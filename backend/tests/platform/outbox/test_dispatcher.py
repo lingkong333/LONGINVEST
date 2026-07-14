@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
@@ -60,11 +60,28 @@ async def submit_test_job(database: Database) -> Job:
         )
 
 
+async def clean_foundation_jobs(database: Database) -> None:
+    async with database.transaction() as session:
+        job_ids = (
+            await session.scalars(
+                select(Job.id).where(Job.job_type == "FOUNDATION_TEST")
+            )
+        ).all()
+        if not job_ids:
+            return
+        aggregate_ids = [str(job_id) for job_id in job_ids]
+        await session.execute(
+            delete(EventOutbox).where(EventOutbox.aggregate_id.in_(aggregate_ids))
+        )
+        await session.execute(delete(Job).where(Job.id.in_(job_ids)))
+
+
 @pytest.mark.anyio
 async def test_successful_dispatch_marks_outbox_and_job_queued() -> None:
     database = Database(AppSettings(_env_file=None).database_url)
     publisher = FakePublisher()
     try:
+        await clean_foundation_jobs(database)
         job = await submit_test_job(database)
         report = await OutboxDispatcher(
             database=database,
@@ -85,6 +102,7 @@ async def test_successful_dispatch_marks_outbox_and_job_queued() -> None:
         assert outbox is not None and outbox.status == OutboxStatus.DISPATCHED
         assert outbox.rq_job_id == f"outbox-{outbox.id}"
     finally:
+        await clean_foundation_jobs(database)
         await database.dispose()
 
 
@@ -92,6 +110,7 @@ async def test_successful_dispatch_marks_outbox_and_job_queued() -> None:
 async def test_redis_failure_returns_outbox_to_pending() -> None:
     database = Database(AppSettings(_env_file=None).database_url)
     try:
+        await clean_foundation_jobs(database)
         job = await submit_test_job(database)
         report = await OutboxDispatcher(
             database=database,
@@ -112,6 +131,7 @@ async def test_redis_failure_returns_outbox_to_pending() -> None:
         assert outbox.attempt_count == 1
         assert outbox.last_error_code == "QUEUE_UNAVAILABLE"
     finally:
+        await clean_foundation_jobs(database)
         await database.dispose()
 
 
@@ -120,6 +140,7 @@ async def test_concurrent_dispatchers_claim_one_outbox_once() -> None:
     database = Database(AppSettings(_env_file=None).database_url)
     publisher = FakePublisher(delay=0.05)
     try:
+        await clean_foundation_jobs(database)
         await submit_test_job(database)
         reports = await asyncio.gather(
             OutboxDispatcher(
@@ -137,6 +158,7 @@ async def test_concurrent_dispatchers_claim_one_outbox_once() -> None:
         assert sum(report.claimed for report in reports) == 1
         assert len(publisher.published_ids) == 1
     finally:
+        await clean_foundation_jobs(database)
         await database.dispose()
 
 
@@ -150,6 +172,7 @@ async def test_replayed_dispatch_uses_same_deterministic_rq_id() -> None:
         dispatcher_id="dispatcher-a",
     )
     try:
+        await clean_foundation_jobs(database)
         job = await submit_test_job(database)
         await dispatcher.dispatch_once()
         async with database.transaction() as session:
@@ -169,4 +192,5 @@ async def test_replayed_dispatch_uses_same_deterministic_rq_id() -> None:
         assert len(publisher.published_ids) == 2
         assert len(publisher.created_ids) == 1
     finally:
+        await clean_foundation_jobs(database)
         await database.dispose()

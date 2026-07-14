@@ -78,16 +78,28 @@ async def test_application_role_has_only_safe_audit_permissions() -> None:
         async with database.session() as session:
             current_user = await session.scalar(text("SELECT current_user"))
             can_select = await session.scalar(
-                text("SELECT has_table_privilege(current_user, 'audit_event', 'SELECT')")
+                text(
+                    "SELECT has_table_privilege("
+                    "current_user, 'audit_event', 'SELECT')"
+                )
             )
             can_insert = await session.scalar(
-                text("SELECT has_table_privilege(current_user, 'audit_event', 'INSERT')")
+                text(
+                    "SELECT has_table_privilege("
+                    "current_user, 'audit_event', 'INSERT')"
+                )
             )
             can_update = await session.scalar(
-                text("SELECT has_table_privilege(current_user, 'audit_event', 'UPDATE')")
+                text(
+                    "SELECT has_table_privilege("
+                    "current_user, 'audit_event', 'UPDATE')"
+                )
             )
             can_delete = await session.scalar(
-                text("SELECT has_table_privilege(current_user, 'audit_event', 'DELETE')")
+                text(
+                    "SELECT has_table_privilege("
+                    "current_user, 'audit_event', 'DELETE')"
+                )
             )
     finally:
         await database.dispose()

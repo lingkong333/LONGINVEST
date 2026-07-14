@@ -34,7 +34,9 @@ class Database:
 
     async def migration_is_current(self) -> bool:
         async with self._engine.connect() as connection:
-            result = await connection.execute(text("SELECT version_num FROM alembic_version"))
+            result = await connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            )
             current = frozenset(result.scalars())
         return current == expected_database_revisions()
 

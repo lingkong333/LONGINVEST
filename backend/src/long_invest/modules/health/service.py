@@ -68,7 +68,8 @@ class ReadinessService:
     @staticmethod
     async def _probe_migration(probe: DatabaseProbe) -> str:
         try:
-            return "compatible" if await probe.migration_is_current() else "incompatible"
+            is_current = await probe.migration_is_current()
+            return "compatible" if is_current else "incompatible"
         except Exception:
             return "incompatible"
 

@@ -92,32 +92,48 @@ describe("统一 API 客户端", () => {
     await expect(api.client.GET("/status")).rejects.toMatchObject({ code: "REQUEST_TIMEOUT" })
   })
 
-  it("并发 401 合并为一次退出流程，完成后下一波可以再次触发", async () => {
+  it("同一认证代际的延迟 401 只处理一次，reset 后新 401 可再次触发", async () => {
+    let responseCount = 0
     server.use(
-      http.get("http://localhost/api/v1/status", () => HttpResponse.json({
-        success: false,
-        code: "AUTH_REQUIRED",
-        message: "登录已失效",
-        data: null,
-        request_id: "req_401",
-        server_time: "2026-07-14T00:00:00Z",
-      }, { status: 401 })),
+      http.get("http://localhost/api/v1/status", async () => {
+        responseCount += 1
+        if (responseCount === 2) {
+          await delay(50)
+        }
+        return HttpResponse.json({
+          success: false,
+          code: "AUTH_REQUIRED",
+          message: "登录已失效",
+          data: null,
+          request_id: "req_401",
+          server_time: "2026-07-14T00:00:00Z",
+        }, { status: 401 })
+      }),
     )
-    let releaseFirstWave: (() => void) | undefined
-    const onUnauthorized = vi
-      .fn<() => Promise<void>>()
-      .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseFirstWave = resolve }))
-      .mockResolvedValue(undefined)
+    const onUnauthorized = vi.fn(async () => undefined)
     const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1", onUnauthorized })
 
-    const firstWave = Promise.all([api.client.GET("/status"), api.client.GET("/status")])
-    await vi.waitFor(() => expect(onUnauthorized).toHaveBeenCalledOnce())
-    releaseFirstWave?.()
-    await firstWave
+    await Promise.all([api.client.GET("/status"), api.client.GET("/status")])
 
+    expect(onUnauthorized).toHaveBeenCalledOnce()
+
+    api.resetUnauthorized()
     await api.client.GET("/status")
 
     expect(onUnauthorized).toHaveBeenCalledTimes(2)
+  })
+
+  it("把网络 TypeError 转换为保留原因的稳定 ApiError", async () => {
+    const networkFailure = new TypeError("Failed to fetch")
+    const api = createApiClient<TestPaths>({
+      baseUrl: "http://localhost/api/v1",
+      fetch: vi.fn().mockRejectedValue(networkFailure),
+    })
+
+    await expect(api.request(api.client.GET("/status"))).rejects.toMatchObject({
+      code: "NETWORK_ERROR",
+      cause: networkFailure,
+    })
   })
 
   it("把 422 错误包络统一转换为不重试的 ApiError", async () => {
@@ -176,6 +192,7 @@ describe("Query 重试边界", () => {
     expect(retry(0, new ApiError("invalid", { status: 422, code: "VALIDATION_FAILED" }))).toBe(false)
     expect(retry(0, new ApiError("unavailable", { status: 503, code: "DEPENDENCY_UNAVAILABLE" }))).toBe(true)
     expect(retry(0, new ApiError("timeout", { code: "REQUEST_TIMEOUT" }))).toBe(true)
+    expect(retry(0, new ApiError("network", { code: "NETWORK_ERROR" }))).toBe(true)
     expect(retry(1, new ApiError("unavailable", { status: 503, code: "DEPENDENCY_UNAVAILABLE" }))).toBe(false)
   })
 })

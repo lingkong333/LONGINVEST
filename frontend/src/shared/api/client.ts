@@ -103,23 +103,44 @@ export function createApiClient<Paths extends object>({
   onUnauthorized,
   fetch: fetchImplementation = globalThis.fetch,
 }: ApiClientOptions = {}) {
-  let unauthorizedWave: Promise<void> | undefined
+  let authGeneration = 0
+  let handledUnauthorizedGeneration: number | undefined
+  let unauthorizedWave: {
+    generation: number
+    promise: Promise<void>
+  } | undefined
 
-  const handleUnauthorized = () => {
+  const handleUnauthorized = (requestGeneration: number) => {
     if (!onUnauthorized) {
       return Promise.resolve()
     }
-    if (!unauthorizedWave) {
-      unauthorizedWave = Promise.resolve()
-        .then(onUnauthorized)
-        .finally(() => {
-          unauthorizedWave = undefined
-        })
+    if (requestGeneration !== authGeneration) {
+      return Promise.resolve()
     }
-    return unauthorizedWave
+    if (handledUnauthorizedGeneration === requestGeneration) {
+      return unauthorizedWave?.generation === requestGeneration
+        ? unauthorizedWave.promise
+        : Promise.resolve()
+    }
+
+    handledUnauthorizedGeneration = requestGeneration
+    const wave = {
+      generation: requestGeneration,
+      promise: Promise.resolve(),
+    }
+    wave.promise = Promise.resolve()
+      .then(onUnauthorized)
+      .finally(() => {
+        if (unauthorizedWave === wave) {
+          unauthorizedWave = undefined
+        }
+      })
+    unauthorizedWave = wave
+    return wave.promise
   }
 
   const guardedFetch: typeof globalThis.fetch = async (input, init) => {
+    const requestGeneration = authGeneration
     const originalRequest = input instanceof Request ? input : new Request(input, init)
     const headers = new Headers(originalRequest.headers)
     const method = originalRequest.method.toUpperCase()
@@ -150,7 +171,7 @@ export function createApiClient<Paths extends object>({
       })
       const response = await fetchImplementation(request)
       if (response.status === 401) {
-        await handleUnauthorized()
+        await handleUnauthorized(requestGeneration)
       }
       return response
     } catch (error) {
@@ -170,7 +191,21 @@ export function createApiClient<Paths extends object>({
   const client = createClient<Paths>({ baseUrl, fetch: guardedFetch })
 
   async function request<T>(operation: Promise<ApiOperationResult<T>>) {
-    const result = await operation
+    let result: ApiOperationResult<T>
+    try {
+      result = await operation
+    } catch (error) {
+      if (error instanceof ApiError) {
+        throw error
+      }
+      if (error instanceof TypeError) {
+        throw new ApiError("网络连接失败，请检查网络后重试。", {
+          code: "NETWORK_ERROR",
+          cause: error,
+        })
+      }
+      throw error
+    }
     if (!result.response.ok || result.error !== undefined) {
       if (isApiEnvelope(result.error)) {
         throw apiErrorFromEnvelope(result.error, result.response.status)
@@ -184,5 +219,11 @@ export function createApiClient<Paths extends object>({
     return unwrapEnvelope(result.data, result.response.status)
   }
 
-  return { client, request }
+  function resetUnauthorized() {
+    authGeneration += 1
+    handledUnauthorizedGeneration = undefined
+    unauthorizedWave = undefined
+  }
+
+  return { client, request, resetUnauthorized }
 }

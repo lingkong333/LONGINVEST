@@ -4,7 +4,10 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from long_invest.bootstrap.app import create_app
-from long_invest.modules.health.service import ReadinessService
+from long_invest.modules.health.service import (
+    ReadinessService,
+    get_readiness_service,
+)
 
 
 @pytest.fixture
@@ -76,3 +79,22 @@ async def test_ready_endpoint_checks_real_compose_dependencies() -> None:
             "redis": "healthy",
         },
     }
+
+
+@pytest.mark.anyio
+async def test_ready_endpoint_returns_standard_failure_when_database_is_down() -> None:
+    app = create_app()
+    app.dependency_overrides[get_readiness_service] = lambda: ReadinessService(
+        database=Probe(ConnectionError("database unavailable")),
+        redis=Probe(),
+    )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/health/ready")
+
+    assert response.status_code == 503
+    body = response.json()
+    assert body["success"] is False
+    assert body["code"] == "SERVICE_NOT_READY"
+    assert body["data"] is None
+    assert body["details"]["dependencies"]["postgresql"] == "unavailable"

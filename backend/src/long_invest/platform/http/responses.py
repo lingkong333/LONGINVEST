@@ -22,3 +22,20 @@ def success_response(
         "request_id": get_request_id(),
         "server_time": utc_now_iso(),
     }
+
+
+def failure_response(
+    *,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "success": False,
+        "code": code,
+        "message": message,
+        "data": None,
+        "details": details,
+        "request_id": get_request_id(),
+        "server_time": utc_now_iso(),
+    }

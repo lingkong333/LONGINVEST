@@ -1,7 +1,7 @@
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, update
+from sqlalchemy import select, text, update
 from sqlalchemy.exc import DBAPIError
 
 from long_invest.platform.audit.models import AuditEvent
@@ -68,3 +68,32 @@ async def test_database_rejects_audit_event_updates() -> None:
                 )
     finally:
         await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_application_role_has_only_safe_audit_permissions() -> None:
+    settings = AppSettings(_env_file=None)
+    database = Database(settings.database_url)
+    try:
+        async with database.session() as session:
+            current_user = await session.scalar(text("SELECT current_user"))
+            can_select = await session.scalar(
+                text("SELECT has_table_privilege(current_user, 'audit_event', 'SELECT')")
+            )
+            can_insert = await session.scalar(
+                text("SELECT has_table_privilege(current_user, 'audit_event', 'INSERT')")
+            )
+            can_update = await session.scalar(
+                text("SELECT has_table_privilege(current_user, 'audit_event', 'UPDATE')")
+            )
+            can_delete = await session.scalar(
+                text("SELECT has_table_privilege(current_user, 'audit_event', 'DELETE')")
+            )
+    finally:
+        await database.dispose()
+
+    assert current_user == settings.database_app_role
+    assert can_select is True
+    assert can_insert is True
+    assert can_update is False
+    assert can_delete is False

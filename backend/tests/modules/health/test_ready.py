@@ -18,11 +18,15 @@ def anyio_backend() -> str:
 @dataclass
 class Probe:
     error: Exception | None = None
+    compatible: bool = True
 
     async def ping(self) -> bool:
         if self.error is not None:
             raise self.error
         return True
+
+    async def migration_is_current(self) -> bool:
+        return self.compatible
 
 
 @pytest.mark.anyio
@@ -35,6 +39,7 @@ async def test_readiness_is_ready_when_dependencies_are_healthy() -> None:
     assert report.status == "ready"
     assert report.dependencies == {
         "postgresql": "healthy",
+        "migration": "compatible",
         "redis": "healthy",
     }
 
@@ -64,6 +69,18 @@ async def test_readiness_is_unavailable_when_postgresql_fails() -> None:
 
 
 @pytest.mark.anyio
+async def test_readiness_is_unavailable_when_migration_is_not_current() -> None:
+    report = await ReadinessService(
+        database=Probe(compatible=False),
+        redis=Probe(),
+    ).check()
+
+    assert report.status == "unavailable"
+    assert report.http_status == 503
+    assert report.dependencies["migration"] == "incompatible"
+
+
+@pytest.mark.anyio
 async def test_ready_endpoint_checks_real_compose_dependencies() -> None:
     transport = ASGITransport(app=create_app())
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -72,13 +89,7 @@ async def test_ready_endpoint_checks_real_compose_dependencies() -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["success"] is True
-    assert body["data"] == {
-        "status": "ready",
-        "dependencies": {
-            "postgresql": "healthy",
-            "redis": "healthy",
-        },
-    }
+    assert body["data"] == {"status": "ready"}
 
 
 @pytest.mark.anyio
@@ -97,4 +108,4 @@ async def test_ready_endpoint_returns_standard_failure_when_database_is_down() -
     assert body["success"] is False
     assert body["code"] == "SERVICE_NOT_READY"
     assert body["data"] is None
-    assert body["details"]["dependencies"]["postgresql"] == "unavailable"
+    assert body["details"] is None

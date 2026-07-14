@@ -76,3 +76,17 @@ async def test_unknown_error_hides_internal_details() -> None:
     assert body["message"] == "服务器内部错误"
     assert "secret internal detail" not in response.text
     assert body["request_id"] == response.headers["X-Request-ID"]
+
+
+@pytest.mark.anyio
+async def test_framework_http_error_uses_standard_failure_response() -> None:
+    transport = ASGITransport(app=create_app())
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/definitely-missing")
+
+    assert response.status_code == 404
+    body = response.json()
+    assert body["success"] is False
+    assert body["code"] == "RESOURCE_NOT_FOUND"
+    assert body["message"] == "请求的资源不存在"
+    assert body["request_id"] == response.headers["X-Request-ID"]

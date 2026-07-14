@@ -1,5 +1,9 @@
 # Public Foundation Bootstrap Implementation Plan
 
+> 状态：已完成的历史基础切片计划。后续施工不得把本文当作总计划；当前需求与实施顺序以 `docs/requirements/README.md` 指向的规格为准。
+
+> 已验证结果：服务器容器启动正常，基础测试、代码检查、迁移一致性、健康降级与审计不可修改约束均已通过。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build the first server-verifiable foundation slice with typed configuration, a standard live-health response, request IDs, and isolated Docker services.

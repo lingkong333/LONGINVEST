@@ -9,6 +9,9 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
         "LONGINVEST_API_PORT",
         "LONGINVEST_LOG_LEVEL",
         "LONGINVEST_DATABASE_URL",
+        "LONGINVEST_DATABASE_OWNER_URL",
+        "LONGINVEST_DATABASE_APP_ROLE",
+        "LONGINVEST_DATABASE_APP_PASSWORD",
         "LONGINVEST_REDIS_URL",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -20,6 +23,8 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
     assert settings.api_port == 8000
     assert settings.log_level == "INFO"
     assert settings.database_url.startswith("postgresql+")
+    assert settings.database_owner_url.startswith("postgresql+")
+    assert settings.database_app_role == "longinvest_app"
     assert settings.redis_url.startswith("redis://")
 
 

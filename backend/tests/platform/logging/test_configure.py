@@ -1,10 +1,16 @@
 import json
+import logging
 from io import StringIO
+from queue import Queue
 
 import structlog
 from asgi_correlation_id import correlation_id
 
-from long_invest.platform.logging.configure import configure_logging
+from long_invest.platform.logging.configure import (
+    NonBlockingQueueHandler,
+    configure_logging,
+    get_dropped_log_counts,
+)
 
 
 def test_configure_logging_emits_json_with_request_id() -> None:
@@ -38,3 +44,14 @@ def test_configure_logging_honors_log_level() -> None:
 
     records = [json.loads(line) for line in stream.getvalue().splitlines()]
     assert [record["event"] for record in records] == ["visible"]
+
+
+def test_full_log_queue_drops_without_blocking() -> None:
+    log_queue: Queue[logging.LogRecord] = Queue(maxsize=1)
+    log_queue.put(logging.LogRecord("test", logging.INFO, "", 0, "first", (), None))
+    handler = NonBlockingQueueHandler(log_queue, [])
+    before = get_dropped_log_counts().get("INFO", 0)
+
+    handler.emit(logging.LogRecord("test", logging.INFO, "", 0, "second", (), None))
+
+    assert get_dropped_log_counts()["INFO"] == before + 1

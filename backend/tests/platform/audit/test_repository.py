@@ -101,6 +101,12 @@ async def test_application_role_has_only_safe_audit_permissions() -> None:
                     "current_user, 'audit_event', 'DELETE')"
                 )
             )
+            can_change_migration = await session.scalar(
+                text(
+                    "SELECT has_table_privilege("
+                    "current_user, 'alembic_version', 'UPDATE')"
+                )
+            )
     finally:
         await database.dispose()
 
@@ -109,3 +115,4 @@ async def test_application_role_has_only_safe_audit_permissions() -> None:
     assert can_insert is True
     assert can_update is False
     assert can_delete is False
+    assert can_change_migration is False

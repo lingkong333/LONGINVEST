@@ -1,9 +1,12 @@
+from typing import Any
+
 import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from long_invest.platform.errors import AppError
+from long_invest.platform.http.request_id import REQUEST_ID_HEADER
 from long_invest.platform.http.responses import failure_response
 
 logger = structlog.get_logger(__name__)
@@ -29,13 +32,11 @@ def _validation_fields(exc: RequestValidationError) -> dict[str, str]:
 
 
 async def app_error_handler(_request: Request, exc: AppError) -> JSONResponse:
-    return JSONResponse(
+    return _failure_json_response(
         status_code=exc.status_code,
-        content=failure_response(
-            code=exc.code,
-            message=exc.message,
-            details=exc.details,
-        ),
+        code=exc.code,
+        message=exc.message,
+        details=exc.details,
     )
 
 
@@ -43,24 +44,39 @@ async def validation_error_handler(
     _request: Request,
     exc: RequestValidationError,
 ) -> JSONResponse:
-    return JSONResponse(
+    return _failure_json_response(
         status_code=422,
-        content=failure_response(
-            code="VALIDATION_ERROR",
-            message="请求参数校验失败",
-            details={"fields": _validation_fields(exc)},
-        ),
+        code="VALIDATION_ERROR",
+        message="请求参数校验失败",
+        details={"fields": _validation_fields(exc)},
     )
 
 
 async def unknown_error_handler(_request: Request, exc: Exception) -> JSONResponse:
     logger.exception("unhandled_request_error", error_type=type(exc).__name__)
-    return JSONResponse(
+    return _failure_json_response(
         status_code=500,
-        content=failure_response(
-            code="INTERNAL_ERROR",
-            message="服务器内部错误",
-        ),
+        code="INTERNAL_ERROR",
+        message="服务器内部错误",
+    )
+
+
+def _failure_json_response(
+    *,
+    status_code: int,
+    code: str,
+    message: str,
+    details: dict[str, Any] | None = None,
+) -> JSONResponse:
+    content = failure_response(
+        code=code,
+        message=message,
+        details=details,
+    )
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers={REQUEST_ID_HEADER: content["request_id"]},
     )
 
 

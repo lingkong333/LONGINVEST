@@ -1,0 +1,1 @@
+"""LongInvest backend package."""

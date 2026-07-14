@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from long_invest.platform.config.settings import get_settings
+from long_invest.platform.database.migrations import expected_database_revisions
 
 
 class Database:
@@ -30,6 +31,12 @@ class Database:
     async def ping(self) -> bool:
         async with self._engine.connect() as connection:
             return await connection.scalar(text("SELECT 1")) == 1
+
+    async def migration_is_current(self) -> bool:
+        async with self._engine.connect() as connection:
+            result = await connection.execute(text("SELECT version_num FROM alembic_version"))
+            current = frozenset(result.scalars())
+        return current == expected_database_revisions()
 
     async def dispose(self) -> None:
         await self._engine.dispose()

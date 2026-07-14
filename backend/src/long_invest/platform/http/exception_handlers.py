@@ -4,6 +4,7 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.request_id import REQUEST_ID_HEADER
@@ -62,6 +63,21 @@ async def unknown_error_handler(_request: Request, exc: Exception) -> JSONRespon
     )
 
 
+async def http_error_handler(
+    _request: Request,
+    exc: StarletteHTTPException,
+) -> JSONResponse:
+    code, message = {
+        404: ("RESOURCE_NOT_FOUND", "请求的资源不存在"),
+        405: ("METHOD_NOT_ALLOWED", "请求方法不允许"),
+    }.get(exc.status_code, ("HTTP_ERROR", "请求无法处理"))
+    return _failure_json_response(
+        status_code=exc.status_code,
+        code=code,
+        message=message,
+    )
+
+
 def _failure_json_response(
     *,
     status_code: int,
@@ -88,6 +104,7 @@ def _failure_json_response(
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    app.add_exception_handler(StarletteHTTPException, http_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(AppError, app_error_handler)  # type: ignore[arg-type]
     app.add_exception_handler(  # type: ignore[arg-type]
         RequestValidationError,

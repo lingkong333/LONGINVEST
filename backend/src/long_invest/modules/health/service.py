@@ -9,6 +9,10 @@ class DependencyProbe(Protocol):
     async def ping(self) -> bool: ...
 
 
+class DatabaseProbe(DependencyProbe, Protocol):
+    async def migration_is_current(self) -> bool: ...
+
+
 @dataclass(frozen=True)
 class ReadinessReport:
     status: str
@@ -20,7 +24,7 @@ class ReadinessService:
     def __init__(
         self,
         *,
-        database: DependencyProbe,
+        database: DatabaseProbe,
         redis: DependencyProbe,
     ) -> None:
         self._database = database
@@ -28,13 +32,15 @@ class ReadinessService:
 
     async def check(self) -> ReadinessReport:
         postgresql_status = await self._probe(self._database)
+        migration_status = await self._probe_migration(self._database)
         redis_status = await self._probe(self._redis)
         dependencies = {
             "postgresql": postgresql_status,
+            "migration": migration_status,
             "redis": redis_status,
         }
 
-        if postgresql_status != "healthy":
+        if postgresql_status != "healthy" or migration_status != "compatible":
             return ReadinessReport(
                 status="unavailable",
                 http_status=503,
@@ -59,10 +65,16 @@ class ReadinessService:
         except Exception:
             return "unavailable"
 
+    @staticmethod
+    async def _probe_migration(probe: DatabaseProbe) -> str:
+        try:
+            return "compatible" if await probe.migration_is_current() else "incompatible"
+        except Exception:
+            return "incompatible"
+
 
 def get_readiness_service() -> ReadinessService:
     return ReadinessService(
         database=get_database(),
         redis=get_redis_probe(),
     )
-

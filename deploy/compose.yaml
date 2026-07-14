@@ -49,10 +49,13 @@ services:
       context: ..
       dockerfile: deploy/docker/backend.Dockerfile
       target: runtime
-    command: ["alembic", "upgrade", "head"]
+    command: ["python", "-m", "long_invest.entrypoints.migrate"]
     environment:
       LONGINVEST_ENVIRONMENT: development
-      LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_OWNER_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_APP_ROLE: longinvest_app
+      LONGINVEST_DATABASE_APP_PASSWORD: ${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}
       LONGINVEST_REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
@@ -71,8 +74,9 @@ services:
       target: runtime
     environment:
       LONGINVEST_ENVIRONMENT: development
-      LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_REDIS_URL: redis://redis:6379/0
+      LONGINVEST_LOG_FILE: /var/log/longinvest/application.jsonl
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -82,6 +86,8 @@ services:
         condition: service_healthy
     ports:
       - 127.0.0.1:18080:8000
+    volumes:
+      - application_logs:/var/log/longinvest
     healthcheck:
       test:
         - CMD
@@ -101,6 +107,11 @@ services:
     mem_limit: 384m
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
 
   test:
     profiles: ["test"]
@@ -110,7 +121,9 @@ services:
       target: test
     environment:
       LONGINVEST_ENVIRONMENT: test
-      LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_OWNER_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_DATABASE_APP_ROLE: longinvest_app
       LONGINVEST_REDIS_URL: redis://redis:6379/1
     depends_on:
       migrate:
@@ -129,3 +142,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  application_logs:

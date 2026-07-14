@@ -29,13 +29,11 @@ async def ready(
         content = failure_response(
             code="SERVICE_NOT_READY",
             message="服务尚未就绪",
-            details={"dependencies": report.dependencies},
         )
     else:
         content = success_response(
             data={
                 "status": report.status,
-                "dependencies": report.dependencies,
             },
             message="服务已就绪" if report.status == "ready" else "服务降级运行",
         )

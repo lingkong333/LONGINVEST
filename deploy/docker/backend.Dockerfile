@@ -8,7 +8,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_LINK_MODE=copy
 
 RUN groupadd --system longinvest \
-    && useradd --system --gid longinvest --home-dir /app longinvest
+    && useradd --system --gid longinvest --home-dir /app longinvest \
+    && mkdir -p /var/log/longinvest \
+    && chown longinvest:longinvest /var/log/longinvest
 
 WORKDIR /app
 
@@ -31,7 +33,7 @@ USER longinvest
 
 EXPOSE 8000
 
-CMD ["uvicorn", "long_invest.entrypoints.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "long_invest.entrypoints.api:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
 
 FROM base AS test
 

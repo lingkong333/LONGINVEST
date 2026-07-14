@@ -1,7 +1,18 @@
 from long_invest.platform.config.settings import AppSettings
 
 
-def test_settings_use_safe_defaults() -> None:
+def test_settings_use_safe_defaults(monkeypatch) -> None:
+    for name in (
+        "LONGINVEST_APP_NAME",
+        "LONGINVEST_ENVIRONMENT",
+        "LONGINVEST_API_HOST",
+        "LONGINVEST_API_PORT",
+        "LONGINVEST_LOG_LEVEL",
+        "LONGINVEST_DATABASE_URL",
+        "LONGINVEST_REDIS_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
     settings = AppSettings(_env_file=None)
 
     assert settings.app_name == "LongInvest"

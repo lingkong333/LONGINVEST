@@ -16,6 +16,7 @@ class AppSettings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     api_host: str = "0.0.0.0"
     api_port: int = Field(default=8000, ge=1, le=65535)
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     database_url: str = (
         "postgresql+asyncpg://longinvest:longinvest@postgres:5432/longinvest"
     )

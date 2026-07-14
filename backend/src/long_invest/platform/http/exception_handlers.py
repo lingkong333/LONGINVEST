@@ -58,6 +58,7 @@ async def unknown_error_handler(_request: Request, exc: Exception) -> JSONRespon
         status_code=500,
         code="INTERNAL_ERROR",
         message="服务器内部错误",
+        include_request_id_header=True,
     )
 
 
@@ -67,16 +68,22 @@ def _failure_json_response(
     code: str,
     message: str,
     details: dict[str, Any] | None = None,
+    include_request_id_header: bool = False,
 ) -> JSONResponse:
     content = failure_response(
         code=code,
         message=message,
         details=details,
     )
+    headers = (
+        {REQUEST_ID_HEADER: content["request_id"]}
+        if include_request_id_header
+        else None
+    )
     return JSONResponse(
         status_code=status_code,
         content=content,
-        headers={REQUEST_ID_HEADER: content["request_id"]},
+        headers=headers,
     )
 
 

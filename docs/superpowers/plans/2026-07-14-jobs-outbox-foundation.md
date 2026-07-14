@@ -169,23 +169,23 @@ Run all `tests/platform/jobs` tests and commit `feat: fence worker run updates`.
 - Modify: `deploy/compose.yaml`
 - Test: `backend/tests/platform/jobs/test_watchdog.py`
 
-- [ ] **Step 1: Write recovery tests**
+- [x] **Step 1: Write recovery tests**
 
 Require expired outbox leases to return to pending, active runs with heartbeats newer than 60 seconds to remain untouched, stale runs to become `LOST`, and only one automatic recovery run to be scheduled when policy allows it.
 
-- [ ] **Step 2: Verify focused tests fail**
+- [x] **Step 2: Verify focused tests fail**
 
 Run `pytest -q tests/platform/jobs/test_watchdog.py`.
 
-- [ ] **Step 3: Implement bounded recovery**
+- [x] **Step 3: Implement bounded recovery**
 
 Use database time for lease and heartbeat comparisons. Recovery methods lock rows and are idempotent. The loops use configurable scan intervals, structured maintenance logs, and graceful cancellation.
 
-- [ ] **Step 4: Add isolated Compose roles**
+- [x] **Step 4: Add isolated Compose roles**
 
 Add `dispatcher` and `watchdog` services from the same backend image. Give both the low-privilege application database URL; only the dispatcher receives Redis. Keep read-only filesystems, memory limits, bounded logs, and no host ports.
 
-- [ ] **Step 5: Run recovery tests and commit**
+- [x] **Step 5: Run recovery tests and commit**
 
 Commit `feat: add dispatcher and watchdog processes`.
 
@@ -195,19 +195,19 @@ Commit `feat: add dispatcher and watchdog processes`.
 - Create: `backend/tests/integration/test_jobs_outbox_flow.py`
 - Modify: `docs/superpowers/plans/2026-07-14-jobs-outbox-foundation.md`
 
-- [ ] **Step 1: Add an end-to-end test**
+- [x] **Step 1: Add an end-to-end test**
 
 Submit a representative maintenance job, dispatch it, verify the deterministic RQ record, claim a fenced run, complete it, and confirm the database result. Add a second test that submits while Redis is stopped and dispatches successfully after Redis returns without creating a second logical job.
 
-- [ ] **Step 2: Run all automated gates**
+- [x] **Step 2: Run all automated gates**
 
 Run `pytest -q`, `ruff check .`, and `alembic check`. Expected: zero failures and no pending migration operations.
 
-- [ ] **Step 3: Run server container fault checks**
+- [x] **Step 3: Run server container fault checks**
 
 Rebuild services, verify API/dispatcher/watchdog health, stop Redis, submit and confirm `PENDING_DISPATCH`, restore Redis and confirm `QUEUED`, then verify only one deterministic RQ message exists.
 
-- [ ] **Step 4: Mark every completed checkbox and commit**
+- [x] **Step 4: Mark every completed checkbox and commit**
 
 Commit `test: verify jobs outbox reliability`. Push the verified main branch to the server workspace and configured GitHub remote.
 

@@ -103,6 +103,25 @@ class JobService:
                 status_code=409,
                 details={"status": job.status},
             )
+        if job.current_run_id is not None and job.current_fence_token is not None:
+            recovery_run = await self._jobs.lock_run(job.current_run_id)
+            if (
+                recovery_run is not None
+                and recovery_run.fence_token == job.current_fence_token
+                and recovery_run.status == JobRunStatus.CLAIMED
+                and recovery_run.worker_id is None
+            ):
+                recovery_run.worker_id = worker_id
+                job.status = JobStatus.RUNNING
+                job.updated_at = datetime.now(UTC)
+                job.version += 1
+                await self._session.flush()
+                return recovery_run
+            raise AppError(
+                code="JOB_RUN_CONFLICT",
+                message="任务已有活动执行记录",
+                status_code=409,
+            )
         if hard_timeout_seconds < soft_timeout_seconds:
             raise ValueError("hard timeout cannot be shorter than soft timeout")
 

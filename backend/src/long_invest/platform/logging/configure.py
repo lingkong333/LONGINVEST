@@ -4,6 +4,7 @@ import logging
 import sys
 from collections import Counter
 from collections.abc import MutableMapping
+from functools import partial
 from logging.handlers import QueueListener, TimedRotatingFileHandler
 from pathlib import Path
 from queue import Full, Queue
@@ -33,9 +34,11 @@ def add_log_contract(
     _logger: Any,
     _method_name: str,
     event_dict: MutableMapping[str, Any],
+    *,
+    service: str = "longinvest-api",
 ) -> MutableMapping[str, Any]:
     event = str(event_dict.get("event", "log_event"))
-    event_dict.setdefault("service", "longinvest-api")
+    event_dict.setdefault("service", service)
     event_dict.setdefault("category", "application")
     event_dict.setdefault("message", event)
     return event_dict
@@ -68,6 +71,7 @@ def configure_logging(
     use_queue: bool = True,
     queue_capacity: int = 10_000,
     log_file: str | None = None,
+    service: str = "longinvest-api",
 ) -> None:
     global _listener
 
@@ -79,7 +83,7 @@ def configure_logging(
         structlog.stdlib.add_logger_name,
         timestamper,
         add_request_id,
-        add_log_contract,
+        partial(add_log_contract, service=service),
     ]
 
     structlog.configure(

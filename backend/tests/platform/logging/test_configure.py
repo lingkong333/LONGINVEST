@@ -46,6 +46,20 @@ def test_configure_logging_honors_log_level() -> None:
     assert [record["event"] for record in records] == ["visible"]
 
 
+def test_configure_logging_accepts_process_service_name() -> None:
+    stream = StringIO()
+    configure_logging(
+        level="INFO",
+        stream=stream,
+        use_queue=False,
+        service="longinvest-dispatcher",
+    )
+
+    structlog.get_logger("test").info("cycle_complete")
+
+    assert json.loads(stream.getvalue())["service"] == "longinvest-dispatcher"
+
+
 def test_full_log_queue_drops_without_blocking() -> None:
     log_queue: Queue[logging.LogRecord] = Queue(maxsize=1)
     log_queue.put(logging.LogRecord("test", logging.INFO, "", 0, "first", (), None))

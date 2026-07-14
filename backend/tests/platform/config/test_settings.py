@@ -26,6 +26,11 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
     assert settings.database_owner_url.startswith("postgresql+")
     assert settings.database_app_role == "longinvest_app"
     assert settings.redis_url.startswith("redis://")
+    assert settings.dispatcher_scan_interval_seconds == 1.0
+    assert settings.dispatcher_batch_size == 50
+    assert settings.watchdog_scan_interval_seconds == 10.0
+    assert settings.outbox_lease_timeout_seconds == 60
+    assert settings.run_stale_timeout_seconds == 60
 
 
 def test_settings_accept_longinvest_environment_prefix(monkeypatch) -> None:

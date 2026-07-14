@@ -30,6 +30,12 @@ class AppSettings(BaseSettings):
     database_app_role: str = "longinvest_app"
     database_app_password: str = "longinvest-app-local-only"
     redis_url: str = "redis://redis:6379/0"
+    dispatcher_scan_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
+    dispatcher_batch_size: int = Field(default=50, ge=1, le=500)
+    queue_job_timeout_seconds: int = Field(default=60, ge=10, le=3600)
+    watchdog_scan_interval_seconds: float = Field(default=10.0, ge=1, le=60)
+    outbox_lease_timeout_seconds: int = Field(default=60, ge=15, le=600)
+    run_stale_timeout_seconds: int = Field(default=60, ge=30, le=600)
 
 
 @lru_cache

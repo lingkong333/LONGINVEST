@@ -1,0 +1,35 @@
+from enum import StrEnum
+
+
+class DeliveryChannel(StrEnum):
+    WECOM = "WECOM"
+    EMAIL = "EMAIL"
+
+
+class NotificationEventStatus(StrEnum):
+    ELIGIBLE = "ELIGIBLE"
+    SUPPRESSED = "SUPPRESSED"
+    DISPATCHED = "DISPATCHED"
+    PARTIAL = "PARTIAL"
+    DELIVERED = "DELIVERED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
+class NotificationDeliveryStatus(StrEnum):
+    PENDING = "PENDING"
+    SENDING = "SENDING"
+    SENT = "SENT"
+    RETRY_WAIT = "RETRY_WAIT"
+    OUTCOME_UNKNOWN = "OUTCOME_UNKNOWN"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+    SKIPPED_DISABLED = "SKIPPED_DISABLED"
+    SKIPPED_INELIGIBLE = "SKIPPED_INELIGIBLE"
+
+
+class DeliveryOutcome(StrEnum):
+    SUCCESS = "SUCCESS"
+    TEMPORARY_FAILURE = "TEMPORARY_FAILURE"
+    PERMANENT_FAILURE = "PERMANENT_FAILURE"
+    OUTCOME_UNKNOWN = "OUTCOME_UNKNOWN"

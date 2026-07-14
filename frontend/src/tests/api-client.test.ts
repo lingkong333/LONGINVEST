@@ -2,7 +2,8 @@ import { delay, http, HttpResponse } from "msw"
 import { setupServer } from "msw/node"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { createApiClient, unwrapEnvelope, type ApiEnvelope } from "@/shared/api/client"
+import { ApiError, createApiClient, unwrapEnvelope, type ApiEnvelope } from "@/shared/api/client"
+import { createAppQueryClient } from "@/shared/query/query-client"
 
 interface TestPaths {
   "/status": {
@@ -10,6 +11,7 @@ interface TestPaths {
       responses: {
         200: { content: { "application/json": ApiEnvelope<{ ready: boolean }> } }
         401: { content: { "application/json": ApiEnvelope<null> } }
+        503: { content: { "application/json": ApiEnvelope<null> } }
       }
     }
   }
@@ -18,6 +20,7 @@ interface TestPaths {
       requestBody: { content: { "application/json": { enabled: boolean } } }
       responses: {
         200: { content: { "application/json": ApiEnvelope<{ enabled: boolean }> } }
+        422: { content: { "application/json": ApiEnvelope<null> } }
       }
     }
   }
@@ -45,11 +48,11 @@ describe("统一 API 客户端", () => {
         } satisfies ApiEnvelope<{ ready: boolean }>)
       }),
     )
-    const client = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1" })
+    const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1" })
 
-    const { data } = await client.GET("/status")
+    const data = await api.request(api.client.GET("/status"))
 
-    expect(unwrapEnvelope(data)).toEqual({ ready: true })
+    expect(data).toEqual({ ready: true })
   })
 
   it("写请求携带内存 CSRF 和幂等键", async () => {
@@ -67,14 +70,14 @@ describe("统一 API 客户端", () => {
         } satisfies ApiEnvelope<{ enabled: boolean }>)
       }),
     )
-    const client = createApiClient<TestPaths>({
+    const api = createApiClient<TestPaths>({
       baseUrl: "http://localhost/api/v1",
       getCsrfToken: () => "csrf-memory-only",
     })
 
-    const { data } = await client.POST("/settings", { body: { enabled: true } })
+    const data = await api.request(api.client.POST("/settings", { body: { enabled: true } }))
 
-    expect(unwrapEnvelope(data)).toEqual({ enabled: true })
+    expect(data).toEqual({ enabled: true })
   })
 
   it("请求超过截止时间后返回稳定超时错误", async () => {
@@ -84,12 +87,12 @@ describe("统一 API 客户端", () => {
         return HttpResponse.json({})
       }),
     )
-    const client = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1", timeoutMs: 10 })
+    const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1", timeoutMs: 10 })
 
-    await expect(client.GET("/status")).rejects.toMatchObject({ code: "REQUEST_TIMEOUT" })
+    await expect(api.client.GET("/status")).rejects.toMatchObject({ code: "REQUEST_TIMEOUT" })
   })
 
-  it("并发 401 只触发一次退出流程", async () => {
+  it("并发 401 合并为一次退出流程，完成后下一波可以再次触发", async () => {
     server.use(
       http.get("http://localhost/api/v1/status", () => HttpResponse.json({
         success: false,
@@ -100,12 +103,80 @@ describe("统一 API 客户端", () => {
         server_time: "2026-07-14T00:00:00Z",
       }, { status: 401 })),
     )
-    const onUnauthorized = vi.fn(async () => undefined)
-    const client = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1", onUnauthorized })
+    let releaseFirstWave: (() => void) | undefined
+    const onUnauthorized = vi
+      .fn<() => Promise<void>>()
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { releaseFirstWave = resolve }))
+      .mockResolvedValue(undefined)
+    const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1", onUnauthorized })
 
-    await Promise.all([client.GET("/status"), client.GET("/status")])
+    const firstWave = Promise.all([api.client.GET("/status"), api.client.GET("/status")])
+    await vi.waitFor(() => expect(onUnauthorized).toHaveBeenCalledOnce())
+    releaseFirstWave?.()
+    await firstWave
 
-    expect(onUnauthorized).toHaveBeenCalledOnce()
+    await api.client.GET("/status")
+
+    expect(onUnauthorized).toHaveBeenCalledTimes(2)
+  })
+
+  it("把 422 错误包络统一转换为不重试的 ApiError", async () => {
+    server.use(
+      http.post("http://localhost/api/v1/settings", () => HttpResponse.json({
+        success: false,
+        code: "VALIDATION_FAILED",
+        message: "输入有误",
+        data: null,
+        details: { fields: { enabled: "状态值无效" } },
+        request_id: "req_422",
+        server_time: "2026-07-15T00:00:00Z",
+      }, { status: 422 })),
+    )
+    const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1" })
+
+    await expect(api.request(api.client.POST("/settings", { body: { enabled: true } }))).rejects.toMatchObject({
+      status: 422,
+      code: "VALIDATION_FAILED",
+      requestId: "req_422",
+      fieldErrors: { enabled: "状态值无效" },
+    })
+  })
+
+  it("把 503 错误包络统一转换为可重试的 ApiError", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/status", () => HttpResponse.json({
+        success: false,
+        code: "DEPENDENCY_UNAVAILABLE",
+        message: "依赖暂不可用",
+        data: null,
+        request_id: "req_503",
+        server_time: "2026-07-15T00:00:00Z",
+      }, { status: 503 })),
+    )
+    const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1" })
+
+    await expect(api.request(api.client.GET("/status"))).rejects.toMatchObject({
+      status: 503,
+      code: "DEPENDENCY_UNAVAILABLE",
+      requestId: "req_503",
+    })
+  })
+})
+
+describe("Query 重试边界", () => {
+  it("4xx 不重试、5xx 和请求超时最多重试一次", () => {
+    const queryClient = createAppQueryClient()
+    const retry = queryClient.getDefaultOptions().queries?.retry
+
+    expect(retry).toBeTypeOf("function")
+    if (typeof retry !== "function") {
+      throw new Error("Query retry 配置缺失")
+    }
+
+    expect(retry(0, new ApiError("invalid", { status: 422, code: "VALIDATION_FAILED" }))).toBe(false)
+    expect(retry(0, new ApiError("unavailable", { status: 503, code: "DEPENDENCY_UNAVAILABLE" }))).toBe(true)
+    expect(retry(0, new ApiError("timeout", { code: "REQUEST_TIMEOUT" }))).toBe(true)
+    expect(retry(1, new ApiError("unavailable", { status: 503, code: "DEPENDENCY_UNAVAILABLE" }))).toBe(false)
   })
 })
 

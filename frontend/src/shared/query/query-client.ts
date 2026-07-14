@@ -4,7 +4,10 @@ import { ApiError } from "@/shared/api/client"
 
 function canRetryQuery(error: unknown) {
   if (error instanceof ApiError) {
-    return error.status === undefined || error.status >= 500
+    if (error.status !== undefined) {
+      return error.status >= 500 && error.status < 600
+    }
+    return error.code === "REQUEST_TIMEOUT" || error.code === "NETWORK_ERROR"
   }
   return error instanceof TypeError
 }

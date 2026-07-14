@@ -49,21 +49,48 @@ interface ApiClientOptions {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
-function createWebId() {
+interface ApiOperationResult<T> {
+  data?: ApiEnvelope<T>
+  error?: unknown
+  response: Response
+}
+
+export function createClientRequestId() {
   return `web_${globalThis.crypto.randomUUID()}`
 }
 
-export function unwrapEnvelope<T>(envelope: ApiEnvelope<T> | undefined): T {
+function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
+  if (!value || typeof value !== "object") {
+    return false
+  }
+  const candidate = value as Partial<ApiEnvelope<unknown>>
+  return (
+    typeof candidate.success === "boolean"
+    && typeof candidate.code === "string"
+    && typeof candidate.message === "string"
+    && typeof candidate.request_id === "string"
+  )
+}
+
+function apiErrorFromEnvelope(envelope: ApiEnvelope<unknown>, status?: number) {
+  return new ApiError(envelope.message, {
+    code: envelope.code,
+    requestId: envelope.request_id,
+    fieldErrors: envelope.details?.fields,
+    status,
+  })
+}
+
+export function unwrapEnvelope<T>(envelope: ApiEnvelope<T> | undefined, status?: number): T {
   if (!envelope) {
-    throw new ApiError("服务器返回了无法识别的响应。", { code: "INVALID_RESPONSE" })
+    throw new ApiError("服务器返回了无法识别的响应。", {
+      code: "INVALID_RESPONSE",
+      status,
+    })
   }
 
   if (!envelope.success || envelope.data === null) {
-    throw new ApiError(envelope.message, {
-      code: envelope.code,
-      requestId: envelope.request_id,
-      fieldErrors: envelope.details?.fields,
-    })
+    throw apiErrorFromEnvelope(envelope, status)
   }
 
   return envelope.data
@@ -76,7 +103,21 @@ export function createApiClient<Paths extends object>({
   onUnauthorized,
   fetch: fetchImplementation = globalThis.fetch,
 }: ApiClientOptions = {}) {
-  let unauthorizedHandled = false
+  let unauthorizedWave: Promise<void> | undefined
+
+  const handleUnauthorized = () => {
+    if (!onUnauthorized) {
+      return Promise.resolve()
+    }
+    if (!unauthorizedWave) {
+      unauthorizedWave = Promise.resolve()
+        .then(onUnauthorized)
+        .finally(() => {
+          unauthorizedWave = undefined
+        })
+    }
+    return unauthorizedWave
+  }
 
   const guardedFetch: typeof globalThis.fetch = async (input, init) => {
     const originalRequest = input instanceof Request ? input : new Request(input, init)
@@ -85,10 +126,10 @@ export function createApiClient<Paths extends object>({
     const isWrite = !SAFE_METHODS.has(method)
 
     if (!headers.has("X-Request-ID")) {
-      headers.set("X-Request-ID", createWebId())
+      headers.set("X-Request-ID", createClientRequestId())
     }
     if (isWrite && !headers.has("Idempotency-Key")) {
-      headers.set("Idempotency-Key", createWebId())
+      headers.set("Idempotency-Key", createClientRequestId())
     }
     const csrfToken = isWrite ? getCsrfToken?.() : undefined
     if (csrfToken && !headers.has("X-CSRF-Token")) {
@@ -108,9 +149,8 @@ export function createApiClient<Paths extends object>({
         signal: controller.signal,
       })
       const response = await fetchImplementation(request)
-      if (response.status === 401 && onUnauthorized && !unauthorizedHandled) {
-        unauthorizedHandled = true
-        await onUnauthorized()
+      if (response.status === 401) {
+        await handleUnauthorized()
       }
       return response
     } catch (error) {
@@ -127,5 +167,22 @@ export function createApiClient<Paths extends object>({
     }
   }
 
-  return createClient<Paths>({ baseUrl, fetch: guardedFetch })
+  const client = createClient<Paths>({ baseUrl, fetch: guardedFetch })
+
+  async function request<T>(operation: Promise<ApiOperationResult<T>>) {
+    const result = await operation
+    if (!result.response.ok || result.error !== undefined) {
+      if (isApiEnvelope(result.error)) {
+        throw apiErrorFromEnvelope(result.error, result.response.status)
+      }
+      throw new ApiError("服务器请求失败。", {
+        code: `HTTP_${result.response.status}`,
+        requestId: result.response.headers.get("X-Request-ID") ?? undefined,
+        status: result.response.status,
+      })
+    }
+    return unwrapEnvelope(result.data, result.response.status)
+  }
+
+  return { client, request }
 }

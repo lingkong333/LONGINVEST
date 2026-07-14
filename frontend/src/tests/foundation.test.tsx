@@ -1,9 +1,14 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { z } from "zod"
+import { createMemoryRouter, RouterProvider } from "react-router-dom"
 
 import { AppErrorBoundary } from "@/app/app-error-boundary"
+import { RouteErrorPage } from "@/app/route-error-page"
 import { FoundationPage } from "@/pages/foundation-page"
+import { ApiError } from "@/shared/api/client"
+import { useZodForm } from "@/shared/forms/use-zod-form"
 import { Button } from "@/shared/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogTitle, DialogTrigger } from "@/shared/ui/dialog"
 import { FormField } from "@/shared/ui/form-field"
@@ -25,16 +30,39 @@ describe("公共表单组件", () => {
     expect(onSubmit).toHaveBeenCalledOnce()
   })
 
-  it("输入框通过表单字段关联标签、说明和错误", () => {
-    render(
-      <FormField label="股票代码" description="输入沪深北 A 股代码" error="代码格式不正确" htmlFor="symbol">
-        <Input id="symbol" aria-invalid />
-      </FormField>,
-    )
+  it("RHF 与 Zod 校验失败时自动关联错误并标记输入无效", async () => {
+    const schema = z.object({
+      symbol: z.string().regex(/^\d{6}$/, "代码格式不正确"),
+    })
+    const onSubmit = vi.fn()
+    const TestForm = () => {
+      const form = useZodForm(schema, { defaultValues: { symbol: "" } })
+      return (
+        <form onSubmit={form.handleSubmit(onSubmit)}>
+          <FormField
+            control={form.control}
+            name="symbol"
+            label="股票代码"
+            description="输入沪深北 A 股代码"
+          >
+            {({ field }) => <Input {...field} />}
+          </FormField>
+          <Button type="submit">提交</Button>
+        </form>
+      )
+    }
+    render(<TestForm />)
+
+    await userEvent.click(screen.getByRole("button", { name: "提交" }))
 
     const input = screen.getByRole("textbox", { name: "股票代码" })
     expect(input).toHaveAccessibleDescription("输入沪深北 A 股代码 代码格式不正确")
     expect(input).toHaveAttribute("aria-invalid", "true")
+
+    await userEvent.type(input, "600000")
+    await userEvent.click(screen.getByRole("button", { name: "提交" }))
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ symbol: "600000" }, expect.anything()))
+    expect(input).toHaveAttribute("aria-invalid", "false")
   })
 })
 
@@ -108,10 +136,16 @@ describe("统一页面状态", () => {
 })
 
 describe("应用错误边界和入口", () => {
-  it("未知渲染错误被隔离且不展示堆栈", () => {
+  it("渲染错误显示稳定诊断并可复制，不展示堆栈", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
     const Broken = () => {
-      throw new Error("private stack detail")
+      throw new ApiError("private stack detail", {
+        code: "DEPENDENCY_UNAVAILABLE",
+        requestId: "req_boundary",
+        status: 503,
+      })
     }
 
     render(
@@ -121,8 +155,49 @@ describe("应用错误边界和入口", () => {
     )
 
     expect(screen.getByRole("alert")).toHaveTextContent("页面出现异常")
+    expect(screen.getByText("DEPENDENCY_UNAVAILABLE")).toBeInTheDocument()
+    expect(screen.getByText("req_boundary")).toBeInTheDocument()
     expect(screen.queryByText("private stack detail")).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "复制诊断信息" }))
+    expect(writeText).toHaveBeenCalledWith("错误码: DEPENDENCY_UNAVAILABLE\n请求标识: req_boundary")
     consoleError.mockRestore()
+  })
+
+  it("未知渲染错误生成稳定客户端诊断标识", () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const Broken = () => { throw new Error("unknown") }
+
+    render(<AppErrorBoundary><Broken /></AppErrorBoundary>)
+
+    expect(screen.getByText("UNEXPECTED_CLIENT_ERROR")).toBeInTheDocument()
+    expect(screen.getByText(/^web_/)).toBeInTheDocument()
+    consoleError.mockRestore()
+  })
+
+  it("路由错误入口显示并复制服务端诊断信息", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    const router = createMemoryRouter([
+      {
+        path: "/",
+        loader: () => {
+          throw new ApiError("认证后端不可用", {
+            code: "AUTH_BACKEND_UNAVAILABLE",
+            requestId: "req_route",
+            status: 503,
+          })
+        },
+        element: <p>不会显示</p>,
+        errorElement: <RouteErrorPage />,
+      },
+    ])
+
+    render(<RouterProvider router={router} future={{ v7_startTransition: true }} />)
+
+    expect(await screen.findByText("AUTH_BACKEND_UNAVAILABLE")).toBeInTheDocument()
+    expect(screen.getByText("req_route")).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "复制诊断信息" }))
+    expect(writeText).toHaveBeenCalledWith("错误码: AUTH_BACKEND_UNAVAILABLE\n请求标识: req_route")
   })
 
   it("重新尝试会清除错误边界并重新渲染子内容", async () => {

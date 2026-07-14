@@ -5,7 +5,7 @@
 ## 当前边界
 
 - `src/app` 只负责路由、全局 Provider 和错误边界。
-- `src/shared` 只负责通用 UI、请求、Query 与基础工具，不得引用 `features` 或 `pages`。
+- `src/shared` 只负责通用 UI、请求、Query、表单、错误诊断与基础工具，不得引用 `features` 或 `pages`。
 - `src/features` 由后续业务模块拥有，各模块只能通过自己的公开入口被页面组合。
 - `src/pages` 只组合功能，不实现业务规则。
 - 本阶段不拥有业务数据、不声明业务事件、不接入真实 API，也不实现业务页面。
@@ -13,8 +13,10 @@
 ## 公共接口
 
 - UI：`Button`、`Input`、`FormField`、`Dialog`、`DataTable`、`PageState`。
-- 应用：`AppErrorBoundary`、`AppProviders`、Data Mode 路由和 Query Client。
-- 请求：`createApiClient`、`unwrapEnvelope`、`ApiError`。
+- 应用：`AppErrorBoundary`、`RouteErrorPage`、`AppProviders` 和 Data Mode 路由。
+- Query：`shared/query` 中的统一 Query Client；查询只对网络、超时和 5xx 最多重试一次。
+- 表单：`useZodForm` 和受控 `FormField`，字段错误统一关联到输入控件。
+- 请求：`createApiClient`、`ApiError`。调用方使用 `api.request(api.client.GET(...))`，不得直接消费 openapi-fetch 的原始 `data/error` 结果。
 
 后端提供 OpenAPI 文件后，在 `frontend` 目录运行 `npm run generate:api`，再由主流程提交生成类型。页面和业务组件不得直接调用 `fetch`。
 

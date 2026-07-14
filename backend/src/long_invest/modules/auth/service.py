@@ -2,6 +2,11 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from long_invest.modules.auth.audit import (
+    AuditContext,
+    AuthAuditPort,
+    build_auth_audit_event,
+)
 from long_invest.modules.auth.contracts import (
     RequestActivity,
     SessionStatus,
@@ -12,7 +17,11 @@ from long_invest.modules.auth.passwords import PasswordService
 from long_invest.modules.auth.rate_limit import LoginRateLimitPolicy
 from long_invest.modules.auth.repository import AuthRepository
 from long_invest.modules.auth.session_policy import SessionPolicy
-from long_invest.modules.auth.tokens import SessionCredentials, TokenService
+from long_invest.modules.auth.tokens import (
+    CsrfCredentials,
+    SessionCredentials,
+    TokenService,
+)
 from long_invest.modules.auth.validation import validate_new_password
 from long_invest.platform.errors import AppError
 
@@ -36,11 +45,15 @@ class AuthService:
         passwords: PasswordService,
         tokens: TokenService,
         rate_limiter: LoginRateLimitPolicy,
+        audit: AuthAuditPort,
+        audit_context: AuditContext,
     ) -> None:
         self._repository = repository
         self._passwords = passwords
         self._tokens = tokens
         self._rate_limiter = rate_limiter
+        self._audit = audit
+        self._audit_context = audit_context
         self._sessions = SessionPolicy()
         self._dummy_hash = passwords.hash("fixed dummy password value")
 
@@ -53,12 +66,20 @@ class AuthService:
         user_agent_summary: str | None,
         now: datetime,
     ) -> LoginResult:
-        decision = self._rate_limiter.check(
+        decision = await self._rate_limiter.check(
             ip=client_ip,
             username=username,
             now=now,
         )
         if not decision.allowed:
+            await self._record_audit(
+                action_code="AUTH_LOGIN",
+                object_type="app_user",
+                object_id=username,
+                result="DENIED",
+                risk_level="HIGH",
+                reason="rate_limited",
+            )
             raise AppError(
                 code="AUTH_RATE_LIMITED",
                 message="登录尝试过于频繁，请稍后再试",
@@ -70,10 +91,19 @@ class AuthService:
         encoded = user.password_hash if user is not None else self._dummy_hash
         verification = self._passwords.verify(password, encoded)
         if user is None or not verification.valid or user.status != UserStatus.ACTIVE:
-            self._rate_limiter.record_failure(
+            await self._rate_limiter.record_failure(
                 ip=client_ip,
                 username=username,
                 now=now,
+            )
+            await self._record_audit(
+                action_code="AUTH_LOGIN",
+                object_type="app_user",
+                object_id=username,
+                result="FAILED",
+                risk_level="HIGH",
+                reason="invalid_credentials",
+                actor_user_id=str(user.id) if user is not None else None,
             )
             raise _invalid_credentials()
 
@@ -91,8 +121,18 @@ class AuthService:
         user.last_login_at = now
         user.last_login_ip = client_ip
         await self._repository.add_session(session)
+        await self._record_audit(
+            action_code="AUTH_LOGIN",
+            object_type="app_user",
+            object_id=str(user.id),
+            result="SUCCESS",
+            risk_level="MEDIUM",
+            after_summary={"password_version": user.password_version},
+            actor_user_id=str(user.id),
+            session_id=str(session.id),
+        )
         await self._repository.flush()
-        self._rate_limiter.record_success(
+        await self._rate_limiter.record_success(
             ip=client_ip,
             username=username,
             now=now,
@@ -127,6 +167,57 @@ class AuthService:
             raise _invalid_session(status)
         return AuthenticatedSession(user=user, session=session)
 
+    async def issue_csrf(
+        self,
+        *,
+        session_token: str,
+        now: datetime,
+        client_ip: str | None = None,
+    ) -> CsrfCredentials:
+        authenticated = await self.authenticate(
+            token=session_token,
+            now=now,
+            activity=RequestActivity.BACKGROUND,
+            client_ip=client_ip,
+        )
+        credentials = self._tokens.issue_csrf()
+        authenticated.session.csrf_secret_digest = credentials.csrf_digest
+        await self._repository.flush()
+        return credentials
+
+    async def validate_csrf(
+        self,
+        *,
+        session_token: str,
+        csrf_token: str,
+        now: datetime,
+        client_ip: str | None = None,
+    ) -> AuthenticatedSession:
+        authenticated = await self.authenticate(
+            token=session_token,
+            now=now,
+            activity=RequestActivity.BACKGROUND,
+            client_ip=client_ip,
+        )
+        if not self._tokens.verify_digest(
+            csrf_token,
+            authenticated.session.csrf_secret_digest,
+        ):
+            raise AppError(
+                code="AUTH_CSRF_INVALID",
+                message="CSRF 校验失败",
+                status_code=403,
+            )
+        self._sessions.record_request(
+            authenticated.session,
+            authenticated.user,
+            now=now,
+            activity=RequestActivity.WRITE,
+            client_ip=client_ip,
+        )
+        await self._repository.flush()
+        return authenticated
+
     async def revoke_session(
         self,
         *,
@@ -143,6 +234,19 @@ class AuthService:
                 status_code=404,
             )
         changed = self._sessions.revoke(session, now=now, reason=reason)
+        await self._record_audit(
+            action_code="AUTH_SESSION_REVOKE",
+            object_type="user_session",
+            object_id=str(session.id),
+            result="SUCCESS" if changed else "NOOP",
+            risk_level="HIGH",
+            reason=reason,
+            before_summary={
+                "status": SessionStatus.ACTIVE if changed else session.status
+            },
+            after_summary={"status": session.status},
+            actor_user_id=str(user_id),
+        )
         await self._repository.flush()
         return changed
 
@@ -162,6 +266,17 @@ class AuthService:
                 reason=reason,
             ):
                 changed += 1
+        await self._record_audit(
+            action_code="AUTH_SESSION_REVOKE_OTHERS",
+            object_type="app_user",
+            object_id=str(user_id),
+            result="SUCCESS" if changed else "NOOP",
+            risk_level="HIGH",
+            reason=reason,
+            after_summary={"revoked_count": changed},
+            actor_user_id=str(user_id),
+            session_id=str(current_session_id),
+        )
         await self._repository.flush()
         return changed
 
@@ -197,9 +312,25 @@ class AuthService:
         if status is not SessionStatus.ACTIVE:
             raise _invalid_session(status)
 
-        user.password_hash = self._passwords.hash(new_password)
-        user.password_version += 1
-        user.password_changed_at = now
+        user = await self._repository.advance_password_version(
+            user_id,
+            expected_version=current.password_version,
+            password_hash=self._passwords.hash(new_password),
+            changed_at=now,
+        )
+        if user is None:
+            await self._record_audit(
+                action_code="AUTH_PASSWORD_CHANGE",
+                object_type="app_user",
+                object_id=str(user_id),
+                result="DENIED",
+                risk_level="CRITICAL",
+                reason="password_version_conflict",
+                before_summary={"password_version": current.password_version},
+                actor_user_id=str(user_id),
+                session_id=str(current_session_id),
+            )
+            raise _invalid_session(SessionStatus.PASSWORD_CHANGED)
         for session in await self._repository.list_sessions(user_id):
             self._sessions.revoke(
                 session,
@@ -217,8 +348,49 @@ class AuthService:
             user_agent_summary=user_agent_summary,
         )
         await self._repository.add_session(rotated)
+        await self._record_audit(
+            action_code="AUTH_PASSWORD_CHANGE",
+            object_type="app_user",
+            object_id=str(user_id),
+            result="SUCCESS",
+            risk_level="CRITICAL",
+            before_summary={"password_version": current.password_version},
+            after_summary={"password_version": user.password_version},
+            actor_user_id=str(user_id),
+            session_id=str(current_session_id),
+        )
         await self._repository.flush()
         return LoginResult(session=rotated, credentials=credentials)
+
+    async def _record_audit(
+        self,
+        *,
+        action_code: str,
+        object_type: str,
+        object_id: str,
+        result: str,
+        risk_level: str,
+        reason: str | None = None,
+        before_summary: dict[str, object] | None = None,
+        after_summary: dict[str, object] | None = None,
+        actor_user_id: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        await self._audit.record(
+            build_auth_audit_event(
+                self._audit_context,
+                action_code=action_code,
+                object_type=object_type,
+                object_id=object_id,
+                result=result,
+                risk_level=risk_level,
+                reason=reason,
+                before_summary=before_summary,
+                after_summary=after_summary,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+            )
+        )
 
 
 def _invalid_credentials() -> AppError:

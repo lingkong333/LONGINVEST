@@ -14,9 +14,12 @@ def anyio_backend() -> str:
 @pytest.mark.anyio
 async def test_sqlalchemy_repository_owns_auth_persistence_operations() -> None:
     user = MagicMock(id=uuid4())
+    updated_user = MagicMock(id=user.id, password_version=2)
     auth_session = MagicMock(id=uuid4(), user_id=user.id)
     database_session = MagicMock()
-    database_session.scalar = AsyncMock(side_effect=[user, True, auth_session])
+    database_session.scalar = AsyncMock(
+        side_effect=[user, True, auth_session, updated_user]
+    )
     database_session.scalars = AsyncMock(return_value=[auth_session])
     database_session.flush = AsyncMock()
     repository = SqlAlchemyAuthRepository(database_session)
@@ -24,6 +27,16 @@ async def test_sqlalchemy_repository_owns_auth_persistence_operations() -> None:
     assert await repository.find_user_by_username("admin") is user
     assert await repository.has_any_user() is True
     assert await repository.get_session(auth_session.id) is auth_session
+    changed = await repository.advance_password_version(
+        user.id,
+        expected_version=1,
+        password_hash="new hash",
+        changed_at=MagicMock(),
+    )
+    assert changed is updated_user
+    update_statement = database_session.scalar.await_args_list[3].args[0]
+    assert "UPDATE app_user" in str(update_statement)
+    assert "app_user.password_version" in str(update_statement)
     assert await repository.list_sessions(user.id) == [auth_session]
     assert await repository.add_user(user) is user
     assert await repository.add_session(auth_session) is auth_session

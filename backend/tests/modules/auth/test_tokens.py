@@ -1,3 +1,6 @@
+import secrets
+from unittest.mock import patch
+
 from long_invest.modules.auth.tokens import TokenService
 
 
@@ -23,3 +26,17 @@ def test_issued_tokens_contain_at_least_256_bits_of_random_input() -> None:
     # token_urlsafe(32) encodes 32 random bytes as at least 43 URL-safe characters.
     assert len(credentials.session_token) >= 43
     assert len(credentials.csrf_token) >= 43
+
+
+def test_token_digest_verification_uses_constant_time_comparison() -> None:
+    service = TokenService()
+    digest = service.digest("csrf value")
+
+    with patch(
+        "long_invest.modules.auth.tokens.secrets.compare_digest",
+        wraps=secrets.compare_digest,
+    ) as compare:
+        assert service.verify_digest("csrf value", digest) is True
+        assert service.verify_digest("wrong value", digest) is False
+
+    assert compare.call_count == 2

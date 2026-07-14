@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
@@ -5,6 +6,7 @@ import pytest
 from argon2 import PasswordHasher
 
 from long_invest.modules.auth.account_service import AccountAdminService
+from long_invest.modules.auth.audit import AuditContext, AuthAuditEvent
 from long_invest.modules.auth.contracts import (
     RequestActivity,
     SessionStatus,
@@ -44,6 +46,22 @@ class MemoryAuthRepository:
         self.users[user.id] = user
         return user
 
+    async def advance_password_version(
+        self,
+        user_id: UUID,
+        *,
+        expected_version: int,
+        password_hash: str,
+        changed_at: datetime,
+    ) -> AppUser | None:
+        user = self.users.get(user_id)
+        if user is None or user.password_version != expected_version:
+            return None
+        user.password_hash = password_hash
+        user.password_version += 1
+        user.password_changed_at = changed_at
+        return user
+
     async def find_session_by_digest(self, digest: str) -> UserSession | None:
         return next(
             (s for s in self.sessions.values() if s.token_digest == digest),
@@ -64,20 +82,139 @@ class MemoryAuthRepository:
         return None
 
 
+class ConcurrentChangeRepository(MemoryAuthRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self._session_reads = 0
+        self._both_session_reads = asyncio.Event()
+        self._password_update_lock = asyncio.Lock()
+
+    async def get_user(self, user_id: UUID) -> AppUser | None:
+        user = self.users.get(user_id)
+        if user is None:
+            return None
+        return AppUser(
+            id=user.id,
+            username=user.username,
+            password_hash=user.password_hash,
+            password_version=user.password_version,
+            status=user.status,
+            created_at=user.created_at,
+            password_changed_at=user.password_changed_at,
+        )
+
+    async def get_session(self, session_id: UUID) -> UserSession | None:
+        session = self.sessions.get(session_id)
+        if session is None:
+            return None
+        snapshot = UserSession(
+            id=session.id,
+            user_id=session.user_id,
+            token_digest=session.token_digest,
+            csrf_secret_digest=session.csrf_secret_digest,
+            password_version=session.password_version,
+            created_at=session.created_at,
+            last_request_at=session.last_request_at,
+            last_user_activity_at=session.last_user_activity_at,
+            idle_expires_at=session.idle_expires_at,
+            absolute_expires_at=session.absolute_expires_at,
+            status=session.status,
+        )
+        self._session_reads += 1
+        if self._session_reads == 2:
+            self._both_session_reads.set()
+        await self._both_session_reads.wait()
+        return snapshot
+
+    async def advance_password_version(
+        self,
+        user_id: UUID,
+        *,
+        expected_version: int,
+        password_hash: str,
+        changed_at: datetime,
+    ) -> AppUser | None:
+        async with self._password_update_lock:
+            return await super().advance_password_version(
+                user_id,
+                expected_version=expected_version,
+                password_hash=password_hash,
+                changed_at=changed_at,
+            )
+
+
 class AllowLimiter:
-    def check(self, *, ip: str, username: str, now: datetime) -> RateLimitDecision:
+    async def check(
+        self, *, ip: str, username: str, now: datetime
+    ) -> RateLimitDecision:
         return RateLimitDecision(allowed=True)
 
-    def record_failure(self, *, ip: str, username: str, now: datetime) -> None:
+    async def record_failure(
+        self, *, ip: str, username: str, now: datetime
+    ) -> None:
         return None
 
-    def record_success(self, *, ip: str, username: str, now: datetime) -> None:
+    async def record_success(
+        self, *, ip: str, username: str, now: datetime
+    ) -> None:
         return None
 
 
 class DenyLimiter(AllowLimiter):
-    def check(self, *, ip: str, username: str, now: datetime) -> RateLimitDecision:
+    async def check(
+        self, *, ip: str, username: str, now: datetime
+    ) -> RateLimitDecision:
         return RateLimitDecision(allowed=False, retry_after_seconds=30)
+
+
+class RecordingAuditPort:
+    def __init__(self) -> None:
+        self.events: list[AuthAuditEvent] = []
+
+    async def record(self, event: AuthAuditEvent) -> None:
+        self.events.append(event)
+
+
+def audit_context() -> AuditContext:
+    unique = uuid4().hex
+    return AuditContext(
+        request_id=f"req_{unique}",
+        idempotency_key=f"audit_{unique}",
+        trusted_ip="203.0.113.1",
+    )
+
+
+def make_auth_service(
+    repo: MemoryAuthRepository,
+    passwords: PasswordService,
+    *,
+    limiter: AllowLimiter | None = None,
+    audit: RecordingAuditPort | None = None,
+    context: AuditContext | None = None,
+) -> AuthService:
+    return AuthService(
+        repo,
+        passwords,
+        TokenService(),
+        limiter or AllowLimiter(),
+        audit or RecordingAuditPort(),
+        context or audit_context(),
+    )
+
+
+def make_admin_service(
+    repo: MemoryAuthRepository,
+    passwords: PasswordService,
+    *,
+    audit: RecordingAuditPort | None = None,
+    context: AuditContext | None = None,
+) -> AccountAdminService:
+    return AccountAdminService(
+        repo,
+        passwords,
+        audit or RecordingAuditPort(),
+        context or audit_context(),
+    )
 
 
 class RecordingPasswordService(PasswordService):
@@ -128,7 +265,9 @@ async def test_login_with_correct_password_creates_fresh_hashed_session() -> Non
     passwords = PasswordService()
     user = make_user(passwords)
     await repo.add_user(user)
-    service = AuthService(repo, passwords, TokenService(), AllowLimiter())
+    audit = RecordingAuditPort()
+    context = audit_context()
+    service = make_auth_service(repo, passwords, audit=audit, context=context)
 
     result = await service.login(
         username="admin",
@@ -150,6 +289,11 @@ async def test_login_with_correct_password_creates_fresh_hashed_session() -> Non
     assert result.credentials.csrf_token not in result.session.__dict__.values()
     assert user.last_login_at == NOW
     assert user.last_login_ip == "203.0.113.1"
+    assert [(event.action_code, event.result) for event in audit.events] == [
+        ("AUTH_LOGIN", "SUCCESS")
+    ]
+    assert audit.events[0].request_id == context.request_id
+    assert audit.events[0].session_id == str(result.session.id)
 
 
 @pytest.mark.anyio
@@ -157,7 +301,9 @@ async def test_wrong_and_unknown_users_get_same_credentials_error() -> None:
     repo = MemoryAuthRepository()
     passwords = RecordingPasswordService()
     await repo.add_user(make_user(passwords))
-    service = AuthService(repo, passwords, TokenService(), AllowLimiter())
+    audit = RecordingAuditPort()
+    context = audit_context()
+    service = make_auth_service(repo, passwords, audit=audit, context=context)
 
     for username in ("admin", "missing"):
         with pytest.raises(AppError) as captured:
@@ -176,6 +322,11 @@ async def test_wrong_and_unknown_users_get_same_credentials_error() -> None:
     assert all(
         encoded.startswith("$argon2id$") for encoded in passwords.verified_hashes
     )
+    assert [event.result for event in audit.events] == ["FAILED", "FAILED"]
+    assert all(event.action_code == "AUTH_LOGIN" for event in audit.events)
+    assert all(event.request_id == context.request_id for event in audit.events)
+    assert all(event.idempotency_key for event in audit.events)
+    assert PASSWORD not in repr(audit.events)
 
 
 @pytest.mark.anyio
@@ -187,7 +338,7 @@ async def test_disabled_user_gets_the_same_credentials_error() -> None:
     await repo.add_user(user)
 
     with pytest.raises(AppError) as captured:
-        await AuthService(repo, passwords, TokenService(), AllowLimiter()).login(
+        await make_auth_service(repo, passwords).login(
             username="admin",
             password=PASSWORD,
             client_ip="203.0.113.1",
@@ -217,7 +368,7 @@ async def test_login_upgrades_old_hash_without_changing_password_version() -> No
     )
     await repo.add_user(user)
 
-    await AuthService(repo, current, TokenService(), AllowLimiter()).login(
+    await make_auth_service(repo, current).login(
         username="admin",
         password=PASSWORD,
         client_ip="203.0.113.1",
@@ -233,13 +384,16 @@ async def test_login_upgrades_old_hash_without_changing_password_version() -> No
 @pytest.mark.anyio
 async def test_login_rate_limit_is_reported_before_credentials_check() -> None:
     repo = MemoryAuthRepository()
+    audit = RecordingAuditPort()
+    context = audit_context()
 
     with pytest.raises(AppError) as captured:
-        await AuthService(
+        await make_auth_service(
             repo,
             PasswordService(),
-            TokenService(),
-            DenyLimiter(),
+            limiter=DenyLimiter(),
+            audit=audit,
+            context=context,
         ).login(
             username="admin",
             password=PASSWORD,
@@ -251,6 +405,9 @@ async def test_login_rate_limit_is_reported_before_credentials_check() -> None:
     assert captured.value.code == "AUTH_RATE_LIMITED"
     assert captured.value.status_code == 429
     assert captured.value.details == {"retry_after_seconds": 30}
+    assert [(event.action_code, event.result) for event in audit.events] == [
+        ("AUTH_LOGIN", "DENIED")
+    ]
 
 
 @pytest.mark.anyio
@@ -259,7 +416,7 @@ async def test_authenticate_records_background_without_extending_idle() -> None:
     passwords = PasswordService()
     user = make_user(passwords)
     await repo.add_user(user)
-    auth = AuthService(repo, passwords, TokenService(), AllowLimiter())
+    auth = make_auth_service(repo, passwords)
     login = await auth.login(
         username="admin",
         password=PASSWORD,
@@ -283,6 +440,64 @@ async def test_authenticate_records_background_without_extending_idle() -> None:
 
 
 @pytest.mark.anyio
+async def test_csrf_can_be_reissued_and_is_bound_to_its_session() -> None:
+    repo = MemoryAuthRepository()
+    passwords = PasswordService()
+    first_user = make_user(passwords)
+    second_user = make_user(passwords, username="second")
+    await repo.add_user(first_user)
+    await repo.add_user(second_user)
+    auth = make_auth_service(repo, passwords)
+    first = await auth.login(
+        username="admin",
+        password=PASSWORD,
+        client_ip="203.0.113.1",
+        user_agent_summary="Browser",
+        now=NOW,
+    )
+    second = await auth.login(
+        username="second",
+        password=PASSWORD,
+        client_ip="203.0.113.2",
+        user_agent_summary="Browser",
+        now=NOW,
+    )
+    old_csrf = first.credentials.csrf_token
+
+    refreshed = await auth.issue_csrf(
+        session_token=first.credentials.session_token,
+        now=NOW + timedelta(minutes=1),
+        client_ip="203.0.113.1",
+    )
+
+    assert refreshed.csrf_token != old_csrf
+    assert refreshed.csrf_token not in first.session.__dict__.values()
+    with pytest.raises(AppError) as old_token:
+        await auth.validate_csrf(
+            session_token=first.credentials.session_token,
+            csrf_token=old_csrf,
+            now=NOW + timedelta(minutes=2),
+            client_ip="203.0.113.1",
+        )
+    assert old_token.value.code == "AUTH_CSRF_INVALID"
+    with pytest.raises(AppError) as other_session:
+        await auth.validate_csrf(
+            session_token=first.credentials.session_token,
+            csrf_token=second.credentials.csrf_token,
+            now=NOW + timedelta(minutes=2),
+            client_ip="203.0.113.1",
+        )
+    assert other_session.value.code == "AUTH_CSRF_INVALID"
+    validated = await auth.validate_csrf(
+        session_token=first.credentials.session_token,
+        csrf_token=refreshed.csrf_token,
+        now=NOW + timedelta(minutes=2),
+        client_ip="203.0.113.1",
+    )
+    assert validated.session.id == first.session.id
+
+
+@pytest.mark.anyio
 async def test_revoke_session_is_idempotent() -> None:
     repo = MemoryAuthRepository()
     passwords = PasswordService()
@@ -290,7 +505,9 @@ async def test_revoke_session_is_idempotent() -> None:
     session = make_session(user)
     await repo.add_user(user)
     await repo.add_session(session)
-    auth = AuthService(repo, passwords, TokenService(), AllowLimiter())
+    audit = RecordingAuditPort()
+    context = audit_context()
+    auth = make_auth_service(repo, passwords, audit=audit, context=context)
 
     first = await auth.revoke_session(
         user_id=user.id,
@@ -308,6 +525,11 @@ async def test_revoke_session_is_idempotent() -> None:
     assert first is True
     assert second is False
     assert session.revoked_reason == "user request"
+    assert [(event.action_code, event.result) for event in audit.events] == [
+        ("AUTH_SESSION_REVOKE", "SUCCESS"),
+        ("AUTH_SESSION_REVOKE", "NOOP"),
+    ]
+    assert all(event.request_id == context.request_id for event in audit.events)
 
 
 @pytest.mark.anyio
@@ -320,7 +542,7 @@ async def test_revoke_other_sessions_keeps_current_session_active() -> None:
     await repo.add_user(user)
     await repo.add_session(current)
     await repo.add_session(other)
-    auth = AuthService(repo, passwords, TokenService(), AllowLimiter())
+    auth = make_auth_service(repo, passwords)
 
     assert (
         await auth.revoke_other_sessions(
@@ -354,7 +576,9 @@ async def test_change_password_rotates_and_invalidates_old_sessions() -> None:
     await repo.add_user(user)
     await repo.add_session(current)
     await repo.add_session(other)
-    auth = AuthService(repo, passwords, TokenService(), AllowLimiter())
+    audit = RecordingAuditPort()
+    context = audit_context()
+    auth = make_auth_service(repo, passwords, audit=audit, context=context)
 
     rotated = await auth.change_password(
         user_id=user.id,
@@ -375,12 +599,65 @@ async def test_change_password_rotates_and_invalidates_old_sessions() -> None:
     assert (
         passwords.verify("a different long password", user.password_hash).valid is True
     )
+    assert [(event.action_code, event.result) for event in audit.events] == [
+        ("AUTH_PASSWORD_CHANGE", "SUCCESS")
+    ]
+    assert audit.events[0].before_summary == {"password_version": 1}
+    assert audit.events[0].after_summary == {"password_version": 2}
+    assert audit.events[0].request_id == context.request_id
+
+
+@pytest.mark.anyio
+async def test_concurrent_password_changes_allow_only_one_old_request() -> None:
+    repo = ConcurrentChangeRepository()
+    passwords = PasswordService()
+    user = make_user(passwords)
+    current = make_session(user)
+    await repo.add_user(user)
+    await repo.add_session(current)
+    auth = make_auth_service(repo, passwords)
+
+    results = await asyncio.gather(
+        auth.change_password(
+            user_id=user.id,
+            current_session_id=current.id,
+            new_password="first different password",
+            confirmation="first different password",
+            client_ip="203.0.113.1",
+            user_agent_summary="Browser",
+            now=NOW + timedelta(days=1),
+        ),
+        auth.change_password(
+            user_id=user.id,
+            current_session_id=current.id,
+            new_password="second different password",
+            confirmation="second different password",
+            client_ip="203.0.113.1",
+            user_agent_summary="Browser",
+            now=NOW + timedelta(days=1),
+        ),
+        return_exceptions=True,
+    )
+
+    successes = [result for result in results if not isinstance(result, Exception)]
+    failures = [result for result in results if isinstance(result, AppError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert failures[0].code == "AUTH_SESSION_INVALID"
+    assert repo.users[user.id].password_version == 2
 
 
 @pytest.mark.anyio
 async def test_cli_create_admin_rejects_duplicate_and_validates_password() -> None:
     repo = MemoryAuthRepository()
-    service = AccountAdminService(repo, PasswordService())
+    audit = RecordingAuditPort()
+    context = audit_context()
+    service = make_admin_service(
+        repo,
+        PasswordService(),
+        audit=audit,
+        context=context,
+    )
     created = await service.create_admin("admin", PASSWORD, now=NOW)
 
     assert created.username == "admin"
@@ -394,6 +671,9 @@ async def test_cli_create_admin_rejects_duplicate_and_validates_password() -> No
     with pytest.raises(AppError) as short:
         await service.create_admin("other", "too short", now=NOW)
     assert short.value.code == "AUTH_PASSWORD_INVALID"
+    assert audit.events[0].action_code == "AUTH_ADMIN_CREATE"
+    assert audit.events[0].result == "SUCCESS"
+    assert audit.events[0].request_id == context.request_id
 
 
 @pytest.mark.anyio
@@ -407,7 +687,12 @@ async def test_cli_password_reset_invalidates_all_sessions() -> None:
     await repo.add_session(first)
     await repo.add_session(second)
 
-    changed = await AccountAdminService(repo, passwords).reset_password(
+    audit = RecordingAuditPort()
+    changed = await make_admin_service(
+        repo,
+        passwords,
+        audit=audit,
+    ).reset_password(
         "admin",
         "a different long password",
         now=NOW + timedelta(days=1),
@@ -417,6 +702,9 @@ async def test_cli_password_reset_invalidates_all_sessions() -> None:
     assert passwords.verify("a different long password", changed.password_hash).valid
     assert first.status == SessionStatus.PASSWORD_CHANGED
     assert second.status == SessionStatus.PASSWORD_CHANGED
+    assert [(event.action_code, event.result) for event in audit.events] == [
+        ("AUTH_ADMIN_PASSWORD_RESET", "SUCCESS")
+    ]
 
 
 @pytest.mark.anyio
@@ -429,7 +717,8 @@ async def test_cli_revoke_disable_and_enable_are_idempotent() -> None:
     await repo.add_user(user)
     await repo.add_session(first)
     await repo.add_session(second)
-    service = AccountAdminService(repo, passwords)
+    audit = RecordingAuditPort()
+    service = make_admin_service(repo, passwords, audit=audit)
 
     assert await service.revoke_sessions("admin", now=NOW) == 2
     assert await service.revoke_sessions("admin", now=NOW) == 0
@@ -442,3 +731,11 @@ async def test_cli_revoke_disable_and_enable_are_idempotent() -> None:
     assert first.status == SessionStatus.REVOKED
     assert second.status == SessionStatus.REVOKED
     assert active_after_revoke.status == SessionStatus.USER_DISABLED
+    assert [event.action_code for event in audit.events] == [
+        "AUTH_ADMIN_SESSIONS_REVOKE",
+        "AUTH_ADMIN_SESSIONS_REVOKE",
+        "AUTH_ADMIN_DISABLE",
+        "AUTH_ADMIN_DISABLE",
+        "AUTH_ADMIN_ENABLE",
+        "AUTH_ADMIN_ENABLE",
+    ]

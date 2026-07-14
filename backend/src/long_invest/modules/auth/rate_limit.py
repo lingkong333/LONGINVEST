@@ -1,7 +1,45 @@
+import hashlib
+import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from math import ceil
 from typing import Protocol, runtime_checkable
+
+from redis.exceptions import RedisError
+
+_CHECK_SCRIPT = """
+local now = tonumber(ARGV[1])
+local cutoff = tonumber(ARGV[2])
+local window = tonumber(ARGV[3])
+local retry = 0
+local blocked = false
+for i = 1, 3 do
+  redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', cutoff)
+  local count = redis.call('ZCARD', KEYS[i])
+  local limit = tonumber(ARGV[i + 3])
+  if count >= limit then
+    blocked = true
+    local index = count - limit
+    local item = redis.call('ZRANGE', KEYS[i], index, index, 'WITHSCORES')
+    if #item == 2 then
+      local wait = tonumber(item[2]) + window - now
+      if wait > retry then retry = wait end
+    end
+  end
+end
+if blocked then return {0, math.max(1, math.ceil(retry / 1000))} end
+return {1, 0}
+"""
+
+_RECORD_SCRIPT = """
+local cutoff = tonumber(ARGV[2])
+for i = 1, 3 do
+  redis.call('ZREMRANGEBYSCORE', KEYS[i], '-inf', cutoff)
+  redis.call('ZADD', KEYS[i], ARGV[1], ARGV[4])
+  redis.call('PEXPIRE', KEYS[i], ARGV[3])
+end
+return 1
+"""
 
 
 @dataclass(frozen=True)
@@ -20,7 +58,7 @@ class RateLimitConfig:
 
 @runtime_checkable
 class LoginRateLimitPolicy(Protocol):
-    def check(
+    async def check(
         self,
         *,
         ip: str,
@@ -28,7 +66,7 @@ class LoginRateLimitPolicy(Protocol):
         now: datetime,
     ) -> RateLimitDecision: ...
 
-    def record_failure(
+    async def record_failure(
         self,
         *,
         ip: str,
@@ -36,7 +74,7 @@ class LoginRateLimitPolicy(Protocol):
         now: datetime,
     ) -> None: ...
 
-    def record_success(
+    async def record_success(
         self,
         *,
         ip: str,
@@ -52,7 +90,7 @@ class InMemoryLoginRateLimiter:
         self._config = config or RateLimitConfig()
         self._failures: list[tuple[datetime, str, str]] = []
 
-    def check(
+    async def check(
         self,
         *,
         ip: str,
@@ -60,26 +98,40 @@ class InMemoryLoginRateLimiter:
         now: datetime,
     ) -> RateLimitDecision:
         self._prune(now)
-        ip_failures = [item for item in self._failures if item[1] == ip]
-        username_failures = [item for item in self._failures if item[2] == username]
-        blocked = (
-            len(ip_failures) >= self._config.per_ip
-            or len(username_failures) >= self._config.per_username
-            or len(self._failures) >= self._config.global_failures
+        dimensions = (
+            (
+                [item for item in self._failures if item[1] == ip],
+                self._config.per_ip,
+            ),
+            (
+                [item for item in self._failures if item[2] == username],
+                self._config.per_username,
+            ),
+            (self._failures, self._config.global_failures),
         )
-        if not blocked:
+        blocked_dimensions = [
+            (failures, limit)
+            for failures, limit in dimensions
+            if len(failures) >= limit
+        ]
+        if not blocked_dimensions:
             return RateLimitDecision(allowed=True)
-        oldest = min(item[0] for item in self._failures)
         retry_after = max(
-            1,
-            ceil((oldest + self._config.window - now).total_seconds()),
+            ceil(
+                (
+                    failures[len(failures) - limit][0]
+                    + self._config.window
+                    - now
+                ).total_seconds()
+            )
+            for failures, limit in blocked_dimensions
         )
         return RateLimitDecision(
             allowed=False,
-            retry_after_seconds=retry_after,
+            retry_after_seconds=max(1, retry_after),
         )
 
-    def record_failure(
+    async def record_failure(
         self,
         *,
         ip: str,
@@ -89,7 +141,7 @@ class InMemoryLoginRateLimiter:
         self._prune(now)
         self._failures.append((now, ip, username))
 
-    def record_success(
+    async def record_success(
         self,
         *,
         ip: str,
@@ -101,3 +153,161 @@ class InMemoryLoginRateLimiter:
     def _prune(self, now: datetime) -> None:
         cutoff = now - self._config.window
         self._failures = [item for item in self._failures if item[0] > cutoff]
+
+
+class RedisEvalClient(Protocol):
+    async def eval(
+        self,
+        script: str,
+        numkeys: int,
+        *keys_and_args: object,
+    ) -> object: ...
+
+
+class RedisLoginRateLimiter:
+    def __init__(
+        self,
+        redis: RedisEvalClient,
+        config: RateLimitConfig | None = None,
+        *,
+        namespace: str = "long-invest:auth:login",
+    ) -> None:
+        self._redis = redis
+        self._config = config or RateLimitConfig()
+        self._namespace = namespace
+
+    async def check(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+    ) -> RateLimitDecision:
+        keys = self._keys(ip, username)
+        now_ms = _milliseconds(now)
+        window_ms = int(self._config.window.total_seconds() * 1000)
+        raw = await self._redis.eval(
+            _CHECK_SCRIPT,
+            3,
+            *keys,
+            now_ms,
+            now_ms - window_ms,
+            window_ms,
+            self._config.per_ip,
+            self._config.per_username,
+            self._config.global_failures,
+        )
+        allowed, retry_after = raw  # type: ignore[misc]
+        return RateLimitDecision(
+            allowed=bool(int(allowed)),
+            retry_after_seconds=None if int(allowed) else int(retry_after),
+        )
+
+    async def record_failure(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+    ) -> None:
+        keys = self._keys(ip, username)
+        now_ms = _milliseconds(now)
+        window_ms = int(self._config.window.total_seconds() * 1000)
+        await self._redis.eval(
+            _RECORD_SCRIPT,
+            3,
+            *keys,
+            now_ms,
+            now_ms - window_ms,
+            window_ms,
+            secrets.token_hex(16),
+        )
+
+    async def record_success(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+    ) -> None:
+        return None
+
+    def _keys(self, ip: str, username: str) -> tuple[str, str, str]:
+        ip_digest = hashlib.sha256(ip.encode()).hexdigest()
+        username_digest = hashlib.sha256(username.casefold().encode()).hexdigest()
+        return (
+            f"{self._namespace}:ip:{ip_digest}",
+            f"{self._namespace}:username:{username_digest}",
+            f"{self._namespace}:global",
+        )
+
+
+class ResilientLoginRateLimiter:
+    def __init__(
+        self,
+        primary: LoginRateLimitPolicy,
+        fallback: LoginRateLimitPolicy,
+        *,
+        fallback_cooldown: timedelta = timedelta(seconds=30),
+    ) -> None:
+        self._primary = primary
+        self._fallback = fallback
+        self._fallback_cooldown = fallback_cooldown
+        self._fallback_until: datetime | None = None
+
+    async def check(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+    ) -> RateLimitDecision:
+        if self._using_fallback(now):
+            return await self._fallback.check(ip=ip, username=username, now=now)
+        try:
+            return await self._primary.check(ip=ip, username=username, now=now)
+        except (RedisError, OSError):
+            self._activate_fallback(now)
+            return await self._fallback.check(ip=ip, username=username, now=now)
+
+    async def record_failure(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+    ) -> None:
+        if self._using_fallback(now):
+            await self._fallback.record_failure(ip=ip, username=username, now=now)
+            return
+        try:
+            await self._primary.record_failure(ip=ip, username=username, now=now)
+        except (RedisError, OSError):
+            self._activate_fallback(now)
+            await self._fallback.record_failure(ip=ip, username=username, now=now)
+
+    async def record_success(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+    ) -> None:
+        if self._using_fallback(now):
+            await self._fallback.record_success(ip=ip, username=username, now=now)
+            return
+        try:
+            await self._primary.record_success(ip=ip, username=username, now=now)
+        except (RedisError, OSError):
+            self._activate_fallback(now)
+            await self._fallback.record_success(ip=ip, username=username, now=now)
+
+    def _using_fallback(self, now: datetime) -> bool:
+        return self._fallback_until is not None and now < self._fallback_until
+
+    def _activate_fallback(self, now: datetime) -> None:
+        self._fallback_until = now + self._fallback_cooldown
+
+
+def _milliseconds(value: datetime) -> int:
+    return int(value.timestamp() * 1000)

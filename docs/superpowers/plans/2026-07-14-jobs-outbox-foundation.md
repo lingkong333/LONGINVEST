@@ -63,23 +63,23 @@ Run the contract tests and Ruff. Commit `feat: add job contracts`.
 - Create: `backend/alembic/versions/20260714_0004_jobs_outbox.py`
 - Test: `backend/tests/platform/jobs/test_models.py`
 
-- [ ] **Step 1: Write database tests before models**
+- [x] **Step 1: Write database tests before models**
 
 Require a `job` with type, queue, priority, frozen configuration, scoped idempotency key and request hash; multiple immutable `job_run` attempts; unique per-job `job_item` keys; and a pending `event_outbox` row. Assert duplicate scoped idempotency keys and duplicate `(job_id, attempt_no)` pairs are rejected by PostgreSQL.
 
-- [ ] **Step 2: Run focused tests and confirm missing imports**
+- [x] **Step 2: Run focused tests and confirm missing imports**
 
 Run `pytest -q tests/platform/jobs/test_models.py`. Expected: model import failure.
 
-- [ ] **Step 3: Implement the four SQLAlchemy models**
+- [x] **Step 3: Implement the four SQLAlchemy models**
 
 Use UUID primary keys, timezone-aware timestamps, JSONB snapshots/results, integer optimistic versions, explicit check constraints, and indexes for pending dispatch, active runs, job status, and cleanup timestamps. Store status values as bounded strings so migrations stay explicit.
 
-- [ ] **Step 4: Add a single linear migration**
+- [x] **Step 4: Add a single linear migration**
 
 Create all four tables in dependency order. Grant the application role normal job/outbox access while keeping table ownership with the migration role. Downgrade in reverse order.
 
-- [ ] **Step 5: Apply the migration and verify constraints**
+- [x] **Step 5: Apply the migration and verify constraints**
 
 Run `alembic upgrade head`, focused database tests, and `alembic check`. Commit `feat: add job and outbox storage`.
 

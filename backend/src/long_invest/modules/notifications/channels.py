@@ -11,6 +11,10 @@ from long_invest.modules.notifications.security import (
     SecretReferenceValue,
     validate_notification_payload,
 )
+from long_invest.modules.notifications.templates import (
+    RenderedTemplate,
+    TemplateDefinition,
+)
 
 SecretReference = SecretReferenceValue
 
@@ -171,11 +175,15 @@ class NotificationChannel(Protocol[ConfigT]):
 
     def validate_config(self, config: ConfigT) -> tuple[str, ...]: ...
 
-    def render(self, template: object, variables: dict[str, Any]) -> object: ...
+    def render(
+        self,
+        template: TemplateDefinition,
+        variables: dict[str, Any],
+    ) -> RenderedTemplate: ...
 
-    def send(self, request: ChannelSendRequest) -> ChannelResult: ...
+    async def send(self, request: ChannelSendRequest) -> ChannelResult: ...
 
-    def test(self, request: ChannelSendRequest) -> ChannelResult: ...
+    async def test(self, request: ChannelSendRequest) -> ChannelResult: ...
 
 
 class WeComRobotChannel(NotificationChannel[WeComChannelConfig], Protocol):

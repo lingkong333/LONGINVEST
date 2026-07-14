@@ -26,8 +26,10 @@ def test_notification_records_keep_business_channel_and_attempt_facts_separate()
         "template_variables",
         "eligibility_status",
         "effective_channels",
+        "content_hash",
     } <= event_columns
     assert {"channel", "config_version", "target_fingerprint"} <= delivery_columns
+    assert {"lease_owner", "lease_token", "lease_expires_at"} <= delivery_columns
     assert {"attempt_no", "phase", "outcome", "possibly_delivered"} <= attempt_columns
 
     assert "attempt_no" not in event_columns | delivery_columns

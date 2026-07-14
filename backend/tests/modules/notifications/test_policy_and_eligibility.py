@@ -1,5 +1,7 @@
 import importlib
 import importlib.util
+from dataclasses import fields
+from inspect import signature
 
 import pytest
 
@@ -135,3 +137,133 @@ def test_emergency_pause_invalidates_a_pending_delivery() -> None:
 
     assert decision.eligible is False
     assert decision.reason == "SUBSCRIPTION_DISABLED"
+
+
+def test_system_alert_policy_has_independent_severity_and_lifecycle_channels() -> None:
+    policy = load_module("policy")
+    alert_policy = policy.SystemAlertPolicy(
+        warning=policy.PolicySelection.web_only(),
+        error=policy.PolicySelection.email_only(),
+        critical=policy.PolicySelection.both(),
+        recovered=policy.PolicySelection.wecom_only(),
+        daily_unresolved=policy.PolicySelection.email_only(),
+    )
+
+    warning = policy.resolve_system_alert_policy(
+        policy=alert_policy,
+        severity=policy.SystemAlertSeverity.WARNING,
+        notice_kind=policy.SystemAlertNoticeKind.OPENED,
+    )
+    critical = policy.resolve_system_alert_policy(
+        policy=alert_policy,
+        severity=policy.SystemAlertSeverity.CRITICAL,
+        notice_kind=policy.SystemAlertNoticeKind.OPENED,
+    )
+    recovered = policy.resolve_system_alert_policy(
+        policy=alert_policy,
+        severity=policy.SystemAlertSeverity.ERROR,
+        notice_kind=policy.SystemAlertNoticeKind.RECOVERED,
+    )
+    daily = policy.resolve_system_alert_policy(
+        policy=alert_policy,
+        severity=policy.SystemAlertSeverity.ERROR,
+        notice_kind=policy.SystemAlertNoticeKind.DAILY_UNRESOLVED,
+    )
+
+    assert warning.channels == frozenset()
+    assert critical.channels == frozenset(policy.NotificationChannel)
+    assert recovered.channels == frozenset({policy.NotificationChannel.WECOM})
+    assert daily.channels == frozenset({policy.NotificationChannel.EMAIL})
+    assert (
+        "subscription" not in signature(policy.resolve_system_alert_policy).parameters
+    )
+
+
+def test_system_alert_eligibility_snapshot_has_no_stock_subscription_facts() -> None:
+    eligibility = load_module("eligibility")
+
+    field_names = {
+        field.name for field in fields(eligibility.SystemAlertEligibilitySnapshot)
+    }
+
+    assert "subscription_enabled" not in field_names
+    assert "is_holding" not in field_names
+    assert "position_version" not in field_names
+    assert "SYSTEM_ALERT" not in eligibility.NotificationKind.__members__
+
+
+def test_resolved_alert_sends_only_recovery_notice() -> None:
+    eligibility = load_module("eligibility")
+    snapshot = eligibility.SystemAlertEligibilitySnapshot(
+        canceled=False,
+        channel_enabled=True,
+        resolved=True,
+        alert_version=5,
+        severity=eligibility.SystemAlertSeverity.ERROR,
+        reminded_today=False,
+    )
+
+    opened = eligibility.review_system_alert_eligibility(
+        eligibility.SystemAlertEligibilityRequest(
+            notice_kind=eligibility.SystemAlertNoticeKind.OPENED,
+            expected_alert_version=5,
+            expected_severity=eligibility.SystemAlertSeverity.ERROR,
+        ),
+        snapshot,
+    )
+    recovered = eligibility.review_system_alert_eligibility(
+        eligibility.SystemAlertEligibilityRequest(
+            notice_kind=eligibility.SystemAlertNoticeKind.RECOVERED,
+            expected_alert_version=5,
+            expected_severity=eligibility.SystemAlertSeverity.ERROR,
+        ),
+        snapshot,
+    )
+
+    assert opened.eligible is False
+    assert opened.reason == "ALERT_ALREADY_RESOLVED"
+    assert recovered.eligible is True
+
+
+def test_daily_unresolved_alert_is_suppressed_after_today_reminder() -> None:
+    eligibility = load_module("eligibility")
+    request = eligibility.SystemAlertEligibilityRequest(
+        notice_kind=eligibility.SystemAlertNoticeKind.DAILY_UNRESOLVED,
+        expected_alert_version=8,
+        expected_severity=eligibility.SystemAlertSeverity.CRITICAL,
+    )
+    snapshot = eligibility.SystemAlertEligibilitySnapshot(
+        canceled=False,
+        channel_enabled=True,
+        resolved=False,
+        alert_version=8,
+        severity=eligibility.SystemAlertSeverity.CRITICAL,
+        reminded_today=True,
+    )
+
+    decision = eligibility.review_system_alert_eligibility(request, snapshot)
+
+    assert decision.eligible is False
+    assert decision.reason == "DAILY_REMINDER_ALREADY_SENT"
+
+
+def test_changed_alert_version_invalidates_old_pending_notice() -> None:
+    eligibility = load_module("eligibility")
+    request = eligibility.SystemAlertEligibilityRequest(
+        notice_kind=eligibility.SystemAlertNoticeKind.OPENED,
+        expected_alert_version=3,
+        expected_severity=eligibility.SystemAlertSeverity.ERROR,
+    )
+    snapshot = eligibility.SystemAlertEligibilitySnapshot(
+        canceled=False,
+        channel_enabled=True,
+        resolved=False,
+        alert_version=4,
+        severity=eligibility.SystemAlertSeverity.CRITICAL,
+        reminded_today=False,
+    )
+
+    decision = eligibility.review_system_alert_eligibility(request, snapshot)
+
+    assert decision.eligible is False
+    assert decision.reason == "ALERT_VERSION_CHANGED"

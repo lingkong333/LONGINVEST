@@ -8,8 +8,9 @@
   `notification_delivery_attempt` model definitions. The main integration flow owns
   migration generation and registration.
 - Public capabilities: policy resolution, channel protocols and safe channel results,
-  strict template rendering, pre-send eligibility review, and pure retry/circuit/event
-  status decisions.
+  immutable Git template resolution, pre-send eligibility review, notification
+  publication, leased delivery persistence and recovery, channel-scoped execution,
+  and retry/circuit/event status decisions.
 - Internal events for later integration: `notification.requested/suppressed`,
   `delivery_created/started/succeeded/failed/unknown/canceled`, and
   `channel_degraded/recovered`.
@@ -21,5 +22,7 @@
 ## Explicit exclusions
 
 This foundation does not publish business signals, call external networks, register
-HTTP routes, run workers, write outbox records, manage secrets, or own Alembic
-migrations. Real WeCom/SMTP adapters and business integration belong to stage 5.
+HTTP or process entrypoints, write outbox records, manage secrets, or own Alembic
+migrations. It exposes the transaction-safe service/repository operations and the
+claimed-delivery executor that future independent WeCom and email processes will call.
+Real WeCom/SMTP adapters and business integration belong to stage 5.

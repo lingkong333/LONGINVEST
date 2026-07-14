@@ -86,6 +86,7 @@ class NotificationEvent(Base):
         nullable=False,
         unique=True,
     )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     request_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -106,6 +107,7 @@ class NotificationDelivery(Base):
     __tablename__ = "notification_delivery"
     __table_args__ = (
         UniqueConstraint("event_id", "channel", "generation"),
+        UniqueConstraint("lease_token"),
         CheckConstraint("generation > 0", name="generation_positive"),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
         CheckConstraint(
@@ -127,6 +129,12 @@ class NotificationDelivery(Base):
             "channel",
             "status",
             "next_retry_at",
+        ),
+        Index(
+            "ix_notification_delivery_expired_lease",
+            "channel",
+            "status",
+            "lease_expires_at",
         ),
     )
 
@@ -173,6 +181,9 @@ class NotificationDelivery(Base):
         String(200),
         nullable=False,
     )
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

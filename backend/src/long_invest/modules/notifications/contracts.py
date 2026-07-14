@@ -33,3 +33,15 @@ class DeliveryOutcome(StrEnum):
     TEMPORARY_FAILURE = "TEMPORARY_FAILURE"
     PERMANENT_FAILURE = "PERMANENT_FAILURE"
     OUTCOME_UNKNOWN = "OUTCOME_UNKNOWN"
+
+
+class SystemAlertSeverity(StrEnum):
+    WARNING = "WARNING"
+    ERROR = "ERROR"
+    CRITICAL = "CRITICAL"
+
+
+class SystemAlertNoticeKind(StrEnum):
+    OPENED = "OPENED"
+    RECOVERED = "RECOVERED"
+    DAILY_UNRESOLVED = "DAILY_UNRESOLVED"

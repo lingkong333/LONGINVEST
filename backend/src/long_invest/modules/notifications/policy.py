@@ -4,6 +4,10 @@ from enum import StrEnum
 from long_invest.modules.notifications.contracts import (
     DeliveryChannel as NotificationChannel,
 )
+from long_invest.modules.notifications.contracts import (
+    SystemAlertNoticeKind,
+    SystemAlertSeverity,
+)
 
 
 class PolicyMode(StrEnum):
@@ -15,6 +19,7 @@ class PolicySource(StrEnum):
     SUBSCRIPTION = "SUBSCRIPTION"
     SIGNAL_TYPE = "SIGNAL_TYPE"
     GLOBAL = "GLOBAL"
+    SYSTEM_ALERT = "SYSTEM_ALERT"
 
 
 class PolicyResolutionError(ValueError):
@@ -73,6 +78,15 @@ class ResolvedPolicy:
     source: PolicySource
 
 
+@dataclass(frozen=True, slots=True)
+class SystemAlertPolicy:
+    warning: PolicySelection
+    error: PolicySelection
+    critical: PolicySelection
+    recovered: PolicySelection
+    daily_unresolved: PolicySelection
+
+
 def _custom_selection(override: PolicyOverride | None) -> PolicySelection | None:
     if override is None or override.mode is PolicyMode.INHERIT:
         return None
@@ -101,3 +115,22 @@ def resolve_signal_policy(
             "an explicit global notification policy is required"
         )
     return ResolvedPolicy(global_default.channels, PolicySource.GLOBAL)
+
+
+def resolve_system_alert_policy(
+    *,
+    policy: SystemAlertPolicy,
+    severity: SystemAlertSeverity,
+    notice_kind: SystemAlertNoticeKind,
+) -> ResolvedPolicy:
+    if notice_kind is SystemAlertNoticeKind.RECOVERED:
+        selection = policy.recovered
+    elif notice_kind is SystemAlertNoticeKind.DAILY_UNRESOLVED:
+        selection = policy.daily_unresolved
+    else:
+        selection = {
+            SystemAlertSeverity.WARNING: policy.warning,
+            SystemAlertSeverity.ERROR: policy.error,
+            SystemAlertSeverity.CRITICAL: policy.critical,
+        }[severity]
+    return ResolvedPolicy(selection.channels, PolicySource.SYSTEM_ALERT)

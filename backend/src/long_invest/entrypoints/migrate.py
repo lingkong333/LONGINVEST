@@ -29,7 +29,13 @@ async def ensure_application_role() -> None:
                 else "CREATE ROLE %I WITH LOGIN PASSWORD %L"
             )
             statement = await connection.scalar(
-                text("SELECT format(:template, :role, :password)"),
+                text(
+                    "SELECT format("
+                    "CAST(:template AS text), "
+                    "CAST(:role AS text), "
+                    "CAST(:password AS text)"
+                    ")"
+                ),
                 {
                     "template": template,
                     "role": settings.database_app_role,

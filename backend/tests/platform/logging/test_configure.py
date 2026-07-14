@@ -1,8 +1,8 @@
 import json
 from io import StringIO
 
-from asgi_correlation_id import correlation_id
 import structlog
+from asgi_correlation_id import correlation_id
 
 from long_invest.platform.logging.configure import configure_logging
 

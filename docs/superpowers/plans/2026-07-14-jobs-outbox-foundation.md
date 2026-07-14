@@ -6,7 +6,7 @@
 
 **Architecture:** Domain state remains in PostgreSQL. `JobService` writes `job` and `event_outbox` through a caller-owned transaction; a leased dispatcher sends deterministic RQ messages and then marks the database task queued. Worker and watchdog services update state only through fenced service methods, so Redis loss, duplicate delivery, process loss, and late completion cannot corrupt formal state.
 
-**Tech Stack:** Python 3.12, SQLAlchemy 2 async, PostgreSQL 16, Redis 7, RQ 2.9, Alembic, pytest, Docker Compose.
+**Tech Stack:** Python 3.12, SQLAlchemy 2 async, PostgreSQL 16, Redis 7, RQ 2.x, Alembic, pytest, Docker Compose.
 
 ---
 
@@ -33,23 +33,23 @@
 - Create: `backend/src/long_invest/platform/jobs/contracts.py`
 - Test: `backend/tests/platform/jobs/test_contracts.py`
 
-- [ ] **Step 1: Write the failing contract tests**
+- [x] **Step 1: Write the failing contract tests**
 
 Define tests that require `JobResult` to serialize only safe fields and require every V3.1 logical, run, and item status to exist as a string enum. Verify `JobResult.failure(...)` carries `retryable`, warnings, and duration metrics but never accepts an exception object.
 
-- [ ] **Step 2: Run the focused tests and confirm collection fails**
+- [x] **Step 2: Run the focused tests and confirm collection fails**
 
 Run `pytest -q tests/platform/jobs/test_contracts.py`. Expected: import failure because `platform.jobs.contracts` does not exist.
 
-- [ ] **Step 3: Implement minimal immutable contracts**
+- [x] **Step 3: Implement minimal immutable contracts**
 
 Use `StrEnum` for the exact V3.1 states. Use frozen dataclasses for `JobResult`, `SubmitJob`, and `JobProgress`; all payload fields are JSON-compatible mappings and identifiers, not exception instances.
 
-- [ ] **Step 4: Add RQ 2.9 and refresh the lock file**
+- [x] **Step 4: Add RQ 2.9 and refresh the lock file**
 
 Add `rq>=2.9,<3` and run `uv lock`. RQ is isolated behind the queue adapter; domain services must not import RQ.
 
-- [ ] **Step 5: Run focused tests and commit**
+- [x] **Step 5: Run focused tests and commit**
 
 Run the contract tests and Ruff. Commit `feat: add job contracts`.
 

@@ -36,15 +36,18 @@ class MemoryAuthRepository:
     async def find_user_by_username(self, username: str) -> AppUser | None:
         return next((u for u in self.users.values() if u.username == username), None)
 
-    async def has_any_user(self) -> bool:
-        return bool(self.users)
-
     async def get_user(self, user_id: UUID) -> AppUser | None:
         return self.users.get(user_id)
 
     async def add_user(self, user: AppUser) -> AppUser:
         self.users[user.id] = user
         return user
+
+    async def add_admin_if_absent(self, user: AppUser) -> bool:
+        if self.users:
+            return False
+        self.users[user.id] = user
+        return True
 
     async def advance_password_version(
         self,
@@ -61,6 +64,24 @@ class MemoryAuthRepository:
         user.password_version += 1
         user.password_changed_at = changed_at
         return user
+
+    async def replace_password_hash(
+        self,
+        user_id: UUID,
+        *,
+        expected_version: int,
+        expected_hash: str,
+        replacement_hash: str,
+    ) -> bool:
+        user = self.users.get(user_id)
+        if (
+            user is None
+            or user.password_version != expected_version
+            or user.password_hash != expected_hash
+        ):
+            return False
+        user.password_hash = replacement_hash
+        return True
 
     async def find_session_by_digest(self, digest: str) -> UserSession | None:
         return next(
@@ -143,6 +164,41 @@ class ConcurrentChangeRepository(MemoryAuthRepository):
             )
 
 
+class HashUpgradeRaceRepository(MemoryAuthRepository):
+    def __init__(self, concurrent_hash: str) -> None:
+        super().__init__()
+        self._concurrent_hash = concurrent_hash
+
+    async def replace_password_hash(
+        self,
+        user_id: UUID,
+        *,
+        expected_version: int,
+        expected_hash: str,
+        replacement_hash: str,
+    ) -> bool:
+        user = self.users[user_id]
+        user.password_hash = self._concurrent_hash
+        user.password_version += 1
+        return False
+
+    async def add_session(self, session: UserSession) -> UserSession:
+        user = self.users[session.user_id]
+        user.password_hash = self._concurrent_hash
+        user.password_version += 1
+        return await super().add_session(session)
+
+
+class ConcurrentAdminRepository(MemoryAuthRepository):
+    def __init__(self) -> None:
+        super().__init__()
+        self._create_lock = asyncio.Lock()
+
+    async def add_admin_if_absent(self, user: AppUser) -> bool:
+        async with self._create_lock:
+            return await super().add_admin_if_absent(user)
+
+
 class AllowLimiter:
     async def check(
         self, *, ip: str, username: str, now: datetime
@@ -199,6 +255,7 @@ def make_auth_service(
         limiter or AllowLimiter(),
         audit or RecordingAuditPort(),
         context or audit_context(),
+        dummy_password_hash=passwords.hash("startup generated dummy password"),
     )
 
 
@@ -225,6 +282,16 @@ class RecordingPasswordService(PasswordService):
     def verify(self, password: str, encoded: str):  # type: ignore[no-untyped-def]
         self.verified_hashes.append(encoded)
         return super().verify(password, encoded)
+
+
+class CountingPasswordService(PasswordService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.hash_calls = 0
+
+    def hash(self, password: str) -> str:
+        self.hash_calls += 1
+        return super().hash(password)
 
 
 def make_user(passwords: PasswordService, *, username: str = "admin") -> AppUser:
@@ -257,6 +324,25 @@ def make_session(
         absolute_expires_at=NOW + timedelta(days=90),
         status=status,
     )
+
+
+def test_auth_service_constructor_does_not_hash_a_dummy_password() -> None:
+    repo = MemoryAuthRepository()
+    passwords = CountingPasswordService()
+    dummy_hash = passwords.hash("startup generated dummy password")
+    calls_before_construction = passwords.hash_calls
+
+    AuthService(
+        repo,
+        passwords,
+        TokenService(),
+        AllowLimiter(),
+        RecordingAuditPort(),
+        audit_context(),
+        dummy_password_hash=dummy_hash,
+    )
+
+    assert passwords.hash_calls == calls_before_construction
 
 
 @pytest.mark.anyio
@@ -379,6 +465,40 @@ async def test_login_upgrades_old_hash_without_changing_password_version() -> No
     assert current.verify(PASSWORD, user.password_hash).valid is True
     assert old.check_needs_rehash(user.password_hash) is True
     assert user.password_version == 7
+
+
+@pytest.mark.anyio
+async def test_hash_upgrade_cannot_overwrite_a_concurrent_password_change() -> None:
+    old_hasher = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1)
+    passwords = PasswordService(
+        PasswordHasher(time_cost=2, memory_cost=8192, parallelism=1)
+    )
+    concurrent_hash = passwords.hash("concurrently changed password")
+    repo = HashUpgradeRaceRepository(concurrent_hash)
+    user = AppUser(
+        id=uuid4(),
+        username="admin",
+        password_hash=old_hasher.hash(PASSWORD),
+        password_version=1,
+        status=UserStatus.ACTIVE,
+        created_at=NOW,
+        password_changed_at=NOW,
+    )
+    await repo.add_user(user)
+
+    with pytest.raises(AppError) as captured:
+        await make_auth_service(repo, passwords).login(
+            username="admin",
+            password=PASSWORD,
+            client_ip="203.0.113.1",
+            user_agent_summary="Browser",
+            now=NOW + timedelta(minutes=1),
+        )
+
+    assert captured.value.code == "AUTH_INVALID_CREDENTIALS"
+    assert repo.users[user.id].password_hash == concurrent_hash
+    assert repo.users[user.id].password_version == 2
+    assert repo.sessions == {}
 
 
 @pytest.mark.anyio
@@ -674,6 +794,27 @@ async def test_cli_create_admin_rejects_duplicate_and_validates_password() -> No
     assert audit.events[0].action_code == "AUTH_ADMIN_CREATE"
     assert audit.events[0].result == "SUCCESS"
     assert audit.events[0].request_id == context.request_id
+
+
+@pytest.mark.anyio
+async def test_concurrent_different_admin_names_create_only_one_user() -> None:
+    repo = ConcurrentAdminRepository()
+    passwords = PasswordService()
+    first = make_admin_service(repo, passwords)
+    second = make_admin_service(repo, passwords)
+
+    results = await asyncio.gather(
+        first.create_admin("first-admin", PASSWORD, now=NOW),
+        second.create_admin("second-admin", PASSWORD, now=NOW),
+        return_exceptions=True,
+    )
+
+    successes = [result for result in results if isinstance(result, AppUser)]
+    failures = [result for result in results if isinstance(result, AppError)]
+    assert len(successes) == 1
+    assert len(failures) == 1
+    assert failures[0].code == "AUTH_USER_ALREADY_EXISTS"
+    assert len(repo.users) == 1
 
 
 @pytest.mark.anyio

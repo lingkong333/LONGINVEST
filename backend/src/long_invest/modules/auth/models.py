@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -22,6 +23,7 @@ class AppUser(Base):
     __tablename__ = "app_user"
     __table_args__ = (
         UniqueConstraint("username"),
+        Index("uq_app_user_singleton", text("(1)"), unique=True),
         CheckConstraint("password_version > 0", name="password_version_positive"),
         CheckConstraint(
             "status IN ('ACTIVE','DISABLED')",

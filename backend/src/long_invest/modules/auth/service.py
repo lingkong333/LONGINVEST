@@ -47,6 +47,8 @@ class AuthService:
         rate_limiter: LoginRateLimitPolicy,
         audit: AuthAuditPort,
         audit_context: AuditContext,
+        *,
+        dummy_password_hash: str,
     ) -> None:
         self._repository = repository
         self._passwords = passwords
@@ -55,7 +57,7 @@ class AuthService:
         self._audit = audit
         self._audit_context = audit_context
         self._sessions = SessionPolicy()
-        self._dummy_hash = passwords.hash("fixed dummy password value")
+        self._dummy_hash = dummy_password_hash
 
     async def login(
         self,
@@ -108,6 +110,23 @@ class AuthService:
             raise _invalid_credentials()
 
         if verification.upgraded_hash is not None:
+            replaced = await self._repository.replace_password_hash(
+                user.id,
+                expected_version=user.password_version,
+                expected_hash=encoded,
+                replacement_hash=verification.upgraded_hash,
+            )
+            if not replaced:
+                await self._record_audit(
+                    action_code="AUTH_LOGIN",
+                    object_type="app_user",
+                    object_id=str(user.id),
+                    result="DENIED",
+                    risk_level="HIGH",
+                    reason="password_hash_upgrade_conflict",
+                    actor_user_id=str(user.id),
+                )
+                raise _invalid_credentials()
             user.password_hash = verification.upgraded_hash
         credentials = self._tokens.issue()
         session = self._sessions.new_session(

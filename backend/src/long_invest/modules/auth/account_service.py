@@ -37,7 +37,16 @@ class AccountAdminService:
         now: datetime,
     ) -> AppUser:
         validate_new_password(password)
-        if await self._repository.has_any_user():
+        user = AppUser(
+            id=uuid4(),
+            username=username,
+            password_hash=self._passwords.hash(password),
+            password_version=1,
+            status=UserStatus.ACTIVE,
+            created_at=now,
+            password_changed_at=now,
+        )
+        if not await self._repository.add_admin_if_absent(user):
             await self._record_audit(
                 action_code="AUTH_ADMIN_CREATE",
                 object_type="app_user",
@@ -50,16 +59,6 @@ class AccountAdminService:
                 message="管理员账号已存在",
                 status_code=409,
             )
-        user = AppUser(
-            id=uuid4(),
-            username=username,
-            password_hash=self._passwords.hash(password),
-            password_version=1,
-            status=UserStatus.ACTIVE,
-            created_at=now,
-            password_changed_at=now,
-        )
-        await self._repository.add_user(user)
         await self._record_audit(
             action_code="AUTH_ADMIN_CREATE",
             object_type="app_user",

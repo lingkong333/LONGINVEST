@@ -2,7 +2,8 @@ from datetime import datetime
 from typing import Protocol
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.models import AppUser, UserSession
@@ -11,11 +12,11 @@ from long_invest.modules.auth.models import AppUser, UserSession
 class AuthRepository(Protocol):
     async def find_user_by_username(self, username: str) -> AppUser | None: ...
 
-    async def has_any_user(self) -> bool: ...
-
     async def get_user(self, user_id: UUID) -> AppUser | None: ...
 
     async def add_user(self, user: AppUser) -> AppUser: ...
+
+    async def add_admin_if_absent(self, user: AppUser) -> bool: ...
 
     async def advance_password_version(
         self,
@@ -25,6 +26,15 @@ class AuthRepository(Protocol):
         password_hash: str,
         changed_at: datetime,
     ) -> AppUser | None: ...
+
+    async def replace_password_hash(
+        self,
+        user_id: UUID,
+        *,
+        expected_version: int,
+        expected_hash: str,
+        replacement_hash: str,
+    ) -> bool: ...
 
     async def find_session_by_digest(self, digest: str) -> UserSession | None: ...
 
@@ -46,16 +56,21 @@ class SqlAlchemyAuthRepository:
             select(AppUser).where(AppUser.username == username)
         )
 
-    async def has_any_user(self) -> bool:
-        count = await self._session.scalar(select(func.count()).select_from(AppUser))
-        return bool(count)
-
     async def get_user(self, user_id: UUID) -> AppUser | None:
         return await self._session.scalar(select(AppUser).where(AppUser.id == user_id))
 
     async def add_user(self, user: AppUser) -> AppUser:
         self._session.add(user)
         return user
+
+    async def add_admin_if_absent(self, user: AppUser) -> bool:
+        try:
+            async with self._session.begin_nested():
+                self._session.add(user)
+                await self._session.flush()
+        except IntegrityError:
+            return False
+        return True
 
     async def advance_password_version(
         self,
@@ -78,6 +93,26 @@ class SqlAlchemyAuthRepository:
             )
             .returning(AppUser)
         )
+
+    async def replace_password_hash(
+        self,
+        user_id: UUID,
+        *,
+        expected_version: int,
+        expected_hash: str,
+        replacement_hash: str,
+    ) -> bool:
+        updated_id = await self._session.scalar(
+            update(AppUser)
+            .where(
+                AppUser.id == user_id,
+                AppUser.password_version == expected_version,
+                AppUser.password_hash == expected_hash,
+            )
+            .values(password_hash=replacement_hash)
+            .returning(AppUser.id)
+        )
+        return updated_id is not None
 
     async def find_session_by_digest(self, digest: str) -> UserSession | None:
         return await self._session.scalar(

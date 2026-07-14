@@ -1,6 +1,9 @@
 from datetime import UTC, datetime
 from uuid import uuid4
 
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex
+
 from long_invest.modules.auth.contracts import SessionStatus, UserStatus
 from long_invest.modules.auth.models import AppUser, UserSession
 
@@ -72,3 +75,18 @@ def test_model_defaults_match_active_first_version_account() -> None:
         absolute_expires_at=now,
     )
     assert session.status == SessionStatus.ACTIVE
+
+
+def test_database_has_a_unique_single_administrator_invariant() -> None:
+    singleton_index = next(
+        index
+        for index in AppUser.__table__.indexes
+        if index.name == "uq_app_user_singleton"
+    )
+
+    ddl = str(
+        CreateIndex(singleton_index).compile(dialect=postgresql.dialect())
+    )
+    assert singleton_index.unique is True
+    assert "UNIQUE INDEX" in ddl
+    assert "(1)" in ddl

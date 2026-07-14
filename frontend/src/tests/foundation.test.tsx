@@ -177,17 +177,22 @@ describe("应用错误边界和入口", () => {
   it("路由错误入口显示并复制服务端诊断信息", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    let loaderShouldFail = true
+    const loader = vi.fn(() => {
+      if (!loaderShouldFail) {
+        return null
+      }
+      throw new ApiError("认证后端不可用", {
+        code: "AUTH_BACKEND_UNAVAILABLE",
+        requestId: "req_route",
+        status: 503,
+      })
+    })
     const router = createMemoryRouter([
       {
         path: "/",
-        loader: () => {
-          throw new ApiError("认证后端不可用", {
-            code: "AUTH_BACKEND_UNAVAILABLE",
-            requestId: "req_route",
-            status: 503,
-          })
-        },
-        element: <p>不会显示</p>,
+        loader,
+        element: <p>页面已恢复</p>,
         errorElement: <RouteErrorPage />,
       },
     ])
@@ -198,6 +203,12 @@ describe("应用错误边界和入口", () => {
     expect(screen.getByText("req_route")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "复制诊断信息" }))
     expect(writeText).toHaveBeenCalledWith("错误码: AUTH_BACKEND_UNAVAILABLE\n请求标识: req_route")
+
+    loaderShouldFail = false
+    await userEvent.click(screen.getByRole("button", { name: "重试" }))
+
+    expect(await screen.findByText("页面已恢复")).toBeInTheDocument()
+    expect(loader).toHaveBeenCalledTimes(2)
   })
 
   it("重新尝试会清除错误边界并重新渲染子内容", async () => {

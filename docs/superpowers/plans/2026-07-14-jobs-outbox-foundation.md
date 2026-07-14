@@ -91,19 +91,19 @@ Run `alembic upgrade head`, focused database tests, and `alembic check`. Commit 
 - Create: `backend/src/long_invest/platform/jobs/service.py`
 - Test: `backend/tests/platform/jobs/test_service.py`
 
-- [ ] **Step 1: Write service tests against real PostgreSQL**
+- [x] **Step 1: Write service tests against real PostgreSQL**
 
 Submit through a caller-owned transaction and assert one `job` plus one outbox row appear together. Roll back the transaction and assert neither remains. Resubmit the same scope/key/hash and require the existing job; resubmit the same scope/key with a different hash and require HTTP 409 `IDEMPOTENCY_KEY_REUSED`.
 
-- [ ] **Step 2: Verify the tests fail because the service is absent**
+- [x] **Step 2: Verify the tests fail because the service is absent**
 
 Run `pytest -q tests/platform/jobs/test_service.py` and confirm the missing service is the failure reason.
 
-- [ ] **Step 3: Implement `JobService.submit`**
+- [x] **Step 3: Implement `JobService.submit`**
 
 Accept an existing `AsyncSession`; never call commit. Canonically hash the frozen request with sorted JSON. Insert the logical job and a minimal outbox payload containing `job_id`, `outbox_id`, type, queue, and request ID. Resolve unique-key races by re-reading and comparing the stored hash.
 
-- [ ] **Step 4: Verify rollback, replay, and conflict behavior**
+- [x] **Step 4: Verify rollback, replay, and conflict behavior**
 
 Run the focused tests and the existing audit tests. Commit `feat: submit jobs through transactional outbox`.
 
@@ -115,23 +115,23 @@ Run the focused tests and the existing audit tests. Commit `feat: submit jobs th
 - Create: `backend/src/long_invest/platform/outbox/dispatcher.py`
 - Test: `backend/tests/platform/outbox/test_dispatcher.py`
 
-- [ ] **Step 1: Write dispatcher tests with a narrow queue fake**
+- [x] **Step 1: Write dispatcher tests with a narrow queue fake**
 
 Test that two dispatcher instances cannot claim the same row; Redis failure returns the row to pending with a future retry time and leaves the job `PENDING_DISPATCH`; success records the RQ ID and changes the job to `QUEUED`; replay uses deterministic `outbox-{outbox_id}` and does not create a second RQ job.
 
-- [ ] **Step 2: Run focused tests and confirm missing dispatcher failure**
+- [x] **Step 2: Run focused tests and confirm missing dispatcher failure**
 
 Run `pytest -q tests/platform/outbox/test_dispatcher.py`.
 
-- [ ] **Step 3: Implement lease and finalization transactions**
+- [x] **Step 3: Implement lease and finalization transactions**
 
 Claim due rows using `FOR UPDATE SKIP LOCKED`, persist `DISPATCHING`, owner, lease time, and attempt count, then commit. Call Redis outside the transaction. Finalize success or a capped exponential retry in a new transaction.
 
-- [ ] **Step 4: Implement the RQ adapter**
+- [x] **Step 4: Implement the RQ adapter**
 
 Use one sync Redis connection and `Queue.enqueue` with `job_id=f"outbox-{outbox_id}"`, `unique=True`, explicit timeout, and only `job_id`/`outbox_id` arguments. Never use RQ status as business truth.
 
-- [ ] **Step 5: Verify success, duplicate, and Redis-down cases**
+- [x] **Step 5: Verify success, duplicate, and Redis-down cases**
 
 Run focused tests with real PostgreSQL plus Redis adapter integration, then commit `feat: add reliable outbox dispatcher`.
 

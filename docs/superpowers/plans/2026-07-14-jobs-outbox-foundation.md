@@ -143,19 +143,19 @@ Run focused tests with real PostgreSQL plus Redis adapter integration, then comm
 - Create: `backend/src/long_invest/platform/jobs/worker.py`
 - Test: `backend/tests/platform/jobs/test_run_lifecycle.py`
 
-- [ ] **Step 1: Write lifecycle tests**
+- [x] **Step 1: Write lifecycle tests**
 
 Require attempt numbers to increase, run rows to remain immutable after terminal state, heartbeats to update only the active fence, progress to reject stale fences, terminal completion to update job and run atomically, and a late old fence to become `SUPERSEDED` without overwriting the new result.
 
-- [ ] **Step 2: Confirm focused tests fail on missing lifecycle methods**
+- [x] **Step 2: Confirm focused tests fail on missing lifecycle methods**
 
 Run `pytest -q tests/platform/jobs/test_run_lifecycle.py`.
 
-- [ ] **Step 3: Implement fenced state transitions**
+- [x] **Step 3: Implement fenced state transitions**
 
 Lock the logical job before creating a run. Generate a UUID fence token for every attempt and compare it with `job.current_fence_token` on heartbeat, progress, completion, and failure. Store only `JobResult` safe summaries.
 
-- [ ] **Step 4: Run lifecycle and full job tests**
+- [x] **Step 4: Run lifecycle and full job tests**
 
 Run all `tests/platform/jobs` tests and commit `feat: fence worker run updates`.
 

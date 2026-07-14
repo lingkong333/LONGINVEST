@@ -1,0 +1,30 @@
+# LongInvest 前端基础工程
+
+本目录对应 V3.1 的第 17 章、第 21 章阶段 1B、第 22.7 节和第 25.16 节。
+
+## 当前边界
+
+- `src/app` 只负责路由、全局 Provider 和错误边界。
+- `src/shared` 只负责通用 UI、请求、Query 与基础工具，不得引用 `features` 或 `pages`。
+- `src/features` 由后续业务模块拥有，各模块只能通过自己的公开入口被页面组合。
+- `src/pages` 只组合功能，不实现业务规则。
+- 本阶段不拥有业务数据、不声明业务事件、不接入真实 API，也不实现业务页面。
+
+## 公共接口
+
+- UI：`Button`、`Input`、`FormField`、`Dialog`、`DataTable`、`PageState`。
+- 应用：`AppErrorBoundary`、`AppProviders`、Data Mode 路由和 Query Client。
+- 请求：`createApiClient`、`unwrapEnvelope`、`ApiError`。
+
+后端提供 OpenAPI 文件后，在 `frontend` 目录运行 `npm run generate:api`，再由主流程提交生成类型。页面和业务组件不得直接调用 `fetch`。
+
+## 验证
+
+```text
+npm test
+npm run lint
+npm run typecheck
+npm run build
+```
+
+Playwright 已配置桌面和手机项目，但本阶段不下载浏览器，也不编写业务端到端流程。

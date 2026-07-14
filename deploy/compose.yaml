@@ -48,6 +48,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
     environment:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
@@ -76,6 +77,28 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     mem_limit: 384m
+    security_opt:
+      - no-new-privileges:true
+
+  test:
+    profiles: ["test"]
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: test
+    environment:
+      LONGINVEST_ENVIRONMENT: test
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_REDIS_URL: redis://redis:6379/1
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 512m
     security_opt:
       - no-new-privileges:true
 

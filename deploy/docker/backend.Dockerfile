@@ -18,6 +18,8 @@ COPY backend/uv.lock ./uv.lock
 RUN uv sync --frozen --no-dev --no-install-project
 
 COPY backend/src ./src
+COPY backend/alembic.ini ./alembic.ini
+COPY backend/alembic ./alembic
 
 RUN uv sync --frozen --no-dev
 

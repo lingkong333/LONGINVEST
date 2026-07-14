@@ -1,7 +1,14 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from long_invest.platform.config.settings import get_settings
 
@@ -15,6 +22,10 @@ class Database:
             pool_size=5,
             max_overflow=5,
         )
+        self._session_factory = async_sessionmaker(
+            self._engine,
+            expire_on_commit=False,
+        )
 
     async def ping(self) -> bool:
         async with self._engine.connect() as connection:
@@ -23,8 +34,17 @@ class Database:
     async def dispose(self) -> None:
         await self._engine.dispose()
 
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[AsyncSession]:
+        async with self._session_factory() as session:
+            yield session
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[AsyncSession]:
+        async with self._session_factory() as session, session.begin():
+            yield session
+
 
 @lru_cache
 def get_database() -> Database:
     return Database(get_settings().database_url)
-

@@ -44,6 +44,26 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  migrate:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["alembic", "upgrade", "head"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+
   api:
     build:
       context: ..
@@ -54,6 +74,8 @@ services:
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_REDIS_URL: redis://redis:6379/0
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:
@@ -91,6 +113,8 @@ services:
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_REDIS_URL: redis://redis:6379/1
     depends_on:
+      migrate:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       redis:

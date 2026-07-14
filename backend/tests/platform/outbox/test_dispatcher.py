@@ -64,7 +64,15 @@ async def clean_foundation_jobs(database: Database) -> None:
     async with database.transaction() as session:
         job_ids = (
             await session.scalars(
-                select(Job.id).where(Job.job_type == "FOUNDATION_TEST")
+                select(Job.id).where(
+                    Job.job_type.in_(
+                        (
+                            "FOUNDATION_TEST",
+                            "RUN_LIFECYCLE_TEST",
+                            "WATCHDOG_TEST",
+                        )
+                    )
+                )
             )
         ).all()
         if not job_ids:

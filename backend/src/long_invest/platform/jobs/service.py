@@ -1,13 +1,20 @@
 import hashlib
 import json
-from uuid import uuid4
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import JobStatus, SubmitJob
-from long_invest.platform.jobs.models import Job
+from long_invest.platform.jobs.contracts import (
+    JobProgress,
+    JobResult,
+    JobRunStatus,
+    JobStatus,
+    SubmitJob,
+)
+from long_invest.platform.jobs.models import Job, JobRun
 from long_invest.platform.jobs.repository import JobRepository
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
@@ -73,6 +80,186 @@ class JobService:
                 raise
             return _resolve_replay(existing, request_hash)
         return job
+
+    async def claim(
+        self,
+        *,
+        job_id: UUID,
+        worker_id: str,
+        soft_timeout_seconds: int,
+        hard_timeout_seconds: int,
+    ) -> JobRun:
+        job = await self._jobs.lock(job_id)
+        if job is None:
+            raise AppError(
+                code="JOB_NOT_FOUND",
+                message="任务不存在",
+                status_code=404,
+            )
+        if job.status != JobStatus.QUEUED:
+            raise AppError(
+                code="JOB_NOT_CLAIMABLE",
+                message="任务当前状态不能领取",
+                status_code=409,
+                details={"status": job.status},
+            )
+        if hard_timeout_seconds < soft_timeout_seconds:
+            raise ValueError("hard timeout cannot be shorter than soft timeout")
+
+        run = JobRun(
+            job_id=job.id,
+            attempt_no=await self._jobs.next_attempt_no(job.id),
+            worker_id=worker_id,
+            fence_token=uuid4(),
+            status=JobRunStatus.CLAIMED,
+            soft_timeout_seconds=soft_timeout_seconds,
+            hard_timeout_seconds=hard_timeout_seconds,
+        )
+        self._session.add(run)
+        await self._session.flush()
+        now = datetime.now(UTC)
+        job.status = JobStatus.RUNNING
+        job.current_run_id = run.id
+        job.current_fence_token = run.fence_token
+        job.updated_at = now
+        job.version += 1
+        await self._session.flush()
+        return run
+
+    async def start(self, *, job_id: UUID, fence_token: UUID) -> bool:
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        now = datetime.now(UTC)
+        run.status = JobRunStatus.RUNNING
+        run.started_at = run.started_at or now
+        run.heartbeat_at = now
+        job.updated_at = now
+        await self._session.flush()
+        return True
+
+    async def heartbeat(self, *, job_id: UUID, fence_token: UUID) -> bool:
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        now = datetime.now(UTC)
+        run.heartbeat_at = now
+        job.updated_at = now
+        await self._session.flush()
+        return True
+
+    async def report_progress(
+        self,
+        *,
+        job_id: UUID,
+        fence_token: UUID,
+        progress: JobProgress,
+    ) -> bool:
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        now = datetime.now(UTC)
+        job.progress = {
+            "completed": progress.completed,
+            "total": progress.total,
+            "message": progress.message,
+        }
+        job.updated_at = now
+        run.heartbeat_at = now
+        await self._session.flush()
+        return True
+
+    async def complete(
+        self,
+        *,
+        job_id: UUID,
+        fence_token: UUID,
+        result: JobResult,
+    ) -> bool:
+        if not result.success:
+            raise ValueError("successful completion requires a successful JobResult")
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        now = datetime.now(UTC)
+        run.status = JobRunStatus.SUCCEEDED
+        run.ended_at = now
+        run.heartbeat_at = now
+        run.metrics = result.metrics
+        job.status = JobStatus.SUCCEEDED
+        job.result_summary = result.as_dict()
+        job.terminal_at = now
+        job.updated_at = now
+        job.current_run_id = None
+        job.current_fence_token = None
+        job.version += 1
+        await self._session.flush()
+        return True
+
+    async def fail(
+        self,
+        *,
+        job_id: UUID,
+        fence_token: UUID,
+        result: JobResult,
+    ) -> bool:
+        if result.success:
+            raise ValueError("failure requires a failed JobResult")
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        now = datetime.now(UTC)
+        run.status = JobRunStatus.FAILED
+        run.ended_at = now
+        run.heartbeat_at = now
+        run.error_code = result.code
+        run.error_summary = result.message[:500]
+        run.metrics = result.metrics
+        job.status = JobStatus.WAITING_RETRY if result.retryable else JobStatus.FAILED
+        job.result_summary = result.as_dict()
+        job.terminal_at = None if result.retryable else now
+        job.updated_at = now
+        job.current_run_id = None
+        job.current_fence_token = None
+        job.version += 1
+        await self._session.flush()
+        return True
+
+    async def _active_run(
+        self,
+        job_id: UUID,
+        fence_token: UUID,
+    ) -> tuple[Job, JobRun] | None:
+        job = await self._jobs.lock(job_id)
+        if job is None:
+            return None
+        if job.current_fence_token != fence_token or job.current_run_id is None:
+            stale = await self._jobs.lock_run_by_fence(fence_token)
+            if stale is not None and stale.status in {
+                JobRunStatus.CLAIMED,
+                JobRunStatus.STARTING,
+                JobRunStatus.RUNNING,
+                JobRunStatus.LOST,
+            }:
+                stale.status = JobRunStatus.SUPERSEDED
+                stale.ended_at = stale.ended_at or datetime.now(UTC)
+                await self._session.flush()
+            return None
+        run = await self._jobs.lock_run(job.current_run_id)
+        if run is None or run.fence_token != fence_token:
+            return None
+        if run.status not in {
+            JobRunStatus.CLAIMED,
+            JobRunStatus.STARTING,
+            JobRunStatus.RUNNING,
+        }:
+            return None
+        return job, run
 
 
 def _request_hash(command: SubmitJob) -> str:

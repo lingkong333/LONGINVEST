@@ -86,6 +86,18 @@ def test_detail_not_found_has_stable_error() -> None:
     assert response.json()["code"] == "SECURITY_NOT_FOUND"
 
 
+def test_search_rejects_a_whitespace_only_query() -> None:
+    application = Mock()
+    application.search = AsyncMock()
+    client, _identity = client_for(application)
+
+    response = client.get("/api/v1/securities/search", params={"q": "   "})
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "SECURITY_SEARCH_QUERY_INVALID"
+    application.search.assert_not_awaited()
+
+
 def test_refresh_requires_confirmation_and_idempotency_key() -> None:
     application = Mock()
     application.refresh = AsyncMock()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from long_invest.modules.securities.contracts import validate_symbol
 from long_invest.modules.securities.models import Security
@@ -8,7 +9,6 @@ from long_invest.modules.securities.repository import SecurityRepository
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.models import Job
 from long_invest.platform.jobs.service import JobService
 
 
@@ -67,7 +67,7 @@ class SecurityApplication:
         idempotency_key: str,
         request_id: str,
         created_by_user_id: str,
-    ) -> Job:
+    ) -> Any:
         command = SubmitJob(
             job_type="SECURITY_MASTER_REFRESH",
             queue="maintenance",

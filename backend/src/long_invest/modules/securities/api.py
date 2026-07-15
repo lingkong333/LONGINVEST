@@ -52,6 +52,12 @@ async def search_securities(
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
+    if not q.strip():
+        raise AppError(
+            code="SECURITY_SEARCH_QUERY_INVALID",
+            message="股票搜索词不能为空",
+            status_code=422,
+        )
     items, total = await application.search(
         query=q.strip(), page=page, page_size=page_size
     )

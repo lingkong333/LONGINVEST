@@ -93,6 +93,7 @@ async def test_repository_locks_only_expired_sending_leases_for_recovery() -> No
     sql = str(statement.compile(dialect=postgresql.dialect())).upper()
     assert "NOTIFICATION_DELIVERY.STATUS" in sql
     assert "LEASE_EXPIRES_AT" in sql
+    assert "ORDER BY NOTIFICATION_DELIVERY.EVENT_ID, NOTIFICATION_DELIVERY.ID" in sql
     assert "FOR UPDATE SKIP LOCKED" in sql
     assert expired == [delivery]
 

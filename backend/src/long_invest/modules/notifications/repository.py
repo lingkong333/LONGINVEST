@@ -99,7 +99,7 @@ class NotificationRepository:
                 NotificationDelivery.status == NotificationDeliveryStatus.SENDING,
                 NotificationDelivery.lease_expires_at <= now,
             )
-            .order_by(NotificationDelivery.lease_expires_at)
+            .order_by(NotificationDelivery.event_id, NotificationDelivery.id)
             .limit(limit)
             .with_for_update(skip_locked=True)
         )

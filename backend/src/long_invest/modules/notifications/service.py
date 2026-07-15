@@ -224,7 +224,8 @@ class NotificationService:
             now=now,
             limit=limit,
         )
-        for delivery in expired:
+        ordered_expired = sorted(expired, key=lambda item: (item.event_id, item.id))
+        for delivery in ordered_expired:
             await self._record_locked_result(
                 delivery,
                 result=ChannelResult.outcome_unknown(

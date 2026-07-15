@@ -2,7 +2,7 @@ import importlib
 import importlib.util
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -265,6 +265,61 @@ async def test_expired_sending_lease_becomes_unknown_and_gets_one_compensation()
     assert len(repository.attempts) == 1
     assert repository.attempts[0].outcome == "OUTCOME_UNKNOWN"
     assert repository.attempts[0].possibly_delivered is True
+
+
+@pytest.mark.anyio
+async def test_cross_channel_recovery_locks_events_in_same_global_order() -> None:
+    service = load_service()
+    event_ids = (UUID(int=1), UUID(int=2))
+
+    async def recovery_lock_order(channel, returned_event_ids):
+        events = []
+        deliveries = []
+        for event_id in event_ids:
+            event, delivery, _lease_token = event_and_delivery()
+            event.id = event_id
+            delivery.event_id = event_id
+            delivery.channel = channel
+            events.append(event)
+            deliveries.append(delivery)
+
+        class OrderingRepository(FakeRepository):
+            def __init__(self):
+                super().__init__(events[0], deliveries)
+                self.events = {item.id: item for item in events}
+                self.expired = [
+                    next(
+                        item
+                        for item in deliveries
+                        if item.event_id == returned_event_id
+                    )
+                    for returned_event_id in returned_event_ids
+                ]
+                self.locked_event_ids = []
+
+            async def lock_event(self, event_id):
+                self.locked_event_ids.append(event_id)
+                return self.events[event_id]
+
+        repository = OrderingRepository()
+        await service.NotificationService(repository).recover_expired_leases(
+            channel=channel,
+            now=datetime(2026, 7, 15, 1, 2, tzinfo=UTC),
+            limit=10,
+        )
+        return repository.locked_event_ids
+
+    wecom_order = await recovery_lock_order(
+        DeliveryChannel.WECOM,
+        tuple(reversed(event_ids)),
+    )
+    email_order = await recovery_lock_order(
+        DeliveryChannel.EMAIL,
+        event_ids,
+    )
+
+    assert wecom_order == list(event_ids)
+    assert email_order == list(event_ids)
 
 
 @pytest.mark.anyio

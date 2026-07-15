@@ -17,6 +17,7 @@ from long_invest.modules.providers.contracts import (
 )
 from long_invest.modules.providers.models import ProviderMutationRequest
 from long_invest.modules.providers.repository import ProviderRepository
+from long_invest.modules.providers.resilience import ProviderRouteSetting
 from long_invest.modules.providers.service import ProviderService
 from long_invest.platform.errors import AppError
 
@@ -168,6 +169,38 @@ async def test_settings_persists_history_audit_outbox_atomically() -> None:
     }
     assert audit.calls[0]["context"].trusted_ip == "127.0.0.1"
     assert events.calls[0][1]["idempotency_key"] == "idem-1"
+
+
+@async_test
+async def test_runtime_outcome_persists_health_circuit_history_and_events() -> None:
+    session = FakeSession([None, None])
+    events = RecordingEvents()
+    repository = ProviderRepository(session, audit=RecordingAudit(), events=events)
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+    )
+    await repository.record_outcome(
+        setting,
+        success=False,
+        snapshot={
+            "state": "OPEN",
+            "consecutive_failures": 3,
+            "cooldown_index": 0,
+            "opened_at": datetime.now(UTC),
+        },
+        occurred_at=datetime.now(UTC),
+        error_code="PROVIDER_FAILED",
+    )
+    assert {item.__tablename__ for item in session.added} == {
+        "provider_health_state",
+        "provider_circuit_state",
+        "provider_circuit_history",
+    }
+    assert [call[0][0] for call in events.calls] == [
+        "provider.circuit_state_changed",
+        "provider.request_failed",
+    ]
 
 
 @async_test

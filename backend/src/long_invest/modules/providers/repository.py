@@ -126,6 +126,15 @@ class ProviderRepositoryPort(Protocol):
         reason: str,
         context: AuditContext,
     ) -> None: ...
+    async def record_outcome(
+        self,
+        setting: ProviderRouteSetting,
+        *,
+        success: bool,
+        snapshot: dict[str, Any],
+        occurred_at: datetime,
+        error_code: str | None,
+    ) -> None: ...
 
 
 class ProviderRepository:
@@ -463,6 +472,120 @@ class ProviderRepository:
                 "provider.quote_diagnostics",
                 {"symbols": symbols},
                 idempotency_key=context.idempotency_key,
+            )
+            await self._session.flush()
+
+    async def record_outcome(
+        self,
+        setting: ProviderRouteSetting,
+        *,
+        success: bool,
+        snapshot: dict[str, Any],
+        occurred_at: datetime,
+        error_code: str | None,
+    ) -> None:
+        event_key = (
+            f"runtime:{setting.provider.value}:{setting.capability.value}:"
+            f"{occurred_at.isoformat()}"
+        )
+        async with self._session.begin():
+            health = await self._session.scalar(
+                select(ProviderHealthState)
+                .where(
+                    ProviderHealthState.provider_code == setting.provider.value,
+                    ProviderHealthState.capability == setting.capability.value,
+                )
+                .with_for_update()
+            )
+            if health is None:
+                health = ProviderHealthState(
+                    provider_code=setting.provider.value,
+                    capability=setting.capability.value,
+                    status="UNKNOWN",
+                    consecutive_failures=0,
+                    metrics={},
+                )
+                self._session.add(health)
+            failures = snapshot.get("consecutive_failures", snapshot.get("failures", 0))
+            state = snapshot.get("state", "UNKNOWN")
+            health.status = (
+                "HEALTHY"
+                if success
+                else ("CIRCUIT_OPEN" if state == "OPEN" else "DEGRADED")
+            )
+            health.consecutive_failures = int(failures)
+            if success:
+                health.last_success_at = occurred_at
+            else:
+                health.last_failure_at = occurred_at
+            health.metrics = {**health.metrics, "last_error_code": error_code}
+
+            circuit = await self._session.scalar(
+                select(ProviderCircuitState)
+                .where(
+                    ProviderCircuitState.provider_code == setting.provider.value,
+                    ProviderCircuitState.capability == setting.capability.value,
+                )
+                .with_for_update()
+            )
+            previous_state = "UNKNOWN"
+            if circuit is None:
+                circuit = ProviderCircuitState(
+                    provider_code=setting.provider.value,
+                    capability=setting.capability.value,
+                    state=state,
+                    consecutive_failures=int(failures),
+                    cooldown_index=int(
+                        snapshot.get("cooldown_index", snapshot.get("level", 0))
+                    ),
+                    opened_at=snapshot.get("opened_at"),
+                )
+                self._session.add(circuit)
+            else:
+                previous_state = circuit.state
+                circuit.state = state
+                circuit.consecutive_failures = int(failures)
+                circuit.cooldown_index = int(
+                    snapshot.get("cooldown_index", snapshot.get("level", 0))
+                )
+                circuit.opened_at = snapshot.get("opened_at")
+            if previous_state != state:
+                self._session.add(
+                    ProviderCircuitHistory(
+                        provider_code=setting.provider.value,
+                        capability=setting.capability.value,
+                        from_state=previous_state,
+                        to_state=state,
+                        reason_code=error_code or "PROVIDER_REQUEST_SUCCEEDED",
+                        occurred_at=occurred_at,
+                    )
+                )
+                await self._events.append(
+                    "provider.circuit_state_changed",
+                    {
+                        "provider": setting.provider.value,
+                        "capability": setting.capability.value,
+                        "from_state": previous_state,
+                        "to_state": state,
+                    },
+                    idempotency_key=f"{event_key}:circuit",
+                )
+            await self._events.append(
+                (
+                    "provider.rate_limited"
+                    if error_code == "PROVIDER_RATE_LIMITED"
+                    else (
+                        "provider.request_succeeded"
+                        if success
+                        else "provider.request_failed"
+                    )
+                ),
+                {
+                    "provider": setting.provider.value,
+                    "capability": setting.capability.value,
+                    "error_code": error_code,
+                },
+                idempotency_key=f"{event_key}:outcome",
             )
             await self._session.flush()
 

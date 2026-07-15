@@ -226,6 +226,29 @@ class ProviderRuntimeStatePort(Protocol):
     ) -> dict[str, Any]: ...
 
 
+class ProviderRuntimeObserverPort(Protocol):
+    async def record_outcome(
+        self,
+        setting: ProviderRouteSetting,
+        *,
+        success: bool,
+        snapshot: dict[str, Any],
+        occurred_at: datetime,
+        error_code: str | None,
+    ) -> None: ...
+
+
+class NullProviderRuntimeObserver:
+    async def record_outcome(self, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
+
+class ProviderCallError(RuntimeError):
+    def __init__(self, code: str) -> None:
+        super().__init__(code)
+        self.code = code
+
+
 class InMemoryProviderRuntimeState:
     """Conservative fallback and deterministic test implementation."""
 
@@ -467,8 +490,13 @@ class RedisProviderRuntimeState:
 
 
 class ProviderInvocationPipeline:
-    def __init__(self, runtime: ProviderRuntimeStatePort) -> None:
+    def __init__(
+        self,
+        runtime: ProviderRuntimeStatePort,
+        observer: ProviderRuntimeObserverPort | None = None,
+    ) -> None:
         self._runtime = runtime
+        self._observer = observer or NullProviderRuntimeObserver()
 
     async def call[T](
         self,
@@ -479,11 +507,25 @@ class ProviderInvocationPipeline:
         probe: bool = False,
     ) -> T:
         if not setting.enabled:
-            raise RuntimeError("PROVIDER_DISABLED")
+            raise ProviderCallError("PROVIDER_DISABLED")
         if not await self._runtime.allow(setting, probe=probe):
-            raise RuntimeError("PROVIDER_CIRCUIT_OPEN")
+            await self._observer.record_outcome(
+                setting,
+                success=False,
+                snapshot=await self._runtime.circuit_snapshot(setting),
+                occurred_at=datetime.now(UTC),
+                error_code="PROVIDER_CIRCUIT_OPEN",
+            )
+            raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
         if not await self._runtime.acquire(setting):
-            raise RuntimeError("PROVIDER_RATE_LIMITED")
+            await self._observer.record_outcome(
+                setting,
+                success=False,
+                snapshot=await self._runtime.circuit_snapshot(setting),
+                occurred_at=datetime.now(UTC),
+                error_code="PROVIDER_RATE_LIMITED",
+            )
+            raise ProviderCallError("PROVIDER_RATE_LIMITED")
         try:
             remaining = (deadline - datetime.now(UTC)).total_seconds()
             timeout = min(setting.timeout_seconds, remaining)
@@ -497,9 +539,23 @@ class ProviderInvocationPipeline:
                 await self._runtime.record_failure(setting)
             else:
                 await self._runtime.record_success(setting)
+            await self._observer.record_outcome(
+                setting,
+                success=not (batch_error or unhealthy_probe),
+                snapshot=await self._runtime.circuit_snapshot(setting),
+                occurred_at=datetime.now(UTC),
+                error_code=batch_error or getattr(result, "error_code", None),
+            )
             return result
-        except Exception:
+        except Exception as error:
             await self._runtime.record_failure(setting)
+            await self._observer.record_outcome(
+                setting,
+                success=False,
+                snapshot=await self._runtime.circuit_snapshot(setting),
+                occurred_at=datetime.now(UTC),
+                error_code=getattr(error, "code", "PROVIDER_FAILED"),
+            )
             raise
         finally:
             await self._runtime.release(setting)

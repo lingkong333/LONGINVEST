@@ -18,6 +18,7 @@ from long_invest.modules.providers.resilience import (
     ProviderConfigurationPort,
     ProviderInvocationPipeline,
     ProviderRouteSetting,
+    ProviderRuntimeObserverPort,
     ProviderRuntimeStatePort,
     StaticProviderConfiguration,
 )
@@ -31,6 +32,7 @@ class ProviderRouter:
         *,
         config: ProviderConfigurationPort | None = None,
         runtime: ProviderRuntimeStatePort | None = None,
+        observer: ProviderRuntimeObserverPort | None = None,
     ) -> None:
         self._providers = {
             ProviderCode.EASTMONEY: eastmoney,
@@ -38,7 +40,9 @@ class ProviderRouter:
         }
         self._config = config or StaticProviderConfiguration()
         self._runtime = runtime or InMemoryProviderRuntimeState()
-        self._pipeline = ProviderInvocationPipeline(self._runtime)
+        if observer is None and hasattr(self._config, "record_outcome"):
+            observer = self._config  # type: ignore[assignment]
+        self._pipeline = ProviderInvocationPipeline(self._runtime, observer)
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime

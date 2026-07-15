@@ -1,11 +1,16 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 
-from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
+from long_invest.modules.providers.contracts import (
+    ProviderBatchResult,
+    ProviderCapability,
+    ProviderCode,
+)
 from long_invest.modules.providers.resilience import (
     CircuitBreaker,
     CircuitState,
     InMemoryProviderRuntimeState,
+    ProviderInvocationPipeline,
     ProviderRateLimiter,
     ProviderRouteSetting,
 )
@@ -110,3 +115,36 @@ def test_repeated_manual_half_open_still_allows_only_one_probe() -> None:
         assert not await runtime.allow(setting, probe=True)
 
     asyncio.run(scenario())
+
+
+def test_pipeline_observer_receives_persistable_health_and_circuit_snapshots() -> None:
+    runtime = InMemoryProviderRuntimeState()
+    calls = []
+
+    class Observer:
+        async def record_outcome(self, setting, **kwargs):
+            calls.append((setting, kwargs))
+
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+        rate_per_second=100,
+    )
+    pipeline = ProviderInvocationPipeline(runtime, Observer())
+
+    async def scenario() -> None:
+        for _ in range(3):
+            await pipeline.call(
+                setting,
+                lambda: _batch_failure(),
+                deadline=datetime.now(UTC) + timedelta(seconds=1),
+            )
+
+    async def _batch_failure():
+        return ProviderBatchResult(batch_error_code="PROVIDER_FAILED")
+
+    asyncio.run(scenario())
+    assert len(calls) == 3
+    assert calls[-1][1]["success"] is False
+    assert calls[-1][1]["snapshot"]["state"] == "OPEN"
+    assert calls[-1][1]["error_code"] == "PROVIDER_FAILED"

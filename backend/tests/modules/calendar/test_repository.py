@@ -4,7 +4,11 @@ from uuid import uuid4
 
 import pytest
 
-from long_invest.modules.calendar.repository import CalendarRepository
+from long_invest.modules.calendar.contracts import CalendarDayStatus
+from long_invest.modules.calendar.repository import (
+    CalendarRepository,
+    _continuous_confirmed_through,
+)
 
 
 @pytest.fixture
@@ -15,12 +19,13 @@ def anyio_backend() -> str:
 @pytest.mark.anyio
 async def test_repository_provides_all_calendar_read_paths() -> None:
     current = MagicMock(version_id=uuid4(), pointer_version=3)
-    day = MagicMock(trade_date=date(2026, 7, 15))
+    day = MagicMock(
+        trade_date=date(2026, 7, 15),
+        status=CalendarDayStatus.CONFIRMED,
+    )
     version = MagicMock(id=current.version_id)
     session = MagicMock()
-    session.scalar = AsyncMock(
-        side_effect=[current, day, day, day, version, date(2026, 9, 30)]
-    )
+    session.scalar = AsyncMock(side_effect=[current, day, day, day, version])
     scalars_result = MagicMock()
     scalars_result.all.return_value = [day]
     session.scalars = AsyncMock(return_value=scalars_result)
@@ -33,7 +38,7 @@ async def test_repository_provides_all_calendar_read_paths() -> None:
     assert await repository.get_version(version.id) is version
     assert await repository.confirmed_through(
         "CN_A", date(2026, 7, 15)
-    ) == date(2026, 9, 30)
+    ) == date(2026, 7, 15)
     assert await repository.list_days(
         "CN_A", date(2026, 7, 1), date(2026, 7, 31)
     ) == [day]
@@ -58,3 +63,24 @@ async def test_repository_persists_and_atomically_switches_current_pointer() -> 
     assert switched is True
     session.add.assert_called_once_with(version)
     assert session.flush.await_count == 1
+
+
+def test_confirmed_through_stops_at_first_natural_day_gap_or_unconfirmed_day() -> None:
+    rows = [
+        MagicMock(
+            trade_date=date(2026, 7, 15),
+            status=CalendarDayStatus.CONFIRMED,
+        ),
+        MagicMock(
+            trade_date=date(2026, 7, 16),
+            status=CalendarDayStatus.OVERRIDDEN,
+        ),
+        MagicMock(
+            trade_date=date(2026, 7, 18),
+            status=CalendarDayStatus.CONFIRMED,
+        ),
+    ]
+
+    assert _continuous_confirmed_through(rows, date(2026, 7, 15)) == date(
+        2026, 7, 16
+    )

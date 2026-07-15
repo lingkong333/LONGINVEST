@@ -2,6 +2,7 @@ import io
 import json
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.calendar.cli import read_calendar_import, run_calendar_import
 from long_invest.platform.errors import AppError
@@ -65,3 +66,23 @@ async def test_cli_handler_returns_service_result_without_committing() -> None:
 
     assert result == {"created": True}
     assert service.command.market == "CN_A"
+    assert service.command.audit_context.request_id.startswith("cli_")
+    assert service.command.audit_context.actor_user_id == "local-cli"
+    assert service.command.audit_context.session_id == "local-cli"
+    assert service.command.audit_context.trusted_ip == "local-cli"
+
+
+@pytest.mark.anyio
+async def test_cli_maps_database_failure_to_stable_503() -> None:
+    class Service:
+        async def import_version(self, _command):
+            raise SQLAlchemyError("database unavailable")
+
+    with pytest.raises(AppError) as caught:
+        await run_calendar_import(
+            Service(),
+            stdin=io.BytesIO(json.dumps(valid_payload()).encode()),
+        )
+
+    assert caught.value.code == "CALENDAR_BACKEND_UNAVAILABLE"
+    assert caught.value.status_code == 503

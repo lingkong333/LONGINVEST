@@ -5,6 +5,7 @@ from long_invest.modules.calendar.contracts import (
     CalendarDayStatus,
     CalendarImport,
     TradingSessionInput,
+    validate_calendar_coverage,
     validate_calendar_import,
 )
 
@@ -73,6 +74,42 @@ def test_empty_import_is_rejected_as_incomplete() -> None:
 
     assert [issue.code for issue in validate_calendar_import(command)] == [
         "CALENDAR_IMPORT_EMPTY"
+    ]
+
+
+def test_omitted_trading_sessions_use_the_two_default_a_share_periods() -> None:
+    trading = CalendarDayInput(
+        trade_date=date(2026, 7, 15),
+        is_trading_day=True,
+        status=CalendarDayStatus.CONFIRMED,
+    )
+    closed = CalendarDayInput(
+        trade_date=date(2026, 7, 18),
+        is_trading_day=False,
+        status=CalendarDayStatus.CONFIRMED,
+    )
+
+    assert [(item.starts_at, item.ends_at) for item in trading.sessions] == [
+        (time(9, 30), time(11, 30)),
+        (time(13), time(15)),
+    ]
+    assert closed.sessions == ()
+
+
+def test_continuous_coverage_reports_every_missing_or_unconfirmed_natural_day() -> None:
+    start = date(2026, 7, 15)
+    days = (
+        day("2026-07-15"),
+        day("2026-07-17", status=CalendarDayStatus.PROVISIONAL),
+        day("2026-07-18", status=CalendarDayStatus.MISSING),
+    )
+
+    issues = validate_calendar_coverage(days, from_date=start, required_days=4)
+
+    assert [(item.code, item.path) for item in issues] == [
+        ("CALENDAR_COVERAGE_GAP", "days[2026-07-16]"),
+        ("CALENDAR_COVERAGE_GAP", "days[2026-07-17]"),
+        ("CALENDAR_COVERAGE_GAP", "days[2026-07-18]"),
     ]
 
 

@@ -5,6 +5,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -12,12 +13,15 @@ from long_invest.modules.auth.dependencies import (
     require_verified_write_request,
 )
 from long_invest.modules.calendar.contracts import (
+    CalendarAuditContext,
     CalendarDayInput,
     CalendarImport,
+    CalendarVersionResult,
     OverrideCalendarDay,
     RestoreCalendarVersion,
     TradingSessionInput,
 )
+from long_invest.modules.calendar.outbox import CalendarOutboxAdapter
 from long_invest.modules.calendar.repository import CalendarRepository
 from long_invest.modules.calendar.service import TradingCalendarService
 from long_invest.platform.audit.service import AuditService
@@ -45,7 +49,7 @@ class ImportRequest(StrictRequest):
 class OverrideRequest(StrictRequest):
     market: str = "CN_A"
     is_trading_day: bool
-    sessions: tuple[TradingSessionInput, ...] = ()
+    sessions: tuple[TradingSessionInput, ...] | None = None
     expected_current_version: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=500)
     confirm: bool
@@ -60,11 +64,19 @@ class RestoreRequest(StrictRequest):
 
 
 async def get_calendar_service() -> AsyncIterator[TradingCalendarService]:
-    async with get_database().transaction() as session:
-        yield TradingCalendarService(
-            CalendarRepository(session),
-            audit_service=AuditService(session),
-        )
+    try:
+        async with get_database().transaction() as session:
+            yield TradingCalendarService(
+                CalendarRepository(session),
+                audit_service=AuditService(session),
+                event_sink=CalendarOutboxAdapter(session),
+            )
+    except SQLAlchemyError as exc:
+        raise AppError(
+            code="CALENDAR_BACKEND_UNAVAILABLE",
+            message="交易日历服务暂时不可用",
+            status_code=503,
+        ) from exc
 
 
 ServiceDependency = Annotated[TradingCalendarService, Depends(get_calendar_service)]
@@ -158,30 +170,33 @@ async def override_calendar_day(
     date: Date,
     body: OverrideRequest,
     service: ServiceDependency,
-    _authenticated: WriteAuth,
+    authenticated: WriteAuth,
     idempotency_key: IdempotencyKey,
 ) -> dict:
     _require_confirmation(body.confirm)
+    override_data = {
+        "market": body.market,
+        "trade_date": date,
+        "is_trading_day": body.is_trading_day,
+        "expected_current_version": body.expected_current_version,
+        "reason": body.reason,
+        "idempotency_key": idempotency_key,
+        "note": body.note,
+        "audit_context": _calendar_context(authenticated, idempotency_key),
+    }
+    if body.sessions is not None:
+        override_data["sessions"] = body.sessions
     result = await service.override_day(
-        OverrideCalendarDay(
-            market=body.market,
-            trade_date=date,
-            is_trading_day=body.is_trading_day,
-            sessions=body.sessions,
-            expected_current_version=body.expected_current_version,
-            reason=body.reason,
-            idempotency_key=idempotency_key,
-            note=body.note,
-        )
+        OverrideCalendarDay.model_validate(override_data)
     )
-    return success_response(data=result.model_dump(mode="json"))
+    return success_response(data=_result_data(result))
 
 
 @router.post("/import")
 async def import_calendar(
     body: ImportRequest,
     service: ServiceDependency,
-    _authenticated: WriteAuth,
+    authenticated: WriteAuth,
     idempotency_key: IdempotencyKey,
 ) -> dict:
     _require_confirmation(body.confirm)
@@ -194,9 +209,10 @@ async def import_calendar(
             expected_current_version=body.expected_current_version,
             days=body.days,
             reason=body.reason,
+            audit_context=_calendar_context(authenticated, idempotency_key),
         )
     )
-    return success_response(data=result.model_dump(mode="json"))
+    return success_response(data=_result_data(result))
 
 
 @router.post("/versions/{version_id}/restore")
@@ -204,7 +220,7 @@ async def restore_calendar(
     version_id: UUID,
     body: RestoreRequest,
     service: ServiceDependency,
-    _authenticated: WriteAuth,
+    authenticated: WriteAuth,
     idempotency_key: IdempotencyKey,
 ) -> dict:
     _require_confirmation(body.confirm)
@@ -215,9 +231,10 @@ async def restore_calendar(
             expected_current_version=body.expected_current_version,
             reason=body.reason,
             idempotency_key=idempotency_key,
+            audit_context=_calendar_context(authenticated, idempotency_key),
         )
     )
-    return success_response(data=result.model_dump(mode="json"))
+    return success_response(data=_result_data(result))
 
 
 def _require_confirmation(confirm: bool) -> None:
@@ -227,6 +244,32 @@ def _require_confirmation(confirm: bool) -> None:
             message="请确认日历修改操作",
             status_code=422,
         )
+
+
+def _calendar_context(
+    authenticated: AuthenticatedRequest,
+    idempotency_key: str,
+) -> CalendarAuditContext:
+    return CalendarAuditContext(
+        request_id=authenticated.audit_context.request_id,
+        idempotency_key=idempotency_key,
+        actor_user_id=str(authenticated.user.id),
+        session_id=str(authenticated.session.id),
+        trusted_ip=authenticated.audit_context.trusted_ip or "unknown",
+    )
+
+
+def _result_data(result: CalendarVersionResult) -> dict:
+    if result.issues:
+        raise AppError(
+            code="CALENDAR_CONTENT_INVALID",
+            message="日历内容校验失败",
+            status_code=422,
+            details={
+                "issues": [item.model_dump(mode="json") for item in result.issues]
+            },
+        )
+    return result.model_dump(mode="json")
 
 
 def _day_data(item) -> dict | None:

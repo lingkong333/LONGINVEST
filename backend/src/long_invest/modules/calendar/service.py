@@ -2,20 +2,27 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import date
+from collections.abc import Callable
+from datetime import date, datetime, timedelta
 from uuid import UUID
 
+from sqlalchemy.exc import IntegrityError
+
 from long_invest.modules.calendar.contracts import (
+    SHANGHAI_TZ,
+    CalendarAuditContext,
     CalendarCoverage,
     CalendarDayInput,
     CalendarDayStatus,
     CalendarEvent,
     CalendarEventSink,
     CalendarImport,
+    CalendarValidationIssue,
     CalendarVersionResult,
     OverrideCalendarDay,
     RestoreCalendarVersion,
     TradingSessionInput,
+    validate_calendar_coverage,
     validate_calendar_import,
 )
 from long_invest.modules.calendar.models import (
@@ -36,10 +43,14 @@ class TradingCalendarService:
         *,
         audit_service: AuditService | None = None,
         event_sink: CalendarEventSink | None = None,
+        today_provider: Callable[[], date] | None = None,
     ) -> None:
         self._repository = repository
         self._audit = audit_service
         self._events = event_sink
+        self._today = today_provider or (
+            lambda: datetime.now(SHANGHAI_TZ).date()
+        )
 
     async def get_day(self, trade_date: date, market: str = "CN_A"):
         return await self._repository.get_day(market, trade_date)
@@ -63,9 +74,33 @@ class TradingCalendarService:
     async def import_version(
         self, command: CalendarImport
     ) -> CalendarVersionResult:
-        issues = validate_calendar_import(command)
+        self._require_write_ports(command.audit_context, command.idempotency_key)
+        today = self._today()
+        issues = (
+            *validate_calendar_import(command),
+            *validate_calendar_coverage(
+                command.days,
+                from_date=today,
+                required_days=31,
+            ),
+        )
+        today_item = next(
+            (item for item in command.days if item.trade_date == today), None
+        )
+        if today_item is None or today_item.status not in {
+            CalendarDayStatus.CONFIRMED,
+            CalendarDayStatus.OVERRIDDEN,
+        }:
+            issues = (
+                CalendarValidationIssue(
+                    code="CALENDAR_TODAY_MISSING",
+                    path=f"days[{today.isoformat()}]",
+                    message="当天日历缺失或尚未确认",
+                ),
+                *issues,
+            )
         if issues:
-            return CalendarVersionResult(issues=issues)
+            return CalendarVersionResult(issues=tuple(issues))
         content_hash = _command_hash(command)
         replay = await self._repository.find_by_idempotency(
             command.market, command.idempotency_key
@@ -87,12 +122,19 @@ class TradingCalendarService:
             based_on_version_id=current.version_id if current else None,
         )
         await self._activate(version, expected)
-        await self._record_change(version, "TRADING_CALENDAR_IMPORT", command.reason)
-        return _result(version, created=True)
+        await self._record_change(
+            version,
+            "TRADING_CALENDAR_IMPORT",
+            command.reason,
+            command.audit_context,
+        )
+        warnings = await self._coverage_warnings(version, command.audit_context)
+        return _result(version, created=True, warnings=warnings)
 
     async def override_day(
         self, command: OverrideCalendarDay
     ) -> CalendarVersionResult:
+        self._require_write_ports(command.audit_context, command.idempotency_key)
         desired_hash = _command_hash(command)
         replay = await self._repository.find_by_idempotency(
             command.market, command.idempotency_key
@@ -104,6 +146,8 @@ class TradingCalendarService:
         if current.pointer_version != command.expected_current_version:
             raise _optimistic_conflict()
         base = await self._required_version(current.version_id)
+        source_by_date = {item.trade_date: item.source for item in base.days}
+        source_by_date[command.trade_date] = "manual_override"
         days = [_day_contract(item) for item in base.days]
         replacement = CalendarDayInput(
             trade_date=command.trade_date,
@@ -130,6 +174,7 @@ class TradingCalendarService:
             expected_current_version=command.expected_current_version,
             days=tuple(days),
             reason=command.reason,
+            audit_context=command.audit_context,
         )
         issues = validate_calendar_import(imported)
         if issues:
@@ -140,16 +185,22 @@ class TradingCalendarService:
             based_on_version_id=base.id,
             override_date=command.trade_date,
             override_reason=command.reason,
+            source_by_date=source_by_date,
         )
         await self._activate(version, command.expected_current_version)
         await self._record_change(
-            version, "TRADING_CALENDAR_OVERRIDE", command.reason
+            version,
+            "TRADING_CALENDAR_OVERRIDE",
+            command.reason,
+            command.audit_context,
         )
-        return _result(version, created=True)
+        warnings = await self._coverage_warnings(version, command.audit_context)
+        return _result(version, created=True, warnings=warnings)
 
     async def restore_version(
         self, command: RestoreCalendarVersion
     ) -> CalendarVersionResult:
+        self._require_write_ports(command.audit_context, command.idempotency_key)
         desired_hash = _command_hash(command)
         replay = await self._repository.find_by_idempotency(
             command.market, command.idempotency_key
@@ -175,6 +226,7 @@ class TradingCalendarService:
             expected_current_version=command.expected_current_version,
             days=tuple(_day_contract(item) for item in target.days),
             reason=command.reason,
+            audit_context=command.audit_context,
         )
         version = await self._build_version(
             imported,
@@ -183,9 +235,13 @@ class TradingCalendarService:
         )
         await self._activate(version, command.expected_current_version)
         await self._record_change(
-            version, "TRADING_CALENDAR_RESTORE", command.reason
+            version,
+            "TRADING_CALENDAR_RESTORE",
+            command.reason,
+            command.audit_context,
         )
-        return _result(version, created=True)
+        warnings = await self._coverage_warnings(version, command.audit_context)
+        return _result(version, created=True, warnings=warnings)
 
     async def is_automatic_trading_day(
         self, trade_date: date, market: str = "CN_A"
@@ -202,11 +258,30 @@ class TradingCalendarService:
         self, from_date: date, market: str = "CN_A"
     ) -> CalendarCoverage:
         current = await self._repository.get_current(market)
-        through = await self._repository.confirmed_through(market, from_date)
-        days = max(0, (through - from_date).days) if through else 0
+        range_end = from_date + timedelta(days=60)
+        calendar_days = await self._repository.list_days(
+            market, from_date, range_end
+        )
+        by_date = {item.trade_date: item for item in calendar_days}
+        through = None
+        confirmed_records = 0
+        for offset in range(61):
+            wanted = from_date + timedelta(days=offset)
+            item = by_date.get(wanted)
+            if item is None or item.status not in {
+                CalendarDayStatus.CONFIRMED,
+                CalendarDayStatus.OVERRIDDEN,
+            }:
+                break
+            confirmed_records += 1
+            through = wanted
+        days = max(0, confirmed_records - 1)
         level = "ERROR" if days < 30 else "WARNING" if days < 60 else "OK"
-        today = await self._repository.get_day(market, from_date)
-        missing = today is None or today.status == CalendarDayStatus.MISSING
+        today = by_date.get(from_date)
+        missing = today is None or today.status not in {
+            CalendarDayStatus.CONFIRMED,
+            CalendarDayStatus.OVERRIDDEN,
+        }
         aggregate_id = str(current.version_id) if current else market
         if level != "OK":
             await self._emit(
@@ -240,6 +315,7 @@ class TradingCalendarService:
         based_on_version_id: UUID | None,
         override_date: date | None = None,
         override_reason: str | None = None,
+        source_by_date: dict[date, str] | None = None,
     ) -> TradingCalendarVersion:
         version = TradingCalendarVersion(
             market=command.market,
@@ -255,7 +331,7 @@ class TradingCalendarService:
             _day_model(
                 version.id,
                 item,
-                source=command.source,
+                source=(source_by_date or {}).get(item.trade_date, command.source),
                 override_reason=(
                     override_reason if item.trade_date == override_date else None
                 ),
@@ -267,12 +343,15 @@ class TradingCalendarService:
     async def _activate(
         self, version: TradingCalendarVersion, expected: int | None
     ) -> None:
-        await self._repository.add_version(version)
-        switched = await self._repository.switch_current(
-            market=version.market,
-            version_id=version.id,
-            expected_pointer_version=expected,
-        )
+        try:
+            await self._repository.add_version(version)
+            switched = await self._repository.switch_current(
+                market=version.market,
+                version_id=version.id,
+                expected_pointer_version=expected,
+            )
+        except IntegrityError as exc:
+            raise _optimistic_conflict() from exc
         if not switched:
             raise _optimistic_conflict()
 
@@ -301,34 +380,49 @@ class TradingCalendarService:
         version: TradingCalendarVersion,
         action_code: str,
         reason: str | None,
+        context: CalendarAuditContext | None,
     ) -> None:
-        if self._audit is not None:
-            await self._audit.append(
-                AuditWrite(
-                    action_code=action_code,
-                    object_type="trading_calendar_version",
-                    object_id=str(version.id),
-                    result="SUCCESS",
-                    request_id=version.idempotency_key,
-                    idempotency_key=version.idempotency_key,
-                    risk_level="HIGH",
-                    reason=reason,
-                    before_summary={
-                        "based_on_version_id": str(version.based_on_version_id)
-                        if version.based_on_version_id
-                        else None
-                    },
-                    after_summary={
-                        "version_id": str(version.id),
-                        "version_number": version.version_number,
-                    },
-                )
+        self._require_write_ports(context, version.idempotency_key)
+        assert self._audit is not None
+        assert context is not None
+        await self._audit.append(
+            AuditWrite(
+                action_code=action_code,
+                object_type="trading_calendar_version",
+                object_id=str(version.id),
+                result="SUCCESS",
+                request_id=context.request_id,
+                idempotency_key=_audit_key(
+                    action_code, context.idempotency_key
+                ),
+                risk_level="HIGH",
+                reason=reason,
+                before_summary={
+                    "based_on_version_id": str(version.based_on_version_id)
+                    if version.based_on_version_id
+                    else None
+                },
+                after_summary={
+                    "version_id": str(version.id),
+                    "version_number": version.version_number,
+                },
+                actor_user_id=context.actor_user_id,
+                session_id=context.session_id,
+                trusted_ip=context.trusted_ip,
             )
+        )
         await self._emit(
             "trading_calendar.updated",
             str(version.id),
             version.idempotency_key,
-            {"market": version.market, "version_number": version.version_number},
+            {
+                "market": version.market,
+                "version_number": version.version_number,
+                "request_id": context.request_id,
+                "actor_user_id": context.actor_user_id,
+                "session_id": context.session_id,
+                "trusted_ip": context.trusted_ip,
+            },
         )
 
     async def _emit(
@@ -338,15 +432,59 @@ class TradingCalendarService:
         idempotency_key: str,
         payload: dict,
     ) -> None:
-        if self._events is not None:
-            await self._events.append(
-                CalendarEvent(
-                    event_type=event_type,
-                    aggregate_id=aggregate_id,
-                    idempotency_key=idempotency_key,
-                    payload=payload,
-                )
+        if self._events is None:
+            raise _ports_unavailable()
+        await self._events.append(
+            CalendarEvent(
+                event_type=event_type,
+                aggregate_id=aggregate_id,
+                idempotency_key=idempotency_key,
+                payload=payload,
             )
+        )
+
+    async def _coverage_warnings(
+        self,
+        version: TradingCalendarVersion,
+        context: CalendarAuditContext | None,
+    ) -> tuple[CalendarValidationIssue, ...]:
+        days = max(
+            0,
+            _continuous_days(version.days, self._today(), limit=61) - 1,
+        )
+        if days >= 60:
+            return ()
+        assert context is not None
+        warning = CalendarValidationIssue(
+            code="CALENDAR_COVERAGE_LOW",
+            path="days",
+            message="未来确认日历覆盖低于 60 个自然日",
+        )
+        await self._emit(
+            "trading_calendar.coverage_low",
+            str(version.id),
+            f"{version.idempotency_key}:coverage-low",
+            {
+                "market": version.market,
+                "days": days,
+                "level": "WARNING",
+                "request_id": context.request_id,
+            },
+        )
+        return (warning,)
+
+    def _require_write_ports(
+        self,
+        context: CalendarAuditContext | None,
+        idempotency_key: str,
+    ) -> None:
+        if (
+            self._audit is None
+            or self._events is None
+            or context is None
+            or context.idempotency_key != idempotency_key
+        ):
+            raise _ports_unavailable()
 
 
 def _day_model(
@@ -413,12 +551,16 @@ def _verify_replay(version: TradingCalendarVersion, content_hash: str) -> None:
 
 
 def _result(
-    version: TradingCalendarVersion, *, created: bool
+    version: TradingCalendarVersion,
+    *,
+    created: bool,
+    warnings: tuple[CalendarValidationIssue, ...] = (),
 ) -> CalendarVersionResult:
     return CalendarVersionResult(
         version_id=version.id,
         version_number=version.version_number,
         created=created,
+        warnings=warnings,
     )
 
 
@@ -428,3 +570,35 @@ def _optimistic_conflict() -> AppError:
         message="日历已被其他请求修改，请刷新后重试",
         status_code=409,
     )
+
+
+def _ports_unavailable() -> AppError:
+    return AppError(
+        code="CALENDAR_TRANSACTION_PORT_UNAVAILABLE",
+        message="日历审计或可靠事件服务不可用",
+        status_code=503,
+    )
+
+
+def _audit_key(action_code: str, idempotency_key: str) -> str:
+    digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()
+    return f"calendar:{action_code.lower()}:{digest}"
+
+
+def _continuous_days(
+    days: list[TradingCalendarDay],
+    from_date: date,
+    *,
+    limit: int,
+) -> int:
+    by_date = {item.trade_date: item for item in days}
+    count = 0
+    for offset in range(limit):
+        item = by_date.get(from_date + timedelta(days=offset))
+        if item is None or item.status not in {
+            CalendarDayStatus.CONFIRMED,
+            CalendarDayStatus.OVERRIDDEN,
+        }:
+            break
+        count += 1
+    return count

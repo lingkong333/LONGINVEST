@@ -2,10 +2,15 @@ import json
 import sys
 from pathlib import Path
 from typing import BinaryIO
+from uuid import uuid4
 
 from pydantic import ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
-from long_invest.modules.calendar.contracts import CalendarImport
+from long_invest.modules.calendar.contracts import (
+    CalendarAuditContext,
+    CalendarImport,
+)
 from long_invest.modules.calendar.service import TradingCalendarService
 from long_invest.platform.errors import AppError
 
@@ -41,9 +46,24 @@ async def run_calendar_import(
     source: Path | None = None,
     stdin: BinaryIO | None = None,
 ):
-    return await service.import_version(
-        read_calendar_import(source=source, stdin=stdin)
+    command = read_calendar_import(source=source, stdin=stdin)
+    context = CalendarAuditContext(
+        request_id=f"cli_{uuid4().hex}",
+        idempotency_key=command.idempotency_key,
+        actor_user_id="local-cli",
+        session_id="local-cli",
+        trusted_ip="local-cli",
     )
+    try:
+        return await service.import_version(
+            command.model_copy(update={"audit_context": context})
+        )
+    except SQLAlchemyError as exc:
+        raise AppError(
+            code="CALENDAR_BACKEND_UNAVAILABLE",
+            message="交易日历服务暂时不可用",
+            status_code=503,
+        ) from exc
 
 
 def _invalid_file(detail: str) -> AppError:

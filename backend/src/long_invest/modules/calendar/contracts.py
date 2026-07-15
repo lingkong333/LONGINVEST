@@ -5,7 +5,7 @@ from enum import StrEnum
 from typing import Any, Protocol
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 SHANGHAI_TZ = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
@@ -21,9 +21,24 @@ class CalendarDayStatus(StrEnum):
     MISSING = "MISSING"
 
 
+class CalendarAuditContext(StrictContract):
+    request_id: str = Field(min_length=1, max_length=64)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    actor_user_id: str = Field(min_length=1, max_length=64)
+    session_id: str = Field(min_length=1, max_length=64)
+    trusted_ip: str = Field(min_length=1, max_length=64)
+
+
 class TradingSessionInput(StrictContract):
     starts_at: time
     ends_at: time
+
+
+def default_trading_sessions() -> tuple[TradingSessionInput, ...]:
+    return (
+        TradingSessionInput(starts_at=time(9, 30), ends_at=time(11, 30)),
+        TradingSessionInput(starts_at=time(13), ends_at=time(15)),
+    )
 
 
 class CalendarDayInput(StrictContract):
@@ -32,6 +47,18 @@ class CalendarDayInput(StrictContract):
     status: CalendarDayStatus
     sessions: tuple[TradingSessionInput, ...] = ()
     note: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_default_sessions(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "sessions" not in value:
+            return {
+                **value,
+                "sessions": default_trading_sessions()
+                if value.get("is_trading_day")
+                else (),
+            }
+        return value
 
     @property
     def allows_automatic_trading(self) -> bool:
@@ -49,6 +76,7 @@ class CalendarImport(StrictContract):
     expected_current_version: int | None = Field(default=None, ge=1)
     days: tuple[CalendarDayInput, ...]
     reason: str | None = Field(default=None, max_length=500)
+    audit_context: CalendarAuditContext | None = Field(default=None, exclude=True)
 
 
 class CalendarValidationIssue(StrictContract):
@@ -62,6 +90,7 @@ class CalendarVersionResult(StrictContract):
     version_number: int | None = None
     created: bool = False
     issues: tuple[CalendarValidationIssue, ...] = ()
+    warnings: tuple[CalendarValidationIssue, ...] = ()
 
 
 class OverrideCalendarDay(StrictContract):
@@ -73,6 +102,19 @@ class OverrideCalendarDay(StrictContract):
     reason: str = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=200)
     note: str | None = Field(default=None, max_length=500)
+    audit_context: CalendarAuditContext | None = Field(default=None, exclude=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_default_sessions(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "sessions" not in value:
+            return {
+                **value,
+                "sessions": default_trading_sessions()
+                if value.get("is_trading_day")
+                else (),
+            }
+        return value
 
 
 class RestoreCalendarVersion(StrictContract):
@@ -81,6 +123,7 @@ class RestoreCalendarVersion(StrictContract):
     expected_current_version: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=500)
     idempotency_key: str = Field(min_length=1, max_length=200)
+    audit_context: CalendarAuditContext | None = Field(default=None, exclude=True)
 
 
 class CalendarCoverage(StrictContract):
@@ -171,4 +214,29 @@ def validate_calendar_import(
                         message="交易时段不能重叠",
                     )
                 )
+    return tuple(issues)
+
+
+def validate_calendar_coverage(
+    days: tuple[CalendarDayInput, ...],
+    *,
+    from_date: date,
+    required_days: int,
+) -> tuple[CalendarValidationIssue, ...]:
+    by_date = {item.trade_date: item for item in days}
+    issues: list[CalendarValidationIssue] = []
+    for offset in range(required_days):
+        wanted = from_date + timedelta(days=offset)
+        item = by_date.get(wanted)
+        if item is None or item.status not in {
+            CalendarDayStatus.CONFIRMED,
+            CalendarDayStatus.OVERRIDDEN,
+        }:
+            issues.append(
+                CalendarValidationIssue(
+                    code="CALENDAR_COVERAGE_GAP",
+                    path=f"days[{wanted.isoformat()}]",
+                    message="日期缺失或尚未确认",
+                )
+            )
     return tuple(issues)

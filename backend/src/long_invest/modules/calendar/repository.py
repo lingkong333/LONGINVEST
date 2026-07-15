@@ -109,8 +109,8 @@ class CalendarRepository:
     async def confirmed_through(
         self, market: str, from_date: date
     ) -> date | None:
-        return await self._session.scalar(
-            select(func.max(TradingCalendarDay.trade_date))
+        rows = await self._session.scalars(
+            select(TradingCalendarDay)
             .join(
                 TradingCalendarCurrent,
                 TradingCalendarCurrent.version_id == TradingCalendarDay.version_id,
@@ -118,11 +118,10 @@ class CalendarRepository:
             .where(
                 TradingCalendarCurrent.market == market,
                 TradingCalendarDay.trade_date >= from_date,
-                TradingCalendarDay.status.in_(
-                    (CalendarDayStatus.CONFIRMED, CalendarDayStatus.OVERRIDDEN)
-                ),
             )
+            .order_by(TradingCalendarDay.trade_date)
         )
+        return _continuous_confirmed_through(list(rows.all()), from_date)
 
     async def next_version_number(self, market: str) -> int:
         value = await self._session.scalar(
@@ -187,3 +186,19 @@ class CalendarRepository:
                 (CalendarDayStatus.CONFIRMED, CalendarDayStatus.OVERRIDDEN)
             ),
         )
+
+
+def _continuous_confirmed_through(
+    rows: list[TradingCalendarDay], from_date: date
+) -> date | None:
+    expected = from_date
+    through = None
+    for row in rows:
+        if row.trade_date != expected or row.status not in {
+            CalendarDayStatus.CONFIRMED,
+            CalendarDayStatus.OVERRIDDEN,
+        }:
+            break
+        through = row.trade_date
+        expected = expected.fromordinal(expected.toordinal() + 1)
+    return through

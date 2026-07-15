@@ -290,6 +290,24 @@ class AuthApplication:
 
         return await self._run(audit_context, operation)
 
+    async def validate_write_request(
+        self,
+        *,
+        session_token: str,
+        csrf_token: str,
+        client_ip: str | None,
+        audit_context: AuditContext,
+    ) -> AuthenticatedSession:
+        return await self._run(
+            audit_context,
+            lambda service, _repository, _audit: service.validate_csrf(
+                session_token=session_token,
+                csrf_token=csrf_token,
+                now=datetime.now(UTC),
+                client_ip=client_ip,
+            ),
+        )
+
     async def revoke_session(
         self,
         *,

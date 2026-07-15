@@ -27,6 +27,7 @@ class _Circuit:
     opened_at: datetime | None = None
     cooldown_index: int = 0
     probe_in_flight: bool = False
+    probe_token: str | None = None
 
 
 class CircuitBreaker:
@@ -58,6 +59,7 @@ class CircuitBreaker:
             return True
         if state is CircuitState.HALF_OPEN and not item.probe_in_flight:
             item.probe_in_flight = True
+            item.probe_token = uuid4().hex
             return True
         return False
 
@@ -72,12 +74,14 @@ class CircuitBreaker:
             item.state = CircuitState.OPEN
             item.opened_at = now
             item.probe_in_flight = False
+            item.probe_token = None
             return
         item.consecutive_failures += 1
         if item.consecutive_failures >= 3:
             item.state = CircuitState.OPEN
             item.opened_at = now
             item.probe_in_flight = False
+            item.probe_token = None
 
     def record_success(
         self, provider: ProviderCode, capability: ProviderCapability, *, now: datetime
@@ -89,11 +93,13 @@ class CircuitBreaker:
         item.opened_at = None
         item.cooldown_index = 0
         item.probe_in_flight = False
+        item.probe_token = None
 
     def disable(self, provider: ProviderCode, capability: ProviderCapability) -> None:
         item = self._get(provider, capability)
         item.state = CircuitState.DISABLED
         item.probe_in_flight = False
+        item.probe_token = None
 
     def enable_for_probe(
         self, provider: ProviderCode, capability: ProviderCapability
@@ -101,6 +107,7 @@ class CircuitBreaker:
         item = self._get(provider, capability)
         item.state = CircuitState.HALF_OPEN
         item.probe_in_flight = False
+        item.probe_token = None
 
 
 class ProviderRateLimiter:
@@ -230,6 +237,15 @@ class ProviderRuntimeStatePort(Protocol):
 
 
 class ProviderRuntimeObserverPort(Protocol):
+    async def record_half_open(
+        self,
+        setting: ProviderRouteSetting,
+        *,
+        snapshot: dict[str, Any],
+        occurred_at: datetime,
+        probe_token: str,
+    ) -> None: ...
+
     async def record_outcome(
         self,
         setting: ProviderRouteSetting,
@@ -245,6 +261,9 @@ class ProviderRuntimeObserverPort(Protocol):
 
 
 class NullProviderRuntimeObserver:
+    async def record_half_open(self, *args: Any, **kwargs: Any) -> None:
+        del args, kwargs
+
     async def record_outcome(self, *args: Any, **kwargs: Any) -> None:
         del args, kwargs
 
@@ -347,6 +366,7 @@ class InMemoryProviderRuntimeState:
             "consecutive_failures": item.consecutive_failures,
             "cooldown_index": item.cooldown_index,
             "opened_at": item.opened_at,
+            "probe_token": item.probe_token,
         }
 
 
@@ -386,8 +406,9 @@ class RedisProviderRuntimeState:
         local opened=tonumber(state['opened_at'] or 0)
         local ready=(ARGV[1]=='1') or ((tonumber(ARGV[2])-opened)>=cooldown)
         if not ready or redis.call('exists',KEYS[2])==1 then return 0 end
-        redis.call('set',KEYS[2],'1','EX',30)
+        redis.call('set',KEYS[2],ARGV[6],'EX',30)
         state['state']='HALF_OPEN'
+        state['probe_token']=ARGV[6]
         redis.call('set',KEYS[1],cjson.encode(state))
         return 1
         """
@@ -404,6 +425,7 @@ class RedisProviderRuntimeState:
                     60,
                     180,
                     300,
+                    uuid4().hex,
                 )
             )
         except Exception:
@@ -589,6 +611,19 @@ class ProviderInvocationPipeline:
                     response_sample=None,
                 )
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
+        half_open_snapshot = await self._runtime.circuit_snapshot(setting)
+        probe_token = half_open_snapshot.get("probe_token")
+        if (
+            observe
+            and half_open_snapshot.get("state") == "HALF_OPEN"
+            and probe_token
+        ):
+            await self._observer.record_half_open(
+                setting,
+                snapshot=half_open_snapshot,
+                occurred_at=datetime.now(UTC),
+                probe_token=str(probe_token),
+            )
         lease = await self._runtime.acquire(setting)
         if lease is None:
             if observe:

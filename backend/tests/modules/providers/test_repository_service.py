@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import wraps
@@ -22,7 +23,11 @@ from long_invest.modules.providers.models import (
     ProviderMutationRequest,
 )
 from long_invest.modules.providers.repository import ProviderRepository
-from long_invest.modules.providers.resilience import ProviderRouteSetting
+from long_invest.modules.providers.resilience import (
+    ProviderInvocationPipeline,
+    ProviderRouteSetting,
+    RedisProviderRuntimeState,
+)
 from long_invest.modules.providers.service import ProviderService
 from long_invest.platform.errors import AppError
 
@@ -382,6 +387,88 @@ async def test_degraded_and_actual_auto_switch_publish_public_events() -> None:
         if call[0][0] in {"provider.degraded", "provider.auto_switched"}
     ]
     assert len(keys) == len(set(keys))
+
+
+@async_test
+async def test_redis_half_open_probe_is_persisted_before_upstream_recovers() -> None:
+    class HalfOpenRedis:
+        def __init__(self) -> None:
+            self.raw = json.dumps(
+                {
+                    "state": "OPEN",
+                    "failures": 3,
+                    "level": 0,
+                    "opened_at": 0,
+                }
+            )
+
+        async def eval(self, script, key_count, *args):
+            del key_count
+            if "state['state']='HALF_OPEN'" in script:
+                state = json.loads(self.raw)
+                state["state"] = "HALF_OPEN"
+                state["probe_token"] = "probe-token-1"
+                self.raw = json.dumps(state)
+                return 1
+            if "local total=" in script:
+                return 1
+            if "redis.call('set',KEYS[1],ARGV[1])" in script:
+                self.raw = args[-1]
+                return 1
+            return 1
+
+        async def get(self, key):
+            del key
+            return self.raw
+
+    occurred_at = datetime.now(UTC)
+    health = ProviderHealthState(
+        provider_code="EASTMONEY",
+        capability="REALTIME_QUOTE_BATCH",
+        status="CIRCUIT_OPEN",
+        consecutive_failures=3,
+        metrics={},
+    )
+    circuit = ProviderCircuitState(
+        provider_code="EASTMONEY",
+        capability="REALTIME_QUOTE_BATCH",
+        state="OPEN",
+        consecutive_failures=3,
+        cooldown_index=0,
+        opened_at=occurred_at,
+    )
+    events = RecordingEvents()
+    repository = ProviderRepository(
+        FakeSession([health, circuit, health, circuit]),
+        audit=RecordingAudit(),
+        events=events,
+    )
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+        rate_per_second=100,
+    )
+    pipeline = ProviderInvocationPipeline(
+        RedisProviderRuntimeState(HalfOpenRedis()), repository
+    )
+
+    async def operation() -> ProviderBatchResult:
+        assert circuit.state == "HALF_OPEN"
+        return ProviderBatchResult()
+
+    await pipeline.call(
+        setting,
+        operation,
+        deadline=datetime.now(UTC) + timedelta(seconds=1),
+    )
+    event_names = [call[0][0] for call in events.calls]
+    assert event_names.index("provider.half_opened") < event_names.index(
+        "provider.recovered"
+    )
+    half_opened = next(
+        call for call in events.calls if call[0][0] == "provider.half_opened"
+    )
+    assert half_opened[1]["idempotency_key"].endswith(":probe-token-1")
 
 
 @async_test

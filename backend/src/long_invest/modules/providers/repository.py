@@ -138,6 +138,14 @@ class ProviderRepositoryPort(Protocol):
         switched: bool = False,
         response_sample: dict[str, Any] | None = None,
     ) -> None: ...
+    async def record_half_open(
+        self,
+        setting: ProviderRouteSetting,
+        *,
+        snapshot: dict[str, Any],
+        occurred_at: datetime,
+        probe_token: str,
+    ) -> None: ...
     async def replay_mutation(
         self, idempotency_key: str, digest: str
     ) -> dict[str, Any] | None: ...
@@ -700,6 +708,106 @@ class ProviderRepository:
                 },
                 idempotency_key=f"{event_key}:outcome",
             )
+            await self._session.flush()
+
+    async def record_half_open(
+        self,
+        setting: ProviderRouteSetting,
+        *,
+        snapshot: dict[str, Any],
+        occurred_at: datetime,
+        probe_token: str,
+    ) -> None:
+        event_key = (
+            f"runtime:{setting.provider.value}:{setting.capability.value}:"
+            f"half-open:{probe_token}"
+        )
+        failures = int(
+            snapshot.get("consecutive_failures", snapshot.get("failures", 0))
+        )
+        async with self._session.begin():
+            health = await self._session.scalar(
+                select(ProviderHealthState)
+                .where(
+                    ProviderHealthState.provider_code == setting.provider.value,
+                    ProviderHealthState.capability == setting.capability.value,
+                )
+                .with_for_update()
+            )
+            if health is None:
+                health = ProviderHealthState(
+                    provider_code=setting.provider.value,
+                    capability=setting.capability.value,
+                    status="HALF_OPEN",
+                    consecutive_failures=failures,
+                    metrics={},
+                )
+                self._session.add(health)
+            else:
+                health.status = "HALF_OPEN"
+                health.consecutive_failures = int(
+                    snapshot.get(
+                        "consecutive_failures", snapshot.get("failures", 0)
+                    )
+                )
+
+            circuit = await self._session.scalar(
+                select(ProviderCircuitState)
+                .where(
+                    ProviderCircuitState.provider_code == setting.provider.value,
+                    ProviderCircuitState.capability == setting.capability.value,
+                )
+                .with_for_update()
+            )
+            previous_state = "UNKNOWN" if circuit is None else circuit.state
+            if circuit is None:
+                circuit = ProviderCircuitState(
+                    provider_code=setting.provider.value,
+                    capability=setting.capability.value,
+                    state="HALF_OPEN",
+                    consecutive_failures=int(snapshot.get("failures", 0)),
+                    cooldown_index=int(snapshot.get("level", 0)),
+                    opened_at=snapshot.get("opened_at"),
+                )
+                self._session.add(circuit)
+            else:
+                circuit.state = "HALF_OPEN"
+                circuit.consecutive_failures = int(
+                    snapshot.get(
+                        "consecutive_failures", snapshot.get("failures", 0)
+                    )
+                )
+                circuit.cooldown_index = int(
+                    snapshot.get("cooldown_index", snapshot.get("level", 0))
+                )
+            if previous_state != "HALF_OPEN":
+                self._session.add(
+                    ProviderCircuitHistory(
+                        provider_code=setting.provider.value,
+                        capability=setting.capability.value,
+                        from_state=previous_state,
+                        to_state="HALF_OPEN",
+                        reason_code="PROVIDER_HALF_OPEN_PROBE_GRANTED",
+                        occurred_at=occurred_at,
+                    )
+                )
+                payload = {
+                    "provider": setting.provider.value,
+                    "capability": setting.capability.value,
+                    "from_state": previous_state,
+                    "to_state": "HALF_OPEN",
+                    "probe_token": probe_token,
+                }
+                await self._events.append(
+                    "provider.circuit_state_changed",
+                    payload,
+                    idempotency_key=f"{event_key}:circuit",
+                )
+                await self._events.append(
+                    "provider.half_opened",
+                    payload,
+                    idempotency_key=event_key,
+                )
             await self._session.flush()
 
     @staticmethod

@@ -8,7 +8,6 @@ from long_invest.modules.quotes.contracts import (
     QuoteItemStatus,
 )
 
-
 NOW = datetime(2026, 7, 15, 1, 30, tzinfo=UTC)
 
 
@@ -28,12 +27,24 @@ def command(**overrides: object) -> CreateQuoteCycle:
 
 def test_cycle_and_item_statuses_are_fixed() -> None:
     assert {status.value for status in QuoteCycleStatus} == {
-        "PENDING", "FETCHING", "FINALIZING", "READY", "PARTIAL", "FAILED",
-        "MISSED", "CANCELED",
+        "PENDING",
+        "FETCHING",
+        "FINALIZING",
+        "READY",
+        "PARTIAL",
+        "FAILED",
+        "MISSED",
+        "CANCELED",
     }
     assert {status.value for status in QuoteItemStatus} == {
-        "VALID", "MISSING", "STALE", "CONFLICT", "INVALID", "TIMEOUT",
-        "PROVIDER_FAILED", "NOT_EXPECTED_TO_TRADE",
+        "VALID",
+        "MISSING",
+        "STALE",
+        "CONFLICT",
+        "INVALID",
+        "TIMEOUT",
+        "PROVIDER_FAILED",
+        "NOT_EXPECTED_TO_TRADE",
     }
 
 

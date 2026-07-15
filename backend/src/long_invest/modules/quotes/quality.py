@@ -4,7 +4,6 @@ from decimal import Decimal
 
 from long_invest.modules.providers.contracts import RealtimeQuote
 
-
 MAX_FRESHNESS_SECONDS = 180
 
 
@@ -47,9 +46,7 @@ def validate_quote(
     return QuoteValidation(True)
 
 
-def compare_quotes(
-    primary: RealtimeQuote, fallback: RealtimeQuote
-) -> QuoteComparison:
+def compare_quotes(primary: RealtimeQuote, fallback: RealtimeQuote) -> QuoteComparison:
     difference = abs(primary.price - fallback.price)
     threshold = max(
         Decimal("0.02"),

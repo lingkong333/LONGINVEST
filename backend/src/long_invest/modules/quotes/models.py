@@ -28,6 +28,7 @@ class QuoteCycle(Base):
         ),
         CheckConstraint("deadline_at > started_at", name="deadline"),
         CheckConstraint("expected_count > 0", name="expected_positive"),
+        CheckConstraint("timeout_seconds BETWEEN 10 AND 60", name="timeout_supported"),
         CheckConstraint(
             "valid_count >= 0 AND missing_count >= 0 AND conflict_count >= 0 "
             "AND failed_count >= 0",
@@ -44,9 +45,13 @@ class QuoteCycle(Base):
         kwargs.setdefault("failed_count", 0)
         super().__init__(**kwargs)
 
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
-    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    scheduled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -55,13 +60,16 @@ class QuoteCycle(Base):
     idempotency_scope: Mapped[str] = mapped_column(String(200), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
     valid_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     missing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     conflict_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     cancel_reason: Mapped[str | None] = mapped_column(String(500))
     items: Mapped[list["QuoteCycleItem"]] = relationship(
-        back_populates="cycle", cascade="all, delete-orphan", order_by="QuoteCycleItem.symbol"
+        back_populates="cycle",
+        cascade="all, delete-orphan",
+        order_by="QuoteCycleItem.symbol",
     )
 
 
@@ -79,9 +87,13 @@ class QuoteCycleItem(Base):
         kwargs.setdefault("eligible_for_evaluation", False)
         super().__init__(**kwargs)
 
-    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
     cycle_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("quote_cycle.id", ondelete="CASCADE"), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("quote_cycle.id", ondelete="CASCADE"),
+        nullable=False,
     )
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -97,5 +109,7 @@ class QuoteCycleItem(Base):
     provider: Mapped[str | None] = mapped_column(String(32))
     error_code: Mapped[str | None] = mapped_column(String(80))
     conflict_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
-    eligible_for_evaluation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    eligible_for_evaluation: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     cycle: Mapped[QuoteCycle] = relationship(back_populates="items")

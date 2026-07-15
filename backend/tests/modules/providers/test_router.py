@@ -3,6 +3,8 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 
+import pytest
+
 from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderBatchResult,
@@ -13,6 +15,7 @@ from long_invest.modules.providers.contracts import (
 )
 from long_invest.modules.providers.resilience import (
     InMemoryProviderRuntimeState,
+    ProviderCallError,
     ProviderRouteSetting,
     StaticProviderConfiguration,
 )
@@ -181,6 +184,37 @@ async def test_runtime_settings_control_enable_priority_and_auto_switch() -> Non
     assert east.quote_requests == []
     assert sina.quote_requests == [("600000.SH",)]
     assert result.items[0].source is ProviderCode.SINA
+
+
+@async_test
+async def test_realtime_quotes_from_uses_protected_invocation_pipeline() -> None:
+    east = FakeProvider(
+        ProviderCode.EASTMONEY,
+        ProviderBatchResult((quote("600000.SH", ProviderCode.EASTMONEY),)),
+    )
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    config = StaticProviderConfiguration(
+        {
+            ProviderCapability.REALTIME_QUOTE_BATCH: (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY,
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    enabled=False,
+                ),
+            )
+        }
+    )
+    router = ProviderRouter(east, sina, config=config)
+
+    with pytest.raises(ProviderCallError) as caught:
+        await router.realtime_quotes_from(
+            ProviderCode.EASTMONEY,
+            ("600000.SH",),
+            deadline(),
+        )
+
+    assert caught.value.code == "PROVIDER_DISABLED"
+    assert east.quote_requests == []
 
 
 @async_test

@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import (
+    DailyBarRequest,
     ProbeResult,
     ProviderBatchResult,
     ProviderCapability,
@@ -575,6 +576,85 @@ class ProbeRuntime:
             "cooldown_index": 0,
             "opened_at": None,
         }
+
+
+class AcquisitionRouter:
+    def __init__(self) -> None:
+        self.calls = []
+        self.result = ProviderBatchResult()
+
+    async def realtime_quotes(self, symbols, deadline):
+        self.calls.append(("realtime_quotes", symbols, deadline))
+        return self.result
+
+    async def realtime_quotes_from(self, provider_code, symbols, deadline):
+        self.calls.append(
+            ("realtime_quotes_from", provider_code, symbols, deadline)
+        )
+        return self.result
+
+    async def daily_bars(self, request, deadline):
+        self.calls.append(("daily_bars", request, deadline))
+        return self.result
+
+
+def acquisition_service(router: AcquisitionRouter) -> ProviderService:
+    return ProviderService(router, {}, ServiceRepository(), ProbeRuntime())
+
+
+@async_test
+async def test_service_routes_batch_realtime_quotes() -> None:
+    router = AcquisitionRouter()
+    service = acquisition_service(router)
+    expires_at = datetime.now(UTC) + timedelta(seconds=5)
+
+    result = await service.realtime_quotes(("600000.SH",), expires_at)
+
+    assert result is router.result
+    assert router.calls == [
+        ("realtime_quotes", ("600000.SH",), expires_at)
+    ]
+
+
+@async_test
+async def test_service_routes_batch_realtime_quotes_from_selected_provider() -> None:
+    router = AcquisitionRouter()
+    service = acquisition_service(router)
+    expires_at = datetime.now(UTC) + timedelta(seconds=5)
+
+    result = await service.realtime_quotes_from(
+        ProviderCode.SINA,
+        ("000001.SZ",),
+        expires_at,
+    )
+
+    assert result is router.result
+    assert router.calls == [
+        (
+            "realtime_quotes_from",
+            ProviderCode.SINA,
+            ("000001.SZ",),
+            expires_at,
+        )
+    ]
+
+
+@async_test
+async def test_service_routes_unadjusted_daily_bars() -> None:
+    router = AcquisitionRouter()
+    service = acquisition_service(router)
+    expires_at = datetime.now(UTC) + timedelta(seconds=5)
+    request = DailyBarRequest(
+        "600000.SH",
+        datetime(2025, 1, 1).date(),
+        datetime(2025, 1, 2).date(),
+        ProviderCapability.DAILY_BAR_UNADJUSTED,
+    )
+
+    result = await service.daily_bars(request, expires_at)
+
+    assert result is router.result
+    assert router.calls == [("daily_bars", request, expires_at)]
 
 
 @async_test

@@ -140,7 +140,7 @@ class ProviderRouter:
             observe=False,
         )
 
-    async def diagnostic_quotes(
+    async def realtime_quotes_from(
         self,
         provider_code: ProviderCode,
         symbols: tuple[str, ...],
@@ -159,6 +159,14 @@ class ProviderRouter:
             lambda: provider.realtime_quotes(symbols, deadline),
             deadline=deadline,
         )
+
+    async def diagnostic_quotes(
+        self,
+        provider_code: ProviderCode,
+        symbols: tuple[str, ...],
+        deadline: datetime,
+    ) -> ProviderBatchResult[RealtimeQuote]:
+        return await self.realtime_quotes_from(provider_code, symbols, deadline)
 
     async def _single(
         self,

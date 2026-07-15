@@ -8,6 +8,9 @@ from uuid import UUID
 
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import (
+    DailyBar,
+    DailyBarRequest,
+    ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
     RealtimeQuote,
@@ -45,6 +48,26 @@ class ProviderService:
 
     async def security_master(self, deadline: datetime):
         return await self._router.security_master(deadline)
+
+    async def realtime_quotes(
+        self, symbols: tuple[str, ...], deadline: datetime
+    ) -> ProviderBatchResult[RealtimeQuote]:
+        return await self._router.realtime_quotes(symbols, deadline)
+
+    async def realtime_quotes_from(
+        self,
+        provider_code: ProviderCode,
+        symbols: tuple[str, ...],
+        deadline: datetime,
+    ) -> ProviderBatchResult[RealtimeQuote]:
+        return await self._router.realtime_quotes_from(
+            provider_code, symbols, deadline
+        )
+
+    async def daily_bars(
+        self, request: DailyBarRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]:
+        return await self._router.daily_bars(request, deadline)
 
     async def get_provider(self, provider_code: ProviderCode) -> dict[str, Any]:
         self._require(provider_code)

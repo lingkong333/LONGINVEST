@@ -514,10 +514,1259 @@
           }
         }
       }
+    },
+    "/api/v1/securities": {
+      "get": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "List Securities",
+        "operationId": "list_securities_api_v1_securities_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Securities Api V1 Securities Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/securities/search": {
+      "get": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Search Securities",
+        "operationId": "search_securities_api_v1_securities_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Search Securities Api V1 Securities Search Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/securities/{symbol}": {
+      "get": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Get Security",
+        "operationId": "get_security_api_v1_securities__symbol__get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Security Api V1 Securities  Symbol  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/securities/refresh": {
+      "post": {
+        "tags": [
+          "securities"
+        ],
+        "summary": "Refresh Securities",
+        "operationId": "refresh_securities_api_v1_securities_refresh_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 160
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Refresh Securities Api V1 Securities Refresh Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar": {
+      "get": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "List Calendar",
+        "operationId": "list_calendar_api_v1_trading_calendar_get",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "through",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Through"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CN_A",
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Calendar Api V1 Trading Calendar Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/coverage": {
+      "get": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Calendar Coverage",
+        "operationId": "calendar_coverage_api_v1_trading_calendar_coverage_get",
+        "parameters": [
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "From"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CN_A",
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Calendar Coverage Api V1 Trading Calendar Coverage Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/next-trading-day": {
+      "get": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Next Trading Day",
+        "operationId": "next_trading_day_api_v1_trading_calendar_next_trading_day_get",
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "After"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CN_A",
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Next Trading Day Api V1 Trading Calendar Next Trading Day Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/previous-trading-day": {
+      "get": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Previous Trading Day",
+        "operationId": "previous_trading_day_api_v1_trading_calendar_previous_trading_day_get",
+        "parameters": [
+          {
+            "name": "before",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Before"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CN_A",
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Previous Trading Day Api V1 Trading Calendar Previous Trading Day Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/versions": {
+      "get": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Versions",
+        "operationId": "versions_api_v1_trading_calendar_versions_get",
+        "parameters": [
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CN_A",
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Versions Api V1 Trading Calendar Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/{date}": {
+      "get": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Calendar Day",
+        "operationId": "calendar_day_api_v1_trading_calendar__date__get",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Date"
+            }
+          },
+          {
+            "name": "market",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "CN_A",
+              "title": "Market"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Calendar Day Api V1 Trading Calendar  Date  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Override Calendar Day",
+        "operationId": "override_calendar_day_api_v1_trading_calendar__date__patch",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date",
+              "title": "Date"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OverrideRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Override Calendar Day Api V1 Trading Calendar  Date  Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/import": {
+      "post": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Import Calendar",
+        "operationId": "import_calendar_api_v1_trading_calendar_import_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Import Calendar Api V1 Trading Calendar Import Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/trading-calendar/versions/{version_id}/restore": {
+      "post": {
+        "tags": [
+          "trading-calendar"
+        ],
+        "summary": "Restore Calendar",
+        "operationId": "restore_calendar_api_v1_trading_calendar_versions__version_id__restore_post",
+        "parameters": [
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Version Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RestoreRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Restore Calendar Api V1 Trading Calendar Versions  Version Id  Restore Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "List Providers",
+        "operationId": "list_providers_api_v1_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Providers Api V1 Providers Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/circuits": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "List Circuits",
+        "operationId": "list_circuits_api_v1_providers_circuits_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response List Circuits Api V1 Providers Circuits Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/circuits/{circuit_id}/probe": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Probe Circuit",
+        "operationId": "probe_circuit_api_v1_providers_circuits__circuit_id__probe_post",
+        "parameters": [
+          {
+            "name": "circuit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Circuit Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmedActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Probe Circuit Api V1 Providers Circuits  Circuit Id  Probe Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/circuits/{circuit_id}/reset": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Reset Circuit",
+        "operationId": "reset_circuit_api_v1_providers_circuits__circuit_id__reset_post",
+        "parameters": [
+          {
+            "name": "circuit_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Circuit Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmedActionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Reset Circuit Api V1 Providers Circuits  Circuit Id  Reset Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/quote-diagnostics": {
+      "post": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Quote Diagnostics",
+        "operationId": "quote_diagnostics_api_v1_providers_quote_diagnostics_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QuoteDiagnosticsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Quote Diagnostics Api V1 Providers Quote Diagnostics Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{provider_code}": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Get Provider",
+        "operationId": "get_provider_api_v1_providers__provider_code__get",
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Provider Api V1 Providers  Provider Code  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{provider_code}/capabilities": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Capabilities",
+        "operationId": "capabilities_api_v1_providers__provider_code__capabilities_get",
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Capabilities Api V1 Providers  Provider Code  Capabilities Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{provider_code}/health": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Health",
+        "operationId": "health_api_v1_providers__provider_code__health_get",
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Health Api V1 Providers  Provider Code  Health Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers/{provider_code}/settings": {
+      "patch": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Update Settings",
+        "operationId": "update_settings_api_v1_providers__provider_code__settings_patch",
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderCode"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Update Settings Api V1 Providers  Provider Code  Settings Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "CalendarDayInput": {
+        "properties": {
+          "trade_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Trade Date"
+          },
+          "is_trading_day": {
+            "type": "boolean",
+            "title": "Is Trading Day"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CalendarDayStatus"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/TradingSessionInput"
+            },
+            "type": "array",
+            "title": "Sessions",
+            "default": []
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "trade_date",
+          "is_trading_day",
+          "status"
+        ],
+        "title": "CalendarDayInput"
+      },
+      "CalendarDayStatus": {
+        "type": "string",
+        "enum": [
+          "CONFIRMED",
+          "PROVISIONAL",
+          "OVERRIDDEN",
+          "MISSING"
+        ],
+        "title": "CalendarDayStatus"
+      },
       "ChangePasswordRequest": {
         "properties": {
           "new_password": {
@@ -560,6 +1809,27 @@
         ],
         "title": "ConfirmSessionsRequest"
       },
+      "ConfirmedActionRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason"
+        ],
+        "title": "ConfirmedActionRequest"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -572,6 +1842,68 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "ImportRequest": {
+        "properties": {
+          "market": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Market"
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source"
+          },
+          "source_version": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Source Version"
+          },
+          "expected_current_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Current Version"
+          },
+          "days": {
+            "items": {
+              "$ref": "#/components/schemas/CalendarDayInput"
+            },
+            "type": "array",
+            "title": "Days"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "market",
+          "source",
+          "source_version",
+          "days",
+          "reason",
+          "confirm"
+        ],
+        "title": "ImportRequest"
       },
       "LoginRequest": {
         "properties": {
@@ -595,6 +1927,153 @@
         ],
         "title": "LoginRequest"
       },
+      "OverrideRequest": {
+        "properties": {
+          "market": {
+            "type": "string",
+            "title": "Market",
+            "default": "CN_A"
+          },
+          "is_trading_day": {
+            "type": "boolean",
+            "title": "Is Trading Day"
+          },
+          "sessions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/TradingSessionInput"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessions"
+          },
+          "expected_current_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Current Version"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "is_trading_day",
+          "expected_current_version",
+          "reason",
+          "confirm"
+        ],
+        "title": "OverrideRequest"
+      },
+      "ProviderCode": {
+        "type": "string",
+        "enum": [
+          "EASTMONEY",
+          "SINA"
+        ],
+        "title": "ProviderCode"
+      },
+      "QuoteDiagnosticsRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "minItems": 1,
+            "title": "Symbols"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason",
+          "symbols"
+        ],
+        "title": "QuoteDiagnosticsRequest"
+      },
+      "RefreshRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm"
+        ],
+        "title": "RefreshRequest"
+      },
+      "RestoreRequest": {
+        "properties": {
+          "market": {
+            "type": "string",
+            "title": "Market",
+            "default": "CN_A"
+          },
+          "expected_current_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Current Version"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "expected_current_version",
+          "reason",
+          "confirm"
+        ],
+        "title": "RestoreRequest"
+      },
       "RevokeSessionRequest": {
         "properties": {
           "reason": {
@@ -614,6 +2093,128 @@
           "confirm"
         ],
         "title": "RevokeSessionRequest"
+      },
+      "SettingsRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Version"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 20.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 32.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency"
+          },
+          "rate_per_second": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Per Second"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 60.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "auto_switch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Switch"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason",
+          "expected_version"
+        ],
+        "title": "SettingsRequest"
+      },
+      "TradingSessionInput": {
+        "properties": {
+          "starts_at": {
+            "type": "string",
+            "format": "time",
+            "title": "Starts At"
+          },
+          "ends_at": {
+            "type": "string",
+            "format": "time",
+            "title": "Ends At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "starts_at",
+          "ends_at"
+        ],
+        "title": "TradingSessionInput"
       },
       "ValidationError": {
         "properties": {

@@ -169,6 +169,19 @@ class FailingEventPort(RecordingEventPort):
         raise RuntimeError("forced event failure")
 
 
+class ConflictingRefetchEventPort(RecordingEventPort):
+    async def append_refetch_requested(
+        self,
+        issue: DataQualityIssue,
+        command: RequestQualityRefetch,
+    ) -> None:
+        raise AppError(
+            code="IDEMPOTENCY_KEY_CONFLICT",
+            message="idempotency key already used",
+            status_code=409,
+        )
+
+
 def quality_service(
     repository: MemoryRepository,
     *,
@@ -879,6 +892,26 @@ async def test_request_refetch_rejects_event_port_from_different_transaction() -
 
     assert caught.value.code == "QUALITY_TRANSACTION_MISMATCH"
     assert caught.value.status_code == 500
+    assert repository.records[opened.issue.id].status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_refetch_propagates_idempotency_conflict_without_mutation() -> None:
+    repository = MemoryRepository()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    service = QualityIssueService(
+        repository,
+        events=ConflictingRefetchEventPort(repository.session),
+        now_provider=lambda: NOW,
+    )
+
+    with pytest.raises(AppError) as caught:
+        await service.request_refetch(refetch_command(opened.issue.id))
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_CONFLICT"
+    assert caught.value.status_code == 409
     assert repository.records[opened.issue.id].status == QualityIssueStatus.OPEN
 
 

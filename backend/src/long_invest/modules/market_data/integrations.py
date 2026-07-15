@@ -1,6 +1,8 @@
+import json
 from hashlib import sha256
 from typing import Any, Protocol
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.market_data.contracts import (
@@ -10,6 +12,8 @@ from long_invest.modules.market_data.contracts import (
     RequestQualityRefetch,
 )
 from long_invest.modules.market_data.models import DataQualityIssue
+from long_invest.platform.errors import AppError
+from long_invest.platform.outbox.models import EventOutbox
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 
@@ -85,6 +89,13 @@ class TransactionalQualityEventAdapter(QualityEventPort):
     ) -> None:
         status = QualityIssueStatus(issue.status).value
         key_hash = sha256(command.idempotency_key.encode("utf-8")).hexdigest()
+        dedupe_key = f"quality-refetch:{issue.id}:{key_hash}"
+        request_hash = _refetch_request_hash(issue, command)
+        existing = await self._find_by_dedupe_key(dedupe_key)
+        if existing is not None:
+            _validate_refetch_replay(existing, request_hash)
+            return
+
         await self._writer.append(
             session=self.session,
             topic="data_quality_issue.refetch_requested",
@@ -101,6 +112,41 @@ class TransactionalQualityEventAdapter(QualityEventPort):
                 "status": status,
                 "requested_by": command.actor_user_id,
                 "reason": command.reason,
+                "request_hash": request_hash,
             },
-            dedupe_key=f"quality-refetch:{key_hash}",
+            dedupe_key=dedupe_key,
+        )
+        existing = await self._find_by_dedupe_key(dedupe_key)
+        if existing is not None:
+            _validate_refetch_replay(existing, request_hash)
+
+    async def _find_by_dedupe_key(self, dedupe_key: str) -> EventOutbox | None:
+        return await self.session.scalar(
+            select(EventOutbox).where(EventOutbox.dedupe_key == dedupe_key)
+        )
+
+
+def _refetch_request_hash(
+    issue: DataQualityIssue,
+    command: RequestQualityRefetch,
+) -> str:
+    canonical = json.dumps(
+        {
+            "issue_id": str(issue.id),
+            "actor_user_id": command.actor_user_id,
+            "reason": command.reason,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validate_refetch_replay(event: EventOutbox, request_hash: str) -> None:
+    if event.payload.get("request_hash") != request_hash:
+        raise AppError(
+            code="IDEMPOTENCY_KEY_CONFLICT",
+            message="该幂等键已用于不同的重新抓取请求",
+            status_code=409,
         )

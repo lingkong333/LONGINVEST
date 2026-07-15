@@ -5,6 +5,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
+from long_invest.modules.auth.models import AppUser, UserSession  # noqa: F401
 from long_invest.platform.audit.models import AuditEvent  # noqa: F401
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.base import Base

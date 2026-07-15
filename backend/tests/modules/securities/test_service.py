@@ -449,6 +449,7 @@ async def test_freeze_symbols_rejects_all_invalid_items_atomically() -> None:
             item("000001.SZ", security_type=SecurityType.ETF),
             item("000002.SZ", status=ListingStatus.DELISTED),
             item("000003.SZ", status=ListingStatus.DATA_MISSING),
+            item("600000.SH"),
         )
     )
 
@@ -460,6 +461,7 @@ async def test_freeze_symbols_rejects_all_invalid_items_atomically() -> None:
                     "000003.SZ",
                     "000002.SZ",
                     "000001.SZ",
+                    "600000.SH",
                 )
             )
         )

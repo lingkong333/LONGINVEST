@@ -2,13 +2,49 @@ from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import create_engine
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session
 
 from long_invest.modules.securities.contracts import Market, UniverseQuery
-from long_invest.modules.securities.models import Security
+from long_invest.modules.securities.models import (
+    Security,
+    SecurityUniverseSnapshot,
+    SecurityUniverseSnapshotItem,
+)
 from long_invest.modules.securities.repository import SecurityRepository
 from long_invest.platform.errors import AppError
+
+
+@compiles(JSONB, "sqlite")
+def _compile_jsonb_for_sqlite(_type, _compiler, **_kwargs) -> str:
+    return "JSON"
+
+
+@compiles(PG_UUID, "sqlite")
+def _compile_pg_uuid_for_sqlite(_type, _compiler, **_kwargs) -> str:
+    return "CHAR(32)"
+
+
+class AsyncSessionAdapter:
+    def __init__(self, session: Session) -> None:
+        self._session = session
+
+    def add(self, instance) -> None:
+        self._session.add(instance)
+
+    def add_all(self, instances) -> None:
+        self._session.add_all(instances)
+
+    async def flush(self, instances=None) -> None:
+        self._session.flush(instances)
+
+    async def scalar(self, statement):
+        return self._session.scalar(statement)
 
 
 @pytest.mark.anyio
@@ -96,6 +132,107 @@ async def test_read_snapshot_loads_its_frozen_items() -> None:
 
     statement = session.scalar.await_args.args[0]
     assert statement.get_execution_options()["populate_existing"] is True
+
+
+@pytest.mark.anyio
+async def test_saved_snapshot_does_not_follow_later_security_changes() -> None:
+    engine = create_engine("sqlite:///:memory:")
+    with engine.begin() as connection:
+        connection.exec_driver_sql(
+            """
+            CREATE TABLE security (
+                id CHAR(32) PRIMARY KEY,
+                symbol VARCHAR(16) NOT NULL UNIQUE,
+                exchange_code VARCHAR(32) NOT NULL,
+                name VARCHAR(160) NOT NULL,
+                market VARCHAR(8) NOT NULL,
+                security_type VARCHAR(32) NOT NULL,
+                listed_on DATE,
+                delisted_on DATE,
+                listing_status VARCHAR(32) NOT NULL,
+                is_st BOOLEAN NOT NULL,
+                is_suspended BOOLEAN NOT NULL,
+                provider_codes JSON NOT NULL,
+                master_version INTEGER NOT NULL,
+                source VARCHAR(64) NOT NULL,
+                source_version VARCHAR(160) NOT NULL,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+            )
+            """
+        )
+    SecurityUniverseSnapshot.__table__.create(engine)
+    SecurityUniverseSnapshotItem.__table__.create(engine)
+    security_id = uuid4()
+    snapshot_id = uuid4()
+
+    with Session(engine, expire_on_commit=False) as session:
+        session.add(
+            Security(
+                id=security_id,
+                symbol="600000.SH",
+                exchange_code="600000",
+                name="浦发银行",
+                market="SH",
+                security_type="A_SHARE",
+                listing_status="SUSPENDED",
+                listed_on=None,
+                delisted_on=None,
+                is_st=False,
+                is_suspended=True,
+                provider_codes={},
+                master_version=1,
+                source="eastmoney",
+                source_version="v1",
+            )
+        )
+        repository = SecurityRepository(AsyncSessionAdapter(session))
+        frozen = SecurityUniverseSnapshot(
+            id=snapshot_id,
+            filters={"mode": "symbols", "symbols": ["600000.SH"]},
+            item_count=1,
+            master_version=1,
+        )
+        await repository.save_universe_snapshot(
+            frozen,
+            [
+                SecurityUniverseSnapshotItem(
+                    snapshot_id=snapshot_id,
+                    symbol="600000.SH",
+                    market="SH",
+                    security_type="A_SHARE",
+                    listing_status="SUSPENDED",
+                    is_st=False,
+                    is_suspended=True,
+                    master_version=1,
+                )
+            ],
+        )
+        session.commit()
+
+    with Session(engine) as session:
+        current = session.get(Security, security_id)
+        assert current is not None
+        current.name = "更名后的浦发银行"
+        current.listing_status = "DELISTED"
+        current.is_suspended = False
+        current.master_version = 2
+        session.commit()
+
+    with Session(engine) as session:
+        reloaded = await SecurityRepository(
+            AsyncSessionAdapter(session)
+        ).get_universe_snapshot(snapshot_id)
+
+        assert reloaded is not None
+        assert reloaded is not frozen
+        assert reloaded.item_count == 1
+        assert reloaded.master_version == 1
+        assert [
+            (item.symbol, item.listing_status, item.master_version)
+            for item in reloaded.items
+        ] == [("600000.SH", "SUSPENDED", 1)]
+
+    engine.dispose()
 
 
 @pytest.mark.anyio

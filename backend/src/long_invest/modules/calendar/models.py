@@ -31,9 +31,18 @@ class ImmutableCalendarFact:
 class TradingCalendarVersion(ImmutableCalendarFact, Base):
     __tablename__ = "trading_calendar_version"
     __table_args__ = (
-        UniqueConstraint("market", "version_number"),
-        UniqueConstraint("market", "source", "source_version"),
-        UniqueConstraint("market", "idempotency_key"),
+        UniqueConstraint(
+            "market", "version_number", name="uq_calendar_version_number"
+        ),
+        UniqueConstraint(
+            "market",
+            "source",
+            "source_version",
+            name="uq_calendar_source_version",
+        ),
+        UniqueConstraint(
+            "market", "idempotency_key", name="uq_calendar_idempotency_key"
+        ),
         CheckConstraint("version_number > 0", name="version_number_positive"),
         Index("ix_trading_calendar_version_market_created", "market", "created_at"),
     )
@@ -120,8 +129,15 @@ class TradingCalendarDay(ImmutableCalendarFact, Base):
 class TradingSession(ImmutableCalendarFact, Base):
     __tablename__ = "trading_session"
     __table_args__ = (
-        UniqueConstraint("calendar_day_id", "sequence"),
-        UniqueConstraint("calendar_day_id", "starts_at", "ends_at"),
+        UniqueConstraint(
+            "calendar_day_id", "sequence", name="uq_trading_session_sequence"
+        ),
+        UniqueConstraint(
+            "calendar_day_id",
+            "starts_at",
+            "ends_at",
+            name="uq_trading_session_time_range",
+        ),
         CheckConstraint("sequence > 0", name="sequence_positive"),
         CheckConstraint("starts_at < ends_at", name="time_order_valid"),
     )

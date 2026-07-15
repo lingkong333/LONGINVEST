@@ -440,16 +440,16 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_trading_calendar_version")),
         sa.UniqueConstraint(
-            "market", "idempotency_key", name=op.f("uq_trading_calendar_version_market")
+            "market", "idempotency_key", name="uq_calendar_idempotency_key"
         ),
         sa.UniqueConstraint(
             "market",
             "source",
             "source_version",
-            name=op.f("uq_trading_calendar_version_market"),
+            name="uq_calendar_source_version",
         ),
         sa.UniqueConstraint(
-            "market", "version_number", name=op.f("uq_trading_calendar_version_market")
+            "market", "version_number", name="uq_calendar_version_number"
         ),
     )
     op.create_index(
@@ -618,13 +618,13 @@ def upgrade() -> None:
         sa.UniqueConstraint(
             "calendar_day_id",
             "sequence",
-            name=op.f("uq_trading_session_calendar_day_id"),
+            name="uq_trading_session_sequence",
         ),
         sa.UniqueConstraint(
             "calendar_day_id",
             "starts_at",
             "ends_at",
-            name=op.f("uq_trading_session_calendar_day_id"),
+            name="uq_trading_session_time_range",
         ),
     )
     _seed_provider_config()

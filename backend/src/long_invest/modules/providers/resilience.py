@@ -293,7 +293,11 @@ class InMemoryProviderRuntimeState:
         )
 
     async def force_half_open(self, setting: ProviderRouteSetting) -> None:
-        self._breaker.enable_for_probe(setting.provider, setting.capability)
+        current = self._breaker.state(
+            setting.provider, setting.capability, now=datetime.now(UTC)
+        )
+        if current is not CircuitState.HALF_OPEN:
+            self._breaker.enable_for_probe(setting.provider, setting.capability)
 
     async def circuit_snapshot(self, setting: ProviderRouteSetting) -> dict[str, Any]:
         item = self._breaker._get(setting.provider, setting.capability)
@@ -488,7 +492,8 @@ class ProviderInvocationPipeline:
             async with asyncio.timeout(timeout):
                 result = await operation()
             batch_error = getattr(result, "batch_error_code", None)
-            if batch_error:
+            unhealthy_probe = getattr(result, "healthy", True) is False
+            if batch_error or unhealthy_probe:
                 await self._runtime.record_failure(setting)
             else:
                 await self._runtime.record_success(setting)

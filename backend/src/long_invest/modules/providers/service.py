@@ -1,38 +1,23 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
 from long_invest.modules.auth.audit import AuditContext
-from long_invest.modules.providers.contracts import ProviderCode
+from long_invest.modules.providers.contracts import (
+    ProviderCapability,
+    ProviderCode,
+    RealtimeQuote,
+)
+from long_invest.modules.providers.repository import ProviderRepositoryPort
+from long_invest.modules.providers.resilience import (
+    ProviderRouteSetting,
+    ProviderRuntimeStatePort,
+)
 from long_invest.modules.providers.router import ProviderRouter
 from long_invest.platform.errors import AppError
-
-
-class ProviderAuditPort(Protocol):
-    async def record(
-        self,
-        *,
-        action: str,
-        object_id: str,
-        reason: str,
-        idempotency_key: str,
-        before: dict[str, Any] | None,
-        after: dict[str, Any] | None,
-    ) -> None: ...
-
-
-@dataclass(slots=True)
-class ProviderSettings:
-    enabled: bool = True
-    priority: int = 1
-    concurrency: int = 2
-    rate_per_second: float = 2.0
-    timeout_seconds: float = 5.0
-    auto_switch: bool = True
-    version: int = 1
 
 
 class ProviderService:
@@ -40,134 +25,106 @@ class ProviderService:
         self,
         router: ProviderRouter,
         providers: dict[ProviderCode, Any],
-        audit: ProviderAuditPort | None = None,
+        repository: ProviderRepositoryPort,
+        runtime: ProviderRuntimeStatePort,
     ) -> None:
+        if repository is None or runtime is None:
+            raise ValueError("provider service requires persistent and shared state")
         self._router = router
         self._providers = providers
-        self._audit = audit
-        self._settings = {
-            code: ProviderSettings(priority=index + 1)
-            for index, code in enumerate(providers)
-        }
-        self._circuits: dict[UUID, dict[str, Any]] = {}
+        self._repository = repository
+        self._runtime = runtime
 
     async def list_providers(self) -> list[dict[str, Any]]:
-        return [await self.get_provider(code) for code in self._providers]
+        codes = await self._repository.list_provider_codes()
+        return [await self.get_provider(code) for code in codes]
 
     async def get_provider(self, provider_code: ProviderCode) -> dict[str, Any]:
-        provider = self._require(provider_code)
-        return {
-            "provider_code": provider_code.value,
-            "capabilities": sorted(item.value for item in provider.capabilities),
-            "settings": asdict(self._settings[provider_code]),
-        }
+        self._require(provider_code)
+        return await self._repository.provider_summary(provider_code)
 
     async def capabilities(self, provider_code: ProviderCode) -> list[dict[str, Any]]:
-        provider = self._require(provider_code)
-        return [
-            {"capability": item.value, "enabled": self._settings[provider_code].enabled}
-            for item in sorted(provider.capabilities, key=lambda item: item.value)
-        ]
+        summary = await self.get_provider(provider_code)
+        return summary["capabilities"]
 
     async def health(self, provider_code: ProviderCode) -> list[dict[str, Any]]:
-        provider = self._require(provider_code)
-        return [
-            {"capability": item.value, "status": "UNKNOWN"}
-            for item in sorted(provider.capabilities, key=lambda item: item.value)
-        ]
+        self._require(provider_code)
+        return await self._repository.health(provider_code)
 
     async def update_settings(
         self,
         provider_code: ProviderCode,
         settings: dict[str, Any],
         *,
+        expected_version: int,
         reason: str,
         audit_context: AuditContext,
     ) -> dict[str, Any]:
-        self._require(provider_code)
-        current = self._settings[provider_code]
-        before = asdict(current)
-        for key, value in settings.items():
-            if value is not None:
-                setattr(current, key, value)
-        current.version += 1
-        after = asdict(current)
-        await self._audit_event(
-            "provider.config_changed",
-            provider_code.value,
-            reason,
-            audit_context,
-            before,
-            after,
+        provider = self._require(provider_code)
+        self._require_complete_audit(audit_context)
+        return await self._repository.mutate_settings(
+            provider_code,
+            provider.capabilities,
+            settings,
+            expected_version=expected_version,
+            reason=reason,
+            context=audit_context,
         )
-        return after
 
     async def list_circuits(self) -> list[dict[str, Any]]:
-        return list(self._circuits.values())
+        return await self._repository.circuits()
 
     async def probe_circuit(
         self, circuit_id: UUID, *, reason: str, audit_context: AuditContext
     ) -> dict[str, Any]:
-        circuit = self._circuit(circuit_id)
-        before = dict(circuit)
-        circuit["state"] = "CLOSED"
-        await self._audit_event(
-            "provider.circuit_probed",
-            str(circuit_id),
-            reason,
-            audit_context,
-            before,
-            circuit,
+        return await self._probe_and_persist(
+            circuit_id,
+            reason=reason,
+            audit_context=audit_context,
+            action_code="provider.circuit_probed",
         )
-        return circuit
 
     async def reset_circuit(
         self, circuit_id: UUID, *, reason: str, audit_context: AuditContext
     ) -> dict[str, Any]:
-        circuit = self._circuit(circuit_id)
-        before = dict(circuit)
-        circuit["state"] = "HALF_OPEN"
-        await self._audit_event(
-            "provider.circuit_half_opened",
-            str(circuit_id),
-            reason,
-            audit_context,
-            before,
-            circuit,
+        return await self._probe_and_persist(
+            circuit_id,
+            reason=reason,
+            audit_context=audit_context,
+            action_code="provider.circuit_reset_probed",
         )
-        return circuit
 
     async def quote_diagnostics(
         self,
         symbols: tuple[str, ...],
         *,
-        reason: str = "diagnostic",
-        audit_context: AuditContext | None = None,
+        reason: str,
+        audit_context: AuditContext,
     ) -> dict[str, Any]:
+        self._require_complete_audit(audit_context)
         deadline = datetime.now(UTC) + timedelta(seconds=10)
-        sources = []
+        sources: list[dict[str, Any]] = []
+        by_source: dict[ProviderCode, dict[str, RealtimeQuote]] = {}
         for code in (ProviderCode.EASTMONEY, ProviderCode.SINA):
             provider = self._providers.get(code)
             if provider is None:
                 continue
             try:
                 result = await provider.realtime_quotes(symbols, deadline)
+                by_source[code] = {item.symbol: item for item in result.items}
                 sources.append(
                     {
                         "provider": code.value,
-                        "items": [
-                            {
-                                "symbol": item.symbol,
-                                "price": str(item.price),
-                                "quote_time": item.quote_time.isoformat(),
-                            }
-                            for item in result.items
+                        "items": [self._quote_dict(item) for item in result.items],
+                        "failures": [
+                            {**asdict(item), "provider": item.provider.value}
+                            for item in result.failures
                         ],
-                        "failures": [asdict(item) for item in result.failures],
                         "batch_error_code": result.batch_error_code,
                     }
                 )
             except Exception as error:
+                by_source[code] = {}
                 sources.append(
                     {
                         "provider": code.value,
@@ -176,16 +133,72 @@ class ProviderService:
                         "batch_error_code": getattr(error, "code", "PROVIDER_FAILED"),
                     }
                 )
-        if audit_context is not None:
-            await self._audit_event(
-                "provider.quote_diagnostics",
-                ",".join(symbols),
-                reason,
-                audit_context,
-                None,
-                {"providers": [item["provider"] for item in sources]},
+        comparisons = [
+            self._compare_symbol(
+                symbol,
+                by_source.get(ProviderCode.EASTMONEY, {}).get(symbol),
+                by_source.get(ProviderCode.SINA, {}).get(symbol),
             )
-        return {"symbols": symbols, "sources": sources}
+            for symbol in symbols
+        ]
+        response = {
+            "symbols": symbols,
+            "sources": sources,
+            "comparisons": comparisons,
+        }
+        await self._repository.audit_diagnostic(
+            symbols,
+            {
+                "providers": [item["provider"] for item in sources],
+                "comparison_count": len(comparisons),
+            },
+            reason=reason,
+            context=audit_context,
+        )
+        return response
+
+    async def _probe_and_persist(
+        self,
+        circuit_id: UUID,
+        *,
+        reason: str,
+        audit_context: AuditContext,
+        action_code: str,
+    ) -> dict[str, Any]:
+        self._require_complete_audit(audit_context)
+        circuit = await self._repository.circuit(circuit_id)
+        setting = ProviderRouteSetting(
+            provider=ProviderCode(circuit["provider_code"]),
+            capability=ProviderCapability(circuit["capability"]),
+            enabled=True,
+            priority=1,
+            concurrency=1,
+            rate_per_second=1,
+            timeout_seconds=10,
+            auto_switch=False,
+        )
+        result = await self._router.probe(
+            setting, datetime.now(UTC) + timedelta(seconds=10)
+        )
+        snapshot = await self._runtime.circuit_snapshot(setting)
+        persisted = {
+            "state": snapshot["state"],
+            "consecutive_failures": snapshot.get(
+                "consecutive_failures", snapshot.get("failures", 0)
+            ),
+            "cooldown_index": snapshot.get("cooldown_index", snapshot.get("level", 0)),
+            "opened_at": snapshot.get("opened_at"),
+            "checked_at": result.checked_at,
+            "healthy": result.healthy,
+            "error_code": result.error_code,
+        }
+        return await self._repository.persist_probe(
+            circuit_id,
+            persisted,
+            action_code=action_code,
+            reason=reason,
+            context=audit_context,
+        )
 
     def _require(self, provider_code: ProviderCode):
         provider = self._providers.get(provider_code)
@@ -195,31 +208,86 @@ class ProviderService:
             )
         return provider
 
-    def _circuit(self, circuit_id: UUID) -> dict[str, Any]:
-        circuit = self._circuits.get(circuit_id)
-        if circuit is None:
+    @staticmethod
+    def _require_complete_audit(context: AuditContext) -> None:
+        missing = [
+            name
+            for name in (
+                "request_id",
+                "idempotency_key",
+                "actor_user_id",
+                "session_id",
+                "trusted_ip",
+            )
+            if not getattr(context, name, None)
+        ]
+        if missing:
             raise AppError(
-                code="PROVIDER_CIRCUIT_NOT_FOUND",
-                message="熔断记录不存在",
-                status_code=404,
+                code="AUDIT_CONTEXT_REQUIRED",
+                message="Provider 写操作缺少完整审计上下文",
+                status_code=500,
+                details={"missing": missing},
             )
-        return circuit
 
-    async def _audit_event(
-        self,
-        action: str,
-        object_id: str,
-        reason: str,
-        context: AuditContext,
-        before: dict[str, Any] | None,
-        after: dict[str, Any] | None,
-    ) -> None:
-        if self._audit is not None:
-            await self._audit.record(
-                action=action,
-                object_id=object_id,
-                reason=reason,
-                idempotency_key=context.idempotency_key,
-                before=before,
-                after=after,
-            )
+    @staticmethod
+    def _quote_dict(item: RealtimeQuote) -> dict[str, Any]:
+        return {
+            "symbol": item.symbol,
+            "price": str(item.price),
+            "open": str(item.open),
+            "high": str(item.high),
+            "low": str(item.low),
+            "previous_close": str(item.previous_close),
+            "volume": item.volume,
+            "amount": str(item.amount),
+            "quote_time": item.quote_time.isoformat(),
+            "received_at": item.received_at.isoformat(),
+            "source": item.source.value,
+        }
+
+    @classmethod
+    def _compare_symbol(
+        cls,
+        symbol: str,
+        eastmoney: RealtimeQuote | None,
+        sina: RealtimeQuote | None,
+    ) -> dict[str, Any]:
+        fields = (
+            "price",
+            "open",
+            "high",
+            "low",
+            "previous_close",
+            "volume",
+            "amount",
+            "quote_time",
+        )
+        differences: dict[str, Any] = {}
+        for field in fields:
+            left = getattr(eastmoney, field, None)
+            right = getattr(sina, field, None)
+            if hasattr(left, "isoformat"):
+                left = left.isoformat()
+            if hasattr(right, "isoformat"):
+                right = right.isoformat()
+            if left is not None and field != "volume":
+                left = str(left)
+            if right is not None and field != "volume":
+                right = str(right)
+            differences[field] = {
+                "EASTMONEY": left,
+                "SINA": right,
+                "equal": left == right and left is not None,
+            }
+        return {
+            "symbol": symbol,
+            "missing_sources": [
+                code.value
+                for code, item in (
+                    (ProviderCode.EASTMONEY, eastmoney),
+                    (ProviderCode.SINA, sina),
+                )
+                if item is None
+            ],
+            "differences": differences,
+        }

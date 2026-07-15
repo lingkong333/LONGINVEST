@@ -94,3 +94,19 @@ def test_async_runtime_enforces_token_rate_after_concurrency_release() -> None:
         assert await runtime.acquire(setting)
 
     asyncio.run(scenario())
+
+
+def test_repeated_manual_half_open_still_allows_only_one_probe() -> None:
+    runtime = InMemoryProviderRuntimeState()
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+    )
+
+    async def scenario() -> None:
+        await runtime.force_half_open(setting)
+        assert await runtime.allow(setting, probe=True)
+        await runtime.force_half_open(setting)
+        assert not await runtime.allow(setting, probe=True)
+
+    asyncio.run(scenario())

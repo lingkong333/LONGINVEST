@@ -101,6 +101,24 @@ def test_eastmoney_isolates_identifiable_bad_quote_row() -> None:
     ]
 
 
+def test_eastmoney_keeps_nineteen_good_items_when_one_of_twenty_is_bad() -> None:
+    template = load("normal.json")["data"]["diff"][0]
+    rows = []
+    symbols = []
+    for index in range(20):
+        code = f"6000{index:02d}"
+        symbols.append(f"{code}.SH")
+        rows.append({**template, "f12": code})
+    rows[9]["f2"] = "-"
+    result = EastmoneyProvider(None).parse_quotes(
+        {"rc": 0, "data": {"diff": rows}},
+        tuple(symbols),
+        received_at=datetime.now(UTC),
+    )
+    assert len(result.items) == 19
+    assert result.failures[0].symbol == "600009.SH"
+
+
 @pytest.mark.parametrize("fixture", ["missing_field.json", "bad_time.json"])
 def test_eastmoney_identifiable_anomaly_is_an_item_failure(fixture: str) -> None:
     result = EastmoneyProvider(None).parse_quotes(

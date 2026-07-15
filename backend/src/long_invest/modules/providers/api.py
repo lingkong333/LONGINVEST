@@ -32,6 +32,7 @@ class SettingsRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm: bool
     reason: str = Field(min_length=1, max_length=255)
+    expected_version: int = Field(ge=0)
     enabled: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=20)
     concurrency: int | None = Field(default=None, ge=1, le=32)
@@ -147,11 +148,14 @@ async def update_settings(
     request: WriteRequest,
 ) -> dict:
     require_confirmation(body.confirm)
-    settings = body.model_dump(exclude={"confirm", "reason"}, exclude_none=True)
+    settings = body.model_dump(
+        exclude={"confirm", "reason", "expected_version"}, exclude_none=True
+    )
     return success_response(
         data=await service.update_settings(
             provider_code,
             settings,
+            expected_version=body.expected_version,
             reason=body.reason,
             audit_context=request.audit_context,
         )

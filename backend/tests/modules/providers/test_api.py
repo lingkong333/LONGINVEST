@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +15,7 @@ from long_invest.platform.http.exception_handlers import register_exception_hand
 class FakeService:
     def __init__(self) -> None:
         self.settings_call = None
+        self.actions = []
 
     async def list_providers(self):
         return [{"provider_code": "EASTMONEY"}]
@@ -27,10 +29,13 @@ class FakeService:
     async def health(self, provider_code):
         return []
 
-    async def update_settings(self, provider_code, settings, *, reason, audit_context):
+    async def update_settings(
+        self, provider_code, settings, *, expected_version, reason, audit_context
+    ):
         self.settings_call = (
             provider_code,
             settings,
+            expected_version,
             reason,
             audit_context.idempotency_key,
         )
@@ -40,12 +45,19 @@ class FakeService:
         return []
 
     async def probe_circuit(self, circuit_id, *, reason, audit_context):
+        self.actions.append(
+            ("probe", circuit_id, reason, audit_context.idempotency_key)
+        )
         return {"id": str(circuit_id), "state": "CLOSED"}
 
     async def reset_circuit(self, circuit_id, *, reason, audit_context):
+        self.actions.append(
+            ("reset", circuit_id, reason, audit_context.idempotency_key)
+        )
         return {"id": str(circuit_id), "state": "HALF_OPEN"}
 
-    async def quote_diagnostics(self, symbols):
+    async def quote_diagnostics(self, symbols, *, reason, audit_context):
+        del reason, audit_context
         return {"symbols": symbols, "sources": []}
 
 
@@ -91,7 +103,12 @@ def test_settings_reject_unsafe_fields_and_require_confirmation_reason() -> None
     )
     unconfirmed = client.patch(
         "/api/v1/providers/EASTMONEY/settings",
-        json={"confirm": False, "reason": "test", "enabled": True},
+        json={
+            "confirm": False,
+            "reason": "test",
+            "expected_version": 1,
+            "enabled": True,
+        },
     )
     assert unsafe.status_code == 422
     assert unconfirmed.status_code == 422
@@ -106,6 +123,7 @@ def test_settings_accept_only_safe_fields_and_forward_idempotent_audit_context()
         json={
             "confirm": True,
             "reason": "planned adjustment",
+            "expected_version": 1,
             "enabled": True,
             "priority": 1,
             "concurrency": 2,
@@ -115,4 +133,26 @@ def test_settings_accept_only_safe_fields_and_forward_idempotent_audit_context()
         },
     )
     assert response.status_code == 200
-    assert service.settings_call[2:] == ("planned adjustment", "idem-1")
+    assert service.settings_call[2:] == (1, "planned adjustment", "idem-1")
+
+
+def test_probe_reset_and_diagnostic_write_apis_require_confirmed_safe_input() -> None:
+    service = FakeService()
+    client = app_client(service)
+    circuit_id = uuid4()
+    probe = client.post(
+        f"/api/v1/providers/circuits/{circuit_id}/probe",
+        json={"confirm": True, "reason": "health check"},
+    )
+    reset = client.post(
+        f"/api/v1/providers/circuits/{circuit_id}/reset",
+        json={"confirm": True, "reason": "operator reset"},
+    )
+    invalid_diagnostic = client.post(
+        "/api/v1/providers/quote-diagnostics",
+        json={"confirm": True, "reason": "compare", "symbols": ["600000"]},
+    )
+    assert probe.status_code == 200
+    assert reset.status_code == 200
+    assert invalid_diagnostic.status_code == 422
+    assert [item[0] for item in service.actions] == ["probe", "reset"]

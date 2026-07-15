@@ -57,6 +57,7 @@ class EastmoneyProvider:
     )
     REALTIME_URL = "https://push2.eastmoney.com/api/qt/ulist.np/get"
     MASTER_URL = "https://push2.eastmoney.com/api/qt/clist/get"
+    MASTER_PROBE_URL = "https://push2.eastmoney.com/api/qt/stock/get"
     HISTORY_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
 
     def __init__(self, client: ProviderHttpClient | None) -> None:
@@ -69,7 +70,7 @@ class EastmoneyProvider:
             self.MASTER_URL,
             {
                 "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-                "fields": "f12,f14,f26",
+                "fields": "f2,f12,f14,f26",
                 "pz": "10000",
             },
             deadline,
@@ -121,11 +122,22 @@ class EastmoneyProvider:
             if capability is ProviderCapability.REALTIME_QUOTE_BATCH:
                 await self.realtime_quotes(("600000.SH",), deadline)
             elif capability is ProviderCapability.SECURITY_MASTER:
-                await self.security_master(deadline)
+                payload = await self._json(
+                    self.MASTER_PROBE_URL,
+                    {"secid": "1.600000", "fields": "f2,f12,f14,f26"},
+                    deadline,
+                )
+                if not isinstance(payload.get("data"), dict):
+                    raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+                self.parse_security_master(
+                    {"rc": payload.get("rc"), "data": {"diff": [payload["data"]]}},
+                    observed_at=datetime.now(UTC),
+                )
             else:
+                today = date.today()
                 await self.daily_bars(
                     DailyBarRequest(
-                        "600000.SH", date.today(), date.today(), capability
+                        "600000.SH", today - timedelta(days=7), today, capability
                     ),
                     deadline,
                 )

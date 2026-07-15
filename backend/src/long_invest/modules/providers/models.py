@@ -21,10 +21,12 @@ from long_invest.platform.database.base import Base
 
 class ProviderConfigVersion(Base):
     __tablename__ = "provider_config_version"
+    __table_args__ = (UniqueConstraint("provider_code", "version"),)
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    version: Mapped[int] = mapped_column(Integer, nullable=False, unique=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_code: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -83,6 +85,53 @@ class ProviderCircuitHistory(Base):
     reason_code: Mapped[str] = mapped_column(String(100), nullable=False)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
+    )
+
+
+class ProviderCircuitState(Base):
+    __tablename__ = "provider_circuit_state"
+    __table_args__ = (
+        UniqueConstraint("provider_code", "capability"),
+        CheckConstraint("consecutive_failures >= 0", name="failures_nonnegative"),
+        CheckConstraint("cooldown_index BETWEEN 0 AND 2", name="cooldown_index_range"),
+    )
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    provider_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    capability: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), nullable=False, default="CLOSED")
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    cooldown_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class ProviderMutationRequest(Base):
+    __tablename__ = "provider_mutation_request"
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    idempotency_key: Mapped[str] = mapped_column(
+        String(200), nullable=False, unique=True
+    )
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    operation: Mapped[str] = mapped_column(String(64), nullable=False)
+    object_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    response_summary: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    request_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    trusted_ip: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

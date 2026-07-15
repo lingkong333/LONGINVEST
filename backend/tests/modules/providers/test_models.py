@@ -4,9 +4,11 @@ from long_invest.modules.providers.contracts import ProviderCapability, Provider
 from long_invest.modules.providers.models import (
     ProviderCapabilitySetting,
     ProviderCircuitHistory,
+    ProviderCircuitState,
     ProviderConfigVersion,
     ProviderFailureSample,
     ProviderHealthState,
+    ProviderMutationRequest,
 )
 from long_invest.modules.providers.repository import redact_failure_sample
 
@@ -16,6 +18,8 @@ def test_provider_models_cover_version_settings_health_history_and_samples() -> 
     assert ProviderCapabilitySetting.__tablename__ == "provider_capability_setting"
     assert ProviderHealthState.__tablename__ == "provider_health_state"
     assert ProviderCircuitHistory.__tablename__ == "provider_circuit_history"
+    assert ProviderCircuitState.__tablename__ == "provider_circuit_state"
+    assert ProviderMutationRequest.__tablename__ == "provider_mutation_request"
     assert ProviderFailureSample.__tablename__ == "provider_failure_sample"
 
 

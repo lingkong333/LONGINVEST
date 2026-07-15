@@ -299,6 +299,32 @@ class AuthService:
         await self._repository.flush()
         return changed
 
+    async def revoke_all_sessions(
+        self,
+        *,
+        user_id: UUID,
+        current_session_id: UUID,
+        now: datetime,
+        reason: str,
+    ) -> int:
+        changed = 0
+        for session in await self._repository.list_sessions(user_id):
+            if self._sessions.revoke(session, now=now, reason=reason):
+                changed += 1
+        await self._record_audit(
+            action_code="AUTH_SESSION_REVOKE_ALL",
+            object_type="app_user",
+            object_id=str(user_id),
+            result="SUCCESS" if changed else "NOOP",
+            risk_level="HIGH",
+            reason=reason,
+            after_summary={"revoked_count": changed},
+            actor_user_id=str(user_id),
+            session_id=str(current_session_id),
+        )
+        await self._repository.flush()
+        return changed
+
     async def change_password(
         self,
         *,

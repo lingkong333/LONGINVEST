@@ -205,14 +205,10 @@ class AllowLimiter:
     ) -> RateLimitDecision:
         return RateLimitDecision(allowed=True)
 
-    async def record_failure(
-        self, *, ip: str, username: str, now: datetime
-    ) -> None:
+    async def record_failure(self, *, ip: str, username: str, now: datetime) -> None:
         return None
 
-    async def record_success(
-        self, *, ip: str, username: str, now: datetime
-    ) -> None:
+    async def record_success(self, *, ip: str, username: str, now: datetime) -> None:
         return None
 
 
@@ -684,6 +680,34 @@ async def test_revoke_other_sessions_keeps_current_session_active() -> None:
     )
     assert current.status == SessionStatus.ACTIVE
     assert other.status == SessionStatus.REVOKED
+
+
+@pytest.mark.anyio
+async def test_revoke_all_sessions_includes_current_session() -> None:
+    repo = MemoryAuthRepository()
+    passwords = PasswordService()
+    user = make_user(passwords)
+    current = make_session(user)
+    other = make_session(user)
+    await repo.add_user(user)
+    await repo.add_session(current)
+    await repo.add_session(other)
+    audit = RecordingAuditPort()
+    auth = make_auth_service(repo, passwords, audit=audit)
+
+    changed = await auth.revoke_all_sessions(
+        user_id=user.id,
+        current_session_id=current.id,
+        now=NOW,
+        reason="revoke all",
+    )
+
+    assert changed == 2
+    assert current.status == SessionStatus.REVOKED
+    assert other.status == SessionStatus.REVOKED
+    assert [(event.action_code, event.result) for event in audit.events] == [
+        ("AUTH_SESSION_REVOKE_ALL", "SUCCESS")
+    ]
 
 
 @pytest.mark.anyio

@@ -24,12 +24,12 @@ class AppSettings(BaseSettings):
         "@postgres:5432/longinvest"
     )
     database_owner_url: str = (
-        "postgresql+asyncpg://longinvest:longinvest-local-only"
-        "@postgres:5432/longinvest"
+        "postgresql+asyncpg://longinvest:longinvest-local-only@postgres:5432/longinvest"
     )
     database_app_role: str = "longinvest_app"
     database_app_password: str = "longinvest-app-local-only"
     redis_url: str = "redis://redis:6379/0"
+    auth_allowed_origins: str = "http://127.0.0.1:15173,http://localhost:15173"
     dispatcher_scan_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
     dispatcher_batch_size: int = Field(default=50, ge=1, le=500)
     queue_job_timeout_seconds: int = Field(default=60, ge=10, le=3600)

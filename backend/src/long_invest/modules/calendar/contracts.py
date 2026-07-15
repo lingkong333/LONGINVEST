@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, time, timedelta, timezone
 from enum import StrEnum
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -90,6 +91,17 @@ class CalendarCoverage(StrictContract):
     level: str
     current_version_id: UUID | None
     missing_today: bool = False
+
+
+class CalendarEvent(StrictContract):
+    event_type: str
+    aggregate_id: str
+    idempotency_key: str
+    payload: dict[str, Any]
+
+
+class CalendarEventSink(Protocol):
+    async def append(self, event: CalendarEvent) -> object: ...
 
 
 def validate_calendar_import(

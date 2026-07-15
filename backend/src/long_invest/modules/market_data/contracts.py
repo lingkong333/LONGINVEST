@@ -4,6 +4,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 from typing import NoReturn
 from uuid import UUID
@@ -124,6 +125,11 @@ class OpenQualityIssue:
     requires_review: bool = False
 
     def __post_init__(self) -> None:
+        try:
+            severity = QualitySeverity(self.severity)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("不支持的数据质量问题严重程度") from exc
+        object.__setattr__(self, "severity", severity)
         _require_text(self.issue_type, "问题类型")
         _require_text(self.subject_type, "关联对象类型")
         _require_text(self.subject_id, "关联对象编号")
@@ -141,6 +147,72 @@ class OpenQualityIssue:
         except (TypeError, ValueError) as exc:
             raise ValueError("质量问题证据必须可安全序列化为 JSON") from exc
         object.__setattr__(self, "evidence", _freeze_json_value(json_value))
+
+
+@dataclass(frozen=True, slots=True)
+class QualityIssueView:
+    id: UUID
+    issue_type: str
+    subject_type: str
+    subject_id: str
+    symbol: str | None
+    status: QualityIssueStatus
+    severity: QualitySeverity
+    evidence: Mapping[str, object]
+    occurrence_count: int
+    first_seen_at: datetime
+    last_seen_at: datetime
+    resolved_at: datetime | None
+    resolved_by_user_id: str | None
+    resolution_action: QualityResolutionAction | None
+    resolution_reason: str | None
+    selected_source: str | None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "status", QualityIssueStatus(self.status))
+        object.__setattr__(self, "severity", QualitySeverity(self.severity))
+        if self.resolution_action is not None:
+            object.__setattr__(
+                self,
+                "resolution_action",
+                QualityResolutionAction(self.resolution_action),
+            )
+        if not isinstance(self.evidence, Mapping) or not self.evidence:
+            raise ValueError("数据质量问题证据必须是非空 JSON 对象")
+        try:
+            json_value = _copy_json_value(self.evidence, set())
+            json.dumps(json_value, allow_nan=False)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("数据质量问题证据必须可安全序列化为 JSON") from exc
+        object.__setattr__(self, "evidence", _freeze_json_value(json_value))
+
+
+@dataclass(frozen=True, slots=True)
+class QualityIssuePage:
+    items: tuple[QualityIssueView, ...]
+    total: int
+    page: int
+    page_size: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "items", tuple(self.items))
+        if self.total < 0:
+            raise ValueError("total must not be negative")
+        if self.page < 1 or self.page_size < 1:
+            raise ValueError("page and page_size must be positive")
+
+
+@dataclass(frozen=True, slots=True)
+class RequestQualityRefetch:
+    issue_id: UUID
+    actor_user_id: str
+    reason: str
+    idempotency_key: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.actor_user_id, "请求用户")
+        _require_text(self.reason, "重取原因")
+        _require_text(self.idempotency_key, "幂等键")
 
 
 @dataclass(frozen=True, slots=True)

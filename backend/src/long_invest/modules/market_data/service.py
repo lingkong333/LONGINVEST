@@ -9,9 +9,12 @@ from uuid import UUID
 
 from long_invest.modules.market_data.contracts import (
     OpenQualityIssue,
+    QualityIssuePage,
     QualityIssueStatus,
+    QualityIssueView,
     QualityResolutionAction,
     QualitySeverity,
+    RequestQualityRefetch,
     ResolveQualityIssue,
 )
 from long_invest.modules.market_data.integrations import QualityEventPort
@@ -43,17 +46,35 @@ class QualityIssueRepositoryPort(Protocol):
 
     async def flush(self) -> None: ...
 
+    async def list(
+        self,
+        *,
+        status: QualityIssueStatus | None = None,
+        issue_type: str | None = None,
+        symbol: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> list[DataQualityIssue]: ...
+
+    async def count(
+        self,
+        *,
+        status: QualityIssueStatus | None = None,
+        issue_type: str | None = None,
+        symbol: str | None = None,
+    ) -> int: ...
+
 
 @dataclass(frozen=True, slots=True)
 class OpenQualityIssueResult:
-    issue: DataQualityIssue
+    issue: QualityIssueView
     created: bool
     replayed: bool
 
 
 @dataclass(frozen=True, slots=True)
 class ResolveQualityIssueResult:
-    issue: DataQualityIssue
+    issue: QualityIssueView
     replayed: bool
 
 
@@ -93,7 +114,7 @@ class QualityIssueService:
             claimed, created = await self._repository.claim_issue(candidate)
             if created:
                 return OpenQualityIssueResult(
-                    issue=claimed,
+                    issue=_to_view(claimed),
                     created=True,
                     replayed=False,
                 )
@@ -109,7 +130,7 @@ class QualityIssueService:
         status = _issue_status(locked)
         if status in TERMINAL_STATUSES:
             return OpenQualityIssueResult(
-                issue=locked,
+                issue=_to_view(locked),
                 created=False,
                 replayed=True,
             )
@@ -122,7 +143,7 @@ class QualityIssueService:
         locked.evidence = _json_copy(command.evidence)
         await self._repository.flush()
         return OpenQualityIssueResult(
-            issue=locked,
+            issue=_to_view(locked),
             created=False,
             replayed=True,
         )
@@ -142,7 +163,7 @@ class QualityIssueService:
         status = _issue_status(issue)
         if status in TERMINAL_STATUSES:
             if _same_resolution(issue, command, action):
-                return ResolveQualityIssueResult(issue=issue, replayed=True)
+                return ResolveQualityIssueResult(issue=_to_view(issue), replayed=True)
             raise AppError(
                 code="QUALITY_ISSUE_STATE_CONFLICT",
                 message="数据质量问题已按其他方式处理",
@@ -191,11 +212,93 @@ class QualityIssueService:
         issue.selected_source = command.selected_source
         await self._repository.flush()
         await self._events.append_resolved(issue)
-        return ResolveQualityIssueResult(issue=issue, replayed=False)
+        return ResolveQualityIssueResult(issue=_to_view(issue), replayed=False)
+
+    async def list(
+        self,
+        *,
+        status: QualityIssueStatus | None = None,
+        issue_type: str | None = None,
+        symbol: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> QualityIssuePage:
+        issues = await self._repository.list(
+            status=status,
+            issue_type=issue_type,
+            symbol=symbol,
+            page=page,
+            page_size=page_size,
+        )
+        total = await self._repository.count(
+            status=status,
+            issue_type=issue_type,
+            symbol=symbol,
+        )
+        return QualityIssuePage(
+            items=tuple(_to_view(issue) for issue in issues),
+            total=total,
+            page=page,
+            page_size=page_size,
+        )
+
+    async def request_refetch(
+        self,
+        command: RequestQualityRefetch,
+    ) -> QualityIssueView:
+        issue = await self._repository.get_for_update(command.issue_id)
+        if issue is None:
+            raise AppError(
+                code="QUALITY_ISSUE_NOT_FOUND",
+                message="数据质量问题不存在",
+                status_code=404,
+            )
+        status = _issue_status(issue)
+        if status in TERMINAL_STATUSES:
+            raise AppError(
+                code="QUALITY_ISSUE_STATE_CONFLICT",
+                message="已结束的数据质量问题不能请求重新抓取",
+                status_code=409,
+            )
+        if self._events is None:
+            raise AppError(
+                code="QUALITY_INTEGRATION_UNAVAILABLE",
+                message="数据质量事件集成不可用",
+                status_code=503,
+            )
+        if self._events.session is not self._repository.session:
+            raise AppError(
+                code="QUALITY_TRANSACTION_MISMATCH",
+                message="数据质量问题与事件不在同一事务中",
+                status_code=500,
+            )
+        await self._events.append_refetch_requested(issue, command)
+        return _to_view(issue)
 
 
 def _json_copy(value: Mapping[str, object]) -> dict[str, object]:
     return json.loads(json.dumps(value, allow_nan=False))
+
+
+def _to_view(issue: DataQualityIssue) -> QualityIssueView:
+    return QualityIssueView(
+        id=issue.id,
+        issue_type=issue.issue_type,
+        subject_type=issue.subject_type,
+        subject_id=issue.subject_id,
+        symbol=issue.symbol,
+        status=issue.status,
+        severity=issue.severity,
+        evidence=issue.evidence,
+        occurrence_count=issue.occurrence_count,
+        first_seen_at=issue.first_seen_at,
+        last_seen_at=issue.last_seen_at,
+        resolved_at=issue.resolved_at,
+        resolved_by_user_id=issue.resolved_by_user_id,
+        resolution_action=issue.resolution_action,
+        resolution_reason=issue.resolution_reason,
+        selected_source=issue.selected_source,
+    )
 
 
 def _issue_status(issue: DataQualityIssue) -> QualityIssueStatus:

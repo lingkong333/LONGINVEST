@@ -1,15 +1,19 @@
 import json
 import math
 from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
 
 from long_invest.modules.market_data.contracts import (
     OpenQualityIssue,
+    QualityIssuePage,
     QualityIssueStatus,
+    QualityIssueView,
     QualityResolutionAction,
     QualitySeverity,
+    RequestQualityRefetch,
     ResolveQualityIssue,
 )
 
@@ -71,6 +75,17 @@ def test_open_quality_issue_accepts_valid_command() -> None:
 
     assert command.symbol == "600000.SH"
     assert command.requires_review is False
+
+
+def test_open_quality_issue_normalizes_severity_string_to_enum() -> None:
+    command = _open_command(severity="ERROR")
+
+    assert command.severity is QualitySeverity.ERROR
+
+
+def test_open_quality_issue_rejects_invalid_severity() -> None:
+    with pytest.raises(ValueError):
+        _open_command(severity="URGENT")
 
 
 def test_open_quality_issue_evidence_is_directly_json_serializable() -> None:
@@ -230,3 +245,81 @@ def test_quality_commands_are_frozen() -> None:
         open_command.subject_id = "item-2"  # type: ignore[misc]
     with pytest.raises(FrozenInstanceError):
         resolve_command.reason = "changed"  # type: ignore[misc]
+
+
+def test_quality_issue_view_normalizes_enums_and_freezes_evidence() -> None:
+    evidence = {"sources": [{"provider": "SINA"}]}
+    view = QualityIssueView(
+        id=uuid4(),
+        issue_type="QUOTE_CONFLICT",
+        subject_type="quote_cycle_item",
+        subject_id="item-1",
+        symbol="600000.SH",
+        status="OPEN",
+        severity="WARNING",
+        evidence=evidence,
+        occurrence_count=1,
+        first_seen_at=datetime(2026, 7, 15, tzinfo=UTC),
+        last_seen_at=datetime(2026, 7, 15, tzinfo=UTC),
+        resolved_at=None,
+        resolved_by_user_id=None,
+        resolution_action=None,
+        resolution_reason=None,
+        selected_source=None,
+    )
+
+    evidence["sources"].append({"provider": "EASTMONEY"})
+    assert view.status is QualityIssueStatus.OPEN
+    assert view.severity is QualitySeverity.WARNING
+    assert json.loads(json.dumps(view.evidence, allow_nan=False)) == {
+        "sources": [{"provider": "SINA"}]
+    }
+    with pytest.raises(TypeError):
+        view.evidence["added"] = True  # type: ignore[index]
+    with pytest.raises(FrozenInstanceError):
+        view.status = QualityIssueStatus.RESOLVED  # type: ignore[misc]
+
+
+def test_quality_issue_view_normalizes_optional_resolution_action() -> None:
+    view = QualityIssueView(
+        id=uuid4(),
+        issue_type="QUOTE_CONFLICT",
+        subject_type="quote_cycle_item",
+        subject_id="item-1",
+        symbol=None,
+        status="RESOLVED",
+        severity="ERROR",
+        evidence={"source": "SINA"},
+        occurrence_count=2,
+        first_seen_at=datetime(2026, 7, 15, tzinfo=UTC),
+        last_seen_at=datetime(2026, 7, 15, tzinfo=UTC),
+        resolved_at=datetime(2026, 7, 15, tzinfo=UTC),
+        resolved_by_user_id="user-1",
+        resolution_action="SELECT_SOURCE",
+        resolution_reason="checked",
+        selected_source="SINA",
+    )
+
+    assert view.resolution_action is QualityResolutionAction.SELECT_SOURCE
+
+
+def test_quality_issue_page_is_frozen_and_uses_tuple_items() -> None:
+    page = QualityIssuePage(items=(), total=0, page=1, page_size=50)
+
+    assert page.items == ()
+    with pytest.raises(FrozenInstanceError):
+        page.total = 1  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("field", ["actor_user_id", "reason", "idempotency_key"])
+def test_request_quality_refetch_rejects_blank_required_text(field: str) -> None:
+    values = {
+        "issue_id": uuid4(),
+        "actor_user_id": "user-1",
+        "reason": "retry provider",
+        "idempotency_key": "refetch:item-1:1",
+    }
+    values[field] = "  "
+
+    with pytest.raises(ValueError):
+        RequestQualityRefetch(**values)  # type: ignore[arg-type]

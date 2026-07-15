@@ -38,6 +38,14 @@ class DataQualityIssue(Base):
             "status IN ('OPEN','REVIEW_REQUIRED','RESOLVED','INVALIDATED')",
             name="status_valid",
         ),
+        CheckConstraint(
+            "severity IN ('INFO','WARNING','ERROR','CRITICAL')",
+            name="severity_valid",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence) = 'object' AND evidence <> '{}'::jsonb",
+            name="evidence_non_empty_object",
+        ),
         Index(
             "ix_data_quality_issue_status_last_seen",
             "status",

@@ -1,4 +1,6 @@
 from sqlalchemy import CheckConstraint, Index, UniqueConstraint
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateTable
 
 from long_invest.modules.market_data.models import DataQualityIssue
 
@@ -40,6 +42,18 @@ def test_data_quality_issue_constraints_have_stable_explicit_names() -> None:
     assert "uq_data_quality_issue_dedupe_key" in unique_names
     assert "ck_data_quality_issue_occurrence_count_positive" in check_names
     assert "ck_data_quality_issue_status_valid" in check_names
+    assert "ck_data_quality_issue_severity_valid" in check_names
+    assert "ck_data_quality_issue_evidence_non_empty_object" in check_names
+
+
+def test_quality_issue_database_rejects_invalid_severity_and_evidence() -> None:
+    sql = str(
+        CreateTable(DataQualityIssue.__table__).compile(dialect=postgresql.dialect())
+    )
+
+    assert "severity IN ('INFO','WARNING','ERROR','CRITICAL')" in sql
+    assert "jsonb_typeof(evidence) = 'object'" in sql
+    assert "evidence <> '{}'::jsonb" in sql
 
 
 def test_data_quality_issue_has_stable_query_indexes() -> None:

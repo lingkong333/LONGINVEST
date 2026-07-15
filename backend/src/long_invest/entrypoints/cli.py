@@ -2,6 +2,7 @@ import argparse
 import asyncio
 import getpass
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import uuid4
 
 from sqlalchemy.exc import SQLAlchemyError
@@ -11,6 +12,11 @@ from long_invest.modules.auth.application import AuthAuditAdapter
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.auth.passwords import PasswordService
 from long_invest.modules.auth.repository import SqlAlchemyAuthRepository
+from long_invest.modules.calendar.cli import run_calendar_import
+from long_invest.modules.calendar.outbox import CalendarOutboxAdapter
+from long_invest.modules.calendar.repository import CalendarRepository
+from long_invest.modules.calendar.service import TradingCalendarService
+from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import get_database
 from long_invest.platform.errors import AppError
 
@@ -31,6 +37,10 @@ def build_parser() -> argparse.ArgumentParser:
     ):
         item = commands.add_parser(command)
         item.add_argument("--username", required=True)
+    calendar = groups.add_parser("calendar", help="管理交易日历")
+    calendar_commands = calendar.add_subparsers(dest="command", required=True)
+    calendar_import = calendar_commands.add_parser("import")
+    calendar_import.add_argument("--file")
     return parser
 
 
@@ -88,10 +98,42 @@ async def run_user_command(args: argparse.Namespace) -> str:
         ) from exc
 
 
+async def run_calendar_command(args: argparse.Namespace) -> str:
+    if args.command != "import":
+        raise RuntimeError(f"unsupported calendar command: {args.command}")
+    database = get_database()
+    try:
+        async with database.transaction() as session:
+            service = TradingCalendarService(
+                CalendarRepository(session),
+                audit_service=AuditService(session),
+                event_sink=CalendarOutboxAdapter(session),
+            )
+            result = await run_calendar_import(
+                service,
+                source=Path(args.file) if args.file else None,
+            )
+            return f"交易日历已导入，版本号: {result.version_number}"
+    except SQLAlchemyError as exc:
+        raise AppError(
+            code="CALENDAR_BACKEND_UNAVAILABLE",
+            message="交易日历服务暂时不可用",
+            status_code=503,
+        ) from exc
+
+
+async def run_command(args: argparse.Namespace) -> str:
+    if args.group == "user":
+        return await run_user_command(args)
+    if args.group == "calendar":
+        return await run_calendar_command(args)
+    raise RuntimeError(f"unsupported command group: {args.group}")
+
+
 def main() -> int:
     args = build_parser().parse_args()
     try:
-        message = asyncio.run(run_user_command(args))
+        message = asyncio.run(run_command(args))
     except AppError as exc:
         print(f"失败 [{exc.code}]: {exc.message}")
         return 1

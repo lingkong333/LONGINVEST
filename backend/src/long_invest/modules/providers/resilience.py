@@ -240,6 +240,7 @@ class ProviderRuntimeObserverPort(Protocol):
         error_code: str | None,
         latency_ms: int,
         switched: bool,
+        response_sample: dict[str, Any] | None,
     ) -> None: ...
 
 
@@ -585,6 +586,7 @@ class ProviderInvocationPipeline:
                     error_code="PROVIDER_CIRCUIT_OPEN",
                     latency_ms=int((monotonic() - started) * 1000),
                     switched=switched,
+                    response_sample=None,
                 )
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
         lease = await self._runtime.acquire(setting)
@@ -598,6 +600,7 @@ class ProviderInvocationPipeline:
                     error_code="PROVIDER_RATE_LIMITED",
                     latency_ms=int((monotonic() - started) * 1000),
                     switched=switched,
+                    response_sample=None,
                 )
             raise ProviderCallError("PROVIDER_RATE_LIMITED")
         try:
@@ -619,6 +622,7 @@ class ProviderInvocationPipeline:
                         error_code=getattr(error, "code", "PROVIDER_FAILED"),
                         latency_ms=int((monotonic() - started) * 1000),
                         switched=switched,
+                        response_sample=getattr(error, "response_sample", None),
                     )
                 raise
             batch_error = getattr(result, "batch_error_code", None)
@@ -636,6 +640,7 @@ class ProviderInvocationPipeline:
                     error_code=batch_error or getattr(result, "error_code", None),
                     latency_ms=int((monotonic() - started) * 1000),
                     switched=switched,
+                    response_sample=None,
                 )
             return result
         finally:

@@ -9,10 +9,17 @@ import httpx
 
 
 class ProviderHttpError(RuntimeError):
-    def __init__(self, code: str, *, retryable: bool = False) -> None:
+    def __init__(
+        self,
+        code: str,
+        *,
+        retryable: bool = False,
+        response_sample: dict[str, object] | None = None,
+    ) -> None:
         super().__init__(code)
         self.code = code
         self.retryable = retryable
+        self.response_sample = response_sample
 
 
 def _retryable(error: Exception) -> bool:

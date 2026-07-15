@@ -136,6 +136,7 @@ class ProviderRepositoryPort(Protocol):
         error_code: str | None,
         latency_ms: int = 0,
         switched: bool = False,
+        response_sample: dict[str, Any] | None = None,
     ) -> None: ...
     async def replay_mutation(
         self, idempotency_key: str, digest: str
@@ -509,6 +510,7 @@ class ProviderRepository:
         error_code: str | None,
         latency_ms: int = 0,
         switched: bool = False,
+        response_sample: dict[str, Any] | None = None,
     ) -> None:
         event_key = (
             f"runtime:{setting.provider.value}:{setting.capability.value}:"
@@ -578,7 +580,8 @@ class ProviderRepository:
                         provider=setting.provider,
                         capability=setting.capability,
                         error_code=error_code,
-                        payload={
+                        payload=response_sample
+                        or {
                             "provider": setting.provider.value,
                             "capability": setting.capability.value,
                             "error_code": error_code,

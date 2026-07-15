@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from time import monotonic
@@ -75,7 +76,11 @@ class EastmoneyProvider:
             },
             deadline,
         )
-        return self.parse_security_master(payload, observed_at=datetime.now(UTC))
+        try:
+            return self.parse_security_master(payload, observed_at=datetime.now(UTC))
+        except ProviderHttpError as error:
+            self._attach_schema_sample(error, payload)
+            raise
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime
@@ -89,7 +94,11 @@ class EastmoneyProvider:
             {"secids": secids, "fields": "f2,f5,f6,f12,f14,f15,f16,f17,f18,f124"},
             deadline,
         )
-        return self.parse_quotes(payload, symbols, received_at=datetime.now(UTC))
+        try:
+            return self.parse_quotes(payload, symbols, received_at=datetime.now(UTC))
+        except ProviderHttpError as error:
+            self._attach_schema_sample(error, payload)
+            raise
 
     async def daily_bars(
         self, request: DailyBarRequest, deadline: datetime
@@ -112,7 +121,21 @@ class EastmoneyProvider:
             },
             deadline,
         )
-        return self.parse_bars(payload, request=request)
+        try:
+            return self.parse_bars(payload, request=request)
+        except ProviderHttpError as error:
+            self._attach_schema_sample(error, payload)
+            raise
+
+    @staticmethod
+    def _attach_schema_sample(error: ProviderHttpError, payload: Any) -> None:
+        if error.code != "PROVIDER_SCHEMA_INCOMPATIBLE" or error.response_sample:
+            return
+        error.response_sample = {
+            "body_excerpt": json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":")
+            )[:2048]
+        }
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime

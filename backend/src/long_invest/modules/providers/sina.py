@@ -48,7 +48,12 @@ class SinaRealtimeProvider:
             deadline=deadline,
             encoding="gb18030",
         )
-        return self.parse_quotes(text, symbols, received_at=datetime.now(UTC))
+        try:
+            return self.parse_quotes(text, symbols, received_at=datetime.now(UTC))
+        except ProviderHttpError as error:
+            if error.code == "PROVIDER_SCHEMA_INCOMPATIBLE":
+                error.response_sample = {"body_excerpt": text[:2048]}
+            raise
 
     async def security_master(self, deadline: datetime):
         del deadline

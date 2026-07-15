@@ -248,6 +248,10 @@ async def test_schema_anomaly_persists_sample_alarm_and_health_metrics() -> None
         error_code="PROVIDER_SCHEMA_INCOMPATIBLE",
         latency_ms=37,
         switched=True,
+        response_sample={
+            "body_excerpt": "bad upstream response",
+            "authorization": "secret-value",
+        },
     )
     health = next(
         item for item in session.added if item.__tablename__ == "provider_health_state"
@@ -258,7 +262,8 @@ async def test_schema_anomaly_persists_sample_alarm_and_health_metrics() -> None
         if item.__tablename__ == "provider_failure_sample"
     )
     assert sample.expires_at == occurred_at + timedelta(days=7)
-    assert sample.sample["error_code"] == "PROVIDER_SCHEMA_INCOMPATIBLE"
+    assert sample.sample["body_excerpt"] == "bad upstream response"
+    assert sample.sample["authorization"] == "[REDACTED]"
     assert health.metrics["success_rate"] == 0
     assert health.metrics["p95_latency_ms"] == 37
     assert health.metrics["switch_count"] == 1

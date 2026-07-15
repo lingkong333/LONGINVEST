@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 
@@ -10,6 +10,11 @@ from long_invest.modules.providers.contracts import (
     ProviderCode,
     ProviderItemFailure,
     RealtimeQuote,
+)
+from long_invest.modules.providers.resilience import (
+    InMemoryProviderRuntimeState,
+    ProviderRouteSetting,
+    StaticProviderConfiguration,
 )
 from long_invest.modules.providers.router import ProviderRouter
 
@@ -37,6 +42,10 @@ def quote(symbol: str, source: ProviderCode) -> RealtimeQuote:
         now,
         source,
     )
+
+
+def deadline() -> datetime:
+    return datetime.now(UTC) + timedelta(seconds=5)
 
 
 class FakeProvider:
@@ -80,7 +89,7 @@ async def test_partial_realtime_result_only_fetches_missing_symbols_from_sina() 
         ProviderCode.SINA, ProviderBatchResult((quote("000001.SZ", ProviderCode.SINA),))
     )
     result = await ProviderRouter(east, sina).realtime_quotes(
-        ("600000.SH", "000001.SZ"), datetime.now(UTC)
+        ("600000.SH", "000001.SZ"), deadline()
     )
     assert sina.quote_requests == [("000001.SZ",)]
     assert [(item.symbol, item.source) for item in result.items] == [
@@ -98,7 +107,7 @@ async def test_whole_batch_failure_switches_all_symbols_to_sina() -> None:
         ProviderCode.SINA, ProviderBatchResult((quote("600000.SH", ProviderCode.SINA),))
     )
     result = await ProviderRouter(east, sina).realtime_quotes(
-        ("600000.SH",), datetime.now(UTC)
+        ("600000.SH",), deadline()
     )
     assert sina.quote_requests == [("600000.SH",)]
     assert result.items[0].source is ProviderCode.SINA
@@ -113,7 +122,7 @@ async def test_primary_exception_switches_whole_batch_to_sina() -> None:
         ProviderBatchResult((quote("600000.SH", ProviderCode.SINA),)),
     )
     result = await ProviderRouter(east, sina).realtime_quotes(
-        ("600000.SH",), datetime.now(UTC)
+        ("600000.SH",), deadline()
     )
     assert sina.quote_requests == [("600000.SH",)]
     assert result.items[0].source is ProviderCode.SINA
@@ -131,7 +140,83 @@ async def test_history_uses_eastmoney_only_without_day_level_stitching() -> None
         date(2025, 1, 2),
         ProviderCapability.HISTORICAL_DAILY_QFQ,
     )
-    result = await ProviderRouter(east, sina).daily_bars(request, datetime.now(UTC))
+    result = await ProviderRouter(east, sina).daily_bars(request, deadline())
     assert result.batch_error_code == "PROVIDER_FAILED"
     assert len(east.bar_requests) == 1
     assert sina.bar_requests == []
+
+
+@async_test
+async def test_runtime_settings_control_enable_priority_and_auto_switch() -> None:
+    east = FakeProvider(
+        ProviderCode.EASTMONEY,
+        ProviderBatchResult((quote("600000.SH", ProviderCode.EASTMONEY),)),
+    )
+    sina = FakeProvider(
+        ProviderCode.SINA,
+        ProviderBatchResult((quote("600000.SH", ProviderCode.SINA),)),
+    )
+    config = StaticProviderConfiguration(
+        {
+            ProviderCapability.REALTIME_QUOTE_BATCH: (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY,
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    enabled=False,
+                    priority=1,
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA,
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    enabled=True,
+                    priority=2,
+                    auto_switch=False,
+                ),
+            )
+        }
+    )
+    result = await ProviderRouter(east, sina, config=config).realtime_quotes(
+        ("600000.SH",), deadline()
+    )
+    assert east.quote_requests == []
+    assert sina.quote_requests == [("600000.SH",)]
+    assert result.items[0].source is ProviderCode.SINA
+
+
+@async_test
+async def test_shared_circuit_and_rate_state_survives_router_recreation() -> None:
+    runtime = InMemoryProviderRuntimeState(global_limit=1, realtime_reserved=0)
+    east = FakeProvider(
+        ProviderCode.EASTMONEY,
+        ProviderBatchResult(batch_error_code="PROVIDER_FAILED"),
+    )
+    sina = FakeProvider(
+        ProviderCode.SINA,
+        ProviderBatchResult((quote("600000.SH", ProviderCode.SINA),)),
+    )
+    config = StaticProviderConfiguration(
+        {
+            ProviderCapability.REALTIME_QUOTE_BATCH: (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY,
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    priority=1,
+                    rate_per_second=100,
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA,
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    priority=2,
+                    rate_per_second=100,
+                ),
+            )
+        }
+    )
+    first = ProviderRouter(east, sina, runtime=runtime, config=config)
+    for _ in range(3):
+        await first.realtime_quotes(("600000.SH",), deadline())
+    east.quote_requests.clear()
+    second = ProviderRouter(east, sina, runtime=runtime, config=config)
+    result = await second.realtime_quotes(("600000.SH",), deadline())
+    assert east.quote_requests == []
+    assert result.items[0].source is ProviderCode.SINA

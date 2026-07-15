@@ -1,10 +1,13 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.resilience import (
     CircuitBreaker,
     CircuitState,
+    InMemoryProviderRuntimeState,
     ProviderRateLimiter,
+    ProviderRouteSetting,
 )
 
 
@@ -70,3 +73,24 @@ def test_rate_limiter_reserves_realtime_capacity_and_degrades_conservatively() -
     limiter.release(realtime)
     assert limiter.acquire(historical)
     assert not limiter.acquire(historical)
+
+
+def test_async_runtime_enforces_token_rate_after_concurrency_release() -> None:
+    now = [100.0]
+    runtime = InMemoryProviderRuntimeState(
+        global_limit=2, realtime_reserved=1, clock=lambda: now[0]
+    )
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+        rate_per_second=1,
+    )
+
+    async def scenario() -> None:
+        assert await runtime.acquire(setting)
+        await runtime.release(setting)
+        assert not await runtime.acquire(setting)
+        now[0] += 1
+        assert await runtime.acquire(setting)
+
+    asyncio.run(scenario())

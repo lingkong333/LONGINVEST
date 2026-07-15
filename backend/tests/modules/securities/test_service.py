@@ -63,6 +63,12 @@ class FakeRepository:
         self.revisions = []
         self.saved_universes = []
         self.flushed = 0
+        self.master_lock_count = 0
+        self.read_trace = []
+
+    async def lock_master_updates(self):
+        self.master_lock_count += 1
+        self.read_trace.append("lock")
 
     async def find_master_import(
         self, *, source, idempotency_key=None, source_version=None
@@ -72,6 +78,7 @@ class FakeRepository:
         return self.imports_by_version.get((source, source_version))
 
     async def current_master_version(self):
+        self.read_trace.append("version")
         versions = [record.master_version for record in self.imports_by_key.values()]
         return max(versions, default=0)
 
@@ -86,6 +93,9 @@ class FakeRepository:
             if symbol in self.securities
         }
 
+    async def list_all_for_update(self):
+        return sorted(self.securities.values(), key=lambda security: security.symbol)
+
     def add_security(self, security):
         self.securities[security.symbol] = security
 
@@ -96,6 +106,7 @@ class FakeRepository:
         self.revisions.append(revision)
 
     async def list_for_universe(self, _query):
+        self.read_trace.append("securities")
         return sorted(self.securities.values(), key=lambda security: security.symbol)
 
     async def save_universe_snapshot(self, frozen, items):
@@ -129,6 +140,7 @@ async def test_first_snapshot_creates_securities_and_emits_one_update_event() ->
     event = session.add.call_args.args[0]
     assert event.topic == "security_master.updated"
     assert event.payload["master_version"] == 1
+    assert repository.master_lock_count == 1
     session.commit.assert_not_awaited()
 
 
@@ -164,6 +176,51 @@ async def test_same_source_version_with_a_new_key_has_one_formal_result() -> Non
     assert replay.master_version == 1
     assert len(repository.imports_by_version) == 1
     session.add.assert_not_called()
+
+
+@pytest.mark.anyio
+async def test_missing_security_is_delisted_once_and_replay_adds_no_revision() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    await subject.apply_snapshot(
+        snapshot(item(), item("000001.SZ", name="平安银行"))
+    )
+
+    reduced = snapshot(item(), source_version="v2", key="key-2")
+    result = await subject.apply_snapshot(reduced)
+
+    missing = repository.securities["000001.SZ"]
+    assert missing.listing_status == ListingStatus.DELISTED
+    assert result.revision_count == 1
+    assert repository.revisions[-1].changed_fields == ["listing_status"]
+    eligibility = await subject.validate_monitoring_eligibility("000001.SZ")
+    assert eligibility.code == "SECURITY_DELISTED"
+
+    revision_count = len(repository.revisions)
+    replay = await subject.apply_snapshot(reduced)
+    assert replay.replayed is True
+    assert len(repository.revisions) == revision_count
+    assert repository.master_lock_count == 3
+
+
+@pytest.mark.anyio
+async def test_later_snapshot_can_restore_a_previously_missing_security() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    restored_item = item("000001.SZ", name="平安银行")
+    await subject.apply_snapshot(snapshot(item(), restored_item))
+    await subject.apply_snapshot(
+        snapshot(item(), source_version="v2", key="key-2")
+    )
+
+    result = await subject.apply_snapshot(
+        snapshot(item(), restored_item, source_version="v3", key="key-3")
+    )
+
+    restored = repository.securities["000001.SZ"]
+    assert restored.listing_status == ListingStatus.LISTED
+    assert result.revision_count == 1
+    assert repository.revisions[-1].changed_fields == ["listing_status"]
 
 
 @pytest.mark.anyio
@@ -234,6 +291,8 @@ async def test_freeze_universe_copies_current_state_and_filter_version() -> None
     frozen_item = repository.saved_universes[0][1][0]
     assert frozen_item.symbol == "600000.SH"
     assert frozen_item.master_version == 1
+    assert repository.master_lock_count == 2
+    assert repository.read_trace[-3:] == ["lock", "securities", "version"]
 
 
 @pytest.mark.anyio

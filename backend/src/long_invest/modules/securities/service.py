@@ -60,6 +60,7 @@ class SecurityMasterService:
     ) -> SnapshotResult:
         _validate_snapshot(snapshot)
         content_hash = _snapshot_hash(snapshot)
+        await self._repository.lock_master_updates()
         replay = await self._find_replay(snapshot, content_hash)
         if replay is not None:
             return replay
@@ -82,9 +83,10 @@ class SecurityMasterService:
         if not created:
             return _resolve_existing(claimed, content_hash)
 
-        existing = await self._repository.get_many(
-            incoming.symbol for incoming in snapshot.items
-        )
+        existing = {
+            security.symbol: security
+            for security in await self._repository.list_all_for_update()
+        }
         created_count = 0
         updated_count = 0
         unchanged_count = 0
@@ -118,6 +120,32 @@ class SecurityMasterService:
             )
             self._repository.add_revision(revision)
             _apply_item(current, incoming, snapshot, master_version)
+            updated_count += 1
+            revision_count += 1
+
+        incoming_symbols = {incoming.symbol for incoming in snapshot.items}
+        for missing in existing.values():
+            if (
+                missing.symbol in incoming_symbols
+                or missing.listing_status == ListingStatus.DELISTED
+            ):
+                continue
+            before = _security_data(missing)
+            after = dict(before)
+            after["listing_status"] = ListingStatus.DELISTED.value
+            revision = SecurityRevision(
+                security_id=missing.id,
+                revision_no=await self._repository.next_revision_no(missing.id),
+                master_version=master_version,
+                changed_fields=["listing_status"],
+                before_data=_json_safe(before),
+                after_data=_json_safe(after),
+            )
+            self._repository.add_revision(revision)
+            missing.listing_status = ListingStatus.DELISTED
+            missing.source = snapshot.source
+            missing.source_version = snapshot.source_version
+            missing.master_version = master_version
             updated_count += 1
             revision_count += 1
 
@@ -157,6 +185,7 @@ class SecurityMasterService:
     async def freeze_universe(
         self, query: UniverseQuery
     ) -> SecurityUniverseSnapshot:
+        await self._repository.lock_master_updates()
         securities = await self._repository.list_for_universe(query)
         master_version = await self._repository.current_master_version()
         filters = {

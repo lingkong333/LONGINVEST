@@ -16,6 +16,9 @@ from long_invest.modules.securities.models import (
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
 )
+from long_invest.platform.errors import AppError
+
+_SECURITY_MASTER_LOCK_KEY = 0x4C4F4E47494E5653
 
 
 class SecurityRepository:
@@ -75,6 +78,17 @@ class SecurityRepository:
             select(Security).where(Security.symbol.in_(unique_symbols))
         )
         return {item.symbol: item for item in result.all()}
+
+    async def list_all_for_update(self) -> list[Security]:
+        result = await self._session.scalars(
+            select(Security).order_by(Security.symbol).with_for_update()
+        )
+        return list(result.all())
+
+    async def lock_master_updates(self) -> None:
+        await self._session.execute(
+            select(func.pg_advisory_xact_lock(_SECURITY_MASTER_LOCK_KEY))
+        )
 
     async def list_for_universe(self, query: UniverseQuery) -> list[Security]:
         statement = select(Security).where(
@@ -162,7 +176,11 @@ class SecurityRepository:
                     source_version=record.source_version,
                 )
             if existing is None:
-                raise
+                raise AppError(
+                    code="SECURITY_MASTER_VERSION_CONFLICT",
+                    message="股票主数据版本并发冲突，请重试",
+                    status_code=409,
+                ) from None
             return existing, False
         return record, True
 

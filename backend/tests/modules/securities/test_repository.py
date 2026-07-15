@@ -3,10 +3,12 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.securities.contracts import Market, UniverseQuery
 from long_invest.modules.securities.models import Security
 from long_invest.modules.securities.repository import SecurityRepository
+from long_invest.platform.errors import AppError
 
 
 @pytest.mark.anyio
@@ -87,3 +89,74 @@ async def test_read_snapshot_loads_its_frozen_items() -> None:
 
     statement = session.scalar.await_args.args[0]
     assert statement.get_execution_options()["populate_existing"] is True
+
+
+@pytest.mark.anyio
+async def test_master_update_lock_uses_transaction_scoped_postgres_lock() -> None:
+    session = AsyncMock()
+
+    await SecurityRepository(session).lock_master_updates()
+
+    statement = session.execute.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "pg_advisory_xact_lock" in sql
+
+
+@pytest.mark.anyio
+async def test_unresolved_master_version_collision_is_a_stable_conflict() -> None:
+    session = Mock()
+    session.scalar = AsyncMock(return_value=None)
+    session.flush = AsyncMock(
+        side_effect=IntegrityError("insert", {}, RuntimeError("race"))
+    )
+    nested = AsyncMock()
+    session.begin_nested.return_value = nested
+    record = Mock(
+        source="eastmoney",
+        idempotency_key="key-1",
+        source_version="version-1",
+    )
+
+    with pytest.raises(AppError) as captured:
+        await SecurityRepository(session).claim_master_import(record)
+
+    assert captured.value.code == "SECURITY_MASTER_VERSION_CONFLICT"
+    assert captured.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_same_version_collision_returns_the_formal_winner() -> None:
+    session = Mock()
+    winner = Mock()
+    session.scalar = AsyncMock(return_value=winner)
+    session.flush = AsyncMock(
+        side_effect=IntegrityError("insert", {}, RuntimeError("race"))
+    )
+    session.begin_nested.return_value = AsyncMock()
+    contender = Mock(
+        source="eastmoney",
+        idempotency_key="same-key",
+        source_version="same-version",
+    )
+
+    claimed, created = await SecurityRepository(session).claim_master_import(
+        contender
+    )
+
+    assert claimed is winner
+    assert created is False
+
+
+@pytest.mark.anyio
+async def test_complete_snapshot_reads_all_existing_securities_for_update() -> None:
+    session = AsyncMock()
+    scalars = Mock()
+    scalars.all.return_value = []
+    session.scalars.return_value = scalars
+
+    await SecurityRepository(session).list_all_for_update()
+
+    statement = session.scalars.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect())).upper()
+    assert "ORDER BY SECURITY.SYMBOL" in sql
+    assert "FOR UPDATE" in sql

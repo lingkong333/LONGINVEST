@@ -1,6 +1,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from uuid import uuid4
 
 import pytest
 
@@ -47,6 +48,7 @@ class MemoryRepository:
         self.cycles = {}
         self.by_key = {}
         self.lock = asyncio.Lock()
+        self.for_update_calls = []
 
     async def claim_cycle(self, cycle):
         key = (cycle.idempotency_scope, cycle.idempotency_key)
@@ -60,6 +62,11 @@ class MemoryRepository:
         return self.cycles.get(cycle_id)
 
     async def get_for_finalize(self, cycle_id):
+        await self.lock.acquire()
+        return self.cycles.get(cycle_id)
+
+    async def get_for_update(self, cycle_id):
+        self.for_update_calls.append(cycle_id)
         await self.lock.acquire()
         return self.cycles.get(cycle_id)
 
@@ -172,6 +179,27 @@ async def test_start_uses_cycle_configured_timeout() -> None:
 
 
 @pytest.mark.anyio
+async def test_create_freezes_subscription_version_separately() -> None:
+    subject, repository, _, _ = service()
+    command = CreateQuoteCycle(
+        symbols=symbols(1),
+        scheduled_at=NOW,
+        timeout_seconds=30,
+        idempotency_scope="test",
+        idempotency_key="tracking",
+        universe_snapshot_id="universe",
+        universe_snapshot_version=7,
+        schedule_occurrence_id=uuid4(),
+        subscription_snapshot_version=11,
+    )
+    summary = await subject.create(command)
+    stored = repository.cycles[summary.id]
+    assert stored.schedule_occurrence_id == command.schedule_occurrence_id
+    assert stored.subscription_snapshot_version == 11
+    assert stored.items[0].expected_subscription_version == 11
+
+
+@pytest.mark.anyio
 async def test_all_valid_items_finalize_ready_once() -> None:
     subject, _, events, _ = service()
     cycle = await create(subject, symbols(2))
@@ -251,6 +279,20 @@ async def test_all_provider_failures_finalize_failed() -> None:
 
 
 @pytest.mark.anyio
+async def test_oversized_quote_becomes_invalid_before_database_flush() -> None:
+    subject, repository, _, _ = service()
+    cycle = await create(subject, symbols(1))
+    await subject.start(cycle.id, NOW)
+    symbol = symbols(1)[0]
+    oversized = quote(symbol)
+    object.__setattr__(oversized, "amount", Decimal("1e20"))
+    await subject.submit(cycle.id, QuoteSubmission(symbol, primary=oversized), NOW)
+    item = repository.cycles[cycle.id].items[0]
+    assert item.status == QuoteItemStatus.INVALID
+    assert item.error_code == "QUOTE_QUANTITY_INVALID"
+
+
+@pytest.mark.anyio
 async def test_late_and_duplicate_submissions_do_not_change_terminal_fact() -> None:
     subject, repository, events, _ = service()
     cycle = await create(subject, symbols(1))
@@ -270,6 +312,24 @@ async def test_late_and_duplicate_submissions_do_not_change_terminal_fact() -> N
     item = repository.cycles[cycle.id].items[0]
     assert item.status == QuoteItemStatus.TIMEOUT
     assert events.records == before
+
+
+@pytest.mark.anyio
+async def test_submission_after_deadline_is_rejected_before_item_changes() -> None:
+    subject, repository, _, _ = service()
+    cycle = await create(subject, symbols(1))
+    await subject.start(cycle.id, NOW)
+    with pytest.raises(AppError) as caught:
+        await subject.submit(
+            cycle.id,
+            QuoteSubmission(symbols(1)[0], primary=quote(symbols(1)[0])),
+            NOW + timedelta(seconds=31),
+        )
+    assert caught.value.code == "QUOTE_CYCLE_DEADLINE_EXCEEDED"
+    assert repository.cycles[cycle.id].items[0].error_code is None
+    summary = await subject.finalize(cycle.id, NOW + timedelta(seconds=31))
+    assert summary.status == QuoteCycleStatus.FAILED
+    assert repository.cycles[cycle.id].items[0].status == QuoteItemStatus.TIMEOUT
 
 
 @pytest.mark.anyio
@@ -349,6 +409,46 @@ async def test_event_failure_is_propagated_without_committing() -> None:
     subject, _, _, _ = service(repository, events)
     with pytest.raises(RuntimeError, match="outbox failed"):
         await create(subject, symbols(1))
+
+
+@pytest.mark.anyio
+async def test_mark_missed_locks_and_only_accepts_unstarted_overdue_pending() -> None:
+    subject, repository, _, _ = service()
+    cycle = await create(subject, symbols(1))
+    with pytest.raises(AppError) as early:
+        await subject.mark_missed(cycle.id, NOW)
+    assert early.value.code == "QUOTE_CYCLE_STATE_CONFLICT"
+    result = await subject.mark_missed(cycle.id, NOW + timedelta(microseconds=1))
+    assert result.status == QuoteCycleStatus.MISSED
+    assert repository.for_update_calls == [cycle.id, cycle.id]
+
+
+@pytest.mark.anyio
+async def test_mark_missed_cannot_overwrite_fetching_or_ready_cycle() -> None:
+    subject, repository, events, _ = service()
+    cycle = await create(subject, symbols(1))
+    await subject.start(cycle.id, NOW)
+    with pytest.raises(AppError) as fetching:
+        await subject.mark_missed(cycle.id, NOW + timedelta(seconds=1))
+    assert fetching.value.code == "QUOTE_CYCLE_STATE_CONFLICT"
+    symbol = symbols(1)[0]
+    await subject.submit(cycle.id, QuoteSubmission(symbol, primary=quote(symbol)), NOW)
+    ready = await subject.finalize(cycle.id, NOW)
+    replay = await subject.mark_missed(cycle.id, NOW + timedelta(seconds=2))
+    assert ready.status == replay.status == QuoteCycleStatus.READY
+    assert repository.cycles[cycle.id].status == QuoteCycleStatus.READY
+    assert [event[0] for event in events.records].count("quote_cycle.finalized") == 1
+
+
+@pytest.mark.anyio
+async def test_cancel_locks_and_rejects_non_cancelable_state() -> None:
+    subject, repository, _, _ = service()
+    cycle = await create(subject, symbols(1))
+    canceled = await subject.cancel(cycle.id, NOW, "operator")
+    replay = await subject.cancel(cycle.id, NOW, "other")
+    assert canceled.status == replay.status == QuoteCycleStatus.CANCELED
+    assert repository.cycles[cycle.id].cancel_reason == "operator"
+    assert repository.for_update_calls == [cycle.id, cycle.id]
 
 
 @pytest.mark.anyio

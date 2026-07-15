@@ -44,6 +44,8 @@ class CreateQuoteCycle:
     idempotency_key: str
     universe_snapshot_id: str
     universe_snapshot_version: int
+    schedule_occurrence_id: UUID | None = None
+    subscription_snapshot_version: int | None = None
 
     def __post_init__(self) -> None:
         require_aware(self.scheduled_at)
@@ -59,6 +61,11 @@ class CreateQuoteCycle:
             raise ValueError("idempotency scope and key are required")
         if self.universe_snapshot_version <= 0:
             raise ValueError("universe snapshot version must be positive")
+        if (
+            self.subscription_snapshot_version is not None
+            and self.subscription_snapshot_version <= 0
+        ):
+            raise ValueError("subscription snapshot version must be positive")
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +106,7 @@ class QuoteItemView:
     error_code: str | None
     conflict_evidence: Mapping[str, object] | None
     eligible_for_evaluation: bool
+    expected_subscription_version: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +124,8 @@ class QuoteCycleSummary:
     started_at: datetime | None
     deadline_at: datetime | None
     finalized_at: datetime | None
+    schedule_occurrence_id: UUID | None
+    subscription_snapshot_version: int | None
 
 
 @dataclass(frozen=True, slots=True)

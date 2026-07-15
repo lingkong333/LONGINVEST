@@ -43,6 +43,9 @@ class QuoteCycleRepository:
         )
 
     async def get_for_finalize(self, cycle_id: UUID) -> QuoteCycle | None:
+        return await self.get_for_update(cycle_id)
+
+    async def get_for_update(self, cycle_id: UUID) -> QuoteCycle | None:
         return await self.session.scalar(
             select(QuoteCycle)
             .options(selectinload(QuoteCycle.items))

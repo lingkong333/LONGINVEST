@@ -37,6 +37,15 @@ async def test_finalize_query_uses_lock_and_refreshes_identity_map() -> None:
 
 
 @pytest.mark.anyio
+async def test_lifecycle_query_uses_shared_lock_and_refresh() -> None:
+    session = AsyncMock()
+    await QuoteCycleRepository(session).get_for_update(uuid4())
+    statement = session.scalar.await_args.args[0]
+    assert "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect())).upper()
+    assert statement.get_execution_options()["populate_existing"] is True
+
+
+@pytest.mark.anyio
 async def test_item_submission_query_serializes_and_refreshes() -> None:
     session = AsyncMock()
     cycle_id = uuid4()

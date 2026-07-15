@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 
@@ -66,3 +67,15 @@ def test_create_cycle_rejects_duplicate_symbols_and_naive_time() -> None:
         command(symbols=("600000.SH", "600000.SH"))
     with pytest.raises(ValueError, match="timezone"):
         command(scheduled_at=datetime(2026, 7, 15, 1, 30))
+
+
+def test_create_cycle_tracks_optional_schedule_and_subscription_versions() -> None:
+    occurrence_id = uuid4()
+    value = command(
+        schedule_occurrence_id=occurrence_id,
+        subscription_snapshot_version=9,
+    )
+    assert value.schedule_occurrence_id == occurrence_id
+    assert value.subscription_snapshot_version == 9
+    with pytest.raises(ValueError, match="subscription"):
+        command(subscription_snapshot_version=0)

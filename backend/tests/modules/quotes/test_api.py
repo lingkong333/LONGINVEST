@@ -4,6 +4,7 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from long_invest.modules.auth.application import get_auth_application
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -12,6 +13,7 @@ from long_invest.modules.auth.dependencies import (
 )
 from long_invest.modules.quotes.api import get_quote_application, router
 from long_invest.platform.http.exception_handlers import register_exception_handlers
+from long_invest.platform.http.middleware import RequestContextMiddleware
 
 
 class FakeApplication:
@@ -36,8 +38,17 @@ class FakeApplication:
         return self.job
 
 
+class FakeAuthApplication:
+    async def authenticate(self, **_kwargs):
+        raise AssertionError("missing session must be rejected before authentication")
+
+    async def validate_write_request(self, **_kwargs):
+        raise AssertionError("missing CSRF must be rejected before authentication")
+
+
 def client(application=None, *, auth=True, write=True):
     app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
     register_exception_handlers(app)
     app.include_router(router)
     application = application or FakeApplication()
@@ -144,3 +155,46 @@ def test_cycle_and_item_queries_forward_stable_pagination() -> None:
         ("list", {"status": None, "page": 2, "page_size": 10}),
         ("items", cycle_id, {"page": 1, "page_size": 20}),
     ]
+
+
+def test_actual_read_dependency_rejects_missing_session() -> None:
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
+    register_exception_handlers(app)
+    app.include_router(router)
+    app.dependency_overrides[get_quote_application] = lambda: FakeApplication()
+    app.dependency_overrides[get_auth_application] = lambda: FakeAuthApplication()
+    with TestClient(app, raise_server_exceptions=False) as http:
+        response = http.get("/api/v1/quote-cycles")
+    assert response.status_code == 401
+    assert response.json()["code"] == "AUTH_SESSION_INVALID"
+
+
+def test_actual_write_dependency_rejects_missing_origin_and_csrf(monkeypatch) -> None:
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
+    register_exception_handlers(app)
+    app.include_router(router)
+    app.dependency_overrides[get_quote_application] = lambda: FakeApplication()
+    app.dependency_overrides[get_auth_application] = lambda: FakeAuthApplication()
+    monkeypatch.setattr(
+        "long_invest.modules.auth.dependencies.allowed_origins",
+        lambda: ("http://testserver",),
+    )
+    body = {"symbols": ["600000.SH"], "confirm": True}
+    with TestClient(app, raise_server_exceptions=False) as http:
+        missing_origin = http.post(
+            "/api/v1/quote-cycles/manual",
+            json=body,
+            headers={"Idempotency-Key": "one"},
+        )
+        http.cookies.set("__Host-session", "token")
+        missing_csrf = http.post(
+            "/api/v1/quote-cycles/manual",
+            json=body,
+            headers={"Idempotency-Key": "one", "Origin": "http://testserver"},
+        )
+    assert missing_origin.status_code == 403
+    assert missing_origin.json()["code"] == "AUTH_ORIGIN_INVALID"
+    assert missing_csrf.status_code == 403
+    assert missing_csrf.json()["code"] == "AUTH_CSRF_INVALID"

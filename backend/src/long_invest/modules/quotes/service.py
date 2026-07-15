@@ -36,6 +36,7 @@ class QuoteRepositoryPort(Protocol):
     async def claim_cycle(self, cycle: QuoteCycle) -> tuple[QuoteCycle, bool]: ...
     async def get_with_items(self, cycle_id: UUID) -> QuoteCycle | None: ...
     async def get_for_finalize(self, cycle_id: UUID) -> QuoteCycle | None: ...
+    async def get_for_update(self, cycle_id: UUID) -> QuoteCycle | None: ...
     async def get_item_for_update(
         self, cycle_id: UUID, symbol: str
     ) -> QuoteCycleItem | None: ...
@@ -93,10 +94,15 @@ class QuoteCycleService:
             idempotency_key=command.idempotency_key,
             expected_count=len(command.symbols),
             timeout_seconds=command.timeout_seconds,
+            schedule_occurrence_id=command.schedule_occurrence_id,
+            subscription_snapshot_version=command.subscription_snapshot_version,
         )
         cycle.items = [
             QuoteCycleItem(
-                symbol=symbol, status=QuoteItemStatus.MISSING, error_code=None
+                symbol=symbol,
+                status=QuoteItemStatus.MISSING,
+                error_code=None,
+                expected_subscription_version=command.subscription_snapshot_version,
             )
             for symbol in command.symbols
         ]
@@ -121,27 +127,42 @@ class QuoteCycleService:
     async def submit(
         self, cycle_id: UUID, submission: QuoteSubmission, now: datetime
     ) -> None:
-        cycle = await self._required(cycle_id)
-        if QuoteCycleStatus(cycle.status) in TERMINAL_CYCLES:
-            return
-        if QuoteCycleStatus(cycle.status) is not QuoteCycleStatus.FETCHING:
-            raise _state_error()
-        item = await self._repository.get_item_for_update(cycle_id, submission.symbol)
-        if item is None:
-            raise AppError(
-                code="QUOTE_ITEM_NOT_IN_SCOPE",
-                message="股票不在冻结范围内",
-                status_code=422,
+        cycle = await self._repository.get_for_update(cycle_id)
+        try:
+            if cycle is None:
+                raise _not_found()
+            if QuoteCycleStatus(cycle.status) in TERMINAL_CYCLES:
+                return
+            if QuoteCycleStatus(cycle.status) is not QuoteCycleStatus.FETCHING:
+                raise _state_error()
+            if cycle.deadline_at is not None and now > cycle.deadline_at:
+                raise AppError(
+                    code="QUOTE_CYCLE_DEADLINE_EXCEEDED",
+                    message="行情批次已超过截止时间",
+                    status_code=409,
+                )
+            item = await self._repository.get_item_for_update(
+                cycle_id, submission.symbol
             )
-        if item.error_code is not None or item.status != QuoteItemStatus.MISSING:
-            return
-        if submission.not_expected_to_trade:
-            _set_terminal(
-                item, QuoteItemStatus.NOT_EXPECTED_TO_TRADE, "NOT_EXPECTED_TO_TRADE"
-            )
-        else:
-            await self._apply_submission(cycle, item, submission, now)
-        await self._repository.flush()
+            if item is None:
+                raise AppError(
+                    code="QUOTE_ITEM_NOT_IN_SCOPE",
+                    message="股票不在冻结范围内",
+                    status_code=422,
+                )
+            if item.error_code is not None or item.status != QuoteItemStatus.MISSING:
+                return
+            if submission.not_expected_to_trade:
+                _set_terminal(
+                    item,
+                    QuoteItemStatus.NOT_EXPECTED_TO_TRADE,
+                    "NOT_EXPECTED_TO_TRADE",
+                )
+            else:
+                await self._apply_submission(cycle, item, submission, now)
+            await self._repository.flush()
+        finally:
+            await _release_test_lock(self._repository)
 
     async def _apply_submission(
         self,
@@ -202,7 +223,7 @@ class QuoteCycleService:
         _set_terminal(item, status, code)
 
     async def finalize(self, cycle_id: UUID, now: datetime) -> QuoteCycleSummary:
-        cycle = await self._repository.get_for_finalize(cycle_id)
+        cycle = await self._repository.get_for_update(cycle_id)
         try:
             if cycle is None:
                 raise _not_found()
@@ -267,30 +288,49 @@ class QuoteCycleService:
                 await self._events.missing(cycle, abnormal)
             return _summary(cycle)
         finally:
-            release = getattr(self._repository, "release_finalize", None)
-            if release is not None:
-                await release()
+            await _release_test_lock(self._repository)
 
     async def mark_missed(self, cycle_id: UUID, now: datetime) -> QuoteCycleSummary:
-        cycle = await self._required(cycle_id)
-        if QuoteCycleStatus(cycle.status) in TERMINAL_CYCLES:
+        cycle = await self._repository.get_for_update(cycle_id)
+        try:
+            if cycle is None:
+                raise _not_found()
+            if QuoteCycleStatus(cycle.status) in TERMINAL_CYCLES:
+                return _summary(cycle)
+            if (
+                QuoteCycleStatus(cycle.status) is not QuoteCycleStatus.PENDING
+                or cycle.started_at is not None
+                or now <= cycle.scheduled_at
+            ):
+                raise _state_error()
+            cycle.status = QuoteCycleStatus.MISSED
+            cycle.finalized_at = now
+            await self._repository.flush()
             return _summary(cycle)
-        cycle.status = QuoteCycleStatus.MISSED
-        cycle.finalized_at = now
-        await self._repository.flush()
-        return _summary(cycle)
+        finally:
+            await _release_test_lock(self._repository)
 
     async def cancel(
         self, cycle_id: UUID, now: datetime, reason: str
     ) -> QuoteCycleSummary:
-        cycle = await self._required(cycle_id)
-        if QuoteCycleStatus(cycle.status) in TERMINAL_CYCLES:
+        cycle = await self._repository.get_for_update(cycle_id)
+        try:
+            if cycle is None:
+                raise _not_found()
+            if QuoteCycleStatus(cycle.status) in TERMINAL_CYCLES:
+                return _summary(cycle)
+            if QuoteCycleStatus(cycle.status) not in {
+                QuoteCycleStatus.PENDING,
+                QuoteCycleStatus.FETCHING,
+            }:
+                raise _state_error()
+            cycle.status = QuoteCycleStatus.CANCELED
+            cycle.finalized_at = now
+            cycle.cancel_reason = reason
+            await self._repository.flush()
             return _summary(cycle)
-        cycle.status = QuoteCycleStatus.CANCELED
-        cycle.finalized_at = now
-        cycle.cancel_reason = reason
-        await self._repository.flush()
-        return _summary(cycle)
+        finally:
+            await _release_test_lock(self._repository)
 
     async def recover_expired(
         self, now: datetime, limit: int = 100
@@ -394,6 +434,8 @@ def _summary(cycle: QuoteCycle) -> QuoteCycleSummary:
         started_at=cycle.started_at,
         deadline_at=cycle.deadline_at,
         finalized_at=cycle.finalized_at,
+        schedule_occurrence_id=cycle.schedule_occurrence_id,
+        subscription_snapshot_version=cycle.subscription_snapshot_version,
     )
 
 
@@ -416,6 +458,7 @@ def _item_view(item: QuoteCycleItem) -> QuoteItemView:
         error_code=item.error_code,
         conflict_evidence=item.conflict_evidence,
         eligible_for_evaluation=item.eligible_for_evaluation,
+        expected_subscription_version=item.expected_subscription_version,
     )
 
 
@@ -431,3 +474,9 @@ def _state_error() -> AppError:
         message="行情批次状态不允许该操作",
         status_code=409,
     )
+
+
+async def _release_test_lock(repository: QuoteRepositoryPort) -> None:
+    release = getattr(repository, "release_finalize", None)
+    if release is not None:
+        await release()

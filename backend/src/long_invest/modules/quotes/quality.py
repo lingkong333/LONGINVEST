@@ -5,6 +5,9 @@ from decimal import Decimal
 from long_invest.modules.providers.contracts import RealtimeQuote
 
 MAX_FRESHNESS_SECONDS = 180
+MAX_PRICE_ABS = Decimal("1e14")
+MAX_AMOUNT = Decimal("1e20")
+MAX_VOLUME = 2_147_483_647
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,14 +29,29 @@ def validate_quote(
     _require_aware(now)
     if quote.symbol != symbol:
         return QuoteValidation(False, "QUOTE_SYMBOL_MISMATCH")
-    if quote.price <= 0:
+    if (
+        not quote.price.is_finite()
+        or quote.price <= 0
+        or abs(quote.price) >= MAX_PRICE_ABS
+    ):
         return QuoteValidation(False, "QUOTE_PRICE_INVALID")
     prices = (quote.open, quote.high, quote.low, quote.price)
-    if any(value <= 0 for value in prices):
+    if any(
+        not value.is_finite() or value <= 0 or abs(value) >= MAX_PRICE_ABS
+        for value in prices
+    ):
         return QuoteValidation(False, "QUOTE_OHLC_INVALID")
     if quote.high < max(prices) or quote.low > min(prices):
         return QuoteValidation(False, "QUOTE_OHLC_INVALID")
-    if quote.previous_close < 0 or quote.volume < 0 or quote.amount < 0:
+    if (
+        not quote.previous_close.is_finite()
+        or quote.previous_close < 0
+        or abs(quote.previous_close) >= MAX_PRICE_ABS
+        or type(quote.volume) is not int
+        or not 0 <= quote.volume <= MAX_VOLUME
+        or not quote.amount.is_finite()
+        or not 0 <= quote.amount < MAX_AMOUNT
+    ):
         return QuoteValidation(False, "QUOTE_QUANTITY_INVALID")
     if not _is_aware(quote.quote_time) or not _is_aware(quote.received_at):
         return QuoteValidation(False, "QUOTE_TIME_INVALID")

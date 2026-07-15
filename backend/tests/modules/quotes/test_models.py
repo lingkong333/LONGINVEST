@@ -39,4 +39,10 @@ def test_quote_item_persists_standard_quote_and_quality_fields() -> None:
         "error_code",
         "conflict_evidence",
         "eligible_for_evaluation",
+        "expected_subscription_version",
     } <= columns
+
+
+def test_cycle_persists_v31_schedule_and_subscription_tracking() -> None:
+    columns = set(QuoteCycle.__table__.columns.keys())
+    assert {"schedule_occurrence_id", "subscription_snapshot_version"} <= columns

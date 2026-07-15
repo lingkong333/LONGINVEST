@@ -30,6 +30,11 @@ class QuoteCycle(Base):
         CheckConstraint("expected_count > 0", name="expected_positive"),
         CheckConstraint("timeout_seconds BETWEEN 10 AND 60", name="timeout_supported"),
         CheckConstraint(
+            "subscription_snapshot_version IS NULL OR "
+            "subscription_snapshot_version > 0",
+            name="subscription_snapshot_positive",
+        ),
+        CheckConstraint(
             "valid_count >= 0 AND missing_count >= 0 AND conflict_count >= 0 "
             "AND failed_count >= 0",
             name="counts_nonnegative",
@@ -52,11 +57,13 @@ class QuoteCycle(Base):
     scheduled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
+    schedule_occurrence_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deadline_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     universe_snapshot_id: Mapped[str] = mapped_column(String(200), nullable=False)
     universe_snapshot_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    subscription_snapshot_version: Mapped[int | None] = mapped_column(Integer)
     idempotency_scope: Mapped[str] = mapped_column(String(200), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -79,6 +86,11 @@ class QuoteCycleItem(Base):
         UniqueConstraint("cycle_id", "symbol", name="uq_quote_cycle_item_symbol"),
         CheckConstraint("volume IS NULL OR volume >= 0", name="volume_nonnegative"),
         CheckConstraint("amount IS NULL OR amount >= 0", name="amount_nonnegative"),
+        CheckConstraint(
+            "expected_subscription_version IS NULL OR "
+            "expected_subscription_version > 0",
+            name="expected_subscription_positive",
+        ),
         Index("ix_quote_cycle_item_cycle_status", "cycle_id", "status"),
     )
 
@@ -96,6 +108,7 @@ class QuoteCycleItem(Base):
         nullable=False,
     )
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
+    expected_subscription_version: Mapped[int | None] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     open: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))

@@ -121,6 +121,32 @@ class ConcurrentRepository:
             self.update_lock.release()
 
 
+class RefreshingIdentityMapSession:
+    def __init__(self, cached: DataQualityIssue) -> None:
+        self.cached = cached
+        self.scalar_calls = 0
+        self.flush_calls = 0
+
+    async def scalar(self, statement):
+        self.scalar_calls += 1
+        if self.scalar_calls == 1:
+            return self.cached
+        if statement.get_execution_options().get("populate_existing") is True:
+            self.cached.status = QualityIssueStatus.RESOLVED
+            self.cached.occurrence_count = 7
+            self.cached.severity = QualitySeverity.CRITICAL
+            self.cached.evidence = {"winner": "database"}
+            self.cached.last_seen_at = NOW + timedelta(minutes=5)
+            self.cached.resolved_at = NOW + timedelta(minutes=5)
+            self.cached.resolved_by_user_id = "reviewer"
+            self.cached.resolution_action = QualityResolutionAction.RESOLVE
+            self.cached.resolution_reason = "already handled"
+        return self.cached
+
+    async def flush(self):
+        self.flush_calls += 1
+
+
 @pytest.mark.anyio
 @pytest.mark.parametrize(
     ("requires_review", "expected_status"),
@@ -254,7 +280,10 @@ async def test_simultaneous_open_claims_one_issue_and_serializes_replay() -> Non
         ),
     )
 
-    results = await asyncio.gather(*(service.open(command) for command in commands))
+    results = await asyncio.wait_for(
+        asyncio.gather(*(service.open(command) for command in commands)),
+        timeout=2,
+    )
 
     assert len({result.issue.id for result in results}) == 1
     assert sorted(result.created for result in results) == [False, True]
@@ -266,6 +295,43 @@ async def test_simultaneous_open_claims_one_issue_and_serializes_replay() -> Non
     assert stored.severity == QualitySeverity.CRITICAL
     assert stored.evidence == commands[replay_index].evidence
     assert repository.update_lock_count == 1
+
+
+@pytest.mark.anyio
+async def test_open_refreshes_cached_issue_after_acquiring_database_lock() -> None:
+    stale = DataQualityIssue(
+        issue_type="QUOTE_CONFLICT",
+        subject_type="quote_cycle_item",
+        subject_id="item-1",
+        symbol="600000.SH",
+        status=QualityIssueStatus.OPEN,
+        severity=QualitySeverity.WARNING,
+        evidence={"stale": True},
+        dedupe_key="quote:item-1:conflict",
+        occurrence_count=1,
+        first_seen_at=NOW,
+        last_seen_at=NOW,
+    )
+    session = RefreshingIdentityMapSession(stale)
+    service = QualityIssueService(
+        QualityIssueRepository(session),  # type: ignore[arg-type]
+        now_provider=lambda: NOW + timedelta(minutes=10),
+    )
+
+    result = await service.open(
+        open_command(
+            severity=QualitySeverity.ERROR,
+            evidence={"incoming": "must-not-overwrite-terminal"},
+        )
+    )
+
+    assert result.replayed is True
+    assert result.created is False
+    assert result.issue.status == QualityIssueStatus.RESOLVED
+    assert result.issue.occurrence_count == 7
+    assert result.issue.severity == QualitySeverity.CRITICAL
+    assert result.issue.evidence == {"winner": "database"}
+    assert session.flush_calls == 0
 
 
 @pytest.mark.anyio
@@ -519,6 +585,7 @@ async def test_repository_get_for_update_uses_postgresql_row_lock() -> None:
     statement = session.scalar.await_args.args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
     assert "FOR UPDATE" in str(compiled).upper()
+    assert statement.get_execution_options()["populate_existing"] is True
     assert issue_id in compiled.params.values()
 
 

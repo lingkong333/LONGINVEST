@@ -25,6 +25,7 @@ class QualityIssueRepository:
             select(DataQualityIssue)
             .where(DataQualityIssue.id == issue_id)
             .with_for_update()
+            .execution_options(populate_existing=True)
         )
 
     def add(self, record: DataQualityIssue) -> None:

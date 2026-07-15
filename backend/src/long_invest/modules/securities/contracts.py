@@ -97,6 +97,28 @@ class SnapshotResult:
     replayed: bool = False
 
 
+@dataclass(frozen=True, slots=True)
+class SecurityAuditContext:
+    request_id: str
+    idempotency_key: str
+    actor_user_id: str
+    session_id: str
+    trusted_ip: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        values = (
+            self.request_id,
+            self.idempotency_key,
+            self.actor_user_id,
+            self.session_id,
+            self.trusted_ip,
+            self.reason,
+        )
+        if any(not value.strip() for value in values):
+            raise ValueError("证券主数据审计上下文必须完整")
+
+
 def assess_monitoring_eligibility(item: SecurityMasterItem) -> SecurityEligibility:
     if item.security_type is not SecurityType.A_SHARE or item.market not in {
         Market.SH,

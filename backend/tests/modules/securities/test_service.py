@@ -6,6 +6,7 @@ import pytest
 from long_invest.modules.securities.contracts import (
     ListingStatus,
     Market,
+    SecurityAuditContext,
     SecurityMasterItem,
     SecurityMasterSnapshot,
     SecurityType,
@@ -44,11 +45,12 @@ def item(
 
 def snapshot(
     *items: SecurityMasterItem,
+    source: str = "eastmoney",
     source_version: str = "2026-07-15T09:00:00Z",
     key: str = "refresh-1",
 ) -> SecurityMasterSnapshot:
     return SecurityMasterSnapshot(
-        source="eastmoney",
+        source=source,
         source_version=source_version,
         idempotency_key=key,
         items=tuple(items),
@@ -58,7 +60,7 @@ def snapshot(
 class FakeRepository:
     def __init__(self) -> None:
         self.securities: dict[str, Security] = {}
-        self.imports_by_key: dict[tuple[str, str], SecurityMasterVersion] = {}
+        self.imports_by_key: dict[str, SecurityMasterVersion] = {}
         self.imports_by_version: dict[tuple[str, str], SecurityMasterVersion] = {}
         self.revisions = []
         self.saved_universes = []
@@ -74,7 +76,7 @@ class FakeRepository:
         self, *, source, idempotency_key=None, source_version=None
     ):
         if idempotency_key is not None:
-            return self.imports_by_key.get((source, idempotency_key))
+            return self.imports_by_key.get(idempotency_key)
         return self.imports_by_version.get((source, source_version))
 
     async def current_master_version(self):
@@ -83,7 +85,7 @@ class FakeRepository:
         return max(versions, default=0)
 
     def add_master_import(self, record):
-        self.imports_by_key[(record.source, record.idempotency_key)] = record
+        self.imports_by_key[record.idempotency_key] = record
         self.imports_by_version[(record.source, record.source_version)] = record
 
     async def get_many(self, symbols):
@@ -133,11 +135,42 @@ class FakeRepository:
         self.flushed += 1
 
 
+class FakeAudit:
+    def __init__(self, session) -> None:
+        self.session = session
+
+    async def record(self, event) -> None:
+        self.session.audit_events.append(event)
+
+
+class FakeEvents:
+    def __init__(self, session) -> None:
+        self.session = session
+
+    async def publish(self, event) -> None:
+        self.session.security_events.append(event)
+
+
 def service(repository: FakeRepository):
     session = Mock()
     session.commit = AsyncMock()
-    session.add = Mock()
-    return SecurityMasterService(session, repository=repository), session
+    session.audit_events = []
+    session.security_events = []
+    subject = SecurityMasterService(
+        session,
+        repository=repository,
+        audit_context=SecurityAuditContext(
+            request_id="req_12345678",
+            idempotency_key="refresh-1",
+            actor_user_id="user-1",
+            session_id="session-1",
+            trusted_ip="127.0.0.1",
+            reason="scheduled security master refresh",
+        ),
+        audit=FakeAudit(session),
+        events=FakeEvents(session),
+    )
+    return subject, session
 
 
 @pytest.mark.anyio
@@ -151,11 +184,24 @@ async def test_first_snapshot_creates_securities_and_emits_one_update_event() ->
     assert result.created_count == 1
     assert result.revision_count == 0
     assert set(repository.securities) == {"600000.SH"}
-    event = session.add.call_args.args[0]
-    assert event.topic == "security_master.updated"
-    assert event.payload["master_version"] == 1
+    event = session.security_events[0]
+    assert event.master_version == 1
+    assert session.audit_events[0].master_version == 1
     assert repository.master_lock_count == 1
     session.commit.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_snapshot_fails_closed_without_audit_and_event_ports() -> None:
+    repository = FakeRepository()
+    session = Mock()
+    subject = SecurityMasterService(session, repository=repository)
+
+    with pytest.raises(AppError) as captured:
+        await subject.apply_snapshot(snapshot(item()))
+
+    assert captured.value.code == "SECURITY_INTEGRATION_UNAVAILABLE"
+    assert repository.securities == {}
 
 
 @pytest.mark.anyio
@@ -164,14 +210,16 @@ async def test_same_content_replay_returns_existing_result_without_revision() ->
     subject, session = service(repository)
     first = snapshot(item())
     await subject.apply_snapshot(first)
-    session.add.reset_mock()
+    audit_count = len(session.audit_events)
+    event_count = len(session.security_events)
 
     result = await subject.apply_snapshot(first)
 
     assert result.replayed is True
     assert result.master_version == 1
     assert repository.revisions == []
-    session.add.assert_not_called()
+    assert len(session.audit_events) == audit_count
+    assert len(session.security_events) == event_count
 
 
 @pytest.mark.anyio
@@ -180,7 +228,8 @@ async def test_same_source_version_with_a_new_key_has_one_formal_result() -> Non
     subject, session = service(repository)
     first = snapshot(item())
     await subject.apply_snapshot(first)
-    session.add.reset_mock()
+    audit_count = len(session.audit_events)
+    event_count = len(session.security_events)
 
     replay = await subject.apply_snapshot(
         snapshot(item(), key="a-second-request-key")
@@ -189,7 +238,8 @@ async def test_same_source_version_with_a_new_key_has_one_formal_result() -> Non
     assert replay.replayed is True
     assert replay.master_version == 1
     assert len(repository.imports_by_version) == 1
-    session.add.assert_not_called()
+    assert len(session.audit_events) == audit_count
+    assert len(session.security_events) == event_count
 
 
 @pytest.mark.anyio
@@ -311,7 +361,8 @@ async def test_invalid_snapshot_fails_before_any_mutation(invalid_snapshot) -> N
     assert captured.value.code == "SECURITY_SNAPSHOT_INCOMPLETE"
     assert repository.securities == {}
     assert repository.imports_by_key == {}
-    session.add.assert_not_called()
+    assert session.audit_events == []
+    assert session.security_events == []
 
 
 @pytest.mark.anyio
@@ -322,6 +373,34 @@ async def test_different_content_reusing_key_is_conflict() -> None:
 
     with pytest.raises(AppError) as captured:
         await subject.apply_snapshot(snapshot(item(name="另一个名称")))
+
+    assert captured.value.status_code == 409
+    assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.anyio
+async def test_same_items_and_key_with_a_new_source_version_is_conflict() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    await subject.apply_snapshot(snapshot(item()))
+
+    with pytest.raises(AppError) as captured:
+        await subject.apply_snapshot(
+            snapshot(item(), source_version="a-different-source-version")
+        )
+
+    assert captured.value.status_code == 409
+    assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.anyio
+async def test_same_items_and_key_with_a_new_source_is_conflict() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    await subject.apply_snapshot(snapshot(item()))
+
+    with pytest.raises(AppError) as captured:
+        await subject.apply_snapshot(snapshot(item(), source="another-provider"))
 
     assert captured.value.status_code == 409
     assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"

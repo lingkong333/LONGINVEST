@@ -143,16 +143,14 @@ class SecurityRepository:
         idempotency_key: str | None = None,
         source_version: str | None = None,
     ) -> SecurityMasterVersion | None:
-        statement = select(SecurityMasterVersion).where(
-            SecurityMasterVersion.source == source
-        )
         if idempotency_key is not None:
-            statement = statement.where(
+            statement = select(SecurityMasterVersion).where(
                 SecurityMasterVersion.idempotency_key == idempotency_key
             )
         elif source_version is not None:
-            statement = statement.where(
-                SecurityMasterVersion.source_version == source_version
+            statement = select(SecurityMasterVersion).where(
+                SecurityMasterVersion.source == source,
+                SecurityMasterVersion.source_version == source_version,
             )
         else:
             raise ValueError("必须提供幂等键或来源版本")

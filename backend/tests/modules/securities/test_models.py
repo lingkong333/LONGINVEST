@@ -71,7 +71,7 @@ def test_master_version_serializes_source_version_and_idempotency_claims() -> No
     uniques = unique_columns(SecurityMasterVersion)
 
     assert ("source", "source_version") in uniques
-    assert ("source", "idempotency_key") in uniques
+    assert ("idempotency_key",) in uniques
     assert ("master_version",) in uniques
 
 

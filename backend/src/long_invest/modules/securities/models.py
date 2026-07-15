@@ -77,7 +77,7 @@ class SecurityMasterVersion(Base):
     __tablename__ = "security_master_version"
     __table_args__ = (
         UniqueConstraint("source", "source_version"),
-        UniqueConstraint("source", "idempotency_key"),
+        UniqueConstraint("idempotency_key"),
         UniqueConstraint("master_version"),
         CheckConstraint("master_version > 0", name="master_version_positive"),
         CheckConstraint("item_count > 0", name="item_count_positive"),

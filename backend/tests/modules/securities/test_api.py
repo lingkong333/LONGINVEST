@@ -138,3 +138,20 @@ def test_refresh_creates_job_for_verified_identity() -> None:
     arguments = application.refresh.await_args.kwargs
     assert arguments["idempotency_key"] == "refresh-1"
     assert arguments["created_by_user_id"] == str(identity.user.id)
+
+
+def test_database_unavailable_error_is_exposed_as_stable_503() -> None:
+    application = Mock()
+    application.list = AsyncMock(
+        side_effect=AppError(
+            code="SECURITY_BACKEND_UNAVAILABLE",
+            message="股票主数据服务暂时不可用",
+            status_code=503,
+        )
+    )
+    client, _identity = client_for(application)
+
+    response = client.get("/api/v1/securities")
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "SECURITY_BACKEND_UNAVAILABLE"

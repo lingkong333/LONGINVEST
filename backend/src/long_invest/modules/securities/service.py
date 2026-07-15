@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from long_invest.modules.securities.contracts import (
     ListingStatus,
     Market,
+    SecurityAuditContext,
     SecurityEligibility,
     SecurityMasterItem,
     SecurityMasterSnapshot,
@@ -18,6 +19,12 @@ from long_invest.modules.securities.contracts import (
     UniverseQuery,
     assess_monitoring_eligibility,
     validate_symbol,
+)
+from long_invest.modules.securities.integrations import (
+    SecurityAuditPort,
+    SecurityEventPort,
+    SecurityMasterAuditEvent,
+    SecurityMasterUpdatedEvent,
 )
 from long_invest.modules.securities.models import (
     Security,
@@ -28,7 +35,6 @@ from long_invest.modules.securities.models import (
 )
 from long_invest.modules.securities.repository import SecurityRepository
 from long_invest.platform.errors import AppError
-from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
 _MUTABLE_FIELDS = (
     "exchange_code",
@@ -51,13 +57,20 @@ class SecurityMasterService:
         session: AsyncSession,
         *,
         repository: SecurityRepository | None = None,
+        audit_context: SecurityAuditContext | None = None,
+        audit: SecurityAuditPort | None = None,
+        events: SecurityEventPort | None = None,
     ) -> None:
         self._session = session
         self._repository = repository or SecurityRepository(session)
+        self._audit_context = audit_context
+        self._audit = audit
+        self._events = events
 
     async def apply_snapshot(
         self, snapshot: SecurityMasterSnapshot
     ) -> SnapshotResult:
+        audit_context, audit, events = self._require_integrations()
         _validate_snapshot(snapshot)
         content_hash = _snapshot_hash(snapshot)
         await self._repository.lock_master_updates()
@@ -159,9 +172,48 @@ class SecurityMasterService:
             revision_count=revision_count,
         )
         version_record.result_summary = asdict(result)
-        self._session.add(_updated_event(snapshot, result))
+        await audit.record(
+            SecurityMasterAuditEvent(
+                context=audit_context,
+                master_version=result.master_version,
+                total_count=result.total_count,
+                created_count=result.created_count,
+                updated_count=result.updated_count,
+                revision_count=result.revision_count,
+            )
+        )
+        await events.publish(
+            SecurityMasterUpdatedEvent(
+                master_version=result.master_version,
+                source=snapshot.source,
+                source_version=snapshot.source_version,
+                total_count=result.total_count,
+                created_count=result.created_count,
+                updated_count=result.updated_count,
+            )
+        )
         await self._repository.flush()
         return result
+
+    def _require_integrations(
+        self,
+    ) -> tuple[SecurityAuditContext, SecurityAuditPort, SecurityEventPort]:
+        context = self._audit_context
+        audit = self._audit
+        events = self._events
+        if context is None or audit is None or events is None:
+            raise AppError(
+                code="SECURITY_INTEGRATION_UNAVAILABLE",
+                message="股票主数据审计或可靠事件集成不可用",
+                status_code=503,
+            )
+        if audit.session is not self._session or events.session is not self._session:
+            raise AppError(
+                code="SECURITY_TRANSACTION_MISMATCH",
+                message="股票主数据审计和事件必须使用同一数据库事务",
+                status_code=500,
+            )
+        return context, audit, events
 
     async def validate_monitoring_eligibility(
         self, symbol: str
@@ -312,12 +364,17 @@ def _validate_snapshot(snapshot: SecurityMasterSnapshot) -> None:
 
 
 def _snapshot_hash(snapshot: SecurityMasterSnapshot) -> str:
-    payload = [
+    items = [
         _json_safe(_item_data(item)) | {"symbol": item.symbol}
         for item in snapshot.items
     ]
+    payload = {
+        "source": snapshot.source,
+        "source_version": snapshot.source_version,
+        "items": sorted(items, key=lambda value: value["symbol"]),
+    }
     serialized = json.dumps(
-        sorted(payload, key=lambda value: value["symbol"]),
+        payload,
         ensure_ascii=False,
         allow_nan=False,
         sort_keys=True,
@@ -416,27 +473,3 @@ def _json_safe(value: dict[str, Any]) -> dict[str, Any]:
         key: item.isoformat() if isinstance(item, date) else item
         for key, item in value.items()
     }
-
-
-def _updated_event(
-    snapshot: SecurityMasterSnapshot, result: SnapshotResult
-) -> EventOutbox:
-    dedupe_digest = hashlib.sha256(
-        f"{snapshot.source}\0{snapshot.source_version}".encode()
-    ).hexdigest()
-    return EventOutbox(
-        topic="security_master.updated",
-        aggregate_type="security_master",
-        aggregate_id=str(result.master_version),
-        queue="default",
-        payload={
-            "master_version": result.master_version,
-            "source": snapshot.source,
-            "source_version": snapshot.source_version,
-            "total_count": result.total_count,
-            "created_count": result.created_count,
-            "updated_count": result.updated_count,
-        },
-        dedupe_key=f"security-master:{dedupe_digest}",
-        status=OutboxStatus.PENDING,
-    )

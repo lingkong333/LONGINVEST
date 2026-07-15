@@ -36,11 +36,15 @@ class NotificationRepository:
             )
         )
 
-    def add_event(self, event: NotificationEvent) -> None:
-        self._session.add(event)
-
-    def add_deliveries(self, deliveries: list[NotificationDelivery]) -> None:
-        self._session.add_all(deliveries)
+    async def persist_event_and_deliveries(
+        self,
+        event: NotificationEvent,
+        deliveries: list[NotificationDelivery],
+    ) -> None:
+        async with self._session.begin_nested():
+            self._session.add(event)
+            self._session.add_all(deliveries)
+            await self._session.flush()
 
     async def claim_next(
         self,
@@ -111,11 +115,18 @@ class NotificationRepository:
     async def get_event(self, event_id: UUID) -> NotificationEvent | None:
         return await self._session.get(NotificationEvent, event_id)
 
+    async def lock_event(self, event_id: UUID) -> NotificationEvent | None:
+        return await self._session.scalar(
+            select(NotificationEvent)
+            .where(NotificationEvent.id == event_id)
+            .with_for_update()
+        )
+
     async def list_deliveries(self, event_id: UUID) -> list[NotificationDelivery]:
         result = await self._session.scalars(
-            select(NotificationDelivery).where(
-                NotificationDelivery.event_id == event_id
-            )
+            select(NotificationDelivery)
+            .where(NotificationDelivery.event_id == event_id)
+            .execution_options(populate_existing=True)
         )
         return list(result.all())
 

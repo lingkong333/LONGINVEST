@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
+from sqlalchemy.exc import IntegrityError
+
 from long_invest.modules.notifications.channels import ChannelResult
 from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
@@ -85,12 +87,7 @@ class NotificationService:
             command.idempotency_key
         )
         if existing is not None:
-            if existing.content_hash != content_hash:
-                raise NotificationPublishError(
-                    code="NOTIFICATION_IDEMPOTENCY_KEY_REUSED",
-                    message="notification idempotency key was reused for other content",
-                )
-            return existing
+            return _resolve_publish_replay(existing, content_hash)
 
         try:
             definition = self._templates.resolve(
@@ -149,9 +146,15 @@ class NotificationService:
             for target in command.targets
             if is_eligible
         ]
-        self._repository.add_event(event)
-        self._repository.add_deliveries(deliveries)
-        await self._repository.flush()
+        try:
+            await self._repository.persist_event_and_deliveries(event, deliveries)
+        except IntegrityError:
+            existing = await self._repository.find_event_by_idempotency(
+                command.idempotency_key
+            )
+            if existing is None:
+                raise
+            return _resolve_publish_replay(existing, content_hash)
         return event
 
     async def record_result(
@@ -200,7 +203,7 @@ class NotificationService:
         delivery.error_code = reason
         delivery.next_retry_at = None
         self._clear_lease(delivery)
-        event = await self._repository.get_event(delivery.event_id)
+        event = await self._repository.lock_event(delivery.event_id)
         if event is not None:
             deliveries = await self._repository.list_deliveries(event.id)
             event.status = aggregate_event_status(
@@ -245,7 +248,7 @@ class NotificationService:
         finished_at: datetime,
         phase: str,
     ) -> None:
-        event = await self._repository.get_event(delivery.event_id)
+        event = await self._repository.lock_event(delivery.event_id)
         request_count = delivery.attempt_count + 1
         duration_ms = max(
             0,
@@ -363,3 +366,15 @@ def _publish_content_hash(command: PublishNotification) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _resolve_publish_replay(
+    existing: NotificationEvent,
+    content_hash: str,
+) -> NotificationEvent:
+    if existing.content_hash != content_hash:
+        raise NotificationPublishError(
+            code="NOTIFICATION_IDEMPOTENCY_KEY_REUSED",
+            message="notification idempotency key was reused for other content",
+        )
+    return existing

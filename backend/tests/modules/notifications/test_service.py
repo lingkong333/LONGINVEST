@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.notifications.channels import ChannelResult
 from long_invest.modules.notifications.contracts import (
@@ -38,8 +39,14 @@ class FakeRepository:
         self.attempts: list[NotificationDeliveryAttempt] = []
         self.expired: list[NotificationDelivery] = []
         self.flush_count = 0
+        self.operations: list[str] = []
+        self.concurrent_conflict: str | None = None
+        self.conflict_raised = False
 
     async def find_event_by_idempotency(self, idempotency_key):
+        self.operations.append("find_event_by_idempotency")
+        if self.concurrent_conflict is not None and not self.conflict_raised:
+            return None
         if self.event.idempotency_key == idempotency_key:
             return self.event
         return None
@@ -50,13 +57,32 @@ class FakeRepository:
     def add_deliveries(self, deliveries):
         self.deliveries.extend(deliveries)
 
+    async def persist_event_and_deliveries(self, event, deliveries):
+        self.operations.append("persist_event_and_deliveries")
+        if self.concurrent_conflict is not None:
+            self.conflict_raised = True
+            self.event.idempotency_key = event.idempotency_key
+            self.event.content_hash = (
+                event.content_hash
+                if self.concurrent_conflict == "same"
+                else "different-content-hash"
+            )
+            raise IntegrityError("INSERT", {}, RuntimeError("duplicate key"))
+        self.event = event
+        self.deliveries.extend(deliveries)
+
     async def lock_delivery(self, delivery_id):
         return next((item for item in self.deliveries if item.id == delivery_id), None)
 
     async def get_event(self, event_id):
         return self.event if self.event.id == event_id else None
 
+    async def lock_event(self, event_id):
+        self.operations.append("lock_event")
+        return self.event if self.event.id == event_id else None
+
     async def list_deliveries(self, event_id):
+        self.operations.append("list_deliveries")
         return [item for item in self.deliveries if item.event_id == event_id]
 
     def add_attempt(self, attempt):
@@ -168,6 +194,9 @@ async def test_record_result_writes_attempt_and_advances_delivery_and_event(
     assert repository.attempts[0].attempt_no == 1
     assert repository.attempts[0].outcome == result.outcome
     assert repository.attempts[0].duration_ms == 125
+    assert repository.operations.index("lock_event") < repository.operations.index(
+        "list_deliveries"
+    )
 
 
 @pytest.mark.anyio
@@ -340,3 +369,38 @@ async def test_publish_rejects_idempotency_key_reused_for_different_content() ->
         )
 
     assert exc_info.value.code == "NOTIFICATION_IDEMPOTENCY_KEY_REUSED"
+
+
+@pytest.mark.anyio
+async def test_concurrent_same_publish_returns_winner_after_conflict() -> None:
+    service = load_service()
+    winner, _, _ = event_and_delivery()
+    winner.idempotency_key = "unrelated-before-race"
+    repository = FakeRepository(winner, [])
+    repository.concurrent_conflict = "same"
+
+    returned = await service.NotificationService(repository).publish(
+        publish_command(service)
+    )
+
+    assert returned is winner
+    assert repository.operations == [
+        "find_event_by_idempotency",
+        "persist_event_and_deliveries",
+        "find_event_by_idempotency",
+    ]
+
+
+@pytest.mark.anyio
+async def test_concurrent_different_publish_returns_stable_key_reused_error() -> None:
+    service = load_service()
+    winner, _, _ = event_and_delivery()
+    winner.idempotency_key = "unrelated-before-race"
+    repository = FakeRepository(winner, [])
+    repository.concurrent_conflict = "different"
+
+    with pytest.raises(service.NotificationPublishError) as exc_info:
+        await service.NotificationService(repository).publish(publish_command(service))
+
+    assert exc_info.value.code == "NOTIFICATION_IDEMPOTENCY_KEY_REUSED"
+    assert not isinstance(exc_info.value, IntegrityError)

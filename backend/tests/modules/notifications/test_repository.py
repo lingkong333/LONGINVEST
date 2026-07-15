@@ -11,7 +11,10 @@ from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
     NotificationDeliveryStatus,
 )
-from long_invest.modules.notifications.models import NotificationDelivery
+from long_invest.modules.notifications.models import (
+    NotificationDelivery,
+    NotificationEvent,
+)
 
 
 def load_repository():
@@ -92,3 +95,60 @@ async def test_repository_locks_only_expired_sending_leases_for_recovery() -> No
     assert "LEASE_EXPIRES_AT" in sql
     assert "FOR UPDATE SKIP LOCKED" in sql
     assert expired == [delivery]
+
+
+@pytest.mark.anyio
+async def test_lock_event_uses_database_row_lock_for_serialized_aggregation() -> None:
+    repository = load_repository()
+    event = Mock(spec=NotificationEvent)
+    session = AsyncMock()
+    session.scalar.return_value = event
+    event_id = uuid4()
+
+    locked = await repository.NotificationRepository(session).lock_event(event_id)
+
+    statement = session.scalar.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect())).upper()
+    assert "NOTIFICATION_EVENT.ID" in sql
+    assert "FOR UPDATE" in sql
+    assert locked is event
+
+
+@pytest.mark.anyio
+async def test_persist_event_and_deliveries_runs_inside_savepoint() -> None:
+    repository = load_repository()
+    session = Mock()
+    session.flush = AsyncMock()
+    nested = AsyncMock()
+    session.begin_nested.return_value = nested
+    event = Mock(spec=NotificationEvent)
+    delivery = pending_delivery()
+
+    await repository.NotificationRepository(session).persist_event_and_deliveries(
+        event,
+        [delivery],
+    )
+
+    session.begin_nested.assert_called_once_with()
+    nested.__aenter__.assert_awaited_once()
+    nested.__aexit__.assert_awaited_once()
+    session.add.assert_called_once_with(event)
+    session.add_all.assert_called_once_with([delivery])
+    session.flush.assert_awaited_once()
+
+
+@pytest.mark.anyio
+async def test_delivery_reread_refreshes_identity_map_after_event_lock() -> None:
+    repository = load_repository()
+    session = AsyncMock()
+    result = Mock()
+    result.all.return_value = []
+    session.scalars.return_value = result
+
+    deliveries = await repository.NotificationRepository(session).list_deliveries(
+        uuid4()
+    )
+
+    statement = session.scalars.await_args.args[0]
+    assert statement.get_execution_options()["populate_existing"] is True
+    assert deliveries == []

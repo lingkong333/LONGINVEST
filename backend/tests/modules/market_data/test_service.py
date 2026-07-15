@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, Mock
 from uuid import uuid4
@@ -80,6 +81,44 @@ class MemoryRepository:
         self.flush_calls += 1
         if self.flush_error is not None:
             raise self.flush_error
+
+
+class ConcurrentRepository:
+    def __init__(self) -> None:
+        self.records: dict[str, DataQualityIssue] = {}
+        self.find_barrier = asyncio.Barrier(2)
+        self.claim_barrier = asyncio.Barrier(2)
+        self.claim_lock = asyncio.Lock()
+        self.update_lock = asyncio.Lock()
+        self.update_owner: asyncio.Task[object] | None = None
+        self.update_lock_count = 0
+
+    async def find_by_dedupe_key(self, key: str):
+        await self.find_barrier.wait()
+        return self.records.get(key)
+
+    async def claim_issue(self, record: DataQualityIssue):
+        await self.claim_barrier.wait()
+        async with self.claim_lock:
+            existing = self.records.get(record.dedupe_key)
+            if existing is not None:
+                return existing, False
+            self.records[record.dedupe_key] = record
+            return record, True
+
+    async def get_for_update(self, issue_id):
+        await self.update_lock.acquire()
+        self.update_owner = asyncio.current_task()
+        self.update_lock_count += 1
+        return next(
+            (record for record in self.records.values() if record.id == issue_id),
+            None,
+        )
+
+    async def flush(self):
+        if self.update_owner is asyncio.current_task():
+            self.update_owner = None
+            self.update_lock.release()
 
 
 @pytest.mark.anyio
@@ -198,6 +237,35 @@ async def test_open_concurrent_claim_uses_winning_record_as_replay() -> None:
     assert result.issue is winner
     assert result.created is False
     assert result.replayed is True
+
+
+@pytest.mark.anyio
+async def test_simultaneous_open_claims_one_issue_and_serializes_replay() -> None:
+    repository = ConcurrentRepository()
+    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    commands = (
+        open_command(
+            severity=QualitySeverity.WARNING,
+            evidence={"request": "warning"},
+        ),
+        open_command(
+            severity=QualitySeverity.CRITICAL,
+            evidence={"request": "critical"},
+        ),
+    )
+
+    results = await asyncio.gather(*(service.open(command) for command in commands))
+
+    assert len({result.issue.id for result in results}) == 1
+    assert sorted(result.created for result in results) == [False, True]
+    stored = next(iter(repository.records.values()))
+    replay_index = next(
+        index for index, result in enumerate(results) if result.created is False
+    )
+    assert stored.occurrence_count == 2
+    assert stored.severity == QualitySeverity.CRITICAL
+    assert stored.evidence == commands[replay_index].evidence
+    assert repository.update_lock_count == 1
 
 
 @pytest.mark.anyio
@@ -426,9 +494,32 @@ async def test_repository_claim_conflict_rereads_without_transaction_rollback() 
 
     assert claimed is existing
     assert created is False
+    session.begin_nested.assert_called_once_with()
+    session.add.assert_called_once_with(candidate)
+    session.flush.assert_awaited_once_with()
     session.rollback.assert_not_called()
     nested.__aenter__.assert_awaited_once()
     nested.__aexit__.assert_awaited_once()
+    exit_args = nested.__aexit__.await_args.args
+    assert exit_args[0] is IntegrityError
+    assert isinstance(exit_args[1], IntegrityError)
+    reread = session.scalar.await_args.args[0]
+    compiled = reread.compile(dialect=postgresql.dialect())
+    assert "data_quality_issue.dedupe_key" in str(compiled)
+    assert "same-key" in compiled.params.values()
+
+
+@pytest.mark.anyio
+async def test_repository_get_for_update_uses_postgresql_row_lock() -> None:
+    session = AsyncMock()
+    issue_id = uuid4()
+
+    await QualityIssueRepository(session).get_for_update(issue_id)
+
+    statement = session.scalar.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert "FOR UPDATE" in str(compiled).upper()
+    assert issue_id in compiled.params.values()
 
 
 @pytest.mark.anyio

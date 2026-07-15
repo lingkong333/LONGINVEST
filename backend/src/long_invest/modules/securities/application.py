@@ -110,7 +110,12 @@ class SecurityApplication:
             idempotency_scope="securities:refresh",
             idempotency_key=idempotency_key,
             request_id=request_id,
-            config_snapshot={"source": "eastmoney"},
+            config_snapshot={
+                "source": "eastmoney",
+                "idempotency_key": idempotency_key,
+                "request_id": request_id,
+                "created_by_user_id": created_by_user_id,
+            },
             business_object_type="security_master",
             created_by_user_id=created_by_user_id,
         )

@@ -35,7 +35,7 @@ class RqQueuePublisher:
         rq_job_id = f"outbox-{outbox_id}"
         queue = Queue(queue_name, connection=self._redis)
         job = queue.enqueue(
-            "long_invest.platform.jobs.worker.execute_job",
+            "long_invest.entrypoints.job_worker.execute_job",
             str(job_id),
             str(outbox_id),
             job_id=rq_job_id,

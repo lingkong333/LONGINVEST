@@ -43,6 +43,9 @@ class ProviderService:
         codes = await self._repository.list_provider_codes()
         return [await self.get_provider(code) for code in codes]
 
+    async def security_master(self, deadline: datetime):
+        return await self._router.security_master(deadline)
+
     async def get_provider(self, provider_code: ProviderCode) -> dict[str, Any]:
         self._require(provider_code)
         return await self._repository.provider_summary(provider_code)

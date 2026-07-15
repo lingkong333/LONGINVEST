@@ -141,21 +141,30 @@ async def close_provider_resources() -> None:
 async def provide_provider_service() -> AsyncIterator[ProviderService]:
     resources = get_provider_resources()
     async with get_database().session() as session:
-        repository = ProviderRepository(
-            session,
-            audit=ProviderAuditAdapter(session),
-            events=ProviderEventAdapter(session),
-        )
-        provider_router = ProviderRouter(
-            resources.providers[ProviderCode.EASTMONEY],
-            resources.providers[ProviderCode.SINA],
-            config=repository,
-            runtime=resources.runtime,
-            observer=repository,
-        )
-        yield ProviderService(
-            provider_router,
-            resources.providers,
-            repository,
-            resources.runtime,
-        )
+        yield build_provider_service(session, resources=resources)
+
+
+def build_provider_service(
+    session: AsyncSession,
+    *,
+    resources: ProviderResources | None = None,
+) -> ProviderService:
+    active = resources or get_provider_resources()
+    repository = ProviderRepository(
+        session,
+        audit=ProviderAuditAdapter(session),
+        events=ProviderEventAdapter(session),
+    )
+    provider_router = ProviderRouter(
+        active.providers[ProviderCode.EASTMONEY],
+        active.providers[ProviderCode.SINA],
+        config=repository,
+        runtime=active.runtime,
+        observer=repository,
+    )
+    return ProviderService(
+        provider_router,
+        active.providers,
+        repository,
+        active.runtime,
+    )

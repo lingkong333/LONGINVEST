@@ -57,6 +57,12 @@ async def test_refresh_submits_public_job_in_database_transaction() -> None:
     assert command.idempotency_scope == "securities:refresh"
     assert command.idempotency_key == "refresh-key"
     assert command.created_by_user_id == "user-1"
+    assert command.config_snapshot == {
+        "source": "eastmoney",
+        "idempotency_key": "refresh-key",
+        "request_id": "request-1",
+        "created_by_user_id": "user-1",
+    }
 
 
 @pytest.mark.anyio

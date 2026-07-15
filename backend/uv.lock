@@ -457,6 +457,7 @@ dependencies = [
     { name = "asgi-correlation-id" },
     { name = "asyncpg" },
     { name = "fastapi" },
+    { name = "httpx" },
     { name = "pydantic-settings" },
     { name = "redis" },
     { name = "rq" },
@@ -467,7 +468,6 @@ dependencies = [
 
 [package.optional-dependencies]
 dev = [
-    { name = "httpx" },
     { name = "pytest" },
     { name = "ruff" },
 ]
@@ -479,7 +479,7 @@ requires-dist = [
     { name = "asgi-correlation-id", specifier = ">=5,<6" },
     { name = "asyncpg", specifier = ">=0.30,<1" },
     { name = "fastapi", specifier = ">=0.116,<1" },
-    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28,<1" },
+    { name = "httpx", specifier = ">=0.28,<1" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9,<10" },
     { name = "redis", specifier = ">=6,<8" },

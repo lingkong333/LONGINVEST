@@ -1,3 +1,4 @@
+import json
 import math
 from dataclasses import FrozenInstanceError
 from uuid import uuid4
@@ -70,6 +71,14 @@ def test_open_quality_issue_accepts_valid_command() -> None:
 
     assert command.symbol == "600000.SH"
     assert command.requires_review is False
+
+
+def test_open_quality_issue_evidence_is_directly_json_serializable() -> None:
+    command = _open_command(evidence={"sources": [{"provider": "SINA", "price": 10.5}]})
+
+    assert json.loads(json.dumps(command.evidence, allow_nan=False)) == {
+        "sources": [{"provider": "SINA", "price": 10.5}]
+    }
 
 
 def test_resolve_quality_issue_accepts_all_supported_actions() -> None:
@@ -146,14 +155,14 @@ def test_open_quality_issue_accepts_and_normalizes_json_values() -> None:
         }
     )
 
-    assert command.evidence["values"] == (
+    assert command.evidence["values"] == [
         None,
         True,
         1,
         1.5,
         "text",
-        ("nested",),
-    )
+        ["nested"],
+    ]
 
 
 def test_open_quality_issue_copies_and_deeply_freezes_evidence() -> None:
@@ -170,15 +179,15 @@ def test_open_quality_issue_copies_and_deeply_freezes_evidence() -> None:
     original["sources"][0]["quote"]["price"] = 0  # type: ignore[index]
 
     assert "added" not in command.evidence
-    assert command.evidence["sources"] == (
+    assert command.evidence["sources"] == [
         {"provider": "SINA", "quote": {"price": 10.5}},
-    )
+    ]
 
     with pytest.raises(TypeError):
         command.evidence["added"] = True  # type: ignore[index]
     with pytest.raises(TypeError):
         command.evidence["sources"][0]["provider"] = "CHANGED"  # type: ignore[index]
-    with pytest.raises(AttributeError):
+    with pytest.raises(TypeError):
         command.evidence["sources"].append("new")  # type: ignore[union-attr]
 
 

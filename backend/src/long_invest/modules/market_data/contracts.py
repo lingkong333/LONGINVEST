@@ -5,7 +5,7 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from enum import StrEnum
-from types import MappingProxyType
+from typing import NoReturn
 from uuid import UUID
 
 from long_invest.modules.providers.contracts import validate_symbol
@@ -70,13 +70,45 @@ def _copy_json_value(value: object, active: set[int]) -> object:
     raise ValueError("质量问题证据包含不支持的 JSON 值")
 
 
+class _FrozenDict(dict[str, object]):
+    def _immutable(self, *args: object, **kwargs: object) -> NoReturn:
+        raise TypeError("质量问题证据不可修改")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+
+class _FrozenList(list[object]):
+    def _immutable(self, *args: object, **kwargs: object) -> NoReturn:
+        raise TypeError("质量问题证据不可修改")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    append = _immutable
+    clear = _immutable
+    extend = _immutable
+    insert = _immutable
+    pop = _immutable
+    remove = _immutable
+    reverse = _immutable
+    sort = _immutable
+    __iadd__ = _immutable
+    __imul__ = _immutable
+
+
 def _freeze_json_value(value: object) -> object:
     if isinstance(value, dict):
-        return MappingProxyType(
-            {key: _freeze_json_value(item) for key, item in value.items()}
+        return _FrozenDict(
+            (key, _freeze_json_value(item)) for key, item in value.items()
         )
     if isinstance(value, list):
-        return tuple(_freeze_json_value(item) for item in value)
+        return _FrozenList(_freeze_json_value(item) for item in value)
     return value
 
 

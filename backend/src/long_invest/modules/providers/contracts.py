@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Generic, Protocol, TypeVar
+from typing import Protocol
 
 
 class ProviderCapability(StrEnum):
@@ -27,9 +27,12 @@ def validate_symbol(symbol: str) -> str:
         raise ValueError("invalid internal security symbol")
     code, market = match.groups()
     allowed = (
-        market == "SH" and code.startswith("6")
-        or market == "SZ" and code.startswith(("0", "3"))
-        or market == "BJ" and code.startswith(("4", "8", "9"))
+        market == "SH"
+        and code.startswith("6")
+        or market == "SZ"
+        and code.startswith(("0", "3"))
+        or market == "BJ"
+        and code.startswith(("4", "8", "9"))
     )
     if not allowed:
         raise ValueError("symbol does not belong to market")
@@ -163,11 +166,8 @@ class ProviderItemFailure:
         validate_symbol(self.symbol)
 
 
-T = TypeVar("T")
-
-
 @dataclass(frozen=True, slots=True)
-class ProviderBatchResult(Generic[T]):
+class ProviderBatchResult[T]:
     items: tuple[T, ...] = ()
     failures: tuple[ProviderItemFailure, ...] = ()
     batch_error_code: str | None = None
@@ -180,7 +180,9 @@ class MarketDataProvider(Protocol):
     @property
     def capabilities(self) -> frozenset[ProviderCapability]: ...
 
-    async def security_master(self, deadline: datetime) -> tuple[SecurityMasterRecord, ...]: ...
+    async def security_master(
+        self, deadline: datetime
+    ) -> tuple[SecurityMasterRecord, ...]: ...
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime

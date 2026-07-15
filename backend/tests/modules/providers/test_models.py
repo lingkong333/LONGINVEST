@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.models import (
@@ -20,7 +20,7 @@ def test_provider_models_cover_version_settings_health_history_and_samples() -> 
 
 
 def test_failure_sample_is_redacted_and_expires_within_seven_days() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     sample = redact_failure_sample(
         provider=ProviderCode.EASTMONEY,
         capability=ProviderCapability.REALTIME_QUOTE_BATCH,

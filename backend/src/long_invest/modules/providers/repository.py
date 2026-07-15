@@ -6,14 +6,22 @@ from typing import Any, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
-from long_invest.modules.providers.models import ProviderCircuitHistory, ProviderFailureSample
+from long_invest.modules.providers.models import (
+    ProviderCircuitHistory,
+    ProviderFailureSample,
+)
 
-SENSITIVE_KEYS = frozenset({"token", "cookie", "authorization", "header", "headers", "password", "secret"})
+SENSITIVE_KEYS = frozenset(
+    {"token", "cookie", "authorization", "header", "headers", "password", "secret"}
+)
 
 
 def _redact(value: Any) -> Any:
     if isinstance(value, dict):
-        return {key: "[REDACTED]" if key.lower() in SENSITIVE_KEYS else _redact(item) for key, item in value.items()}
+        return {
+            key: "[REDACTED]" if key.lower() in SENSITIVE_KEYS else _redact(item)
+            for key, item in value.items()
+        }
     if isinstance(value, list):
         return [_redact(item) for item in value]
     if isinstance(value, str):
@@ -22,8 +30,12 @@ def _redact(value: Any) -> Any:
 
 
 def redact_failure_sample(
-    *, provider: ProviderCode, capability: ProviderCapability, error_code: str,
-    payload: dict[str, Any], now: datetime,
+    *,
+    provider: ProviderCode,
+    capability: ProviderCapability,
+    error_code: str,
+    payload: dict[str, Any],
+    now: datetime,
 ) -> ProviderFailureSample:
     return ProviderFailureSample(
         provider_code=provider.value,
@@ -40,7 +52,9 @@ class ProviderEventPort(Protocol):
 
 
 class ProviderRepository:
-    def __init__(self, session: AsyncSession, events: ProviderEventPort | None = None) -> None:
+    def __init__(
+        self, session: AsyncSession, events: ProviderEventPort | None = None
+    ) -> None:
         self._session = session
         self._events = events
 
@@ -49,7 +63,11 @@ class ProviderRepository:
         if self._events is not None:
             await self._events.append(
                 "provider.circuit_state_changed",
-                {"provider": history.provider_code, "capability": history.capability, "state": history.to_state},
+                {
+                    "provider": history.provider_code,
+                    "capability": history.capability,
+                    "state": history.to_state,
+                },
             )
 
     async def add_failure_sample(self, sample: ProviderFailureSample) -> None:

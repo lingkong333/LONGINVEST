@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from enum import StrEnum
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
@@ -89,15 +89,22 @@ class CircuitBreaker:
         item.state = CircuitState.DISABLED
         item.probe_in_flight = False
 
-    def enable_for_probe(self, provider: ProviderCode, capability: ProviderCapability) -> None:
+    def enable_for_probe(
+        self, provider: ProviderCode, capability: ProviderCapability
+    ) -> None:
         item = self._get(provider, capability)
         item.state = CircuitState.HALF_OPEN
         item.probe_in_flight = False
 
 
 class ProviderRateLimiter:
-    def __init__(self, *, global_limit: int, capability_limit: int, realtime_reserved: int) -> None:
-        if min(global_limit, capability_limit) <= 0 or not 0 <= realtime_reserved < global_limit:
+    def __init__(
+        self, *, global_limit: int, capability_limit: int, realtime_reserved: int
+    ) -> None:
+        if (
+            min(global_limit, capability_limit) <= 0
+            or not 0 <= realtime_reserved < global_limit
+        ):
             raise ValueError("invalid rate limits")
         self._configured_global = global_limit
         self._configured_capability = capability_limit
@@ -110,7 +117,11 @@ class ProviderRateLimiter:
         total = sum(self._active.values())
         active = self._active.get(capability, 0)
         is_realtime = capability is ProviderCapability.REALTIME_QUOTE_BATCH
-        usable_global = self._global_limit if is_realtime else max(1, self._global_limit - self._reserved)
+        usable_global = (
+            self._global_limit
+            if is_realtime
+            else max(1, self._global_limit - self._reserved)
+        )
         if total >= usable_global or active >= self._capability_limit:
             return False
         self._active[capability] = active + 1

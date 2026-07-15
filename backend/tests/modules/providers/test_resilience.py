@@ -1,6 +1,4 @@
-from datetime import datetime, timedelta, timezone
-
-import pytest
+from datetime import UTC, datetime, timedelta
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.resilience import (
@@ -11,7 +9,7 @@ from long_invest.modules.providers.resilience import (
 
 
 def test_circuit_opens_after_three_failures_and_isolated_by_capability() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     circuit = CircuitBreaker()
     key = (ProviderCode.EASTMONEY, ProviderCapability.REALTIME_QUOTE_BATCH)
     other = (ProviderCode.EASTMONEY, ProviderCapability.HISTORICAL_DAILY_QFQ)
@@ -21,12 +19,14 @@ def test_circuit_opens_after_three_failures_and_isolated_by_capability() -> None
     assert circuit.state(*other, now=now) is CircuitState.CLOSED
     assert circuit.allow(*key, now=now + timedelta(seconds=59)) is False
     assert circuit.allow(*key, now=now + timedelta(seconds=60)) is True
-    assert circuit.state(*key, now=now + timedelta(seconds=60)) is CircuitState.HALF_OPEN
+    assert (
+        circuit.state(*key, now=now + timedelta(seconds=60)) is CircuitState.HALF_OPEN
+    )
     assert circuit.allow(*key, now=now + timedelta(seconds=60)) is False
 
 
 def test_half_open_success_recovers_and_failures_use_cooldown_ladder() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     circuit = CircuitBreaker()
     key = (ProviderCode.EASTMONEY, ProviderCapability.REALTIME_QUOTE_BATCH)
     for _ in range(3):
@@ -40,7 +40,7 @@ def test_half_open_success_recovers_and_failures_use_cooldown_ladder() -> None:
 
 
 def test_disabled_circuit_requires_single_probe_to_recover() -> None:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     circuit = CircuitBreaker()
     key = (ProviderCode.SINA, ProviderCapability.REALTIME_QUOTE_BATCH)
     circuit.disable(*key)
@@ -53,7 +53,9 @@ def test_disabled_circuit_requires_single_probe_to_recover() -> None:
 
 
 def test_rate_limiter_reserves_realtime_capacity_and_degrades_conservatively() -> None:
-    limiter = ProviderRateLimiter(global_limit=4, capability_limit=3, realtime_reserved=2)
+    limiter = ProviderRateLimiter(
+        global_limit=4, capability_limit=3, realtime_reserved=2
+    )
     historical = ProviderCapability.HISTORICAL_DAILY_QFQ
     realtime = ProviderCapability.REALTIME_QUOTE_BATCH
     assert limiter.acquire(historical)

@@ -1,5 +1,5 @@
 import json
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -24,23 +24,49 @@ def test_eastmoney_declares_supported_capabilities_and_real_hosts() -> None:
 
 def test_eastmoney_normalizes_quotes_and_multiple_markets() -> None:
     provider = EastmoneyProvider(None)
-    result = provider.parse_quotes(load("multi_market.json"), ("600000.SH", "000001.SZ", "430047.BJ"), received_at=datetime.now(timezone.utc))
-    assert [item.symbol for item in result.items] == ["600000.SH", "000001.SZ", "430047.BJ"]
+    result = provider.parse_quotes(
+        load("multi_market.json"),
+        ("600000.SH", "000001.SZ", "430047.BJ"),
+        received_at=datetime.now(UTC),
+    )
+    assert [item.symbol for item in result.items] == [
+        "600000.SH",
+        "000001.SZ",
+        "430047.BJ",
+    ]
     assert all(item.source is ProviderCode.EASTMONEY for item in result.items)
 
 
 def test_eastmoney_empty_and_partial_are_item_failures() -> None:
     provider = EastmoneyProvider(None)
-    empty = provider.parse_quotes(load("empty.json"), ("600000.SH",), received_at=datetime.now(timezone.utc))
-    partial = provider.parse_quotes(load("partial.json"), ("600000.SH", "000001.SZ"), received_at=datetime.now(timezone.utc))
+    empty = provider.parse_quotes(
+        load("empty.json"), ("600000.SH",), received_at=datetime.now(UTC)
+    )
+    partial = provider.parse_quotes(
+        load("partial.json"),
+        ("600000.SH", "000001.SZ"),
+        received_at=datetime.now(UTC),
+    )
     assert empty.failures[0].code == "PROVIDER_ITEM_MISSING"
     assert [failure.symbol for failure in partial.failures] == ["000001.SZ"]
 
 
-@pytest.mark.parametrize("fixture", ["missing_field.json", "error_code.json", "bad_time.json", "html.json", "captcha.json", "oversize.json"])
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "missing_field.json",
+        "error_code.json",
+        "bad_time.json",
+        "html.json",
+        "captcha.json",
+        "oversize.json",
+    ],
+)
 def test_eastmoney_schema_anomalies_have_stable_error(fixture: str) -> None:
     with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
-        EastmoneyProvider(None).parse_quotes(load(fixture), ("600000.SH",), received_at=datetime.now(timezone.utc))
+        EastmoneyProvider(None).parse_quotes(
+            load(fixture), ("600000.SH",), received_at=datetime.now(UTC)
+        )
 
 
 def test_eastmoney_normalizes_unadjusted_and_qfq_bars() -> None:
@@ -50,7 +76,9 @@ def test_eastmoney_normalizes_unadjusted_and_qfq_bars() -> None:
         ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
         ProviderCapability.HISTORICAL_DAILY_QFQ,
     ):
-        result = provider.parse_bars(load("bars.json"), symbol="600000.SH", capability=capability)
+        result = provider.parse_bars(
+            load("bars.json"), symbol="600000.SH", capability=capability
+        )
         assert len(result.items) == 2
         assert result.items[0].trading_date == date(2025, 7, 14)
         assert result.items[0].capability is capability

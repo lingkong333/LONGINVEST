@@ -34,7 +34,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = ["--strict-config", "--strict-markers"]
+addopts = ["--strict-config", "--strict-markers", "--import-mode=importlib"]
 cache_dir = "/tmp/pytest-cache"
 
 [tool.ruff]

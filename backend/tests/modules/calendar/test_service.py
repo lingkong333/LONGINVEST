@@ -82,6 +82,27 @@ class FakeRepository:
         ]
         return max(dates, default=None)
 
+    async def list_days(self, market, from_date, through_date):
+        if self.current is None:
+            return []
+        return [
+            item
+            for item in self.versions[self.current.version_id].days
+            if from_date <= item.trade_date <= through_date
+        ]
+
+    async def next_trading_day(self, market, after_date):
+        items = await self.list_days(market, after_date, date.max)
+        return next((item for item in items if item.trade_date > after_date), None)
+
+    async def previous_trading_day(self, market, before_date):
+        items = await self.list_days(market, date.min, before_date)
+        eligible = [item for item in items if item.trade_date < before_date]
+        return eligible[-1] if eligible else None
+
+    async def list_versions(self, market):
+        return [item for item in self.versions.values() if item.market == market]
+
 
 class Recorder:
     def __init__(self) -> None:
@@ -240,3 +261,17 @@ async def test_stale_override_conflicts_and_restore_creates_a_new_fact() -> None
         repository.versions[restored.version_id].based_on_version_id
         == imported.version_id
     )
+
+
+@pytest.mark.anyio
+async def test_public_queries_read_only_through_the_calendar_repository() -> None:
+    repository = FakeRepository()
+    service = TradingCalendarService(repository)
+    wanted = date(2026, 7, 15)
+    await service.import_version(import_command(trading_day(wanted)))
+
+    assert (await service.get_day(wanted)).trade_date == wanted
+    assert await service.list_days(wanted, wanted)
+    assert (await service.next_trading_day(date(2026, 7, 14))).trade_date == wanted
+    assert (await service.previous_trading_day(date(2026, 7, 16))).trade_date == wanted
+    assert await service.list_versions()

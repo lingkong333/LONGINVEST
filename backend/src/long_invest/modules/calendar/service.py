@@ -41,6 +41,25 @@ class TradingCalendarService:
         self._audit = audit_service
         self._events = event_sink
 
+    async def get_day(self, trade_date: date, market: str = "CN_A"):
+        return await self._repository.get_day(market, trade_date)
+
+    async def list_days(
+        self, from_date: date, through_date: date, market: str = "CN_A"
+    ):
+        return await self._repository.list_days(market, from_date, through_date)
+
+    async def next_trading_day(self, after_date: date, market: str = "CN_A"):
+        return await self._repository.next_trading_day(market, after_date)
+
+    async def previous_trading_day(
+        self, before_date: date, market: str = "CN_A"
+    ):
+        return await self._repository.previous_trading_day(market, before_date)
+
+    async def list_versions(self, market: str = "CN_A"):
+        return await self._repository.list_versions(market)
+
     async def import_version(
         self, command: CalendarImport
     ) -> CalendarVersionResult:

@@ -62,6 +62,20 @@ def test_valid_import_accepts_default_and_special_sessions() -> None:
     assert validate_calendar_import(command) == ()
 
 
+def test_empty_import_is_rejected_as_incomplete() -> None:
+    command = CalendarImport(
+        market="CN_A",
+        source="git",
+        source_version="empty",
+        idempotency_key="empty",
+        days=(),
+    )
+
+    assert [issue.code for issue in validate_calendar_import(command)] == [
+        "CALENDAR_IMPORT_EMPTY"
+    ]
+
+
 def test_import_validation_returns_every_item_issue_at_once() -> None:
     bad = CalendarImport(
         market="CN_A",

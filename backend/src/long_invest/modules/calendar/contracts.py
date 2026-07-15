@@ -108,6 +108,14 @@ def validate_calendar_import(
     command: CalendarImport,
 ) -> tuple[CalendarValidationIssue, ...]:
     issues: list[CalendarValidationIssue] = []
+    if not command.days:
+        issues.append(
+            CalendarValidationIssue(
+                code="CALENDAR_IMPORT_EMPTY",
+                path="days",
+                message="日历导入必须包含至少一个日期",
+            )
+        )
     seen: dict[date, int] = {}
     for day_index, calendar_day in enumerate(command.days):
         path = f"days[{day_index}]"

@@ -5,7 +5,7 @@ from typing import TypeVar
 from uuid import UUID
 
 from redis.asyncio import Redis
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,8 +29,8 @@ from long_invest.modules.auth.service import (
     LoginResult,
 )
 from long_invest.modules.auth.tokens import CsrfCredentials, TokenService
-from long_invest.platform.audit.models import AuditEvent
-from long_invest.platform.audit.repository import AuditRepository, NewAuditEvent
+from long_invest.platform.audit.contracts import AuditRecord, AuditWrite
+from long_invest.platform.audit.service import AuditService
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
@@ -41,6 +41,7 @@ T = TypeVar("T")
 class AuthAuditAdapter(AuthAuditPort):
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        self._audit = AuditService(session)
 
     async def record(self, event: AuthAuditEvent) -> None:
         data = _new_audit_event(event)
@@ -50,14 +51,14 @@ class AuthAuditAdapter(AuthAuditPort):
             return
         try:
             async with self._session.begin_nested():
-                await AuditRepository(self._session).append(data)
+                await self._audit.append(data)
         except IntegrityError:
             existing = await self._find(data.idempotency_key)
             if existing is None:
                 raise
             _resolve_audit_replay(existing, data)
 
-    async def find_replay(self, event: AuthAuditEvent) -> AuditEvent | None:
+    async def find_replay(self, event: AuthAuditEvent) -> AuditRecord | None:
         data = _new_audit_event(event)
         existing = await self._find(data.idempotency_key)
         if existing is not None:
@@ -68,20 +69,18 @@ class AuthAuditAdapter(AuthAuditPort):
         self,
         *,
         request_key: str,
-    ) -> AuditEvent | None:
+    ) -> AuditRecord | None:
         return await self._find(auth_audit_idempotency_key(request_key))
 
-    async def _find(self, idempotency_key: str) -> AuditEvent | None:
-        return await self._session.scalar(
-            select(AuditEvent).where(AuditEvent.idempotency_key == idempotency_key)
-        )
+    async def _find(self, idempotency_key: str) -> AuditRecord | None:
+        return await self._audit.find_by_idempotency(idempotency_key)
 
 
-def _new_audit_event(event: AuthAuditEvent) -> NewAuditEvent:
+def _new_audit_event(event: AuthAuditEvent) -> AuditWrite:
     object_id = event.object_id
     if len(object_id) > 100:
         object_id = f"oversized:{TokenService.digest(object_id)}"
-    return NewAuditEvent(
+    return AuditWrite(
         action_code=event.action_code,
         object_type=event.object_type,
         object_id=object_id,
@@ -98,7 +97,7 @@ def _new_audit_event(event: AuthAuditEvent) -> NewAuditEvent:
     )
 
 
-def _resolve_audit_replay(existing: AuditEvent, data: NewAuditEvent) -> None:
+def _resolve_audit_replay(existing: AuditRecord, data: AuditWrite) -> None:
     comparable = (
         "action_code",
         "object_type",
@@ -117,7 +116,7 @@ def _resolve_audit_replay(existing: AuditEvent, data: NewAuditEvent) -> None:
 
 
 def _resolve_request_replay(
-    existing: AuditEvent,
+    existing: AuditRecord,
     *,
     action_code: str,
     object_type: str | None = None,

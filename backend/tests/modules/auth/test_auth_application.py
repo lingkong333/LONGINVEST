@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
@@ -21,8 +22,7 @@ from long_invest.modules.auth.models import AppUser, UserSession
 from long_invest.modules.auth.passwords import PasswordService
 from long_invest.modules.auth.rate_limit import InMemoryLoginRateLimiter
 from long_invest.modules.auth.tokens import TokenService
-from long_invest.platform.audit.models import AuditEvent
-from long_invest.platform.audit.repository import NewAuditEvent
+from long_invest.platform.audit.contracts import AuditRecord, AuditWrite
 from long_invest.platform.errors import AppError
 
 
@@ -31,8 +31,8 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def _audit_data(*, session_id: str = "session-1") -> NewAuditEvent:
-    return NewAuditEvent(
+def _audit_data(*, session_id: str = "session-1") -> AuditWrite:
+    return AuditWrite(
         action_code="AUTH_SESSION_REVOKE",
         object_type="user_session",
         object_id="target-session",
@@ -49,8 +49,8 @@ def _audit_data(*, session_id: str = "session-1") -> NewAuditEvent:
     )
 
 
-def _stored_audit(data: NewAuditEvent) -> AuditEvent:
-    return AuditEvent(
+def _stored_audit(data: AuditWrite) -> AuditRecord:
+    return AuditRecord(
         action_code=data.action_code,
         object_type=data.object_type,
         object_id=data.object_id,
@@ -257,13 +257,15 @@ async def test_replayed_revoke_others_does_not_touch_new_sessions(monkeypatch) -
             return 99
 
     service = FakeService()
-    replay = _stored_audit(_audit_data(session_id=str(current.id)))
-    replay.action_code = "AUTH_SESSION_REVOKE_OTHERS"
-    replay.object_type = "app_user"
-    replay.object_id = str(user.id)
-    replay.reason = "keep original result"
-    replay.actor_user_id = str(user.id)
-    replay.after_summary = {"revoked_count": 2}
+    replay = replace(
+        _stored_audit(_audit_data(session_id=str(current.id))),
+        action_code="AUTH_SESSION_REVOKE_OTHERS",
+        object_type="app_user",
+        object_id=str(user.id),
+        reason="keep original result",
+        actor_user_id=str(user.id),
+        after_summary={"revoked_count": 2},
+    )
 
     class FakeAudit:
         async def find_request_replay(self, **_kwargs):  # type: ignore[no-untyped-def]
@@ -318,9 +320,11 @@ async def test_replayed_logout_works_after_current_session_is_gone(monkeypatch) 
             self.replay_arguments = kwargs
 
     service = FakeService()
-    replay = _stored_audit(_audit_data(session_id="revoked-session"))
-    replay.action_code = "AUTH_LOGOUT"
-    replay.reason = "user logout"
+    replay = replace(
+        _stored_audit(_audit_data(session_id="revoked-session")),
+        action_code="AUTH_LOGOUT",
+        reason="user logout",
+    )
 
     class FakeAudit:
         async def find_request_replay(self, **_kwargs):  # type: ignore[no-untyped-def]

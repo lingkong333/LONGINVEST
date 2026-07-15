@@ -6,6 +6,7 @@ from sqlalchemy.exc import DBAPIError
 
 from long_invest.platform.audit.models import AuditEvent
 from long_invest.platform.audit.repository import AuditRepository, NewAuditEvent
+from long_invest.platform.audit.service import AuditService
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
 
@@ -48,6 +49,24 @@ async def test_audit_repository_appends_an_immutable_event() -> None:
         assert stored.request_id == event_data.request_id
         assert stored.after_summary == {"status": "created"}
         assert stored.occurred_at.tzinfo is not None
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_audit_service_reads_through_its_public_contract() -> None:
+    database = Database(AppSettings(_env_file=None).database_url)
+    event_data = new_audit_event()
+    try:
+        async with database.transaction() as session:
+            service = AuditService(session)
+            created = await service.append(event_data)
+            found = await service.find_by_idempotency(event_data.idempotency_key)
+
+        assert created == found
+        assert found is not None
+        assert found.action_code == event_data.action_code
+        assert found.after_summary == {"status": "created"}
     finally:
         await database.dispose()
 

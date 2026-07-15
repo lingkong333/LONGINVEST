@@ -1,33 +1,17 @@
-from dataclasses import dataclass
-from typing import Any
-
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.audit.models import AuditEvent
 
-
-@dataclass(frozen=True, slots=True)
-class NewAuditEvent:
-    action_code: str
-    object_type: str
-    object_id: str
-    result: str
-    request_id: str
-    idempotency_key: str
-    risk_level: str
-    reason: str | None
-    before_summary: dict[str, Any] | None
-    after_summary: dict[str, Any] | None
-    actor_user_id: str | None = None
-    session_id: str | None = None
-    trusted_ip: str | None = None
+NewAuditEvent = AuditWrite
 
 
 class AuditRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def append(self, data: NewAuditEvent) -> AuditEvent:
+    async def append(self, data: AuditWrite) -> AuditEvent:
         event = AuditEvent(
             action_code=data.action_code,
             object_type=data.object_type,
@@ -47,3 +31,7 @@ class AuditRepository:
         await self._session.flush()
         return event
 
+    async def find_by_idempotency(self, idempotency_key: str) -> AuditEvent | None:
+        return await self._session.scalar(
+            select(AuditEvent).where(AuditEvent.idempotency_key == idempotency_key)
+        )

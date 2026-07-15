@@ -1,7 +1,7 @@
 import importlib
 import importlib.util
 from datetime import UTC, datetime, timedelta
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, Mock, call
 from uuid import uuid4
 
 import pytest
@@ -135,7 +135,7 @@ async def test_persist_event_and_deliveries_runs_inside_savepoint() -> None:
     nested.__aexit__.assert_awaited_once()
     session.add.assert_called_once_with(event)
     session.add_all.assert_called_once_with([delivery])
-    session.flush.assert_awaited_once()
+    assert session.flush.await_args_list == [call([event]), call([delivery])]
 
 
 @pytest.mark.anyio

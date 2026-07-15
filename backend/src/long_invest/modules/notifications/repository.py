@@ -43,8 +43,9 @@ class NotificationRepository:
     ) -> None:
         async with self._session.begin_nested():
             self._session.add(event)
+            await self._session.flush([event])
             self._session.add_all(deliveries)
-            await self._session.flush()
+            await self._session.flush(deliveries)
 
     async def claim_next(
         self,

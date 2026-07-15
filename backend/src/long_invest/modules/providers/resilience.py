@@ -585,7 +585,7 @@ class ProviderInvocationPipeline:
                     occurred_at=datetime.now(UTC),
                     error_code="PROVIDER_CIRCUIT_OPEN",
                     latency_ms=int((monotonic() - started) * 1000),
-                    switched=switched,
+                    switched=False,
                     response_sample=None,
                 )
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
@@ -599,7 +599,7 @@ class ProviderInvocationPipeline:
                     occurred_at=datetime.now(UTC),
                     error_code="PROVIDER_RATE_LIMITED",
                     latency_ms=int((monotonic() - started) * 1000),
-                    switched=switched,
+                    switched=False,
                     response_sample=None,
                 )
             raise ProviderCallError("PROVIDER_RATE_LIMITED")

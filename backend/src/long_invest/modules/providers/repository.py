@@ -534,6 +534,7 @@ class ProviderRepository:
                     metrics={},
                 )
                 self._session.add(health)
+            previous_health_status = health.status
             failures = snapshot.get("consecutive_failures", snapshot.get("failures", 0))
             state = snapshot.get("state", "UNKNOWN")
             health.status = (
@@ -573,6 +574,25 @@ class ProviderRepository:
                 + int(error_code == "PROVIDER_SCHEMA_INCOMPATIBLE"),
                 "cooldown_remaining_seconds": cooldown_remaining,
             }
+            if previous_health_status != "DEGRADED" and health.status == "DEGRADED":
+                await self._events.append(
+                    "provider.degraded",
+                    {
+                        "provider": setting.provider.value,
+                        "capability": setting.capability.value,
+                        "error_code": error_code,
+                    },
+                    idempotency_key=f"{event_key}:degraded",
+                )
+            if switched:
+                await self._events.append(
+                    "provider.auto_switched",
+                    {
+                        "provider": setting.provider.value,
+                        "capability": setting.capability.value,
+                    },
+                    idempotency_key=f"{event_key}:auto-switched",
+                )
 
             if error_code == "PROVIDER_SCHEMA_INCOMPATIBLE":
                 self._session.add(
@@ -649,6 +669,20 @@ class ProviderRepository:
                     },
                     idempotency_key=f"{event_key}:circuit",
                 )
+                public_event = self._circuit_transition_event(previous_state, state)
+                if public_event is not None:
+                    await self._events.append(
+                        public_event,
+                        {
+                            "provider": setting.provider.value,
+                            "capability": setting.capability.value,
+                            "from_state": previous_state,
+                            "to_state": state,
+                        },
+                        idempotency_key=(
+                            f"{event_key}:transition:{previous_state}:{state}"
+                        ),
+                    )
             await self._events.append(
                 (
                     "provider.rate_limited"
@@ -667,6 +701,16 @@ class ProviderRepository:
                 idempotency_key=f"{event_key}:outcome",
             )
             await self._session.flush()
+
+    @staticmethod
+    def _circuit_transition_event(previous_state: str, state: str) -> str | None:
+        if state == "OPEN":
+            return "provider.circuit_opened"
+        if state == "HALF_OPEN":
+            return "provider.half_opened"
+        if state == "CLOSED" and previous_state in {"OPEN", "HALF_OPEN", "DISABLED"}:
+            return "provider.recovered"
+        return None
 
     @staticmethod
     def _cooldown_remaining_seconds(

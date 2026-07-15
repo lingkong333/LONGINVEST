@@ -10,6 +10,7 @@ from long_invest.modules.providers.resilience import (
     CircuitBreaker,
     CircuitState,
     InMemoryProviderRuntimeState,
+    ProviderCallError,
     ProviderInvocationPipeline,
     ProviderRateLimiter,
     ProviderRouteSetting,
@@ -243,3 +244,40 @@ def test_observer_failure_does_not_count_as_upstream_failure() -> None:
         return ProviderBatchResult()
 
     asyncio.run(scenario())
+
+
+def test_blocked_fallback_is_not_reported_as_an_actual_auto_switch() -> None:
+    calls = []
+
+    class BlockedRuntime(InMemoryProviderRuntimeState):
+        async def allow(self, setting, *, probe=False):
+            del setting, probe
+            return False
+
+    class Observer:
+        async def record_outcome(self, setting, **kwargs):
+            del setting
+            calls.append(kwargs)
+
+    setting = ProviderRouteSetting(
+        ProviderCode.SINA,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+    )
+    pipeline = ProviderInvocationPipeline(BlockedRuntime(), Observer())
+
+    async def scenario() -> None:
+        try:
+            await pipeline.call(
+                setting,
+                lambda: successful_result(),
+                deadline=datetime.now(UTC) + timedelta(seconds=1),
+                switched=True,
+            )
+        except ProviderCallError as error:
+            assert error.code == "PROVIDER_CIRCUIT_OPEN"
+
+    async def successful_result() -> ProviderBatchResult:
+        return ProviderBatchResult()
+
+    asyncio.run(scenario())
+    assert calls[0]["switched"] is False

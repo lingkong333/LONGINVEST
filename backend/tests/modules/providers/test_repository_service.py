@@ -16,7 +16,11 @@ from long_invest.modules.providers.contracts import (
     ProviderCode,
     RealtimeQuote,
 )
-from long_invest.modules.providers.models import ProviderMutationRequest
+from long_invest.modules.providers.models import (
+    ProviderCircuitState,
+    ProviderHealthState,
+    ProviderMutationRequest,
+)
 from long_invest.modules.providers.repository import ProviderRepository
 from long_invest.modules.providers.resilience import ProviderRouteSetting
 from long_invest.modules.providers.service import ProviderService
@@ -221,6 +225,7 @@ async def test_runtime_outcome_persists_health_circuit_history_and_events() -> N
     }
     assert [call[0][0] for call in events.calls] == [
         "provider.circuit_state_changed",
+        "provider.circuit_opened",
         "provider.request_failed",
     ]
 
@@ -273,6 +278,110 @@ async def test_schema_anomaly_persists_sample_alarm_and_health_metrics() -> None
         call for call in events.calls if call[0][0] == "provider.schema_changed"
     )
     assert schema_event[0][1]["alert_code"] == "PROVIDER_SCHEMA_CHANGED"
+
+
+@pytest.mark.parametrize(
+    ("previous_state", "state", "success", "expected_event"),
+    [
+        ("CLOSED", "OPEN", False, "provider.circuit_opened"),
+        ("OPEN", "HALF_OPEN", False, "provider.half_opened"),
+        ("OPEN", "CLOSED", True, "provider.recovered"),
+    ],
+)
+@async_test
+async def test_circuit_transition_publishes_public_contract_event(
+    previous_state: str,
+    state: str,
+    success: bool,
+    expected_event: str,
+) -> None:
+    occurred_at = datetime.now(UTC)
+    health = ProviderHealthState(
+        provider_code="EASTMONEY",
+        capability="REALTIME_QUOTE_BATCH",
+        status="HEALTHY",
+        consecutive_failures=0,
+        metrics={},
+    )
+    circuit = ProviderCircuitState(
+        provider_code="EASTMONEY",
+        capability="REALTIME_QUOTE_BATCH",
+        state=previous_state,
+        consecutive_failures=0,
+        cooldown_index=0,
+        opened_at=occurred_at,
+    )
+    events = RecordingEvents()
+    repository = ProviderRepository(
+        FakeSession([health, circuit]),
+        audit=RecordingAudit(),
+        events=events,
+    )
+    await repository.record_outcome(
+        ProviderRouteSetting(
+            ProviderCode.EASTMONEY,
+            ProviderCapability.REALTIME_QUOTE_BATCH,
+        ),
+        success=success,
+        snapshot={
+            "state": state,
+            "consecutive_failures": 0 if success else 3,
+            "cooldown_index": 0,
+            "opened_at": None if state == "CLOSED" else occurred_at,
+        },
+        occurred_at=occurred_at,
+        error_code=None if success else "PROVIDER_FAILED",
+    )
+    public_event = next(call for call in events.calls if call[0][0] == expected_event)
+    assert public_event[1]["idempotency_key"].endswith(
+        f":transition:{previous_state}:{state}"
+    )
+
+
+@async_test
+async def test_degraded_and_actual_auto_switch_publish_public_events() -> None:
+    occurred_at = datetime.now(UTC)
+    health = ProviderHealthState(
+        provider_code="SINA",
+        capability="REALTIME_QUOTE_BATCH",
+        status="HEALTHY",
+        consecutive_failures=0,
+        metrics={},
+    )
+    circuit = ProviderCircuitState(
+        provider_code="SINA",
+        capability="REALTIME_QUOTE_BATCH",
+        state="CLOSED",
+        consecutive_failures=0,
+        cooldown_index=0,
+        opened_at=None,
+    )
+    events = RecordingEvents()
+    repository = ProviderRepository(
+        FakeSession([health, circuit]),
+        audit=RecordingAudit(),
+        events=events,
+    )
+    await repository.record_outcome(
+        ProviderRouteSetting(
+            ProviderCode.SINA,
+            ProviderCapability.REALTIME_QUOTE_BATCH,
+        ),
+        success=False,
+        snapshot={"state": "CLOSED", "consecutive_failures": 1},
+        occurred_at=occurred_at,
+        error_code="PROVIDER_ITEM_MISSING",
+        switched=True,
+    )
+    event_names = [call[0][0] for call in events.calls]
+    assert "provider.degraded" in event_names
+    assert "provider.auto_switched" in event_names
+    keys = [
+        call[1]["idempotency_key"]
+        for call in events.calls
+        if call[0][0] in {"provider.degraded", "provider.auto_switched"}
+    ]
+    assert len(keys) == len(set(keys))
 
 
 @async_test

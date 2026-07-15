@@ -1,0 +1,1001 @@
+import asyncio
+import json
+from dataclasses import FrozenInstanceError
+from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock, Mock
+from uuid import uuid4
+
+import pytest
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from long_invest.modules.market_data.contracts import (
+    OpenQualityIssue,
+    QualityIssuePage,
+    QualityIssueStatus,
+    QualityIssueView,
+    QualityResolutionAction,
+    QualitySeverity,
+    RequestQualityRefetch,
+    ResolveQualityIssue,
+)
+from long_invest.modules.market_data.models import DataQualityIssue
+from long_invest.modules.market_data.repository import QualityIssueRepository
+from long_invest.modules.market_data.service import QualityIssueService
+from long_invest.platform.errors import AppError
+
+NOW = datetime(2026, 7, 15, 8, 0, tzinfo=UTC)
+
+
+def open_command(**overrides: object) -> OpenQualityIssue:
+    values = {
+        "issue_type": "QUOTE_CONFLICT",
+        "subject_type": "quote_cycle_item",
+        "subject_id": "item-1",
+        "symbol": "600000.SH",
+        "severity": QualitySeverity.WARNING,
+        "evidence": {
+            "sources": {
+                "EASTMONEY": {"price": "10.00"},
+                "SINA": {"price": "10.10"},
+            }
+        },
+        "dedupe_key": "quote:item-1:conflict",
+    }
+    values.update(overrides)
+    return OpenQualityIssue(**values)  # type: ignore[arg-type]
+
+
+def resolve_command(issue_id, **overrides: object) -> ResolveQualityIssue:
+    values = {
+        "issue_id": issue_id,
+        "action": QualityResolutionAction.RESOLVE,
+        "actor_user_id": "user-1",
+        "reason": "evidence checked",
+    }
+    values.update(overrides)
+    return ResolveQualityIssue(**values)  # type: ignore[arg-type]
+
+
+def refetch_command(issue_id, **overrides: object) -> RequestQualityRefetch:
+    values = {
+        "issue_id": issue_id,
+        "actor_user_id": "user-1",
+        "reason": "retry provider",
+        "idempotency_key": f"refetch:{issue_id}:1",
+    }
+    values.update(overrides)
+    return RequestQualityRefetch(**values)  # type: ignore[arg-type]
+
+
+class MemoryRepository:
+    def __init__(self) -> None:
+        self.session = object()
+        self.records: dict[object, DataQualityIssue] = {}
+        self.flush_error: Exception | None = None
+        self.concurrent_record: DataQualityIssue | None = None
+        self.flush_calls = 0
+
+    async def find_by_dedupe_key(self, key: str):
+        return next(
+            (record for record in self.records.values() if record.dedupe_key == key),
+            None,
+        )
+
+    async def get_for_update(self, issue_id):
+        return self.records.get(issue_id)
+
+    async def claim_issue(self, record):
+        if self.concurrent_record is not None:
+            concurrent = self.concurrent_record
+            self.records[concurrent.id] = concurrent
+            return concurrent, False
+        self.records[record.id] = record
+        await self.flush()
+        return record, True
+
+    async def flush(self):
+        self.flush_calls += 1
+        if self.flush_error is not None:
+            raise self.flush_error
+
+    async def list(
+        self,
+        *,
+        status=None,
+        issue_type=None,
+        symbol=None,
+        page=1,
+        page_size=50,
+    ):
+        records = list(self.records.values())
+        if status is not None:
+            records = [record for record in records if record.status == status]
+        if issue_type is not None:
+            records = [record for record in records if record.issue_type == issue_type]
+        if symbol is not None:
+            records = [record for record in records if record.symbol == symbol]
+        records.sort(key=lambda record: (record.last_seen_at, record.id), reverse=True)
+        start = (page - 1) * page_size
+        return records[start : start + page_size]
+
+    async def count(self, *, status=None, issue_type=None, symbol=None):
+        return len(
+            await self.list(
+                status=status,
+                issue_type=issue_type,
+                symbol=symbol,
+                page=1,
+                page_size=max(1, len(self.records)),
+            )
+        )
+
+
+class RecordingEventPort:
+    def __init__(self, session: object) -> None:
+        self.session = session
+        self.issues: list[DataQualityIssue] = []
+        self.refetches: list[tuple[DataQualityIssue, RequestQualityRefetch]] = []
+
+    async def append_resolved(self, issue: DataQualityIssue) -> None:
+        self.issues.append(issue)
+
+    async def append_refetch_requested(
+        self,
+        issue: DataQualityIssue,
+        command: RequestQualityRefetch,
+    ) -> None:
+        self.refetches.append((issue, command))
+
+
+class OrderedRepository(MemoryRepository):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    async def flush(self):
+        self.calls.append("flush")
+        await super().flush()
+
+
+class FailingEventPort(RecordingEventPort):
+    def __init__(self, session: object, calls: list[str]) -> None:
+        super().__init__(session)
+        self.calls = calls
+
+    async def append_resolved(self, issue: DataQualityIssue) -> None:
+        self.calls.append("event")
+        raise RuntimeError("forced event failure")
+
+
+class ConflictingRefetchEventPort(RecordingEventPort):
+    async def append_refetch_requested(
+        self,
+        issue: DataQualityIssue,
+        command: RequestQualityRefetch,
+    ) -> None:
+        raise AppError(
+            code="IDEMPOTENCY_KEY_CONFLICT",
+            message="idempotency key already used",
+            status_code=409,
+        )
+
+
+def quality_service(
+    repository: MemoryRepository,
+    *,
+    now_provider=lambda: NOW,
+) -> tuple[QualityIssueService, RecordingEventPort]:
+    events = RecordingEventPort(repository.session)
+    return (
+        QualityIssueService(repository, events=events, now_provider=now_provider),
+        events,
+    )
+
+
+class ConcurrentRepository:
+    def __init__(self) -> None:
+        self.records: dict[str, DataQualityIssue] = {}
+        self.find_barrier = asyncio.Barrier(2)
+        self.claim_barrier = asyncio.Barrier(2)
+        self.claim_lock = asyncio.Lock()
+        self.update_lock = asyncio.Lock()
+        self.update_owner: asyncio.Task[object] | None = None
+        self.update_lock_count = 0
+
+    async def find_by_dedupe_key(self, key: str):
+        await self.find_barrier.wait()
+        return self.records.get(key)
+
+    async def claim_issue(self, record: DataQualityIssue):
+        await self.claim_barrier.wait()
+        async with self.claim_lock:
+            existing = self.records.get(record.dedupe_key)
+            if existing is not None:
+                return existing, False
+            self.records[record.dedupe_key] = record
+            return record, True
+
+    async def get_for_update(self, issue_id):
+        await self.update_lock.acquire()
+        self.update_owner = asyncio.current_task()
+        self.update_lock_count += 1
+        return next(
+            (record for record in self.records.values() if record.id == issue_id),
+            None,
+        )
+
+    async def flush(self):
+        if self.update_owner is asyncio.current_task():
+            self.update_owner = None
+            self.update_lock.release()
+
+
+class RefreshingIdentityMapSession:
+    def __init__(self, cached: DataQualityIssue) -> None:
+        self.cached = cached
+        self.scalar_calls = 0
+        self.flush_calls = 0
+
+    async def scalar(self, statement):
+        self.scalar_calls += 1
+        if self.scalar_calls == 1:
+            return self.cached
+        if statement.get_execution_options().get("populate_existing") is True:
+            self.cached.status = QualityIssueStatus.RESOLVED
+            self.cached.occurrence_count = 7
+            self.cached.severity = QualitySeverity.CRITICAL
+            self.cached.evidence = {"winner": "database"}
+            self.cached.last_seen_at = NOW + timedelta(minutes=5)
+            self.cached.resolved_at = NOW + timedelta(minutes=5)
+            self.cached.resolved_by_user_id = "reviewer"
+            self.cached.resolution_action = QualityResolutionAction.RESOLVE
+            self.cached.resolution_reason = "already handled"
+        return self.cached
+
+    async def flush(self):
+        self.flush_calls += 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("requires_review", "expected_status"),
+    [
+        (False, QualityIssueStatus.OPEN),
+        (True, QualityIssueStatus.REVIEW_REQUIRED),
+    ],
+)
+async def test_open_creates_initial_status_and_json_evidence(
+    requires_review: bool,
+    expected_status: QualityIssueStatus,
+) -> None:
+    repository = MemoryRepository()
+    service = QualityIssueService(repository, now_provider=lambda: NOW)
+
+    result = await service.open(open_command(requires_review=requires_review))
+
+    assert result.created is True
+    assert result.replayed is False
+    assert result.issue.status == expected_status
+    assert result.issue.occurrence_count == 1
+    assert result.issue.first_seen_at == NOW
+    assert result.issue.last_seen_at == NOW
+    assert isinstance(result.issue.evidence, dict)
+    assert isinstance(result.issue.evidence["sources"], dict)
+
+
+@pytest.mark.anyio
+async def test_open_returns_immutable_public_view() -> None:
+    repository = MemoryRepository()
+
+    result = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+
+    assert isinstance(result.issue, QualityIssueView)
+    assert not isinstance(result.issue, DataQualityIssue)
+    assert json.loads(json.dumps(result.issue.evidence, allow_nan=False)) == {
+        "sources": {
+            "EASTMONEY": {"price": "10.00"},
+            "SINA": {"price": "10.10"},
+        }
+    }
+    with pytest.raises(FrozenInstanceError):
+        result.issue.status = QualityIssueStatus.RESOLVED  # type: ignore[misc]
+
+
+@pytest.mark.anyio
+async def test_open_updates_active_duplicate_and_only_upgrades_severity() -> None:
+    repository = MemoryRepository()
+    times = iter((NOW, NOW + timedelta(minutes=1), NOW + timedelta(minutes=2)))
+    service = QualityIssueService(repository, now_provider=lambda: next(times))
+    created = await service.open(open_command(severity=QualitySeverity.WARNING))
+
+    upgraded = await service.open(
+        open_command(
+            severity=QualitySeverity.CRITICAL,
+            evidence={"latest": 2},
+        )
+    )
+    not_downgraded = await service.open(
+        open_command(
+            severity=QualitySeverity.INFO,
+            evidence={"latest": 3},
+        )
+    )
+
+    assert upgraded.issue.id == created.issue.id
+    assert not_downgraded.created is False
+    assert not_downgraded.replayed is True
+    stored = repository.records[created.issue.id]
+    assert stored.occurrence_count == 3
+    assert stored.last_seen_at == NOW + timedelta(minutes=2)
+    assert stored.severity == QualitySeverity.CRITICAL
+    assert stored.evidence == {"latest": 3}
+
+
+@pytest.mark.anyio
+async def test_open_terminal_duplicate_is_replayed_without_mutation() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    created = await service.open(open_command())
+    await service.resolve(resolve_command(created.issue.id))
+    before = (
+        created.issue.occurrence_count,
+        created.issue.last_seen_at,
+        created.issue.severity,
+        created.issue.evidence,
+    )
+
+    replay = await service.open(
+        open_command(
+            severity=QualitySeverity.CRITICAL,
+            evidence={"latest": "must-not-replace"},
+        )
+    )
+
+    assert replay.created is False
+    assert replay.replayed is True
+    assert replay.issue.id == created.issue.id
+    assert (
+        replay.issue.occurrence_count,
+        replay.issue.last_seen_at,
+        replay.issue.severity,
+        replay.issue.evidence,
+    ) == before
+
+
+@pytest.mark.anyio
+async def test_open_concurrent_claim_uses_winning_record_as_replay() -> None:
+    repository = MemoryRepository()
+    winner = DataQualityIssue(
+        issue_type="QUOTE_CONFLICT",
+        subject_type="quote_cycle_item",
+        subject_id="item-1",
+        symbol="600000.SH",
+        status=QualityIssueStatus.RESOLVED,
+        severity=QualitySeverity.ERROR,
+        evidence={"winner": True},
+        dedupe_key="quote:item-1:conflict",
+        occurrence_count=1,
+        first_seen_at=NOW,
+        last_seen_at=NOW,
+        resolved_at=NOW,
+        resolved_by_user_id="user-1",
+        resolution_action=QualityResolutionAction.RESOLVE,
+        resolution_reason="done",
+    )
+    repository.concurrent_record = winner
+
+    result = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+
+    assert result.issue.id == winner.id
+    assert not isinstance(result.issue, DataQualityIssue)
+    assert result.created is False
+    assert result.replayed is True
+
+
+@pytest.mark.anyio
+async def test_simultaneous_open_claims_one_issue_and_serializes_replay() -> None:
+    repository = ConcurrentRepository()
+    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    commands = (
+        open_command(
+            severity=QualitySeverity.WARNING,
+            evidence={"request": "warning"},
+        ),
+        open_command(
+            severity=QualitySeverity.CRITICAL,
+            evidence={"request": "critical"},
+        ),
+    )
+
+    results = await asyncio.wait_for(
+        asyncio.gather(*(service.open(command) for command in commands)),
+        timeout=2,
+    )
+
+    assert len({result.issue.id for result in results}) == 1
+    assert sorted(result.created for result in results) == [False, True]
+    stored = next(iter(repository.records.values()))
+    replay_index = next(
+        index for index, result in enumerate(results) if result.created is False
+    )
+    assert stored.occurrence_count == 2
+    assert stored.severity == QualitySeverity.CRITICAL
+    assert stored.evidence == commands[replay_index].evidence
+    assert repository.update_lock_count == 1
+
+
+@pytest.mark.anyio
+async def test_open_refreshes_cached_issue_after_acquiring_database_lock() -> None:
+    stale = DataQualityIssue(
+        issue_type="QUOTE_CONFLICT",
+        subject_type="quote_cycle_item",
+        subject_id="item-1",
+        symbol="600000.SH",
+        status=QualityIssueStatus.OPEN,
+        severity=QualitySeverity.WARNING,
+        evidence={"stale": True},
+        dedupe_key="quote:item-1:conflict",
+        occurrence_count=1,
+        first_seen_at=NOW,
+        last_seen_at=NOW,
+    )
+    session = RefreshingIdentityMapSession(stale)
+    service = QualityIssueService(
+        QualityIssueRepository(session),  # type: ignore[arg-type]
+        now_provider=lambda: NOW + timedelta(minutes=10),
+    )
+
+    result = await service.open(
+        open_command(
+            severity=QualitySeverity.ERROR,
+            evidence={"incoming": "must-not-overwrite-terminal"},
+        )
+    )
+
+    assert result.replayed is True
+    assert result.created is False
+    assert result.issue.status == QualityIssueStatus.RESOLVED
+    assert result.issue.occurrence_count == 7
+    assert result.issue.severity == QualitySeverity.CRITICAL
+    assert result.issue.evidence == {"winner": "database"}
+    assert session.flush_calls == 0
+
+
+@pytest.mark.anyio
+async def test_open_does_not_report_success_when_flush_fails() -> None:
+    repository = MemoryRepository()
+    repository.flush_error = RuntimeError("database unavailable")
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await QualityIssueService(repository, now_provider=lambda: NOW).open(
+            open_command()
+        )
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("action", "expected_status"),
+    [
+        (QualityResolutionAction.RESOLVE, QualityIssueStatus.RESOLVED),
+        (QualityResolutionAction.INVALIDATE, QualityIssueStatus.INVALIDATED),
+        (QualityResolutionAction.SELECT_SOURCE, QualityIssueStatus.RESOLVED),
+    ],
+)
+async def test_resolve_applies_supported_terminal_transitions(
+    action: QualityResolutionAction,
+    expected_status: QualityIssueStatus,
+) -> None:
+    repository = MemoryRepository()
+    service, events = quality_service(repository)
+    opened = await service.open(open_command(requires_review=True))
+    selected_source = (
+        "SINA" if action is QualityResolutionAction.SELECT_SOURCE else None
+    )
+
+    result = await service.resolve(
+        resolve_command(
+            opened.issue.id,
+            action=action,
+            selected_source=selected_source,
+        )
+    )
+
+    assert result.replayed is False
+    assert result.issue.status == expected_status
+    assert result.issue.resolved_at == NOW
+    assert result.issue.resolved_by_user_id == "user-1"
+    assert result.issue.resolution_action == action
+    assert result.issue.resolution_reason == "evidence checked"
+    assert result.issue.selected_source == selected_source
+    assert len(events.issues) == 1
+    assert events.issues[0].id == result.issue.id
+    assert events.issues[0].status == result.issue.status
+
+
+@pytest.mark.anyio
+async def test_resolve_returns_immutable_public_view() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+
+    result = await service.resolve(resolve_command(opened.issue.id))
+
+    assert isinstance(result.issue, QualityIssueView)
+    assert not isinstance(result.issue, DataQualityIssue)
+    assert json.dumps(result.issue.evidence, allow_nan=False)
+    with pytest.raises(FrozenInstanceError):
+        result.issue.resolution_reason = "changed"  # type: ignore[misc]
+
+
+@pytest.mark.anyio
+async def test_resolve_identical_terminal_decision_is_idempotent() -> None:
+    repository = MemoryRepository()
+    repository.session = AsyncMock(spec=AsyncSession)
+    service, events = quality_service(repository)
+    opened = await service.open(open_command())
+    command = resolve_command(opened.issue.id)
+    first = await service.resolve(command)
+    flush_calls = repository.flush_calls
+
+    replay = await service.resolve(command)
+
+    assert replay.issue == first.issue
+    assert replay.replayed is True
+    assert repository.flush_calls == flush_calls
+    assert len(events.issues) == 1
+    assert events.issues[0].id == first.issue.id
+    repository.session.commit.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_resolve_rejects_a_different_terminal_decision() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+    await service.resolve(resolve_command(opened.issue.id))
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(
+            resolve_command(
+                opened.issue.id,
+                action=QualityResolutionAction.INVALIDATE,
+            )
+        )
+
+    assert caught.value.code == "QUALITY_ISSUE_STATE_CONFLICT"
+    assert caught.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_resolve_missing_issue_is_404() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    with pytest.raises(AppError) as caught:
+        await service.resolve(resolve_command(uuid4()))
+
+    assert caught.value.code == "QUALITY_ISSUE_NOT_FOUND"
+    assert caught.value.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_select_source_rejects_source_not_present_in_evidence() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(
+            resolve_command(
+                opened.issue.id,
+                action=QualityResolutionAction.SELECT_SOURCE,
+                selected_source="TENCENT",
+            )
+        )
+
+    assert caught.value.code == "QUALITY_SOURCE_NOT_AVAILABLE"
+    assert caught.value.status_code == 422
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"sources": ["EASTMONEY", "SINA"]},
+        {"sources": "EASTMONEY"},
+        {"other": {}},
+    ],
+)
+async def test_select_source_rejects_invalid_sources_shape(evidence) -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command(evidence=evidence))
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(
+            resolve_command(
+                opened.issue.id,
+                action=QualityResolutionAction.SELECT_SOURCE,
+                selected_source="SINA",
+            )
+        )
+
+    assert caught.value.code == "QUALITY_EVIDENCE_INVALID"
+    assert caught.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_select_source_rejects_non_object_evidence_with_stable_error() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+    repository.records[opened.issue.id].evidence = ["invalid"]  # type: ignore[assignment]
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(
+            resolve_command(
+                opened.issue.id,
+                action=QualityResolutionAction.SELECT_SOURCE,
+                selected_source="SINA",
+            )
+        )
+
+    assert caught.value.code == "QUALITY_EVIDENCE_INVALID"
+    assert caught.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_resolve_rejects_invalid_persisted_status_with_stable_error() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+    repository.records[opened.issue.id].status = "BROKEN"
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(resolve_command(opened.issue.id))
+
+    assert caught.value.code == "QUALITY_ISSUE_STATE_INVALID"
+    assert caught.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_resolve_rejects_invalid_action_with_stable_error() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+    command = resolve_command(opened.issue.id)
+    object.__setattr__(command, "action", "EDIT_PRICE")
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(command)
+
+    assert caught.value.code == "QUALITY_ACTION_NOT_ALLOWED"
+    assert caught.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_refetch_is_not_a_terminal_resolution_action() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+    opened = await service.open(open_command())
+
+    with pytest.raises(AppError) as caught:
+        await service.resolve(
+            resolve_command(
+                opened.issue.id,
+                action=QualityResolutionAction.REFETCH,
+            )
+        )
+
+    assert caught.value.code == "QUALITY_ACTION_NOT_ALLOWED"
+    assert caught.value.status_code == 422
+    assert opened.issue.status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_resolve_requires_event_integration_for_a_new_decision() -> None:
+    repository = MemoryRepository()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+
+    with pytest.raises(AppError) as caught:
+        await QualityIssueService(repository, now_provider=lambda: NOW).resolve(
+            resolve_command(opened.issue.id)
+        )
+
+    assert caught.value.code == "QUALITY_INTEGRATION_UNAVAILABLE"
+    assert caught.value.status_code == 503
+    assert opened.issue.status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_resolve_rejects_event_port_from_a_different_transaction() -> None:
+    repository = MemoryRepository()
+    repository.session = AsyncSession()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    other_session = AsyncSession()
+    events = RecordingEventPort(other_session)
+
+    try:
+        with pytest.raises(AppError) as caught:
+            await QualityIssueService(
+                repository,
+                events=events,
+                now_provider=lambda: NOW,
+            ).resolve(resolve_command(opened.issue.id))
+    finally:
+        await repository.session.close()
+        await other_session.close()
+
+    assert caught.value.code == "QUALITY_TRANSACTION_MISMATCH"
+    assert caught.value.status_code == 500
+    assert opened.issue.status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_resolve_flushes_before_event_and_propagates_event_failure() -> None:
+    calls: list[str] = []
+    repository = OrderedRepository(calls)
+    repository.session = AsyncMock(spec=AsyncSession)
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    calls.clear()
+
+    with pytest.raises(RuntimeError, match="forced event failure"):
+        await QualityIssueService(
+            repository,
+            events=FailingEventPort(repository.session, calls),
+            now_provider=lambda: NOW,
+        ).resolve(resolve_command(opened.issue.id))
+
+    assert calls == ["flush", "event"]
+    repository.session.commit.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_list_returns_filtered_paginated_public_views() -> None:
+    repository = MemoryRepository()
+    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    matching = await service.open(open_command())
+    await service.open(
+        open_command(
+            subject_id="item-2",
+            symbol="000001.SZ",
+            dedupe_key="quote:item-2:conflict",
+        )
+    )
+
+    page = await service.list(
+        status=QualityIssueStatus.OPEN,
+        issue_type="QUOTE_CONFLICT",
+        symbol="600000.SH",
+        page=1,
+        page_size=1,
+    )
+
+    assert page == QualityIssuePage(
+        items=(matching.issue,),
+        total=1,
+        page=1,
+        page_size=1,
+    )
+    assert isinstance(page.items, tuple)
+    assert all(isinstance(item, QualityIssueView) for item in page.items)
+    assert all(not isinstance(item, DataQualityIssue) for item in page.items)
+
+
+@pytest.mark.anyio
+async def test_request_refetch_keeps_issue_open_and_appends_one_event() -> None:
+    repository = MemoryRepository()
+    service, events = quality_service(repository)
+    opened = await service.open(open_command())
+    before = repository.records[opened.issue.id].status
+    command = refetch_command(opened.issue.id)
+
+    result = await service.request_refetch(command)
+
+    assert isinstance(result, QualityIssueView)
+    assert result.status == before == QualityIssueStatus.OPEN
+    assert events.refetches == [(repository.records[opened.issue.id], command)]
+
+
+@pytest.mark.anyio
+async def test_request_refetch_missing_issue_is_404() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
+
+    with pytest.raises(AppError) as caught:
+        await service.request_refetch(refetch_command(uuid4()))
+
+    assert caught.value.code == "QUALITY_ISSUE_NOT_FOUND"
+    assert caught.value.status_code == 404
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "status", [QualityIssueStatus.RESOLVED, QualityIssueStatus.INVALIDATED]
+)
+async def test_request_refetch_rejects_terminal_issue(status) -> None:
+    repository = MemoryRepository()
+    service, events = quality_service(repository)
+    opened = await service.open(open_command())
+    repository.records[opened.issue.id].status = status
+
+    with pytest.raises(AppError) as caught:
+        await service.request_refetch(refetch_command(opened.issue.id))
+
+    assert caught.value.code == "QUALITY_ISSUE_STATE_CONFLICT"
+    assert caught.value.status_code == 409
+    assert events.refetches == []
+
+
+@pytest.mark.anyio
+async def test_request_refetch_rejects_invalid_persisted_status() -> None:
+    repository = MemoryRepository()
+    service, events = quality_service(repository)
+    opened = await service.open(open_command())
+    repository.records[opened.issue.id].status = "BROKEN"
+
+    with pytest.raises(AppError) as caught:
+        await service.request_refetch(refetch_command(opened.issue.id))
+
+    assert caught.value.code == "QUALITY_ISSUE_STATE_INVALID"
+    assert caught.value.status_code == 409
+    assert events.refetches == []
+
+
+@pytest.mark.anyio
+async def test_request_refetch_requires_event_integration() -> None:
+    repository = MemoryRepository()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+
+    with pytest.raises(AppError) as caught:
+        await QualityIssueService(repository, now_provider=lambda: NOW).request_refetch(
+            refetch_command(opened.issue.id)
+        )
+
+    assert caught.value.code == "QUALITY_INTEGRATION_UNAVAILABLE"
+    assert caught.value.status_code == 503
+    assert repository.records[opened.issue.id].status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_request_refetch_rejects_event_port_from_different_transaction() -> None:
+    repository = MemoryRepository()
+    repository.session = AsyncSession()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    other_session = AsyncSession()
+
+    try:
+        with pytest.raises(AppError) as caught:
+            await QualityIssueService(
+                repository,
+                events=RecordingEventPort(other_session),
+                now_provider=lambda: NOW,
+            ).request_refetch(refetch_command(opened.issue.id))
+    finally:
+        await repository.session.close()
+        await other_session.close()
+
+    assert caught.value.code == "QUALITY_TRANSACTION_MISMATCH"
+    assert caught.value.status_code == 500
+    assert repository.records[opened.issue.id].status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_refetch_propagates_idempotency_conflict_without_mutation() -> None:
+    repository = MemoryRepository()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    service = QualityIssueService(
+        repository,
+        events=ConflictingRefetchEventPort(repository.session),
+        now_provider=lambda: NOW,
+    )
+
+    with pytest.raises(AppError) as caught:
+        await service.request_refetch(refetch_command(opened.issue.id))
+
+    assert caught.value.code == "IDEMPOTENCY_KEY_CONFLICT"
+    assert caught.value.status_code == 409
+    assert repository.records[opened.issue.id].status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_repository_claim_conflict_rereads_without_transaction_rollback() -> None:
+    session = Mock()
+    session.flush = AsyncMock(
+        side_effect=IntegrityError("insert", {}, Exception("duplicate"))
+    )
+    session.scalar = AsyncMock()
+    nested = AsyncMock()
+    session.begin_nested.return_value = nested
+    existing = Mock(spec=DataQualityIssue)
+    session.scalar.return_value = existing
+    candidate = Mock(spec=DataQualityIssue)
+    candidate.dedupe_key = "same-key"
+
+    claimed, created = await QualityIssueRepository(session).claim_issue(candidate)
+
+    assert claimed is existing
+    assert created is False
+    session.begin_nested.assert_called_once_with()
+    session.add.assert_called_once_with(candidate)
+    session.flush.assert_awaited_once_with()
+    session.rollback.assert_not_called()
+    nested.__aenter__.assert_awaited_once()
+    nested.__aexit__.assert_awaited_once()
+    exit_args = nested.__aexit__.await_args.args
+    assert exit_args[0] is IntegrityError
+    assert isinstance(exit_args[1], IntegrityError)
+    reread = session.scalar.await_args.args[0]
+    compiled = reread.compile(dialect=postgresql.dialect())
+    assert "data_quality_issue.dedupe_key" in str(compiled)
+    assert "same-key" in compiled.params.values()
+
+
+@pytest.mark.anyio
+async def test_repository_get_for_update_uses_postgresql_row_lock() -> None:
+    session = AsyncMock()
+    issue_id = uuid4()
+
+    await QualityIssueRepository(session).get_for_update(issue_id)
+
+    statement = session.scalar.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    assert "FOR UPDATE" in str(compiled).upper()
+    assert statement.get_execution_options()["populate_existing"] is True
+    assert issue_id in compiled.params.values()
+
+
+@pytest.mark.anyio
+async def test_repository_list_and_count_apply_filters_and_stable_pagination() -> None:
+    session = AsyncMock()
+    rows = Mock()
+    rows.all.return_value = []
+    session.scalars.return_value = rows
+    session.scalar.return_value = 7
+    repository = QualityIssueRepository(session)
+
+    listed = await repository.list(
+        status=QualityIssueStatus.OPEN,
+        issue_type="QUOTE_CONFLICT",
+        symbol="600000.SH",
+        page=2,
+        page_size=5,
+    )
+    count = await repository.count(
+        status=QualityIssueStatus.OPEN,
+        issue_type="QUOTE_CONFLICT",
+        symbol="600000.SH",
+    )
+
+    statement = session.scalars.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "data_quality_issue.status" in sql
+    assert "data_quality_issue.issue_type" in sql
+    assert "data_quality_issue.symbol" in sql
+    assert "ORDER BY data_quality_issue.last_seen_at DESC, data_quality_issue.id" in sql
+    assert compiled.params["param_1"] == 5
+    assert compiled.params["param_2"] == 5
+    count_sql = str(
+        session.scalar.await_args.args[0].compile(dialect=postgresql.dialect())
+    )
+    assert "count(*)" in count_sql
+    assert listed == []
+    assert count == 7

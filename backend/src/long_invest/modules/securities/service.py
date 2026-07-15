@@ -16,6 +16,7 @@ from long_invest.modules.securities.contracts import (
     SecurityMasterSnapshot,
     SecurityType,
     SnapshotResult,
+    SymbolUniverseQuery,
     UniverseQuery,
     assess_monitoring_eligibility,
     validate_symbol,
@@ -257,6 +258,56 @@ class SecurityMasterService:
                 message="股票范围筛选条件无效",
                 status_code=422,
             ) from exc
+        return await self._save_universe_snapshot(
+            securities=securities,
+            master_version=master_version,
+            filters=filters,
+        )
+
+    async def freeze_symbols(
+        self, query: SymbolUniverseQuery
+    ) -> SecurityUniverseSnapshot:
+        if not query.symbols:
+            raise AppError(
+                code="SECURITY_UNIVERSE_EMPTY",
+                message="股票范围不能为空",
+                status_code=422,
+            )
+        await self._repository.lock_master_updates()
+        securities_by_symbol = await self._repository.get_many(query.symbols)
+        errors = []
+        securities = []
+        for symbol in query.symbols:
+            security = securities_by_symbol.get(symbol)
+            if security is None:
+                errors.append({"symbol": symbol, "code": "SECURITY_NOT_FOUND"})
+                continue
+            eligibility = assess_monitoring_eligibility(_security_item(security))
+            if not eligibility.eligible:
+                errors.append({"symbol": symbol, "code": eligibility.code})
+                continue
+            securities.append(security)
+        if errors:
+            raise AppError(
+                code="SECURITY_UNIVERSE_INVALID",
+                message="股票范围包含不存在或不具备正式监控资格的股票",
+                status_code=422,
+                details={"errors": errors},
+            )
+        master_version = await self._repository.current_master_version()
+        return await self._save_universe_snapshot(
+            securities=securities,
+            master_version=master_version,
+            filters={"mode": "symbols", "symbols": list(query.symbols)},
+        )
+
+    async def _save_universe_snapshot(
+        self,
+        *,
+        securities: list[Security],
+        master_version: int,
+        filters: dict[str, Any],
+    ) -> SecurityUniverseSnapshot:
         frozen = SecurityUniverseSnapshot(
             id=uuid4(),
             filters=filters,

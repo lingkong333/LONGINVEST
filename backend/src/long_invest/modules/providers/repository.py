@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
@@ -168,71 +168,87 @@ class ProviderRepository:
             .group_by(ProviderCapabilitySetting.provider_code)
             .subquery()
         )
-        rows = await self._session.scalars(
-            select(ProviderCapabilitySetting)
-            .join(
-                latest,
-                (ProviderCapabilitySetting.provider_code == latest.c.provider_code)
-                & (ProviderCapabilitySetting.config_version == latest.c.version),
+        async with self._session.begin():
+            rows = await self._session.scalars(
+                select(ProviderCapabilitySetting)
+                .join(
+                    latest,
+                    (
+                        ProviderCapabilitySetting.provider_code
+                        == latest.c.provider_code
+                    )
+                    & (
+                        ProviderCapabilitySetting.config_version
+                        == latest.c.version
+                    ),
+                )
+                .where(ProviderCapabilitySetting.capability == capability.value)
+                .order_by(ProviderCapabilitySetting.priority)
             )
-            .where(ProviderCapabilitySetting.capability == capability.value)
-            .order_by(ProviderCapabilitySetting.priority)
-        )
-        return tuple(self._route(row) for row in rows)
+            return tuple(self._route(row) for row in rows)
 
     async def list_provider_codes(self) -> tuple[ProviderCode, ...]:
-        rows = await self._session.scalars(
-            select(ProviderConfigVersion.provider_code).distinct()
-        )
-        return tuple(ProviderCode(item) for item in rows)
+        async with self._session.begin():
+            rows = await self._session.scalars(
+                select(ProviderConfigVersion.provider_code).distinct()
+            )
+            return tuple(ProviderCode(item) for item in rows)
 
     async def provider_summary(self, provider: ProviderCode) -> dict[str, Any]:
-        current = await self._latest_config(provider)
-        if current is None:
-            raise AppError(
-                code="PROVIDER_NOT_FOUND", message="Provider 不存在", status_code=404
-            )
-        settings = await self._settings(provider, current.version)
-        return {
-            "provider_code": provider.value,
-            "version": current.version,
-            "reason": current.reason,
-            "capabilities": [self._setting_dict(row) for row in settings],
-        }
+        async with self._session.begin():
+            current = await self._latest_config(provider)
+            if current is None:
+                raise AppError(
+                    code="PROVIDER_NOT_FOUND",
+                    message="Provider 不存在",
+                    status_code=404,
+                )
+            settings = await self._settings(provider, current.version)
+            return {
+                "provider_code": provider.value,
+                "version": current.version,
+                "reason": current.reason,
+                "capabilities": [self._setting_dict(row) for row in settings],
+            }
 
     async def health(self, provider: ProviderCode) -> list[dict[str, Any]]:
-        rows = await self._session.scalars(
-            select(ProviderHealthState).where(
-                ProviderHealthState.provider_code == provider.value
+        async with self._session.begin():
+            rows = await self._session.scalars(
+                select(ProviderHealthState).where(
+                    ProviderHealthState.provider_code == provider.value
+                )
             )
-        )
-        return [
-            {
-                "capability": row.capability,
-                "status": row.status,
-                "consecutive_failures": row.consecutive_failures,
-                "last_success_at": row.last_success_at,
-                "last_failure_at": row.last_failure_at,
-                "metrics": row.metrics,
-            }
-            for row in rows
-        ]
+            return [
+                {
+                    "capability": row.capability,
+                    "status": row.status,
+                    "consecutive_failures": row.consecutive_failures,
+                    "last_success_at": row.last_success_at,
+                    "last_failure_at": row.last_failure_at,
+                    "metrics": row.metrics,
+                }
+                for row in rows
+            ]
 
     async def circuits(self) -> list[dict[str, Any]]:
-        rows = await self._session.scalars(select(ProviderCircuitState))
-        return [self._circuit_dict(row) for row in rows]
+        async with self._session.begin():
+            rows = await self._session.scalars(select(ProviderCircuitState))
+            return [self._circuit_dict(row) for row in rows]
 
     async def circuit(self, circuit_id: UUID) -> dict[str, Any]:
-        row = await self._session.scalar(
-            select(ProviderCircuitState).where(ProviderCircuitState.id == circuit_id)
-        )
-        if row is None:
-            raise AppError(
-                code="PROVIDER_CIRCUIT_NOT_FOUND",
-                message="熔断记录不存在",
-                status_code=404,
+        async with self._session.begin():
+            row = await self._session.scalar(
+                select(ProviderCircuitState).where(
+                    ProviderCircuitState.id == circuit_id
+                )
             )
-        return self._circuit_dict(row)
+            if row is None:
+                raise AppError(
+                    code="PROVIDER_CIRCUIT_NOT_FOUND",
+                    message="熔断记录不存在",
+                    status_code=404,
+                )
+            return self._circuit_dict(row)
 
     async def mutate_settings(
         self,
@@ -253,6 +269,10 @@ class ProviderRepository:
         }
         digest = request_digest(payload)
         async with self._session.begin():
+            await self._session.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:provider_key))"),
+                {"provider_key": f"provider-config:{provider.value}"},
+            )
             replay = await self._idempotent_replay(context.idempotency_key, digest)
             if replay is not None:
                 return replay
@@ -597,7 +617,8 @@ class ProviderRepository:
     async def replay_mutation(
         self, idempotency_key: str, digest: str
     ) -> dict[str, Any] | None:
-        return await self._idempotent_replay(idempotency_key, digest)
+        async with self._session.begin():
+            return await self._idempotent_replay(idempotency_key, digest)
 
     async def _latest_config(
         self, provider: ProviderCode

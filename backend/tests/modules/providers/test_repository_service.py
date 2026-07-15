@@ -3,9 +3,11 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from functools import wraps
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import (
@@ -68,6 +70,10 @@ class FakeSession:
         del statement
         return self.scalar_results.pop(0) if self.scalar_results else None
 
+    async def execute(self, statement, parameters=None):
+        del statement
+        self.last_execute_parameters = parameters
+
     def add(self, item):
         assert self.in_transaction
         self.added.append(item)
@@ -103,6 +109,20 @@ def test_repository_fails_closed_without_audit_or_outbox() -> None:
         ProviderRepository(FakeSession(), audit=None, events=RecordingEvents())
     with pytest.raises(ValueError):
         ProviderRepository(FakeSession(), audit=RecordingAudit(), events=None)
+
+
+@async_test
+async def test_read_boundary_closes_real_async_session_transaction() -> None:
+    session = AsyncSession()
+    repository = ProviderRepository(
+        session, audit=RecordingAudit(), events=RecordingEvents()
+    )
+    repository._idempotent_replay = AsyncMock(return_value=None)
+    assert await repository.replay_mutation("idem", "digest") is None
+    assert session.in_transaction() is False
+    async with session.begin():
+        assert session.in_transaction() is True
+    await session.close()
 
 
 @async_test
@@ -169,6 +189,9 @@ async def test_settings_persists_history_audit_outbox_atomically() -> None:
     }
     assert audit.calls[0]["context"].trusted_ip == "127.0.0.1"
     assert events.calls[0][1]["idempotency_key"] == "idem-1"
+    assert session.last_execute_parameters == {
+        "provider_key": "provider-config:EASTMONEY"
+    }
 
 
 @async_test

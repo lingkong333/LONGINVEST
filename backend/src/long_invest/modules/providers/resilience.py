@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from time import monotonic
 from typing import Any, Protocol
+from uuid import uuid4
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 
@@ -216,8 +217,10 @@ class ProviderRuntimeStatePort(Protocol):
     async def allow(
         self, setting: ProviderRouteSetting, *, probe: bool = False
     ) -> bool: ...
-    async def acquire(self, setting: ProviderRouteSetting) -> bool: ...
-    async def release(self, setting: ProviderRouteSetting) -> None: ...
+    async def acquire(self, setting: ProviderRouteSetting) -> ProviderLease | None: ...
+    async def release(
+        self, setting: ProviderRouteSetting, lease: ProviderLease
+    ) -> None: ...
     async def record_success(self, setting: ProviderRouteSetting) -> None: ...
     async def record_failure(self, setting: ProviderRouteSetting) -> None: ...
     async def force_half_open(self, setting: ProviderRouteSetting) -> None: ...
@@ -249,6 +252,12 @@ class ProviderCallError(RuntimeError):
         self.code = code
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderLease:
+    backend: str
+    token: str
+
+
 class InMemoryProviderRuntimeState:
     """Conservative fallback and deterministic test implementation."""
 
@@ -277,7 +286,7 @@ class InMemoryProviderRuntimeState:
             setting.provider, setting.capability, now=datetime.now(UTC)
         )
 
-    async def acquire(self, setting: ProviderRouteSetting) -> bool:
+    async def acquire(self, setting: ProviderRouteSetting) -> ProviderLease | None:
         async with self._lock:
             key = (setting.provider, setting.capability)
             total = sum(self._active.values())
@@ -285,7 +294,7 @@ class InMemoryProviderRuntimeState:
             if setting.capability is not ProviderCapability.REALTIME_QUOTE_BATCH:
                 usable = max(1, usable - self._reserved)
             if total >= usable or self._active.get(key, 0) >= setting.concurrency:
-                return False
+                return None
             now = self._clock()
             capacity = max(1.0, setting.rate_per_second)
             tokens, updated_at = self._tokens.get(key, (capacity, now))
@@ -295,12 +304,16 @@ class InMemoryProviderRuntimeState:
             )
             if tokens < 1:
                 self._tokens[key] = (tokens, now)
-                return False
+                return None
             self._tokens[key] = (tokens - 1, now)
             self._active[key] = self._active.get(key, 0) + 1
-            return True
+            return ProviderLease("local", uuid4().hex)
 
-    async def release(self, setting: ProviderRouteSetting) -> None:
+    async def release(
+        self, setting: ProviderRouteSetting, lease: ProviderLease
+    ) -> None:
+        if lease.backend != "local":
+            return
         async with self._lock:
             key = (setting.provider, setting.capability)
             self._active[key] = max(0, self._active.get(key, 0) - 1)
@@ -359,44 +372,62 @@ class RedisProviderRuntimeState:
     async def allow(
         self, setting: ProviderRouteSetting, *, probe: bool = False
     ) -> bool:
+        script = """
+        local raw=redis.call('get',KEYS[1])
+        if not raw then return 1 end
+        local state=cjson.decode(raw)
+        if state['state']=='CLOSED' then return 1 end
+        if state['state']=='DISABLED' then return 0 end
+        local level=math.min(tonumber(state['level'] or 0),2)
+        local cooldown=tonumber(ARGV[3+level])
+        local opened=tonumber(state['opened_at'] or 0)
+        local ready=(ARGV[1]=='1') or ((tonumber(ARGV[2])-opened)>=cooldown)
+        if not ready or redis.call('exists',KEYS[2])==1 then return 0 end
+        redis.call('set',KEYS[2],'1','EX',30)
+        state['state']='HALF_OPEN'
+        redis.call('set',KEYS[1],cjson.encode(state))
+        return 1
+        """
         try:
-            raw = await self._redis.get(self._circuit_key(setting))
-            state = (
-                json.loads(raw)
-                if raw
-                else {"state": "CLOSED", "failures": 0, "level": 0}
+            circuit_key = self._circuit_key(setting)
+            return bool(
+                await self._redis.eval(
+                    script,
+                    2,
+                    circuit_key,
+                    f"{circuit_key}:probe",
+                    "1" if probe else "0",
+                    datetime.now(UTC).timestamp(),
+                    60,
+                    180,
+                    300,
+                )
             )
-            if state["state"] == "CLOSED":
-                return True
-            if state["state"] == "DISABLED":
-                return False
-            opened_at = state.get("opened_at")
-            cooldown = (60, 180, 300)[min(int(state.get("level", 0)), 2)]
-            ready = probe or (
-                opened_at is not None
-                and (datetime.now(UTC).timestamp() - float(opened_at)) >= cooldown
-            )
-            if not ready:
-                return False
-            probe_key = f"{self._circuit_key(setting)}:probe"
-            claimed = await self._redis.set(probe_key, "1", ex=30, nx=True)
-            if claimed:
-                state["state"] = "HALF_OPEN"
-                await self._redis.set(self._circuit_key(setting), json.dumps(state))
-            return bool(claimed)
         except Exception:
             return await self._fallback.allow(setting, probe=probe)
 
-    async def acquire(self, setting: ProviderRouteSetting) -> bool:
+    async def acquire(self, setting: ProviderRouteSetting) -> ProviderLease | None:
         script = """
         local total=tonumber(redis.call('get',KEYS[1]) or '0')
         local cap=tonumber(redis.call('get',KEYS[2]) or '0')
-        local rate=tonumber(redis.call('get',KEYS[3]) or '0')
         if total>=tonumber(ARGV[1]) or cap>=tonumber(ARGV[2]) then return 0 end
-        if rate>=tonumber(ARGV[3]) then return 0 end
+        local clock=redis.call('TIME')
+        local now=tonumber(clock[1])*1000+math.floor(tonumber(clock[2])/1000)
+        local rate=tonumber(ARGV[3])
+        local capacity=math.max(1000,rate)
+        local tokens=tonumber(redis.call('hget',KEYS[3],'tokens') or capacity)
+        local updated=tonumber(redis.call('hget',KEYS[3],'updated') or now)
+        tokens=math.min(capacity,tokens+math.floor((now-updated)*rate/1000))
+        if tokens<1000 then
+          redis.call('hmset',KEYS[3],'tokens',tokens,'updated',now)
+          redis.call('expire',KEYS[3],math.max(2,math.ceil(2000/rate)))
+          return 0
+        end
+        tokens=tokens-1000
+        redis.call('hmset',KEYS[3],'tokens',tokens,'updated',now)
+        redis.call('expire',KEYS[3],math.max(2,math.ceil(2000/rate)))
         redis.call('incr',KEYS[1]); redis.call('expire',KEYS[1],30)
         redis.call('incr',KEYS[2]); redis.call('expire',KEYS[2],30)
-        redis.call('incr',KEYS[3]); redis.call('expire',KEYS[3],1)
         return 1
         """
         limit = self._global_limit
@@ -408,20 +439,26 @@ class RedisProviderRuntimeState:
             f"{self._namespace}:rate:{setting.provider}:{setting.capability}",
         ]
         try:
-            return bool(
+            acquired = bool(
                 await self._redis.eval(
                     script,
                     len(keys),
                     *keys,
                     limit,
                     setting.concurrency,
-                    max(1, int(setting.rate_per_second)),
+                    max(1, round(setting.rate_per_second * 1000)),
                 )
             )
+            return ProviderLease("redis", uuid4().hex) if acquired else None
         except Exception:
             return await self._fallback.acquire(setting)
 
-    async def release(self, setting: ProviderRouteSetting) -> None:
+    async def release(
+        self, setting: ProviderRouteSetting, lease: ProviderLease
+    ) -> None:
+        if lease.backend == "local":
+            await self._fallback.release(setting, lease)
+            return
         keys = [
             f"{self._namespace}:active:global",
             f"{self._namespace}:active:{setting.provider}:{setting.capability}",
@@ -436,44 +473,69 @@ class RedisProviderRuntimeState:
         try:
             await self._redis.eval(script, len(keys), *keys)
         except Exception:
-            await self._fallback.release(setting)
+            return
 
     async def record_success(self, setting: ProviderRouteSetting) -> None:
-        state = {"state": "CLOSED", "failures": 0, "level": 0}
+        script = """
+        redis.call('set',KEYS[1],ARGV[1])
+        redis.call('del',KEYS[2])
+        return 1
+        """
         try:
-            await self._redis.set(self._circuit_key(setting), json.dumps(state))
-            await self._redis.delete(f"{self._circuit_key(setting)}:probe")
+            circuit_key = self._circuit_key(setting)
+            await self._redis.eval(
+                script,
+                2,
+                circuit_key,
+                f"{circuit_key}:probe",
+                json.dumps({"state": "CLOSED", "failures": 0, "level": 0}),
+            )
         except Exception:
             await self._fallback.record_success(setting)
 
     async def record_failure(self, setting: ProviderRouteSetting) -> None:
+        script = """
+        local raw=redis.call('get',KEYS[1])
+        local state=raw and cjson.decode(raw) or {state='CLOSED',failures=0,level=0}
+        local failures=tonumber(state['failures'] or 0)+1
+        if state['state']=='HALF_OPEN' then
+          state['level']=math.min(tonumber(state['level'] or 0)+1,2)
+          failures=3
+        end
+        state['failures']=failures
+        if failures>=3 then
+          state['state']='OPEN'
+          state['opened_at']=tonumber(ARGV[1])
+        end
+        redis.call('set',KEYS[1],cjson.encode(state))
+        redis.call('del',KEYS[2])
+        return 1
+        """
         try:
-            raw = await self._redis.get(self._circuit_key(setting))
-            state = (
-                json.loads(raw)
-                if raw
-                else {"state": "CLOSED", "failures": 0, "level": 0}
+            circuit_key = self._circuit_key(setting)
+            await self._redis.eval(
+                script,
+                2,
+                circuit_key,
+                f"{circuit_key}:probe",
+                datetime.now(UTC).timestamp(),
             )
-            failures = int(state.get("failures", 0)) + 1
-            if state.get("state") == "HALF_OPEN":
-                state["level"] = min(int(state.get("level", 0)) + 1, 2)
-                failures = 3
-            state["failures"] = failures
-            if failures >= 3:
-                state["state"] = "OPEN"
-                state["opened_at"] = datetime.now(UTC).timestamp()
-            await self._redis.set(self._circuit_key(setting), json.dumps(state))
-            await self._redis.delete(f"{self._circuit_key(setting)}:probe")
         except Exception:
             await self._fallback.record_failure(setting)
 
     async def force_half_open(self, setting: ProviderRouteSetting) -> None:
+        script = """
+        local raw=redis.call('get',KEYS[1])
+        local state=raw and cjson.decode(raw) or {failures=3,level=0}
+        state['state']='OPEN'
+        state['opened_at']=0
+        redis.call('set',KEYS[1],cjson.encode(state))
+        return 1
+        """
         try:
-            raw = await self._redis.get(self._circuit_key(setting))
-            state = json.loads(raw) if raw else {"failures": 3, "level": 0}
-            state["state"] = "OPEN"
-            state["opened_at"] = 0
-            await self._redis.set(self._circuit_key(setting), json.dumps(state))
+            await self._redis.eval(
+                script, 1, self._circuit_key(setting)
+            )
         except Exception:
             await self._fallback.force_half_open(setting)
 
@@ -519,7 +581,8 @@ class ProviderInvocationPipeline:
                     error_code="PROVIDER_CIRCUIT_OPEN",
                 )
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
-        if not await self._runtime.acquire(setting):
+        lease = await self._runtime.acquire(setting)
+        if lease is None:
             if observe:
                 await self._observer.record_outcome(
                     setting,
@@ -530,12 +593,24 @@ class ProviderInvocationPipeline:
                 )
             raise ProviderCallError("PROVIDER_RATE_LIMITED")
         try:
-            remaining = (deadline - datetime.now(UTC)).total_seconds()
-            timeout = min(setting.timeout_seconds, remaining)
-            if timeout <= 0:
-                raise TimeoutError("provider deadline expired")
-            async with asyncio.timeout(timeout):
-                result = await operation()
+            try:
+                remaining = (deadline - datetime.now(UTC)).total_seconds()
+                timeout = min(setting.timeout_seconds, remaining)
+                if timeout <= 0:
+                    raise TimeoutError("provider deadline expired")
+                async with asyncio.timeout(timeout):
+                    result = await operation()
+            except Exception as error:
+                await self._runtime.record_failure(setting)
+                if observe:
+                    await self._observer.record_outcome(
+                        setting,
+                        success=False,
+                        snapshot=await self._runtime.circuit_snapshot(setting),
+                        occurred_at=datetime.now(UTC),
+                        error_code=getattr(error, "code", "PROVIDER_FAILED"),
+                    )
+                raise
             batch_error = getattr(result, "batch_error_code", None)
             unhealthy_probe = getattr(result, "healthy", True) is False
             if batch_error or unhealthy_probe:
@@ -551,16 +626,5 @@ class ProviderInvocationPipeline:
                     error_code=batch_error or getattr(result, "error_code", None),
                 )
             return result
-        except Exception as error:
-            await self._runtime.record_failure(setting)
-            if observe:
-                await self._observer.record_outcome(
-                    setting,
-                    success=False,
-                    snapshot=await self._runtime.circuit_snapshot(setting),
-                    occurred_at=datetime.now(UTC),
-                    error_code=getattr(error, "code", "PROVIDER_FAILED"),
-                )
-            raise
         finally:
-            await self._runtime.release(setting)
+            await self._runtime.release(setting, lease)

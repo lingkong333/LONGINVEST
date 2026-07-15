@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, ConfigDict, Field
 
 from long_invest.modules.auth.dependencies import (
@@ -25,7 +26,34 @@ def get_provider_service() -> ProviderService:
 
 ServiceDependency = Annotated[ProviderService, Depends(get_provider_service)]
 ReadRequest = Annotated[AuthenticatedRequest, Depends(require_authenticated_request)]
-WriteRequest = Annotated[AuthenticatedRequest, Depends(require_verified_write_request)]
+
+
+async def require_provider_write_request(
+    request: Annotated[
+        AuthenticatedRequest, Depends(require_verified_write_request)
+    ],
+    idempotency_key: Annotated[
+        str | None, Header(alias="Idempotency-Key")
+    ] = None,
+) -> AuthenticatedRequest:
+    if idempotency_key is None or not idempotency_key.strip():
+        raise AppError(
+            code="IDEMPOTENCY_KEY_REQUIRED",
+            message="Provider 写操作必须提供 Idempotency-Key",
+            status_code=422,
+        )
+    return replace(
+        request,
+        audit_context=replace(
+            request.audit_context,
+            idempotency_key=idempotency_key.strip(),
+        ),
+    )
+
+
+WriteRequest = Annotated[
+    AuthenticatedRequest, Depends(require_provider_write_request)
+]
 
 
 class SettingsRequest(BaseModel):

@@ -13,6 +13,7 @@ from long_invest.modules.providers.resilience import (
     ProviderInvocationPipeline,
     ProviderRateLimiter,
     ProviderRouteSetting,
+    RedisProviderRuntimeState,
 )
 
 
@@ -92,11 +93,69 @@ def test_async_runtime_enforces_token_rate_after_concurrency_release() -> None:
     )
 
     async def scenario() -> None:
-        assert await runtime.acquire(setting)
-        await runtime.release(setting)
+        lease = await runtime.acquire(setting)
+        assert lease is not None
+        await runtime.release(setting, lease)
         assert not await runtime.acquire(setting)
         now[0] += 1
         assert await runtime.acquire(setting)
+
+    asyncio.run(scenario())
+
+
+def test_fractional_rate_allows_one_request_every_five_seconds() -> None:
+    now = [100.0]
+    runtime = InMemoryProviderRuntimeState(clock=lambda: now[0])
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+        rate_per_second=0.2,
+    )
+
+    async def scenario() -> None:
+        lease = await runtime.acquire(setting)
+        assert lease is not None
+        await runtime.release(setting, lease)
+        now[0] += 4.9
+        assert await runtime.acquire(setting) is None
+        now[0] += 0.1
+        assert await runtime.acquire(setting) is not None
+
+    asyncio.run(scenario())
+
+
+def test_redis_lease_is_released_by_the_backend_that_acquired_it() -> None:
+    class Redis:
+        def __init__(self) -> None:
+            self.failed = False
+            self.eval_calls = 0
+
+        async def eval(self, *args):
+            del args
+            self.eval_calls += 1
+            if self.failed:
+                raise ConnectionError("redis unavailable")
+            return 1
+
+    redis = Redis()
+    runtime = RedisProviderRuntimeState(redis, realtime_reserved=0)
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+        rate_per_second=100,
+    )
+
+    async def scenario() -> None:
+        redis_lease = await runtime.acquire(setting)
+        assert redis_lease is not None and redis_lease.backend == "redis"
+        redis.failed = True
+        await runtime.release(setting, redis_lease)
+        local_lease = await runtime.acquire(setting)
+        assert local_lease is not None and local_lease.backend == "local"
+        redis.failed = False
+        calls = redis.eval_calls
+        await runtime.release(setting, local_lease)
+        assert redis.eval_calls == calls
 
     asyncio.run(scenario())
 
@@ -148,3 +207,39 @@ def test_pipeline_observer_receives_persistable_health_and_circuit_snapshots() -
     assert calls[-1][1]["success"] is False
     assert calls[-1][1]["snapshot"]["state"] == "OPEN"
     assert calls[-1][1]["error_code"] == "PROVIDER_FAILED"
+
+
+def test_observer_failure_does_not_count_as_upstream_failure() -> None:
+    runtime = InMemoryProviderRuntimeState()
+
+    class FailingObserver:
+        async def record_outcome(self, setting, **kwargs):
+            del setting, kwargs
+            raise RuntimeError("database unavailable")
+
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+        rate_per_second=100,
+    )
+    pipeline = ProviderInvocationPipeline(runtime, FailingObserver())
+
+    async def scenario() -> None:
+        try:
+            await pipeline.call(
+                setting,
+                lambda: successful_result(),
+                deadline=datetime.now(UTC) + timedelta(seconds=1),
+            )
+        except RuntimeError as error:
+            assert str(error) == "database unavailable"
+        else:
+            raise AssertionError("observer failure should remain visible")
+        snapshot = await runtime.circuit_snapshot(setting)
+        assert snapshot.get("failures", 0) == 0
+        assert snapshot["state"] == "CLOSED"
+
+    async def successful_result() -> ProviderBatchResult:
+        return ProviderBatchResult()
+
+    asyncio.run(scenario())

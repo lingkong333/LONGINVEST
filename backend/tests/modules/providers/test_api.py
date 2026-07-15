@@ -1,10 +1,11 @@
-from types import SimpleNamespace
 from uuid import uuid4
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.auth.dependencies import (
+    AuthenticatedRequest,
     require_authenticated_request,
     require_verified_write_request,
 )
@@ -65,7 +66,17 @@ def app_client(service: FakeService) -> TestClient:
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(router)
-    request = SimpleNamespace(audit_context=SimpleNamespace(idempotency_key="idem-1"))
+    request = AuthenticatedRequest(
+        user=object(),
+        session=object(),
+        audit_context=AuditContext(
+            request_id="request-1",
+            idempotency_key="request-1",
+            actor_user_id="user-1",
+            session_id="session-1",
+            trusted_ip="127.0.0.1",
+        ),
+    )
     app.dependency_overrides[get_provider_service] = lambda: service
     app.dependency_overrides[require_authenticated_request] = lambda: request
     app.dependency_overrides[require_verified_write_request] = lambda: request
@@ -100,6 +111,7 @@ def test_settings_reject_unsafe_fields_and_require_confirmation_reason() -> None
     unsafe = client.patch(
         "/api/v1/providers/EASTMONEY/settings",
         json={"confirm": True, "reason": "test", "url": "https://evil.test"},
+        headers={"Idempotency-Key": "idem-unsafe"},
     )
     unconfirmed = client.patch(
         "/api/v1/providers/EASTMONEY/settings",
@@ -109,6 +121,7 @@ def test_settings_reject_unsafe_fields_and_require_confirmation_reason() -> None
             "expected_version": 1,
             "enabled": True,
         },
+        headers={"Idempotency-Key": "idem-unconfirmed"},
     )
     assert unsafe.status_code == 422
     assert unconfirmed.status_code == 422
@@ -131,9 +144,14 @@ def test_settings_accept_only_safe_fields_and_forward_idempotent_audit_context()
             "timeout_seconds": 4,
             "auto_switch": True,
         },
+        headers={"Idempotency-Key": "explicit-idem"},
     )
     assert response.status_code == 200
-    assert service.settings_call[2:] == (1, "planned adjustment", "idem-1")
+    assert service.settings_call[2:] == (
+        1,
+        "planned adjustment",
+        "explicit-idem",
+    )
 
 
 def test_probe_reset_and_diagnostic_write_apis_require_confirmed_safe_input() -> None:
@@ -143,16 +161,45 @@ def test_probe_reset_and_diagnostic_write_apis_require_confirmed_safe_input() ->
     probe = client.post(
         f"/api/v1/providers/circuits/{circuit_id}/probe",
         json={"confirm": True, "reason": "health check"},
+        headers={"Idempotency-Key": "probe-idem"},
     )
     reset = client.post(
         f"/api/v1/providers/circuits/{circuit_id}/reset",
         json={"confirm": True, "reason": "operator reset"},
+        headers={"Idempotency-Key": "reset-idem"},
     )
     invalid_diagnostic = client.post(
         "/api/v1/providers/quote-diagnostics",
         json={"confirm": True, "reason": "compare", "symbols": ["600000"]},
+        headers={"Idempotency-Key": "diagnostic-idem"},
     )
     assert probe.status_code == 200
     assert reset.status_code == 200
     assert invalid_diagnostic.status_code == 422
     assert [item[0] for item in service.actions] == ["probe", "reset"]
+
+
+def test_all_provider_write_apis_reject_missing_or_blank_idempotency_key() -> None:
+    client = app_client(FakeService())
+    circuit_id = uuid4()
+    requests = [
+        ("patch", "/api/v1/providers/EASTMONEY/settings", {
+            "confirm": True, "reason": "change", "expected_version": 0,
+        }),
+        ("post", f"/api/v1/providers/circuits/{circuit_id}/probe", {
+            "confirm": True, "reason": "probe",
+        }),
+        ("post", f"/api/v1/providers/circuits/{circuit_id}/reset", {
+            "confirm": True, "reason": "reset",
+        }),
+        ("post", "/api/v1/providers/quote-diagnostics", {
+            "confirm": True, "reason": "compare", "symbols": ["600000.SH"],
+        }),
+    ]
+    for method, path, body in requests:
+        missing = getattr(client, method)(path, json=body)
+        blank = getattr(client, method)(
+            path, json=body, headers={"Idempotency-Key": "   "}
+        )
+        assert missing.status_code == 422
+        assert blank.status_code == 422

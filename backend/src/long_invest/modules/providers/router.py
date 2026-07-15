@@ -21,7 +21,12 @@ class ProviderRouter:
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime
     ) -> ProviderBatchResult[RealtimeQuote]:
-        primary = await self._eastmoney.realtime_quotes(symbols, deadline)
+        try:
+            primary = await self._eastmoney.realtime_quotes(symbols, deadline)
+        except Exception as error:
+            primary = ProviderBatchResult(
+                batch_error_code=getattr(error, "code", "PROVIDER_FAILED")
+            )
         primary_by_symbol = {item.symbol: item for item in primary.items}
         if primary.batch_error_code or not primary.items:
             fallback_symbols = symbols
@@ -32,7 +37,12 @@ class ProviderRouter:
             )
         fallback = ProviderBatchResult[RealtimeQuote]()
         if fallback_symbols:
-            fallback = await self._sina.realtime_quotes(fallback_symbols, deadline)
+            try:
+                fallback = await self._sina.realtime_quotes(fallback_symbols, deadline)
+            except Exception as error:
+                fallback = ProviderBatchResult(
+                    batch_error_code=getattr(error, "code", "PROVIDER_FAILED")
+                )
         fallback_by_symbol = {item.symbol: item for item in fallback.items}
         items = tuple(
             primary_by_symbol.get(symbol) or fallback_by_symbol[symbol]

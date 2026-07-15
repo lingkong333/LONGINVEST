@@ -45,10 +45,13 @@ class FakeProvider:
         self.result = result
         self.quote_requests: list[tuple[str, ...]] = []
         self.bar_requests: list[DailyBarRequest] = []
+        self.error: Exception | None = None
 
     async def realtime_quotes(self, symbols, deadline):
         del deadline
         self.quote_requests.append(symbols)
+        if self.error:
+            raise self.error
         return self.result
 
     async def daily_bars(self, request, deadline):
@@ -102,6 +105,21 @@ async def test_whole_batch_failure_switches_all_symbols_to_sina() -> None:
 
 
 @async_test
+async def test_primary_exception_switches_whole_batch_to_sina() -> None:
+    east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
+    east.error = RuntimeError("upstream failed")
+    sina = FakeProvider(
+        ProviderCode.SINA,
+        ProviderBatchResult((quote("600000.SH", ProviderCode.SINA),)),
+    )
+    result = await ProviderRouter(east, sina).realtime_quotes(
+        ("600000.SH",), datetime.now(UTC)
+    )
+    assert sina.quote_requests == [("600000.SH",)]
+    assert result.items[0].source is ProviderCode.SINA
+
+
+@async_test
 async def test_history_uses_eastmoney_only_without_day_level_stitching() -> None:
     east = FakeProvider(
         ProviderCode.EASTMONEY, ProviderBatchResult(batch_error_code="PROVIDER_FAILED")
@@ -113,9 +131,7 @@ async def test_history_uses_eastmoney_only_without_day_level_stitching() -> None
         date(2025, 1, 2),
         ProviderCapability.HISTORICAL_DAILY_QFQ,
     )
-    result = await ProviderRouter(east, sina).daily_bars(
-        request, datetime.now(UTC)
-    )
+    result = await ProviderRouter(east, sina).daily_bars(request, datetime.now(UTC))
     assert result.batch_error_code == "PROVIDER_FAILED"
     assert len(east.bar_requests) == 1
     assert sina.bar_requests == []

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import ssl
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
@@ -15,6 +16,10 @@ class ProviderHttpError(RuntimeError):
 
 
 def _retryable(error: Exception) -> bool:
+    if isinstance(error, httpx.ConnectError) and isinstance(
+        error.__cause__, ssl.SSLError
+    ):
+        return False
     return isinstance(
         error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)
     ) or (isinstance(error, ProviderHttpError) and error.retryable)

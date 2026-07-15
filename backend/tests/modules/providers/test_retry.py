@@ -1,4 +1,5 @@
 import asyncio
+import ssl
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 
@@ -68,6 +69,25 @@ async def test_permanent_failures_are_not_retried(failure: Exception) -> None:
     with pytest.raises(type(failure)):
         await run_with_retry(
             operation, deadline=datetime.now(UTC) + timedelta(seconds=2)
+        )
+    assert attempts == 1
+
+
+@async_test
+async def test_tls_connect_failure_is_not_retried() -> None:
+    attempts = 0
+    failure = httpx.ConnectError("tls handshake")
+    failure.__cause__ = ssl.SSLError("certificate verify failed")
+
+    async def operation() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise failure
+
+    with pytest.raises(httpx.ConnectError):
+        await run_with_retry(
+            operation,
+            deadline=datetime.now(UTC) + timedelta(seconds=2),
         )
     assert attempts == 1
 

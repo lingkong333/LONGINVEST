@@ -74,9 +74,7 @@ class EastmoneyProvider:
             },
             deadline,
         )
-        return self.parse_security_master(
-            payload, observed_at=datetime.now(UTC)
-        )
+        return self.parse_security_master(payload, observed_at=datetime.now(UTC))
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime
@@ -90,9 +88,7 @@ class EastmoneyProvider:
             {"secids": secids, "fields": "f2,f5,f6,f12,f14,f15,f16,f17,f18,f124"},
             deadline,
         )
-        return self.parse_quotes(
-            payload, symbols, received_at=datetime.now(UTC)
-        )
+        return self.parse_quotes(payload, symbols, received_at=datetime.now(UTC))
 
     async def daily_bars(
         self, request: DailyBarRequest, deadline: datetime

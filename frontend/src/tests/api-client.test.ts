@@ -123,6 +123,42 @@ describe("统一 API 客户端", () => {
     expect(onUnauthorized).toHaveBeenCalledTimes(2)
   })
 
+  it("reset 后忽略旧代际迟到的 401，只处理新代际 401", async () => {
+    const unauthorizedResponse = () => HttpResponse.json({
+      success: false,
+      code: "AUTH_REQUIRED",
+      message: "登录已失效",
+      data: null,
+      request_id: "req_401_generation",
+      server_time: "2026-07-15T00:00:00Z",
+    } satisfies ApiEnvelope<null>, { status: 401 })
+    let resolveOldRequest: ((response: Response) => void) | undefined
+    const controlledFetch = vi
+      .fn<typeof fetch>()
+      .mockImplementationOnce(() => new Promise<Response>((resolve) => {
+        resolveOldRequest = resolve
+      }))
+      .mockImplementation(async () => unauthorizedResponse())
+    const onUnauthorized = vi.fn(async () => undefined)
+    const api = createApiClient<TestPaths>({
+      baseUrl: "http://localhost/api/v1",
+      fetch: controlledFetch,
+      onUnauthorized,
+    })
+
+    const oldRequest = api.client.GET("/status")
+    await vi.waitFor(() => expect(controlledFetch).toHaveBeenCalledOnce())
+    api.resetUnauthorized()
+    resolveOldRequest?.(unauthorizedResponse())
+    await oldRequest
+
+    expect(onUnauthorized).not.toHaveBeenCalled()
+
+    await api.client.GET("/status")
+
+    expect(onUnauthorized).toHaveBeenCalledOnce()
+  })
+
   it("把网络 TypeError 转换为保留原因的稳定 ApiError", async () => {
     const networkFailure = new TypeError("Failed to fetch")
     const api = createApiClient<TestPaths>({

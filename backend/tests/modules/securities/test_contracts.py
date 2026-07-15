@@ -7,6 +7,7 @@ from long_invest.modules.securities.contracts import (
     Market,
     SecurityMasterItem,
     SecurityType,
+    SymbolUniverseQuery,
     assess_monitoring_eligibility,
     validate_symbol,
 )
@@ -24,6 +25,26 @@ def test_internal_a_share_symbols_are_accepted(symbol: str) -> None:
 def test_noncanonical_symbols_are_rejected(symbol: str) -> None:
     with pytest.raises(ValueError, match="统一代码"):
         validate_symbol(symbol)
+
+
+def test_symbol_universe_query_normalizes_duplicates_and_order() -> None:
+    query = SymbolUniverseQuery(
+        symbols=("600000.SH", "000001.SZ", "600000.SH")
+    )
+
+    assert query.symbols == ("000001.SZ", "600000.SH")
+
+
+def test_symbol_universe_query_rejects_an_invalid_symbol() -> None:
+    with pytest.raises(ValueError, match="统一代码"):
+        SymbolUniverseQuery(symbols=("600000",))
+
+
+def test_symbol_universe_query_rejects_more_than_200_symbols() -> None:
+    symbols = tuple(f"{value:06d}.SZ" for value in range(201))
+
+    with pytest.raises(ValueError, match="最多包含 200 只股票"):
+        SymbolUniverseQuery(symbols=symbols)
 
 
 def security_item(

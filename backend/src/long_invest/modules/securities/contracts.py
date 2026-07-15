@@ -87,6 +87,19 @@ class UniverseQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class SymbolUniverseQuery:
+    symbols: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        normalized = tuple(sorted(set(self.symbols)))
+        if len(normalized) > 200:
+            raise ValueError("股票范围最多包含 200 只股票")
+        for symbol in normalized:
+            validate_symbol(symbol)
+        object.__setattr__(self, "symbols", normalized)
+
+
+@dataclass(frozen=True, slots=True)
 class SnapshotResult:
     master_version: int
     total_count: int

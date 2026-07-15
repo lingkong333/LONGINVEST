@@ -10,6 +10,7 @@ from long_invest.modules.securities.contracts import (
     SecurityMasterItem,
     SecurityMasterSnapshot,
     SecurityType,
+    SymbolUniverseQuery,
     UniverseQuery,
 )
 from long_invest.modules.securities.models import Security, SecurityMasterVersion
@@ -23,18 +24,21 @@ def item(
     name: str = "浦发银行",
     provider_codes: dict[str, str] | None = None,
     status: ListingStatus = ListingStatus.LISTED,
+    security_type: SecurityType = SecurityType.A_SHARE,
+    is_st: bool = False,
+    is_suspended: bool = False,
 ) -> SecurityMasterItem:
     return SecurityMasterItem(
         symbol=symbol,
         exchange_code=symbol[:6],
         name=name,
         market=Market(symbol[-2:]),
-        security_type=SecurityType.A_SHARE,
+        security_type=security_type,
         listing_status=status,
         listed_on=date(1999, 11, 10),
         delisted_on=date(2025, 1, 1) if status is ListingStatus.DELISTED else None,
-        is_st=False,
-        is_suspended=False,
+        is_st=is_st,
+        is_suspended=is_suspended,
         provider_codes=(
             provider_codes
             if provider_codes is not None
@@ -422,6 +426,107 @@ async def test_freeze_universe_copies_current_state_and_filter_version() -> None
     assert frozen_item.master_version == 1
     assert repository.master_lock_count == 2
     assert repository.read_trace[-3:] == ["lock", "securities", "version"]
+
+
+@pytest.mark.anyio
+async def test_freeze_symbols_rejects_an_empty_scope_without_saving() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+
+    with pytest.raises(AppError) as captured:
+        await subject.freeze_symbols(SymbolUniverseQuery())
+
+    assert captured.value.code == "SECURITY_UNIVERSE_EMPTY"
+    assert repository.saved_universes == []
+
+
+@pytest.mark.anyio
+async def test_freeze_symbols_rejects_all_invalid_items_atomically() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    await subject.apply_snapshot(
+        snapshot(
+            item("000001.SZ", security_type=SecurityType.ETF),
+            item("000002.SZ", status=ListingStatus.DELISTED),
+            item("000003.SZ", status=ListingStatus.DATA_MISSING),
+        )
+    )
+
+    with pytest.raises(AppError) as captured:
+        await subject.freeze_symbols(
+            SymbolUniverseQuery(
+                symbols=(
+                    "000004.SZ",
+                    "000003.SZ",
+                    "000002.SZ",
+                    "000001.SZ",
+                )
+            )
+        )
+
+    assert captured.value.code == "SECURITY_UNIVERSE_INVALID"
+    assert captured.value.details == {
+        "errors": [
+            {"symbol": "000001.SZ", "code": "SECURITY_TYPE_UNSUPPORTED"},
+            {"symbol": "000002.SZ", "code": "SECURITY_DELISTED"},
+            {"symbol": "000003.SZ", "code": "SECURITY_DATA_MISSING"},
+            {"symbol": "000004.SZ", "code": "SECURITY_NOT_FOUND"},
+        ]
+    }
+    assert repository.saved_universes == []
+
+
+@pytest.mark.anyio
+async def test_freeze_symbols_copies_normalized_current_state_immutably() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    await subject.apply_snapshot(
+        snapshot(
+            item("600000.SH", name="浦发银行", is_st=True),
+            item(
+                "000001.SZ",
+                name="平安银行",
+                status=ListingStatus.SUSPENDED,
+                is_suspended=True,
+            ),
+        )
+    )
+
+    frozen = await subject.freeze_symbols(
+        SymbolUniverseQuery(
+            symbols=("600000.SH", "000001.SZ", "600000.SH")
+        )
+    )
+
+    assert frozen.item_count == 2
+    assert frozen.master_version == 1
+    assert frozen.filters == {
+        "mode": "symbols",
+        "symbols": ["000001.SZ", "600000.SH"],
+    }
+    frozen_items = repository.saved_universes[-1][1]
+    assert [item.symbol for item in frozen_items] == ["000001.SZ", "600000.SH"]
+    assert [
+        (
+            item.market,
+            item.security_type,
+            item.listing_status,
+            item.is_st,
+            item.is_suspended,
+            item.master_version,
+        )
+        for item in frozen_items
+    ] == [
+        ("SZ", "A_SHARE", "SUSPENDED", False, True, 1),
+        ("SH", "A_SHARE", "LISTED", True, False, 1),
+    ]
+
+    repository.securities["000001.SZ"].name = "更名后的平安银行"
+    repository.securities["000001.SZ"].listing_status = ListingStatus.DELISTED
+    repository.securities["000001.SZ"].is_suspended = False
+
+    assert frozen_items[0].listing_status == "SUSPENDED"
+    assert frozen_items[0].is_suspended is True
 
 
 @pytest.mark.anyio

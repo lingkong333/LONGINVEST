@@ -100,6 +100,32 @@ class CreateDailyBatch:
 
 
 @dataclass(frozen=True, slots=True)
+class DailyRetryAuditContext:
+    request_id: str
+    idempotency_key: str
+    actor_user_id: str
+    session_id: str
+    trusted_ip: str
+    reason: str
+
+    def __post_init__(self) -> None:
+        for value, field_name in (
+            (self.request_id, "请求编号"),
+            (self.actor_user_id, "操作用户"),
+            (self.session_id, "会话编号"),
+            (self.trusted_ip, "可信来源地址"),
+            (self.reason, "重试原因"),
+        ):
+            if not isinstance(value, str) or not value.strip():
+                raise ValueError(f"{field_name}不能为空")
+        object.__setattr__(
+            self, "idempotency_key", _require_idempotency_key(self.idempotency_key)
+        )
+        if len(self.reason) > 500:
+            raise ValueError("重试原因不能超过 500 个字符")
+
+
+@dataclass(frozen=True, slots=True)
 class StageDailyBar:
     symbol: str
     security_id: UUID

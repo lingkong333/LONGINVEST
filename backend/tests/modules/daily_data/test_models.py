@@ -1,4 +1,11 @@
-from sqlalchemy import ForeignKeyConstraint, PrimaryKeyConstraint, UniqueConstraint
+from sqlalchemy import (
+    ForeignKeyConstraint,
+    Index,
+    PrimaryKeyConstraint,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex
 
 from long_invest.modules.daily_data.models import (
     DailyBarRevision,
@@ -13,9 +20,12 @@ def _constraint_names(table, kind) -> set[str | None]:
 
 
 def test_batch_and_stage_have_explicit_scope_constraints() -> None:
-    assert "uq_daily_batch_scope" in _constraint_names(
-        DailyDataBatch.__table__, UniqueConstraint
-    )
+    indexes = {item.name: item for item in DailyDataBatch.__table__.indexes}
+    scope_index = indexes["uq_daily_batch_auto_scope"]
+    assert isinstance(scope_index, Index)
+    assert scope_index.unique is True
+    sql = str(CreateIndex(scope_index).compile(dialect=postgresql.dialect()))
+    assert "WHERE parent_batch_id IS NULL" in sql
     assert "uq_daily_stage_symbol" in _constraint_names(
         DailyBarStage.__table__, UniqueConstraint
     )

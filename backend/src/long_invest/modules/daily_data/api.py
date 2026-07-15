@@ -6,7 +6,7 @@ from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel, ConfigDict, StrictBool
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -17,8 +17,8 @@ from long_invest.modules.daily_data.application import (
     DailyDataApplication,
     get_daily_data_application,
 )
+from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
 from long_invest.platform.errors import AppError
-from long_invest.platform.http.request_id import get_request_id
 from long_invest.platform.http.responses import success_response
 
 router = APIRouter(tags=["daily-data"])
@@ -30,6 +30,7 @@ WriteIdentity = Annotated[AuthenticatedRequest, Depends(require_verified_write_r
 class RetryRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confirm: StrictBool
+    reason: Annotated[str, Field(min_length=1, max_length=500)]
 
 
 @router.get("/api/v1/daily-data/batches")
@@ -81,9 +82,14 @@ async def retry_batch(
         )
     job = await application.retry(
         batch_id=batch_id,
-        idempotency_key=idempotency_key.strip(),
-        request_id=get_request_id(),
-        created_by_user_id=str(identity.user.id),
+        audit_context=DailyRetryAuditContext(
+            request_id=identity.audit_context.request_id,
+            idempotency_key=idempotency_key.strip(),
+            actor_user_id=str(identity.user.id),
+            session_id=str(identity.session.id),
+            trusted_ip=identity.audit_context.trusted_ip or "unknown",
+            reason=body.reason.strip(),
+        ),
     )
     return success_response(
         data={"job_id": str(job.id), "job_type": job.job_type, "status": job.status},

@@ -1,0 +1,219 @@
+import asyncio
+from contextlib import asynccontextmanager
+from copy import deepcopy
+from datetime import date
+from functools import wraps
+from types import SimpleNamespace
+from uuid import uuid4
+
+import pytest
+
+from long_invest.modules.daily_data.application import DailyDataApplication
+from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
+from long_invest.platform.errors import AppError
+
+
+def async_test(function):
+    @wraps(function)
+    def run(*args, **kwargs):
+        return asyncio.run(function(*args, **kwargs))
+
+    return run
+
+
+class FakeDatabase:
+    def __init__(self) -> None:
+        self.session = object()
+        self.state = {"jobs": [], "audits": []}
+        self.rolled_back = False
+
+    @asynccontextmanager
+    async def transaction(self):
+        before = deepcopy(self.state)
+        try:
+            yield self.session
+        except Exception:
+            self.state = before
+            self.rolled_back = True
+            raise
+
+
+class FakeRepository:
+    batch = SimpleNamespace(
+        id=uuid4(),
+        universe_snapshot_id=uuid4(),
+        trading_date=date(2026, 7, 15),
+    )
+
+    def __init__(self, session) -> None:
+        self.session = session
+
+    async def get_batch(self, batch_id):
+        return self.batch if batch_id == self.batch.id else None
+
+
+class FakeDomainService:
+    def __init__(self, repository) -> None:
+        self.repository = repository
+
+    async def retry_scope(self, batch_id):
+        assert batch_id == FakeRepository.batch.id
+        return ("600000.SH", "000001.SZ")
+
+
+class RecordingJobService:
+    def __init__(self, session, database) -> None:
+        self.session = session
+        self.database = database
+        database.job_session = session
+
+    async def submit(self, command):
+        self.database.state["jobs"].append(command)
+        return SimpleNamespace(
+            id=uuid4(), job_type=command.job_type, status="PENDING_DISPATCH"
+        )
+
+
+class RecordingAuditService:
+    def __init__(self, session, database, *, fail=False) -> None:
+        self.session = session
+        self.database = database
+        self.fail = fail
+        database.audit_session = session
+
+    async def find_by_idempotency(self, key):
+        return next(
+            (
+                item
+                for item in self.database.state["audits"]
+                if item.idempotency_key == key
+            ),
+            None,
+        )
+
+    async def append(self, event):
+        if self.fail:
+            raise RuntimeError("forced audit failure")
+        self.database.state["audits"].append(event)
+        return event
+
+
+def _context(key="retry-key"):
+    return DailyRetryAuditContext(
+        request_id="req_12345678",
+        idempotency_key=key,
+        actor_user_id="user-1",
+        session_id="session-1",
+        trusted_ip="127.0.0.1",
+        reason="manual retry",
+    )
+
+
+def _application(database, *, audit_fail=False):
+    return DailyDataApplication(
+        database,
+        repository_factory=FakeRepository,
+        domain_service_factory=FakeDomainService,
+        job_service_factory=lambda session: RecordingJobService(session, database),
+        audit_service_factory=lambda session: RecordingAuditService(
+            session, database, fail=audit_fail
+        ),
+    )
+
+
+@async_test
+async def test_retry_job_and_audit_share_transaction_session() -> None:
+    database = FakeDatabase()
+    application = _application(database)
+
+    await application.retry(
+        batch_id=FakeRepository.batch.id,
+        audit_context=_context(),
+    )
+
+    job = database.state["jobs"][0]
+    audit = database.state["audits"][0]
+    assert job.job_type == "DAILY_DATA_RETRY"
+    assert audit.action_code == "daily_data.batch_retry_requested"
+    assert audit.object_type == "daily_data_batch"
+    assert audit.object_id == str(FakeRepository.batch.id)
+    assert audit.risk_level == "HIGH"
+    assert audit.actor_user_id == "user-1"
+    assert audit.session_id == "session-1"
+    assert audit.trusted_ip == "127.0.0.1"
+    assert audit.after_summary == {
+        "retry_symbols": ["600000.SH", "000001.SZ"],
+        "trading_date": "2026-07-15",
+    }
+    assert database.job_session is database.session
+    assert database.audit_session is database.session
+
+
+@async_test
+async def test_retry_replay_does_not_duplicate_audit() -> None:
+    database = FakeDatabase()
+    application = _application(database)
+
+    await application.retry(batch_id=FakeRepository.batch.id, audit_context=_context())
+    await application.retry(batch_id=FakeRepository.batch.id, audit_context=_context())
+
+    assert len(database.state["audits"]) == 1
+
+
+@async_test
+async def test_audit_failure_rolls_back_job_and_propagates() -> None:
+    database = FakeDatabase()
+    application = _application(database, audit_fail=True)
+
+    with pytest.raises(RuntimeError, match="forced audit failure"):
+        await application.retry(
+            batch_id=FakeRepository.batch.id,
+            audit_context=_context(),
+        )
+
+    assert database.rolled_back is True
+    assert database.state == {"jobs": [], "audits": []}
+
+
+@async_test
+async def test_same_job_key_with_different_reason_keeps_job_conflict() -> None:
+    database = FakeDatabase()
+
+    class ConflictingJobService(RecordingJobService):
+        async def submit(self, command):
+            existing = self.database.state["jobs"]
+            if existing and existing[0].config_snapshot != command.config_snapshot:
+                raise AppError(
+                    code="IDEMPOTENCY_KEY_REUSED",
+                    message="幂等键已用于不同任务",
+                    status_code=409,
+                )
+            return await super().submit(command)
+
+    application = DailyDataApplication(
+        database,
+        repository_factory=FakeRepository,
+        domain_service_factory=FakeDomainService,
+        job_service_factory=lambda session: ConflictingJobService(session, database),
+        audit_service_factory=lambda session: RecordingAuditService(session, database),
+    )
+    await application.retry(
+        batch_id=FakeRepository.batch.id,
+        audit_context=_context(),
+    )
+
+    with pytest.raises(AppError) as captured:
+        await application.retry(
+            batch_id=FakeRepository.batch.id,
+            audit_context=_context().__class__(
+                request_id="req_87654321",
+                idempotency_key="retry-key",
+                actor_user_id="user-1",
+                session_id="session-1",
+                trusted_ip="127.0.0.1",
+                reason="different reason",
+            ),
+        )
+
+    assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
+    assert len(database.state["audits"]) == 1

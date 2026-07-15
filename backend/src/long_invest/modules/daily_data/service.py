@@ -96,6 +96,23 @@ class DailyDataService:
 
     async def validate(self, batch_id: UUID) -> DailyBatchSummary:
         batch = await self._batch(batch_id, for_update=True)
+        status = DailyBatchStatus(batch.status)
+        if status in {
+            DailyBatchStatus.SUCCEEDED,
+            DailyBatchStatus.PARTIAL,
+            DailyBatchStatus.FAILED,
+        }:
+            return _summary(batch)
+        if status not in {
+            DailyBatchStatus.FETCHING,
+            DailyBatchStatus.VALIDATING,
+        }:
+            raise AppError(
+                code="DAILY_BATCH_STATE_CONFLICT",
+                message="日线批次当前状态不允许校验",
+                status_code=409,
+                details={"status": status.value},
+            )
         stages = await self._repository.list_stages(batch_id)
         batch.status = DailyBatchStatus.VALIDATING
         seen: set[tuple[str, object]] = set()
@@ -297,11 +314,17 @@ class DailyDataService:
         stages = {
             item.symbol: item for item in await self._repository.list_stages(batch_id)
         }
-        retry: list[str] = []
+        missing = await self._repository.list_all_missing(batch_id)
+        retry_symbols = {
+            item.symbol
+            for item in missing
+            if not item.explained
+            or DailyMissingReason(item.reason) is DailyMissingReason.UNEXPLAINED
+        }
         for symbol in batch.symbols:
             item = stages.get(symbol)
             if item is None:
-                retry.append(symbol)
+                retry_symbols.add(symbol)
                 continue
             status = DailyStageStatus(item.status)
             if (
@@ -310,8 +333,8 @@ class DailyDataService:
                 and DailyMissingReason(item.missing_reason)
                 is DailyMissingReason.UNEXPLAINED
             ):
-                retry.append(symbol)
-        return tuple(retry)
+                retry_symbols.add(symbol)
+        return tuple(symbol for symbol in batch.symbols if symbol in retry_symbols)
 
     async def _batch(self, batch_id: UUID, *, for_update: bool = False):
         batch = await self._repository.get_batch(batch_id, for_update=for_update)

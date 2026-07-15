@@ -2,14 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date
+from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
 from long_invest.modules.daily_data.repository import DailyDataRepository
 from long_invest.modules.daily_data.service import DailyDataService
 from long_invest.modules.providers.contracts import validate_symbol
+from long_invest.platform.audit.contracts import AuditWrite
+from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.contracts import SubmitJob
@@ -22,9 +26,15 @@ class DailyDataApplication:
         database: Database,
         *,
         job_service_factory: Callable[..., JobService] = JobService,
+        repository_factory: Callable[..., Any] = DailyDataRepository,
+        domain_service_factory: Callable[..., Any] = DailyDataService,
+        audit_service_factory: Callable[..., Any] = AuditService,
     ) -> None:
         self._database = database
         self._job_service_factory = job_service_factory
+        self._repository_factory = repository_factory
+        self._domain_service_factory = domain_service_factory
+        self._audit_service_factory = audit_service_factory
 
     async def list_batches(self, *, page: int, page_size: int):
         try:
@@ -108,16 +118,12 @@ class DailyDataApplication:
         self,
         *,
         batch_id: UUID,
-        idempotency_key: str,
-        request_id: str,
-        created_by_user_id: str,
+        audit_context: DailyRetryAuditContext,
     ) -> Any:
         try:
             async with self._database.transaction() as session:
-                repository = DailyDataRepository(session)
-                service = DailyDataService(
-                    repository,
-                )
+                repository = self._repository_factory(session)
+                service = self._domain_service_factory(repository)
                 symbols = await service.retry_scope(batch_id)
                 if not symbols:
                     raise AppError(
@@ -130,19 +136,44 @@ class DailyDataApplication:
                     job_type="DAILY_DATA_RETRY",
                     queue="daily-data",
                     idempotency_scope=f"daily-data:retry:{batch_id}",
-                    idempotency_key=idempotency_key,
-                    request_id=request_id,
+                    idempotency_key=audit_context.idempotency_key,
+                    request_id=audit_context.request_id,
                     config_snapshot={
                         "original_batch_id": str(batch_id),
                         "universe_snapshot_id": str(batch.universe_snapshot_id),
                         "trading_date": batch.trading_date.isoformat(),
                         "symbols": list(symbols),
+                        "reason": audit_context.reason,
                     },
                     business_object_type="daily_data_batch",
                     business_object_id=str(batch_id),
-                    created_by_user_id=created_by_user_id,
+                    created_by_user_id=audit_context.actor_user_id,
                 )
-                return await self._job_service_factory(session).submit(command)
+                job = await self._job_service_factory(session).submit(command)
+                audit = self._audit_service_factory(session)
+                audit_key = _retry_audit_key(batch_id, audit_context.idempotency_key)
+                if await audit.find_by_idempotency(audit_key) is None:
+                    await audit.append(
+                        AuditWrite(
+                            action_code="daily_data.batch_retry_requested",
+                            object_type="daily_data_batch",
+                            object_id=str(batch_id),
+                            result="SUCCESS",
+                            request_id=audit_context.request_id,
+                            idempotency_key=audit_key,
+                            risk_level="HIGH",
+                            reason=audit_context.reason,
+                            before_summary=None,
+                            after_summary={
+                                "retry_symbols": list(symbols),
+                                "trading_date": batch.trading_date.isoformat(),
+                            },
+                            actor_user_id=audit_context.actor_user_id,
+                            session_id=audit_context.session_id,
+                            trusted_ip=audit_context.trusted_ip,
+                        )
+                    )
+                return job
         except AppError:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:
@@ -170,3 +201,8 @@ def _backend_unavailable() -> AppError:
         message="日线数据服务暂时不可用",
         status_code=503,
     )
+
+
+def _retry_audit_key(batch_id: UUID, idempotency_key: str) -> str:
+    digest = sha256(f"{batch_id}\0{idempotency_key}".encode()).hexdigest()
+    return f"daily-retry:{digest}"

@@ -61,23 +61,27 @@ class DailyDataRepository:
                 await self.session.flush()
             return candidate, True
         except IntegrityError:
-            existing = await self.session.scalar(
+            existing_by_key = await self.session.scalar(
                 select(DailyDataBatch).where(
-                    (DailyDataBatch.idempotency_key == command.idempotency_key)
-                    | (
-                        (DailyDataBatch.trading_date == command.trading_date)
-                        & (
-                            DailyDataBatch.universe_snapshot_id
-                            == command.universe_snapshot_id
-                        )
-                    )
+                    DailyDataBatch.idempotency_key == command.idempotency_key
                 )
             )
-            if existing is None:
+            if existing_by_key is not None:
+                _validate_batch_replay(existing_by_key, command)
+                return existing_by_key, False
+            if command.parent_batch_id is not None:
                 raise
-            if existing.idempotency_key == command.idempotency_key:
-                _validate_batch_replay(existing, command)
-            return existing, False
+            existing_scope = await self.session.scalar(
+                select(DailyDataBatch).where(
+                    DailyDataBatch.trading_date == command.trading_date,
+                    DailyDataBatch.universe_snapshot_id == command.universe_snapshot_id,
+                    DailyDataBatch.parent_batch_id.is_(None),
+                )
+            )
+            if existing_scope is None:
+                raise
+            _validate_scope_replay(existing_scope, command)
+            return existing_scope, False
 
     async def get_batch(
         self, batch_id: UUID, *, for_update: bool = False
@@ -125,6 +129,14 @@ class DailyDataRepository:
             select(DailyBarStage)
             .where(DailyBarStage.batch_id == batch_id)
             .order_by(DailyBarStage.symbol)
+        )
+        return list(result)
+
+    async def list_all_missing(self, batch_id: UUID) -> list[DailyBatchMissingItem]:
+        result = await self.session.scalars(
+            select(DailyBatchMissingItem)
+            .where(DailyBatchMissingItem.batch_id == batch_id)
+            .order_by(DailyBatchMissingItem.symbol)
         )
         return list(result)
 
@@ -277,8 +289,25 @@ def _validate_batch_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         from long_invest.platform.errors import AppError
 
         raise AppError(
-            code="IDEMPOTENCY_KEY_CONFLICT",
+            code="DAILY_BATCH_IDEMPOTENCY_CONFLICT",
             message="该幂等键已用于不同的日线批次请求",
+            status_code=409,
+        )
+
+
+def _validate_scope_replay(existing: DailyDataBatch, command: CreateDailyBatch) -> None:
+    if (
+        existing.trading_date != command.trading_date
+        or existing.universe_snapshot_id != command.universe_snapshot_id
+        or existing.parent_batch_id is not None
+        or command.parent_batch_id is not None
+        or tuple(existing.symbols) != command.symbols
+    ):
+        from long_invest.platform.errors import AppError
+
+        raise AppError(
+            code="DAILY_BATCH_SCOPE_CONFLICT",
+            message="同一交易日和范围快照已有不同的自动日线批次",
             status_code=409,
         )
 

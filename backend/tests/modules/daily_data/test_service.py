@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from functools import wraps
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -93,6 +94,9 @@ class FakeRepository:
 
     async def replace_missing(self, batch_id, items):
         self.missing[batch_id] = list(items)
+
+    async def list_all_missing(self, batch_id):
+        return list(self.missing.get(batch_id, ()))
 
     async def get_bar(self, security_id, trade_date):
         return self.bars.get((security_id, trade_date))
@@ -418,3 +422,92 @@ async def test_new_service_instance_recovers_persisted_staging() -> None:
     result = await recovered_worker.commit(batch.id)
     assert result.status is DailyBatchStatus.SUCCEEDED
     assert (fetched.security_id, DAY) in repo.bars
+
+
+@async_test
+async def test_validate_terminal_batch_is_an_idempotent_replay() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    await service.stage(batch.id, _stage())
+    committed = await service.commit(batch.id)
+
+    replayed = await service.validate(batch.id)
+
+    assert committed.status is DailyBatchStatus.SUCCEEDED
+    assert replayed.status is DailyBatchStatus.SUCCEEDED
+    assert repo.batches[batch.id].status is DailyBatchStatus.SUCCEEDED
+
+
+@async_test
+async def test_commit_savepoint_failure_remains_in_retry_scope() -> None:
+    repo = FakeRepository()
+    repo.fail_symbols.add("600000.SH")
+    service = _service(repo)
+    batch = await service.create(_command())
+    await service.stage(batch.id, _stage())
+
+    result = await service.commit(batch.id)
+
+    assert result.status is DailyBatchStatus.FAILED
+    assert await service.retry_scope(batch.id) == ("600000.SH",)
+
+
+@async_test
+async def test_validate_preserves_every_terminal_status() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    for status in (
+        DailyBatchStatus.SUCCEEDED,
+        DailyBatchStatus.PARTIAL,
+        DailyBatchStatus.FAILED,
+    ):
+        batch = await service.create(_command(key=f"terminal-{status.value}"))
+        repo.batches[batch.id].status = status
+        assert (await service.validate(batch.id)).status is status
+
+
+@async_test
+async def test_validate_rejects_states_before_fetch_and_during_commit() -> None:
+    from long_invest.platform.errors import AppError
+
+    repo = FakeRepository()
+    service = _service(repo)
+    for status in (DailyBatchStatus.PENDING, DailyBatchStatus.COMMITTING):
+        batch = await service.create(_command(key=f"invalid-{status.value}"))
+        repo.batches[batch.id].status = status
+        with pytest.raises(AppError) as captured:
+            await service.validate(batch.id)
+        assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
+
+
+@async_test
+async def test_retry_scope_is_deduplicated_in_frozen_order_and_never_expands() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command(("600000.SH", "000001.SZ", "430047.BJ")))
+    await service.stage(
+        batch.id,
+        _stage(
+            "000001.SZ",
+            status=DailyStageStatus.MISSING,
+            reason=DailyMissingReason.UNEXPLAINED,
+        ),
+    )
+    await service.commit(batch.id)
+    repo.missing[batch.id].extend(
+        [
+            repo.missing[batch.id][0],
+            SimpleNamespace(
+                symbol="300001.SZ",
+                explained=False,
+                reason=DailyMissingReason.UNEXPLAINED,
+            ),
+        ]
+    )
+
+    assert await service.retry_scope(batch.id) == (
+        "600000.SH",
+        "000001.SZ",
+        "430047.BJ",
+    )

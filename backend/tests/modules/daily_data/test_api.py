@@ -6,7 +6,9 @@ from uuid import uuid4
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from long_invest.modules.auth.application import get_auth_application
 from long_invest.modules.auth.dependencies import (
+    AUTH_COOKIE_NAME,
     require_authenticated_request,
     require_verified_write_request,
 )
@@ -17,6 +19,7 @@ from long_invest.platform.http.exception_handlers import (
     app_error_handler,
     validation_error_handler,
 )
+from long_invest.platform.http.middleware import RequestContextMiddleware
 
 
 def _client(application, *, authenticated=True):
@@ -26,7 +29,14 @@ def _client(application, *, authenticated=True):
 
     app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.include_router(router)
-    identity = SimpleNamespace(user=SimpleNamespace(id=uuid4()))
+    identity = SimpleNamespace(
+        user=SimpleNamespace(id=uuid4()),
+        session=SimpleNamespace(id=uuid4()),
+        audit_context=SimpleNamespace(
+            request_id="req_12345678",
+            trusted_ip="127.0.0.1",
+        ),
+    )
     app.dependency_overrides[get_daily_data_application] = lambda: application
     if authenticated:
         app.dependency_overrides[require_authenticated_request] = lambda: identity
@@ -73,11 +83,12 @@ def test_retry_requires_confirmation_and_idempotency_key() -> None:
     client, _ = _client(application)
     unconfirmed = client.post(
         f"/api/v1/daily-data/batches/{uuid4()}/retry",
-        json={"confirm": False},
+        json={"confirm": False, "reason": "manual retry"},
         headers={"Idempotency-Key": "retry-1"},
     )
     missing_key = client.post(
-        f"/api/v1/daily-data/batches/{uuid4()}/retry", json={"confirm": True}
+        f"/api/v1/daily-data/batches/{uuid4()}/retry",
+        json={"confirm": True, "reason": "manual retry"},
     )
     assert unconfirmed.status_code == 422
     assert unconfirmed.json()["code"] == "AUTH_CONFIRMATION_REQUIRED"
@@ -96,7 +107,7 @@ def test_retry_only_submits_daily_retry_job() -> None:
     client, identity = _client(application)
     response = client.post(
         f"/api/v1/daily-data/batches/{batch_id}/retry",
-        json={"confirm": True},
+        json={"confirm": True, "reason": "manual retry"},
         headers={"Idempotency-Key": "retry-1"},
     )
     assert response.status_code == 202
@@ -104,7 +115,88 @@ def test_retry_only_submits_daily_retry_job() -> None:
     application.retry.assert_awaited_once()
     kwargs = application.retry.await_args.kwargs
     assert kwargs["batch_id"] == batch_id
-    assert kwargs["created_by_user_id"] == str(identity.user.id)
+    assert kwargs["audit_context"].actor_user_id == str(identity.user.id)
+    assert kwargs["audit_context"].reason == "manual retry"
+
+
+def test_retry_uses_real_origin_session_and_csrf_protection() -> None:
+    application = Mock()
+    application.retry = AsyncMock(
+        return_value=SimpleNamespace(
+            id=uuid4(), job_type="DAILY_DATA_RETRY", status="PENDING_DISPATCH"
+        )
+    )
+    user_id, session_id = uuid4(), uuid4()
+
+    class FakeAuthApplication:
+        async def validate_write_request(self, **_kwargs):
+            return SimpleNamespace(
+                user=SimpleNamespace(id=user_id),
+                session=SimpleNamespace(id=session_id),
+            )
+
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
+    app.add_exception_handler(AppError, app_error_handler)
+    app.include_router(router)
+    app.dependency_overrides[get_daily_data_application] = lambda: application
+    app.dependency_overrides[get_auth_application] = lambda: FakeAuthApplication()
+    client = TestClient(app)
+    url = f"/api/v1/daily-data/batches/{uuid4()}/retry"
+    body = {"confirm": True, "reason": "manual retry"}
+    valid_headers = {
+        "Origin": "http://127.0.0.1:15173",
+        "X-CSRF-Token": "csrf-token",
+        "Idempotency-Key": "retry-1",
+        "Cookie": f"{AUTH_COOKIE_NAME}=session-token",
+    }
+
+    unauthenticated = client.post(
+        url,
+        json=body,
+        headers={key: value for key, value in valid_headers.items() if key != "Cookie"},
+    )
+    missing_origin = client.post(
+        url,
+        json=body,
+        headers={key: value for key, value in valid_headers.items() if key != "Origin"},
+    )
+    missing_csrf = client.post(
+        url,
+        json=body,
+        headers={
+            key: value for key, value in valid_headers.items() if key != "X-CSRF-Token"
+        },
+    )
+    unconfirmed = client.post(
+        url,
+        json={"confirm": False, "reason": "manual retry"},
+        headers=valid_headers,
+    )
+    missing_key = client.post(
+        url,
+        json=body,
+        headers={
+            key: value
+            for key, value in valid_headers.items()
+            if key != "Idempotency-Key"
+        },
+    )
+    accepted = client.post(url, json=body, headers=valid_headers)
+
+    assert unauthenticated.status_code == 401
+    assert missing_origin.status_code == 403
+    assert missing_csrf.status_code == 403
+    assert unconfirmed.status_code == 422
+    assert unconfirmed.json()["code"] == "AUTH_CONFIRMATION_REQUIRED"
+    assert missing_key.status_code == 422
+    assert missing_key.json()["code"] == "IDEMPOTENCY_KEY_REQUIRED"
+    assert accepted.status_code == 202
+    context = application.retry.await_args.kwargs["audit_context"]
+    assert context.actor_user_id == str(user_id)
+    assert context.session_id == str(session_id)
+    assert context.idempotency_key == "retry-1"
+    assert context.reason == "manual retry"
 
 
 def test_daily_bars_require_date_range_and_enforce_page_limit() -> None:

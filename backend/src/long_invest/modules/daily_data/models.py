@@ -18,6 +18,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -29,8 +30,12 @@ from long_invest.platform.database.base import Base
 class DailyDataBatch(Base):
     __tablename__ = "daily_data_batch"
     __table_args__ = (
-        UniqueConstraint(
-            "trading_date", "universe_snapshot_id", name="uq_daily_batch_scope"
+        Index(
+            "uq_daily_batch_auto_scope",
+            "trading_date",
+            "universe_snapshot_id",
+            unique=True,
+            postgresql_where=text("parent_batch_id IS NULL"),
         ),
         UniqueConstraint("idempotency_key", name="uq_daily_batch_idempotency"),
         CheckConstraint("expected_count > 0", name="daily_batch_expected_positive"),

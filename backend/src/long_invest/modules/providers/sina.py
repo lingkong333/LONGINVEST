@@ -29,6 +29,7 @@ class SinaRealtimeProvider:
     code = ProviderCode.SINA
     capabilities = frozenset({ProviderCapability.REALTIME_QUOTE_BATCH})
     REALTIME_URL = "https://hq.sinajs.cn/list="
+    REFERER = "https://finance.sina.com.cn/"
 
     def __init__(self, client: ProviderHttpClient | None) -> None:
         self._client = client
@@ -40,7 +41,10 @@ class SinaRealtimeProvider:
         if self._client is None:
             raise RuntimeError("provider client is not configured")
         text = await self._client.request_text(
-            ProviderHttpRequest(self.REALTIME_URL + codes),
+            ProviderHttpRequest(
+                self.REALTIME_URL + codes,
+                headers={"Referer": self.REFERER},
+            ),
             deadline=deadline,
             encoding="gb18030",
         )
@@ -92,7 +96,7 @@ class SinaRealtimeProvider:
         ):
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
         parsed: dict[str, RealtimeQuote] = {}
-        empty: set[str] = set()
+        row_failures: dict[str, ProviderItemFailure] = {}
         for raw_line in filter(None, (line.strip() for line in text.splitlines())):
             match = LINE.fullmatch(raw_line)
             if not match:
@@ -100,12 +104,11 @@ class SinaRealtimeProvider:
             market, code, content = match.groups()
             symbol = f"{code}.{market.upper()}"
             if not content:
-                empty.add(symbol)
                 continue
             fields = content.split(",")
-            if len(fields) < 32:
-                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
             try:
+                if len(fields) < 32:
+                    raise ValueError("missing quote fields")
                 quote_time = datetime.fromisoformat(
                     f"{fields[30]}T{fields[31]}"
                 ).replace(tzinfo=CHINA_TIMEZONE)
@@ -123,11 +126,17 @@ class SinaRealtimeProvider:
                     received_at,
                     self.code,
                 )
-            except (ValueError, InvalidOperation) as error:
-                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+            except (ValueError, InvalidOperation):
+                row_failures[symbol] = ProviderItemFailure(
+                    symbol,
+                    "PROVIDER_ITEM_INVALID",
+                    "该股票行情字段无效",
+                    self.code,
+                )
         items = tuple(parsed[symbol] for symbol in symbols if symbol in parsed)
         failures = tuple(
-            ProviderItemFailure(
+            row_failures.get(symbol)
+            or ProviderItemFailure(
                 symbol, "PROVIDER_ITEM_MISSING", "上游未返回该股票", self.code
             )
             for symbol in symbols

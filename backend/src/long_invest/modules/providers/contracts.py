@@ -45,8 +45,8 @@ def _aware(value: datetime) -> None:
 
 
 def _ohlc(open_: Decimal, high: Decimal, low: Decimal, close: Decimal) -> None:
-    if any(value < 0 for value in (open_, high, low, close)):
-        raise ValueError("prices cannot be negative")
+    if any(value <= 0 for value in (open_, high, low, close)):
+        raise ValueError("OHLC prices must be positive")
     if high < max(open_, close, low) or low > min(open_, close, high):
         raise ValueError("invalid OHLC range")
 
@@ -59,9 +59,9 @@ class SecurityMasterRecord:
     security_type: str
     listed_on: date | None
     delisted_on: date | None
-    listed: bool
+    listed: bool | None
     is_st: bool
-    suspended: bool
+    suspended: bool | None
     source: ProviderCode
     observed_at: datetime
 

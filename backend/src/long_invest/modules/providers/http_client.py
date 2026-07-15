@@ -19,6 +19,7 @@ JSON_CONTENT_TYPES = frozenset({"application/json", "text/json", "text/plain"})
 class ProviderHttpRequest:
     url: str
     params: dict[str, str] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def create_async_client(
@@ -68,7 +69,10 @@ class ProviderHttpClient:
             try:
                 async with asyncio.timeout(remaining):
                     async with self._client.stream(
-                        "GET", request.url, params=request.params
+                        "GET",
+                        request.url,
+                        params=request.params,
+                        headers=request.headers,
                     ) as response:
                         if response.status_code in RETRYABLE_STATUSES:
                             raise ProviderHttpError(
@@ -76,7 +80,7 @@ class ProviderHttpClient:
                             )
                         if response.status_code >= 400:
                             raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
-                        self._validate_headers(response)
+                        self._validate_headers(response, JSON_CONTENT_TYPES)
                         body = bytearray()
                         async for chunk in response.aiter_bytes():
                             body.extend(chunk)
@@ -104,7 +108,10 @@ class ProviderHttpClient:
             try:
                 async with asyncio.timeout(remaining):
                     async with self._client.stream(
-                        "GET", request.url, params=request.params
+                        "GET",
+                        request.url,
+                        params=request.params,
+                        headers=request.headers,
                     ) as response:
                         if response.status_code in RETRYABLE_STATUSES:
                             raise ProviderHttpError(
@@ -112,7 +119,16 @@ class ProviderHttpClient:
                             )
                         if response.status_code >= 400:
                             raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
-                        self._validate_headers(response)
+                        self._validate_headers(
+                            response,
+                            frozenset(
+                                {
+                                    "text/plain",
+                                    "application/javascript",
+                                    "text/javascript",
+                                }
+                            ),
+                        )
                         body = bytearray()
                         async for chunk in response.aiter_bytes():
                             body.extend(chunk)
@@ -139,7 +155,9 @@ class ProviderHttpClient:
         if parsed.username or parsed.password or parsed.port not in (None, 443):
             raise ProviderHttpError("PROVIDER_TARGET_NOT_ALLOWED")
 
-    def _validate_headers(self, response: httpx.Response) -> None:
+    def _validate_headers(
+        self, response: httpx.Response, allowed_content_types: frozenset[str]
+    ) -> None:
         if (
             sum(len(k) + len(v) for k, v in response.headers.items())
             > self._max_header_bytes
@@ -149,7 +167,7 @@ class ProviderHttpClient:
         if length and int(length) > self._max_response_bytes:
             raise ProviderHttpError("PROVIDER_RESPONSE_TOO_LARGE")
         content_type = response.headers.get("content-type", "").split(";", 1)[0].lower()
-        if content_type not in JSON_CONTENT_TYPES:
+        if content_type not in allowed_content_types:
             raise ProviderHttpError("PROVIDER_UNEXPECTED_CONTENT")
 
     def _decode(self, body: bytes) -> dict[str, Any]:

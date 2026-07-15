@@ -53,12 +53,9 @@ def test_sina_empty_and_partial_are_item_failures() -> None:
 @pytest.mark.parametrize(
     "fixture",
     [
-        "missing_fields.txt",
         "error.txt",
         "html.txt",
         "captcha.txt",
-        "bad_time.txt",
-        "oversize.txt",
     ],
 )
 def test_sina_schema_anomalies_have_stable_error(fixture: str) -> None:
@@ -66,3 +63,29 @@ def test_sina_schema_anomalies_have_stable_error(fixture: str) -> None:
         SinaRealtimeProvider(None).parse_quotes(
             load(fixture), ("600000.SH",), received_at=datetime.now(UTC)
         )
+
+
+def test_sina_isolates_identifiable_bad_row_in_mixed_batch() -> None:
+    text = load("multi_market.txt").replace(
+        'var hq_str_sz000001="深市,10,10,10,10,10,10,10,1,10',
+        'var hq_str_sz000001="深市,10,10,-,10,10,10,10,1,10',
+    )
+    result = SinaRealtimeProvider(None).parse_quotes(
+        text,
+        ("600000.SH", "000001.SZ", "430047.BJ"),
+        received_at=datetime.now(UTC),
+    )
+    assert [item.symbol for item in result.items] == ["600000.SH", "430047.BJ"]
+    assert result.failures[0].symbol == "000001.SZ"
+    assert result.failures[0].code == "PROVIDER_ITEM_INVALID"
+
+
+@pytest.mark.parametrize(
+    "fixture", ["missing_fields.txt", "bad_time.txt", "oversize.txt"]
+)
+def test_sina_identifiable_anomaly_is_an_item_failure(fixture: str) -> None:
+    result = SinaRealtimeProvider(None).parse_quotes(
+        load(fixture), ("600000.SH",), received_at=datetime.now(UTC)
+    )
+    assert result.items == ()
+    assert result.failures[0].code == "PROVIDER_ITEM_INVALID"

@@ -108,3 +108,24 @@ def test_daily_bar_rejects_negative_quantity_and_invalid_ohlc() -> None:
             source=ProviderCode.EASTMONEY,
             capability=ProviderCapability.DAILY_BAR_UNADJUSTED,
         )
+
+
+@pytest.mark.parametrize("zero_field", ["open", "high", "low", "close"])
+def test_daily_bar_requires_strictly_positive_ohlc(zero_field: str) -> None:
+    values = {
+        "open": Decimal("10"),
+        "high": Decimal("10"),
+        "low": Decimal("10"),
+        "close": Decimal("10"),
+    }
+    values[zero_field] = Decimal("0")
+    with pytest.raises(ValueError, match="positive"):
+        DailyBar(
+            symbol="600000.SH",
+            trading_date=date(2025, 1, 2),
+            volume=1,
+            amount=Decimal("1"),
+            source=ProviderCode.EASTMONEY,
+            capability=ProviderCapability.DAILY_BAR_UNADJUSTED,
+            **values,
+        )

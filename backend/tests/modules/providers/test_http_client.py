@@ -115,18 +115,26 @@ async def test_client_stops_when_total_deadline_has_expired() -> None:
 
 @async_test
 async def test_client_accepts_bounded_plain_text_for_sina() -> None:
-    transport = httpx.MockTransport(
-        lambda _: httpx.Response(
+    seen: list[httpx.Request] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
             200,
-            headers={"content-type": "text/plain; charset=GB18030"},
+            headers={"content-type": "application/javascript; charset=GB18030"},
             content='var hq_str_sh600000="浦发银行,10";'.encode("gb18030"),
         )
-    )
+
+    transport = httpx.MockTransport(handler)
     async with httpx.AsyncClient(transport=transport) as raw:
         client = ProviderHttpClient(raw, allowed_hosts=frozenset({"hq.sinajs.cn"}))
         text = await client.request_text(
-            ProviderHttpRequest("https://hq.sinajs.cn/list=sh600000"),
+            ProviderHttpRequest(
+                "https://hq.sinajs.cn/list=sh600000",
+                headers={"Referer": "https://finance.sina.com.cn/"},
+            ),
             deadline=datetime.now(UTC) + timedelta(seconds=1),
             encoding="gb18030",
         )
     assert "浦发银行" in text
+    assert seen[0].headers["referer"] == "https://finance.sina.com.cn/"

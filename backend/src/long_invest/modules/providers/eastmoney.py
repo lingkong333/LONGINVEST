@@ -111,9 +111,7 @@ class EastmoneyProvider:
             },
             deadline,
         )
-        return self.parse_bars(
-            payload, symbol=request.symbol, capability=request.capability
-        )
+        return self.parse_bars(payload, request=request)
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime
@@ -167,21 +165,21 @@ class EastmoneyProvider:
     ) -> ProviderBatchResult[RealtimeQuote]:
         rows = self._rows(payload, "diff")
         parsed: dict[str, RealtimeQuote] = {}
+        row_failures: dict[str, ProviderItemFailure] = {}
         required = ("f12", "f2", "f17", "f15", "f16", "f18", "f5", "f6", "f124")
         for row in rows:
-            if not isinstance(row, dict) or any(key not in row for key in required):
+            if not isinstance(row, dict) or "f12" not in row:
                 raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
             symbol = _symbol(str(row["f12"]))
             try:
+                if any(key not in row for key in required):
+                    raise ValueError("missing quote field")
                 timestamp = int(row["f124"])
                 quote_time = datetime.fromtimestamp(timestamp, UTC)
-            except (ValueError, TypeError, OSError) as error:
-                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
-            if quote_time.year < 2000 or quote_time > received_at.astimezone(
-                UTC
-            ).replace(microsecond=0) + timedelta(days=1):
-                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
-            try:
+                if quote_time.year < 2000 or quote_time > received_at.astimezone(
+                    UTC
+                ).replace(microsecond=0) + timedelta(days=1):
+                    raise ValueError("invalid quote time")
                 parsed[symbol] = RealtimeQuote(
                     symbol=symbol,
                     price=_decimal(row["f2"]),
@@ -195,11 +193,17 @@ class EastmoneyProvider:
                     received_at=received_at,
                     source=self.code,
                 )
-            except (ValueError, TypeError) as error:
-                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+            except (ProviderHttpError, ValueError, TypeError, OSError):
+                row_failures[symbol] = ProviderItemFailure(
+                    symbol,
+                    "PROVIDER_ITEM_INVALID",
+                    "该股票行情字段无效",
+                    self.code,
+                )
         items = tuple(parsed[symbol] for symbol in symbols if symbol in parsed)
         failures = tuple(
-            ProviderItemFailure(
+            row_failures.get(symbol)
+            or ProviderItemFailure(
                 symbol, "PROVIDER_ITEM_MISSING", "上游未返回该股票", self.code
             )
             for symbol in symbols
@@ -208,19 +212,31 @@ class EastmoneyProvider:
         return ProviderBatchResult(items, failures)
 
     def parse_bars(
-        self, payload: Any, *, symbol: str, capability: ProviderCapability
+        self, payload: Any, *, request: DailyBarRequest
     ) -> ProviderBatchResult[DailyBar]:
         rows = self._rows(payload, "klines")
+        data = payload["data"]
+        if data.get("code") != request.symbol[:6]:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
         items: list[DailyBar] = []
+        seen_dates: set[date] = set()
         try:
             for row in rows:
                 fields = row.split(",")
                 if len(fields) != 7:
                     raise ValueError
+                trading_date = date.fromisoformat(fields[0])
+                if (
+                    trading_date < request.start
+                    or trading_date > request.end
+                    or trading_date in seen_dates
+                ):
+                    raise ValueError
+                seen_dates.add(trading_date)
                 items.append(
                     DailyBar(
-                        symbol,
-                        date.fromisoformat(fields[0]),
+                        request.symbol,
+                        trading_date,
                         _decimal(fields[1]),
                         _decimal(fields[3]),
                         _decimal(fields[4]),
@@ -228,7 +244,7 @@ class EastmoneyProvider:
                         int(fields[5]),
                         _decimal(fields[6]),
                         self.code,
-                        capability,
+                        request.capability,
                     )
                 )
         except (AttributeError, ValueError, TypeError) as error:
@@ -243,17 +259,36 @@ class EastmoneyProvider:
             if not isinstance(row, dict) or not {"f12", "f14"} <= row.keys():
                 raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
             symbol = _symbol(str(row["f12"]))
+            listed_on = None
+            listing_value = row.get("f26")
+            if listing_value not in (None, "", "-"):
+                try:
+                    listed_on = datetime.strptime(str(listing_value), "%Y%m%d").date()
+                except ValueError as error:
+                    raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+            listed = None if listed_on is None else listed_on <= observed_at.date()
+            price_value = row.get("f2")
+            if listed is True and price_value == "-":
+                suspended = True
+            elif listed is True and price_value not in (None, "", "-"):
+                try:
+                    _decimal(price_value)
+                    suspended = False
+                except ProviderHttpError:
+                    suspended = None
+            else:
+                suspended = None
             records.append(
                 SecurityMasterRecord(
                     symbol,
                     str(row["f14"]),
                     symbol[-2:],
                     "STOCK",
+                    listed_on,
                     None,
-                    None,
-                    True,
+                    listed,
                     str(row["f14"]).upper().startswith("ST"),
-                    False,
+                    suspended,
                     self.code,
                     observed_at,
                 )

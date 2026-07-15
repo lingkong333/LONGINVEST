@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -30,6 +31,21 @@ class ScriptedRedis:
         if isinstance(response, Exception):
             raise response
         return response
+
+
+class PausedRedis:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.calls: list[tuple[object, ...]] = []
+
+    async def eval(self, *args: object) -> object:
+        self.calls.append(args)
+        if len(self.calls) == 1:
+            self.started.set()
+            await self.release.wait()
+            return [1, 0]
+        return 1
 
 
 class UnavailableLimiter:
@@ -139,6 +155,29 @@ async def test_limiter_recovers_after_its_rolling_window() -> None:
 
 
 @pytest.mark.anyio
+async def test_check_atomically_reserves_capacity_before_password_work() -> None:
+    limiter = InMemoryLoginRateLimiter(
+        RateLimitConfig(per_ip=1, per_username=1, global_failures=1)
+    )
+
+    first, second = await asyncio.gather(
+        limiter.check(ip="203.0.113.1", username="admin", now=NOW),
+        limiter.check(ip="203.0.113.1", username="admin", now=NOW),
+    )
+
+    assert [first.allowed, second.allowed].count(True) == 1
+    assert [first.allowed, second.allowed].count(False) == 1
+    allowed = first if first.allowed else second
+    await limiter.record_success(
+        ip="203.0.113.1",
+        username="admin",
+        now=NOW,
+        reservation_id=allowed.reservation_id,
+    )
+    assert (await limiter.check(ip="203.0.113.1", username="admin", now=NOW)).allowed
+
+
+@pytest.mark.anyio
 async def test_redis_limiter_uses_hashed_shared_keys_for_three_dimensions() -> None:
     redis = ScriptedRedis([0, 42], 1)
     limiter = RedisLoginRateLimiter(redis, RateLimitConfig())
@@ -151,6 +190,46 @@ async def test_redis_limiter_uses_hashed_shared_keys_for_three_dimensions() -> N
     assert all(call[1] == 3 for call in redis.calls)
     assert "203.0.113.1" not in repr(redis.calls)
     assert "admin" not in repr(redis.calls)
+
+
+@pytest.mark.anyio
+async def test_redis_limiter_reserves_and_releases_a_successful_attempt() -> None:
+    redis = ScriptedRedis([1, 0], 1)
+    limiter = RedisLoginRateLimiter(redis, RateLimitConfig())
+
+    decision = await limiter.check(ip="203.0.113.1", username="admin", now=NOW)
+    await limiter.record_success(
+        ip="203.0.113.1",
+        username="admin",
+        now=NOW,
+        reservation_id=decision.reservation_id,
+    )
+
+    assert decision.allowed is True
+    assert decision.reservation_id
+    assert len(redis.calls) == 2
+    assert decision.reservation_id in redis.calls[0]
+    assert decision.reservation_id in redis.calls[1]
+
+
+@pytest.mark.anyio
+async def test_cancelled_redis_check_releases_a_completed_reservation() -> None:
+    redis = PausedRedis()
+    limiter = RedisLoginRateLimiter(redis, RateLimitConfig())
+
+    check_task = asyncio.create_task(
+        limiter.check(ip="203.0.113.1", username="admin", now=NOW)
+    )
+    await redis.started.wait()
+    check_task.cancel()
+    redis.release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await check_task
+
+    assert len(redis.calls) == 2
+    reservation_id = redis.calls[0][-1]
+    assert reservation_id in redis.calls[1]
 
 
 @pytest.mark.anyio

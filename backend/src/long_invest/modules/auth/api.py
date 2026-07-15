@@ -1,3 +1,4 @@
+import ipaddress
 from datetime import timedelta
 from typing import Annotated
 from urllib.parse import urlsplit
@@ -40,6 +41,12 @@ class ChangePasswordRequest(BaseModel):
 
 class RevokeSessionRequest(BaseModel):
     reason: str = Field(default="user request", min_length=1, max_length=255)
+    confirm: bool
+
+
+class ConfirmSessionsRequest(BaseModel):
+    reason: str = Field(default="user request", min_length=1, max_length=255)
+    confirm: bool
 
 
 def validate_browser_origin(
@@ -78,6 +85,38 @@ def clear_session_cookie(response: Response) -> None:
         httponly=True,
         samesite="strict",
     )
+
+
+def require_confirmation(confirm: bool) -> None:
+    if not confirm:
+        raise AppError(
+            code="AUTH_CONFIRMATION_REQUIRED",
+            message="请确认会话撤销操作",
+            status_code=422,
+        )
+
+
+def resolve_client_ip(
+    *,
+    peer_ip: str,
+    forwarded_ip: str | None,
+    trusted_proxy_networks: tuple[str, ...],
+) -> str:
+    try:
+        peer = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return "unknown"
+    trusted = any(
+        peer in ipaddress.ip_network(network, strict=False)
+        for network in trusted_proxy_networks
+    )
+    if trusted and forwarded_ip:
+        candidate = forwarded_ip.split(",", maxsplit=1)[0].strip()
+        try:
+            return str(ipaddress.ip_address(candidate))[:64]
+        except ValueError:
+            pass
+    return str(peer)[:64]
 
 
 def _allowed_origins() -> tuple[str, ...]:
@@ -123,10 +162,17 @@ def _csrf_token(value: str | None) -> str:
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",", maxsplit=1)[0].strip()[:64]
-    return request.client.host[:64] if request.client else "unknown"
+    settings = get_settings()
+    networks = tuple(
+        item.strip()
+        for item in settings.auth_trusted_proxy_networks.split(",")
+        if item.strip()
+    )
+    return resolve_client_ip(
+        peer_ip=request.client.host if request.client else "unknown",
+        forwarded_ip=request.headers.get("x-forwarded-for"),
+        trusted_proxy_networks=networks,
+    )
 
 
 def _user_agent(request: Request) -> str | None:
@@ -315,10 +361,12 @@ async def revoke_session(
     csrf: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> dict:
     _require_origin(request)
+    require_confirmation(body.confirm)
     changed, revoked_current = await application.revoke_session(
         session_token=_session_token(request),
         csrf_token=_csrf_token(csrf),
         target_session_id=session_id,
+        reason=body.reason,
         client_ip=_client_ip(request),
         audit_context=_audit_context(request),
     )
@@ -331,14 +379,17 @@ async def revoke_session(
 
 @router.post("/sessions/revoke-others")
 async def revoke_other_sessions(
+    body: ConfirmSessionsRequest,
     request: Request,
     application: Annotated[AuthApplication, Depends(get_auth_application)],
     csrf: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> dict:
     _require_origin(request)
+    require_confirmation(body.confirm)
     changed = await application.revoke_other_sessions(
         session_token=_session_token(request),
         csrf_token=_csrf_token(csrf),
+        reason=body.reason,
         client_ip=_client_ip(request),
         audit_context=_audit_context(request),
     )
@@ -347,15 +398,18 @@ async def revoke_other_sessions(
 
 @router.post("/sessions/revoke-all")
 async def revoke_all_sessions(
+    body: ConfirmSessionsRequest,
     request: Request,
     response: Response,
     application: Annotated[AuthApplication, Depends(get_auth_application)],
     csrf: Annotated[str | None, Header(alias="X-CSRF-Token")] = None,
 ) -> dict:
     _require_origin(request)
+    require_confirmation(body.confirm)
     changed = await application.revoke_all_sessions(
         session_token=_session_token(request),
         csrf_token=_csrf_token(csrf),
+        reason=body.reason,
         client_ip=_client_ip(request),
         audit_context=_audit_context(request),
     )

@@ -30,6 +30,7 @@ class AppSettings(BaseSettings):
     database_app_password: str = "longinvest-app-local-only"
     redis_url: str = "redis://redis:6379/0"
     auth_allowed_origins: str = "http://127.0.0.1:15173,http://localhost:15173"
+    auth_trusted_proxy_networks: str = "172.16.0.0/12,127.0.0.0/8,::1/128"
     dispatcher_scan_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)
     dispatcher_batch_size: int = Field(default=50, ge=1, le=500)
     queue_job_timeout_seconds: int = Field(default=60, ge=10, le=3600)

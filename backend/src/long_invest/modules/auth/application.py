@@ -5,10 +5,16 @@ from typing import TypeVar
 from uuid import UUID
 
 from redis.asyncio import Redis
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from long_invest.modules.auth.audit import AuditContext, AuthAuditEvent, AuthAuditPort
+from long_invest.modules.auth.audit import (
+    AuditContext,
+    AuthAuditEvent,
+    AuthAuditPort,
+    auth_audit_idempotency_key,
+)
 from long_invest.modules.auth.contracts import RequestActivity
 from long_invest.modules.auth.passwords import PasswordService
 from long_invest.modules.auth.rate_limit import (
@@ -23,6 +29,7 @@ from long_invest.modules.auth.service import (
     LoginResult,
 )
 from long_invest.modules.auth.tokens import CsrfCredentials, TokenService
+from long_invest.platform.audit.models import AuditEvent
 from long_invest.platform.audit.repository import AuditRepository, NewAuditEvent
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database, get_database
@@ -36,30 +43,99 @@ class AuthAuditAdapter(AuthAuditPort):
         self._session = session
 
     async def record(self, event: AuthAuditEvent) -> None:
-        object_id = event.object_id
-        if len(object_id) > 100:
-            object_id = f"oversized:{TokenService.digest(object_id)}"
-        data = NewAuditEvent(
-            action_code=event.action_code,
-            object_type=event.object_type,
-            object_id=object_id,
-            result=event.result,
-            request_id=event.request_id,
-            idempotency_key=event.idempotency_key,
-            risk_level=event.risk_level,
-            reason=event.reason,
-            before_summary=event.before_summary,
-            after_summary=event.after_summary,
-            actor_user_id=event.actor_user_id,
-            session_id=event.session_id,
-            trusted_ip=event.trusted_ip,
-        )
+        data = _new_audit_event(event)
+        existing = await self._find(data.idempotency_key)
+        if existing is not None:
+            _resolve_audit_replay(existing, data)
+            return
         try:
             async with self._session.begin_nested():
                 await AuditRepository(self._session).append(data)
         except IntegrityError:
-            # Replayed idempotent requests reuse the existing audit fact.
-            return
+            existing = await self._find(data.idempotency_key)
+            if existing is None:
+                raise
+            _resolve_audit_replay(existing, data)
+
+    async def find_replay(self, event: AuthAuditEvent) -> AuditEvent | None:
+        data = _new_audit_event(event)
+        existing = await self._find(data.idempotency_key)
+        if existing is not None:
+            _resolve_audit_replay(existing, data)
+        return existing
+
+    async def find_request_replay(
+        self,
+        *,
+        request_key: str,
+    ) -> AuditEvent | None:
+        return await self._find(auth_audit_idempotency_key(request_key))
+
+    async def _find(self, idempotency_key: str) -> AuditEvent | None:
+        return await self._session.scalar(
+            select(AuditEvent).where(AuditEvent.idempotency_key == idempotency_key)
+        )
+
+
+def _new_audit_event(event: AuthAuditEvent) -> NewAuditEvent:
+    object_id = event.object_id
+    if len(object_id) > 100:
+        object_id = f"oversized:{TokenService.digest(object_id)}"
+    return NewAuditEvent(
+        action_code=event.action_code,
+        object_type=event.object_type,
+        object_id=object_id,
+        result=event.result,
+        request_id=event.request_id,
+        idempotency_key=event.idempotency_key,
+        risk_level=event.risk_level,
+        reason=event.reason,
+        before_summary=event.before_summary,
+        after_summary=event.after_summary,
+        actor_user_id=event.actor_user_id,
+        session_id=event.session_id,
+        trusted_ip=event.trusted_ip,
+    )
+
+
+def _resolve_audit_replay(existing: AuditEvent, data: NewAuditEvent) -> None:
+    comparable = (
+        "action_code",
+        "object_type",
+        "object_id",
+        "risk_level",
+        "reason",
+        "actor_user_id",
+        "session_id",
+    )
+    if any(getattr(existing, field) != getattr(data, field) for field in comparable):
+        raise AppError(
+            code="AUTH_AUDIT_IDEMPOTENCY_CONFLICT",
+            message="幂等键已用于其他认证操作",
+            status_code=409,
+        )
+
+
+def _resolve_request_replay(
+    existing: AuditEvent,
+    *,
+    action_code: str,
+    object_type: str | None = None,
+    object_id: str | None = None,
+    reason: str | None = None,
+) -> None:
+    matches = (
+        existing.action_code == action_code,
+        object_type is None or existing.object_type == object_type,
+        object_id is None or existing.object_id == object_id,
+        reason is None or existing.reason == reason,
+    )
+    if not all(matches):
+        raise AppError(
+            code="AUTH_AUDIT_IDEMPOTENCY_CONFLICT",
+            message="幂等键已用于其他认证操作",
+            status_code=409,
+        )
 
 
 class AuthApplication:
@@ -89,7 +165,7 @@ class AuthApplication:
     ) -> LoginResult:
         return await self._run(
             audit_context,
-            lambda service, _repository: service.login(
+            lambda service, _repository, _audit: service.login(
                 username=username,
                 password=password,
                 client_ip=client_ip,
@@ -108,7 +184,7 @@ class AuthApplication:
     ) -> AuthenticatedSession:
         return await self._run(
             audit_context,
-            lambda service, _repository: service.authenticate(
+            lambda service, _repository, _audit: service.authenticate(
                 token=session_token,
                 now=datetime.now(UTC),
                 activity=activity,
@@ -125,7 +201,7 @@ class AuthApplication:
     ) -> CsrfCredentials:
         return await self._run(
             audit_context,
-            lambda service, _repository: service.issue_csrf(
+            lambda service, _repository, _audit: service.issue_csrf(
                 session_token=session_token,
                 now=datetime.now(UTC),
                 client_ip=client_ip,
@@ -139,7 +215,7 @@ class AuthApplication:
         client_ip: str | None,
         audit_context: AuditContext,
     ) -> tuple[AuthenticatedSession, list]:
-        async def operation(service, repository):
+        async def operation(service, repository, _audit):
             authenticated = await service.authenticate(
                 token=session_token,
                 now=datetime.now(UTC),
@@ -158,7 +234,22 @@ class AuthApplication:
         client_ip: str | None,
         audit_context: AuditContext,
     ) -> bool:
-        async def operation(service, _repository):
+        async def operation(service, _repository, audit):
+            replay = await audit.find_request_replay(
+                request_key=audit_context.idempotency_key,
+            )
+            if replay is not None:
+                await service.validate_replay_credentials(
+                    session_token=session_token,
+                    csrf_token=csrf_token,
+                    expected_session_id=replay.session_id,
+                )
+                _resolve_request_replay(
+                    replay,
+                    action_code="AUTH_LOGOUT",
+                    reason="user logout",
+                )
+                return replay.result == "SUCCESS"
             authenticated = await service.validate_csrf(
                 session_token=session_token,
                 csrf_token=csrf_token,
@@ -170,6 +261,8 @@ class AuthApplication:
                 session_id=authenticated.session.id,
                 now=datetime.now(UTC),
                 reason="user logout",
+                actor_session_id=authenticated.session.id,
+                action_code="AUTH_LOGOUT",
             )
 
         return await self._run(audit_context, operation)
@@ -182,7 +275,7 @@ class AuthApplication:
         client_ip: str | None,
         audit_context: AuditContext,
     ) -> AuthenticatedSession:
-        async def operation(service, _repository):
+        async def operation(service, _repository, _audit):
             await service.validate_csrf(
                 session_token=session_token,
                 csrf_token=csrf_token,
@@ -204,10 +297,31 @@ class AuthApplication:
         session_token: str,
         csrf_token: str,
         target_session_id: UUID,
+        reason: str,
         client_ip: str | None,
         audit_context: AuditContext,
     ) -> tuple[bool, bool]:
-        async def operation(service, _repository):
+        async def operation(service, _repository, audit):
+            replay = await audit.find_request_replay(
+                request_key=audit_context.idempotency_key,
+            )
+            if replay is not None:
+                await service.validate_replay_credentials(
+                    session_token=session_token,
+                    csrf_token=csrf_token,
+                    expected_session_id=replay.session_id,
+                )
+                _resolve_request_replay(
+                    replay,
+                    action_code="AUTH_SESSION_REVOKE",
+                    object_type="user_session",
+                    object_id=str(target_session_id),
+                    reason=reason,
+                )
+                return (
+                    replay.result == "SUCCESS",
+                    str(target_session_id) == replay.session_id,
+                )
             authenticated = await service.validate_csrf(
                 session_token=session_token,
                 csrf_token=csrf_token,
@@ -218,7 +332,8 @@ class AuthApplication:
                 user_id=authenticated.user.id,
                 session_id=target_session_id,
                 now=datetime.now(UTC),
-                reason="user revoked session",
+                reason=reason,
+                actor_session_id=authenticated.session.id,
             )
             return changed, target_session_id == authenticated.session.id
 
@@ -229,10 +344,26 @@ class AuthApplication:
         *,
         session_token: str,
         csrf_token: str,
+        reason: str,
         client_ip: str | None,
         audit_context: AuditContext,
     ) -> int:
-        async def operation(service, _repository):
+        async def operation(service, _repository, audit):
+            replay = await audit.find_request_replay(
+                request_key=audit_context.idempotency_key,
+            )
+            if replay is not None:
+                await service.validate_replay_credentials(
+                    session_token=session_token,
+                    csrf_token=csrf_token,
+                    expected_session_id=replay.session_id,
+                )
+                _resolve_request_replay(
+                    replay,
+                    action_code="AUTH_SESSION_REVOKE_OTHERS",
+                    reason=reason,
+                )
+                return int((replay.after_summary or {}).get("revoked_count", 0))
             authenticated = await service.validate_csrf(
                 session_token=session_token,
                 csrf_token=csrf_token,
@@ -243,7 +374,7 @@ class AuthApplication:
                 user_id=authenticated.user.id,
                 current_session_id=authenticated.session.id,
                 now=datetime.now(UTC),
-                reason="user revoked other sessions",
+                reason=reason,
             )
 
         return await self._run(audit_context, operation)
@@ -253,10 +384,26 @@ class AuthApplication:
         *,
         session_token: str,
         csrf_token: str,
+        reason: str,
         client_ip: str | None,
         audit_context: AuditContext,
     ) -> int:
-        async def operation(service, _repository):
+        async def operation(service, _repository, audit):
+            replay = await audit.find_request_replay(
+                request_key=audit_context.idempotency_key,
+            )
+            if replay is not None:
+                await service.validate_replay_credentials(
+                    session_token=session_token,
+                    csrf_token=csrf_token,
+                    expected_session_id=replay.session_id,
+                )
+                _resolve_request_replay(
+                    replay,
+                    action_code="AUTH_SESSION_REVOKE_ALL",
+                    reason=reason,
+                )
+                return int((replay.after_summary or {}).get("revoked_count", 0))
             authenticated = await service.validate_csrf(
                 session_token=session_token,
                 csrf_token=csrf_token,
@@ -267,7 +414,7 @@ class AuthApplication:
                 user_id=authenticated.user.id,
                 current_session_id=authenticated.session.id,
                 now=datetime.now(UTC),
-                reason="user revoked all sessions",
+                reason=reason,
             )
 
         return await self._run(audit_context, operation)
@@ -283,7 +430,7 @@ class AuthApplication:
         user_agent_summary: str | None,
         audit_context: AuditContext,
     ) -> LoginResult:
-        async def operation(service, _repository):
+        async def operation(service, _repository, _audit):
             authenticated = await service.validate_csrf(
                 session_token=session_token,
                 csrf_token=csrf_token,
@@ -306,29 +453,37 @@ class AuthApplication:
         self,
         audit_context: AuditContext,
         operation: Callable[
-            [AuthService, SqlAlchemyAuthRepository],
+            [AuthService, SqlAlchemyAuthRepository, AuthAuditAdapter],
             Awaitable[T],
         ],
     ) -> T:
         async with self._database.session() as session:
             transaction = await session.begin()
             repository = SqlAlchemyAuthRepository(session)
+            audit = AuthAuditAdapter(session)
             service = AuthService(
                 repository,
                 self._passwords,
                 self._tokens,
                 self._rate_limiter,
-                AuthAuditAdapter(session),
+                audit,
                 audit_context,
                 dummy_password_hash=self._dummy_password_hash,
             )
             try:
-                result = await operation(service, repository)
-            except AppError:
-                await transaction.commit()
+                await session.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                    {"key": audit_context.idempotency_key},
+                )
+                result = await operation(service, repository, audit)
+            except AppError as exc:
+                if exc.code == "AUTH_AUDIT_IDEMPOTENCY_CONFLICT":
+                    await self._rollback_safely(transaction)
+                    raise
+                await self._commit(transaction)
                 raise
             except SQLAlchemyError as exc:
-                await transaction.rollback()
+                await self._rollback_safely(transaction)
                 raise AppError(
                     code="AUTH_BACKEND_UNAVAILABLE",
                     message="认证服务暂时不可用",
@@ -338,18 +493,42 @@ class AuthApplication:
                 await transaction.rollback()
                 raise
             else:
-                await transaction.commit()
+                await self._commit(transaction)
                 return result
+
+    @staticmethod
+    async def _commit(transaction) -> None:
+        try:
+            await transaction.commit()
+        except SQLAlchemyError as exc:
+            await AuthApplication._rollback_safely(transaction)
+            raise AppError(
+                code="AUTH_BACKEND_UNAVAILABLE",
+                message="认证服务暂时不可用",
+                status_code=503,
+            ) from exc
+
+    @staticmethod
+    async def _rollback_safely(transaction) -> None:
+        try:
+            if transaction.is_active:
+                await transaction.rollback()
+        except SQLAlchemyError:
+            return
+
+
+@lru_cache
+def get_auth_redis() -> Redis:
+    settings = get_settings()
+    return Redis.from_url(settings.redis_url, decode_responses=False)
 
 
 @lru_cache
 def get_auth_application() -> AuthApplication:
-    settings = get_settings()
     passwords = PasswordService()
     tokens = TokenService()
-    redis = Redis.from_url(settings.redis_url, decode_responses=False)
     limiter = ResilientLoginRateLimiter(
-        RedisLoginRateLimiter(redis),
+        RedisLoginRateLimiter(get_auth_redis()),
         InMemoryLoginRateLimiter(),
     )
     dummy_hash = passwords.hash("fixed startup dummy password value")
@@ -360,3 +539,9 @@ def get_auth_application() -> AuthApplication:
         tokens,
         dummy_password_hash=dummy_hash,
     )
+
+
+async def close_auth_resources() -> None:
+    await get_auth_redis().aclose()
+    get_auth_application.cache_clear()
+    get_auth_redis.cache_clear()

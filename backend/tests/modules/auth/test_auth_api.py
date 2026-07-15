@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
+import pytest
 from fastapi import Response
 from fastapi.testclient import TestClient
 
@@ -8,6 +9,8 @@ from long_invest.bootstrap.app import create_app
 from long_invest.modules.auth.api import (
     AUTH_COOKIE_NAME,
     clear_session_cookie,
+    require_confirmation,
+    resolve_client_ip,
     router,
     set_session_cookie,
     validate_browser_origin,
@@ -22,6 +25,7 @@ from long_invest.modules.auth.tokens import (
     TokenService,
 )
 from long_invest.platform.config.settings import get_settings
+from long_invest.platform.errors import AppError
 
 
 def test_auth_router_exposes_only_the_v31_session_endpoints() -> None:
@@ -66,6 +70,42 @@ def test_origin_validation_accepts_only_an_explicit_origin_or_referer() -> None:
         referer=None,
         allowed_origins=allowed,
     )
+
+
+def test_forwarded_ip_is_trusted_only_from_an_explicit_proxy_network() -> None:
+    trusted = ("172.16.0.0/12", "127.0.0.0/8")
+
+    assert (
+        resolve_client_ip(
+            peer_ip="172.20.0.4",
+            forwarded_ip="203.0.113.9",
+            trusted_proxy_networks=trusted,
+        )
+        == "203.0.113.9"
+    )
+    assert (
+        resolve_client_ip(
+            peer_ip="198.51.100.7",
+            forwarded_ip="203.0.113.9",
+            trusted_proxy_networks=trusted,
+        )
+        == "198.51.100.7"
+    )
+    assert (
+        resolve_client_ip(
+            peer_ip="172.20.0.4",
+            forwarded_ip="not-an-ip",
+            trusted_proxy_networks=trusted,
+        )
+        == "172.20.0.4"
+    )
+
+
+def test_destructive_session_actions_require_explicit_confirmation() -> None:
+    with pytest.raises(AppError) as caught:
+        require_confirmation(False)
+
+    assert caught.value.code == "AUTH_CONFIRMATION_REQUIRED"
 
 
 def test_session_cookie_is_host_only_secure_and_http_only() -> None:
@@ -121,6 +161,7 @@ class FakeAuthApplication:
             status=SessionStatus.ACTIVE,
         )
         self.logout_calls = 0
+        self.last_logout_arguments: dict | None = None
 
     async def login(self, **_kwargs) -> LoginResult:
         return LoginResult(
@@ -139,8 +180,9 @@ class FakeAuthApplication:
             csrf_digest=self.session.csrf_secret_digest,
         )
 
-    async def logout(self, **_kwargs) -> bool:
+    async def logout(self, **kwargs) -> bool:
         self.logout_calls += 1
+        self.last_logout_arguments = kwargs
         return True
 
 
@@ -194,3 +236,32 @@ def test_login_rejects_a_missing_browser_origin() -> None:
 
     assert response.status_code == 403
     assert response.json()["code"] == "AUTH_ORIGIN_INVALID"
+
+
+def test_logout_replay_requires_the_original_cookie_and_csrf(monkeypatch) -> None:
+    monkeypatch.setenv(
+        "LONGINVEST_AUTH_ALLOWED_ORIGINS",
+        "https://127.0.0.1:15173",
+    )
+    get_settings.cache_clear()
+    fake = FakeAuthApplication()
+    app = create_app()
+    app.dependency_overrides[get_auth_application] = lambda: fake
+    try:
+        with TestClient(app, base_url="https://127.0.0.1:15173") as client:
+            client.cookies.set(AUTH_COOKIE_NAME, "original-session-token")
+            response = client.post(
+                "/api/v1/auth/logout",
+                headers={
+                    "Origin": "https://127.0.0.1:15173",
+                    "Idempotency-Key": "original-logout-request",
+                    "X-CSRF-Token": "original-csrf-token",
+                },
+            )
+    finally:
+        get_settings.cache_clear()
+
+    assert response.status_code == 200
+    assert fake.last_logout_arguments is not None
+    assert fake.last_logout_arguments["session_token"] == "original-session-token"
+    assert fake.last_logout_arguments["csrf_token"] == "original-csrf-token"

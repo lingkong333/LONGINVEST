@@ -84,9 +84,7 @@ def test_database_has_a_unique_single_administrator_invariant() -> None:
         if index.name == "uq_app_user_singleton"
     )
 
-    ddl = str(
-        CreateIndex(singleton_index).compile(dialect=postgresql.dialect())
-    )
+    ddl = str(CreateIndex(singleton_index).compile(dialect=postgresql.dialect()))
     assert singleton_index.unique is True
     assert "UNIQUE INDEX" in ddl
     assert "(1)" in ddl

@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -36,6 +37,12 @@ class LoginResult:
 class AuthenticatedSession:
     user: AppUser
     session: UserSession
+
+
+@dataclass
+class _LoginReservation:
+    reservation_id: str | None
+    failure_counted: bool = False
 
 
 class AuthService:
@@ -89,6 +96,43 @@ class AuthService:
                 details={"retry_after_seconds": decision.retry_after_seconds},
             )
 
+        reservation = _LoginReservation(decision.reservation_id)
+        try:
+            return await self._login_with_reservation(
+                username=username,
+                password=password,
+                client_ip=client_ip,
+                user_agent_summary=user_agent_summary,
+                now=now,
+                reservation=reservation,
+            )
+        finally:
+            if not reservation.failure_counted:
+                release = asyncio.create_task(
+                    self._rate_limiter.record_success(
+                        ip=client_ip,
+                        username=username,
+                        now=now,
+                        reservation_id=reservation.reservation_id,
+                    )
+                )
+                try:
+                    await asyncio.shield(release)
+                except asyncio.CancelledError:
+                    await release
+                    raise
+
+    async def _login_with_reservation(
+        self,
+        *,
+        username: str,
+        password: str,
+        client_ip: str,
+        user_agent_summary: str | None,
+        now: datetime,
+        reservation: _LoginReservation,
+    ) -> LoginResult:
+
         user = await self._repository.find_user_by_username(username)
         encoded = user.password_hash if user is not None else self._dummy_hash
         verification = self._passwords.verify(password, encoded)
@@ -97,7 +141,9 @@ class AuthService:
                 ip=client_ip,
                 username=username,
                 now=now,
+                reservation_id=reservation.reservation_id,
             )
+            reservation.failure_counted = True
             await self._record_audit(
                 action_code="AUTH_LOGIN",
                 object_type="app_user",
@@ -117,6 +163,13 @@ class AuthService:
                 replacement_hash=verification.upgraded_hash,
             )
             if not replaced:
+                await self._rate_limiter.record_failure(
+                    ip=client_ip,
+                    username=username,
+                    now=now,
+                    reservation_id=reservation.reservation_id,
+                )
+                reservation.failure_counted = True
                 await self._record_audit(
                     action_code="AUTH_LOGIN",
                     object_type="app_user",
@@ -151,11 +204,6 @@ class AuthService:
             session_id=str(session.id),
         )
         await self._repository.flush()
-        await self._rate_limiter.record_success(
-            ip=client_ip,
-            username=username,
-            now=now,
-        )
         return LoginResult(session=session, credentials=credentials)
 
     async def authenticate(
@@ -237,6 +285,30 @@ class AuthService:
         await self._repository.flush()
         return authenticated
 
+    async def validate_replay_credentials(
+        self,
+        *,
+        session_token: str,
+        csrf_token: str,
+        expected_session_id: str | None,
+    ) -> UserSession:
+        session = await self._repository.find_session_by_digest(
+            self._tokens.digest(session_token)
+        )
+        if (
+            session is None
+            or str(session.id) != expected_session_id
+            or session.status not in {SessionStatus.ACTIVE, SessionStatus.REVOKED}
+        ):
+            raise _invalid_session()
+        if not self._tokens.verify_digest(csrf_token, session.csrf_secret_digest):
+            raise AppError(
+                code="AUTH_CSRF_INVALID",
+                message="CSRF 校验失败",
+                status_code=403,
+            )
+        return session
+
     async def revoke_session(
         self,
         *,
@@ -244,6 +316,8 @@ class AuthService:
         session_id: UUID,
         now: datetime,
         reason: str,
+        actor_session_id: UUID | None = None,
+        action_code: str = "AUTH_SESSION_REVOKE",
     ) -> bool:
         session = await self._repository.get_session(session_id)
         if session is None or session.user_id != user_id:
@@ -254,7 +328,7 @@ class AuthService:
             )
         changed = self._sessions.revoke(session, now=now, reason=reason)
         await self._record_audit(
-            action_code="AUTH_SESSION_REVOKE",
+            action_code=action_code,
             object_type="user_session",
             object_id=str(session.id),
             result="SUCCESS" if changed else "NOOP",
@@ -265,6 +339,7 @@ class AuthService:
             },
             after_summary={"status": session.status},
             actor_user_id=str(user_id),
+            session_id=str(actor_session_id) if actor_session_id else None,
         )
         await self._repository.flush()
         return changed

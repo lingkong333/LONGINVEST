@@ -47,16 +47,13 @@ def build_auth_audit_event(
     actor_user_id: str | None = None,
     session_id: str | None = None,
 ) -> AuthAuditEvent:
-    idempotency_material = (
-        f"{context.idempotency_key}\0{action_code}".encode()
-    )
     return AuthAuditEvent(
         action_code=action_code,
         object_type=object_type,
         object_id=object_id,
         result=result,
         request_id=context.request_id,
-        idempotency_key=f"auth:{hashlib.sha256(idempotency_material).hexdigest()}",
+        idempotency_key=auth_audit_idempotency_key(context.idempotency_key),
         risk_level=risk_level,
         reason=reason,
         before_summary=before_summary,
@@ -65,3 +62,7 @@ def build_auth_audit_event(
         session_id=session_id or context.session_id,
         trusted_ip=context.trusted_ip,
     )
+
+
+def auth_audit_idempotency_key(request_key: str) -> str:
+    return f"auth:{hashlib.sha256(request_key.encode()).hexdigest()}"

@@ -14,7 +14,11 @@ from long_invest.modules.auth.contracts import (
 )
 from long_invest.modules.auth.models import AppUser, UserSession
 from long_invest.modules.auth.passwords import PasswordService
-from long_invest.modules.auth.rate_limit import RateLimitDecision
+from long_invest.modules.auth.rate_limit import (
+    InMemoryLoginRateLimiter,
+    RateLimitConfig,
+    RateLimitDecision,
+)
 from long_invest.modules.auth.service import AuthService
 from long_invest.modules.auth.tokens import TokenService
 from long_invest.platform.errors import AppError
@@ -189,6 +193,11 @@ class HashUpgradeRaceRepository(MemoryAuthRepository):
         return await super().add_session(session)
 
 
+class FailingLookupRepository(MemoryAuthRepository):
+    async def find_user_by_username(self, username: str) -> AppUser | None:
+        raise RuntimeError("database unavailable")
+
+
 class ConcurrentAdminRepository(MemoryAuthRepository):
     def __init__(self) -> None:
         super().__init__()
@@ -203,12 +212,26 @@ class AllowLimiter:
     async def check(
         self, *, ip: str, username: str, now: datetime
     ) -> RateLimitDecision:
-        return RateLimitDecision(allowed=True)
+        return RateLimitDecision(allowed=True, reservation_id="reservation")
 
-    async def record_failure(self, *, ip: str, username: str, now: datetime) -> None:
+    async def record_failure(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+        reservation_id: str | None = None,
+    ) -> None:
         return None
 
-    async def record_success(self, *, ip: str, username: str, now: datetime) -> None:
+    async def record_success(
+        self,
+        *,
+        ip: str,
+        username: str,
+        now: datetime,
+        reservation_id: str | None = None,
+    ) -> None:
         return None
 
 
@@ -409,6 +432,34 @@ async def test_wrong_and_unknown_users_get_same_credentials_error() -> None:
     assert all(event.request_id == context.request_id for event in audit.events)
     assert all(event.idempotency_key for event in audit.events)
     assert PASSWORD not in repr(audit.events)
+
+
+@pytest.mark.anyio
+async def test_backend_failure_releases_the_atomic_login_reservation() -> None:
+    limiter = InMemoryLoginRateLimiter(
+        RateLimitConfig(per_ip=1, per_username=1, global_failures=1)
+    )
+    passwords = PasswordService()
+    auth = AuthService(
+        FailingLookupRepository(),
+        passwords,
+        TokenService(),
+        limiter,
+        RecordingAuditPort(),
+        audit_context(),
+        dummy_password_hash=passwords.hash("startup dummy password"),
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        await auth.login(
+            username="admin",
+            password=PASSWORD,
+            client_ip="203.0.113.1",
+            user_agent_summary="Browser",
+            now=NOW,
+        )
+
+    assert (await limiter.check(ip="203.0.113.1", username="admin", now=NOW)).allowed
 
 
 @pytest.mark.anyio
@@ -614,6 +665,63 @@ async def test_csrf_can_be_reissued_and_is_bound_to_its_session() -> None:
 
 
 @pytest.mark.anyio
+async def test_replay_credentials_accept_only_the_original_revoked_session() -> None:
+    repo = MemoryAuthRepository()
+    passwords = PasswordService()
+    user = make_user(passwords)
+    session_token = "original-session-token"
+    csrf_token = "original-csrf-token"
+    session = UserSession(
+        id=uuid4(),
+        user_id=user.id,
+        token_digest=TokenService.digest(session_token),
+        csrf_secret_digest=TokenService.digest(csrf_token),
+        password_version=user.password_version,
+        created_at=NOW,
+        last_request_at=NOW,
+        last_user_activity_at=NOW,
+        idle_expires_at=NOW + timedelta(days=30),
+        absolute_expires_at=NOW + timedelta(days=90),
+        status=SessionStatus.REVOKED,
+        revoked_at=NOW,
+        revoked_reason="user logout",
+    )
+    await repo.add_user(user)
+    await repo.add_session(session)
+    auth = make_auth_service(repo, passwords)
+
+    validated = await auth.validate_replay_credentials(
+        session_token=session_token,
+        csrf_token=csrf_token,
+        expected_session_id=str(session.id),
+    )
+
+    assert validated.id == session.id
+    with pytest.raises(AppError) as wrong_csrf:
+        await auth.validate_replay_credentials(
+            session_token=session_token,
+            csrf_token="wrong-csrf",
+            expected_session_id=str(session.id),
+        )
+    assert wrong_csrf.value.code == "AUTH_CSRF_INVALID"
+    with pytest.raises(AppError) as wrong_session:
+        await auth.validate_replay_credentials(
+            session_token=session_token,
+            csrf_token=csrf_token,
+            expected_session_id=str(uuid4()),
+        )
+    assert wrong_session.value.code == "AUTH_SESSION_INVALID"
+    session.status = SessionStatus.PASSWORD_CHANGED
+    with pytest.raises(AppError) as invalidated:
+        await auth.validate_replay_credentials(
+            session_token=session_token,
+            csrf_token=csrf_token,
+            expected_session_id=str(session.id),
+        )
+    assert invalidated.value.code == "AUTH_SESSION_INVALID"
+
+
+@pytest.mark.anyio
 async def test_revoke_session_is_idempotent() -> None:
     repo = MemoryAuthRepository()
     passwords = PasswordService()
@@ -646,6 +754,30 @@ async def test_revoke_session_is_idempotent() -> None:
         ("AUTH_SESSION_REVOKE", "NOOP"),
     ]
     assert all(event.request_id == context.request_id for event in audit.events)
+
+
+@pytest.mark.anyio
+async def test_logout_audit_identifies_the_current_session() -> None:
+    repo = MemoryAuthRepository()
+    passwords = PasswordService()
+    user = make_user(passwords)
+    session = make_session(user)
+    await repo.add_user(user)
+    await repo.add_session(session)
+    audit = RecordingAuditPort()
+    auth = make_auth_service(repo, passwords, audit=audit)
+
+    await auth.revoke_session(
+        user_id=user.id,
+        session_id=session.id,
+        now=NOW,
+        reason="user logout",
+        actor_session_id=session.id,
+        action_code="AUTH_LOGOUT",
+    )
+
+    assert audit.events[0].action_code == "AUTH_LOGOUT"
+    assert audit.events[0].session_id == str(session.id)
 
 
 @pytest.mark.anyio

@@ -12,6 +12,10 @@ class QualityIssueRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
     async def find_by_dedupe_key(
         self,
         dedupe_key: str,

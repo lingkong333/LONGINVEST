@@ -14,6 +14,7 @@ from long_invest.modules.market_data.contracts import (
     QualitySeverity,
     ResolveQualityIssue,
 )
+from long_invest.modules.market_data.integrations import QualityEventPort
 from long_invest.modules.market_data.models import DataQualityIssue
 from long_invest.platform.errors import AppError
 
@@ -29,6 +30,9 @@ SEVERITY_RANK = {
 
 
 class QualityIssueRepositoryPort(Protocol):
+    @property
+    def session(self) -> object: ...
+
     async def find_by_dedupe_key(self, dedupe_key: str) -> DataQualityIssue | None: ...
 
     async def get_for_update(self, issue_id: UUID) -> DataQualityIssue | None: ...
@@ -58,9 +62,11 @@ class QualityIssueService:
         self,
         repository: QualityIssueRepositoryPort,
         *,
+        events: QualityEventPort | None = None,
         now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         self._repository = repository
+        self._events = events
         self._now = now_provider or (lambda: datetime.now(UTC))
 
     async def open(self, command: OpenQualityIssue) -> OpenQualityIssueResult:
@@ -160,6 +166,19 @@ class QualityIssueService:
         if action is QualityResolutionAction.SELECT_SOURCE:
             _validate_selected_source(issue, command.selected_source)
 
+        if self._events is None:
+            raise AppError(
+                code="QUALITY_INTEGRATION_UNAVAILABLE",
+                message="数据质量事件集成不可用",
+                status_code=503,
+            )
+        if self._events.session is not self._repository.session:
+            raise AppError(
+                code="QUALITY_TRANSACTION_MISMATCH",
+                message="数据质量裁决与事件不在同一事务中",
+                status_code=500,
+            )
+
         issue.status = (
             QualityIssueStatus.INVALIDATED
             if action is QualityResolutionAction.INVALIDATE
@@ -171,6 +190,7 @@ class QualityIssueService:
         issue.resolution_reason = command.reason
         issue.selected_source = command.selected_source
         await self._repository.flush()
+        await self._events.append_resolved(issue)
         return ResolveQualityIssueResult(issue=issue, replayed=False)
 
 

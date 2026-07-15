@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.market_data.contracts import (
     OpenQualityIssue,
@@ -54,6 +55,7 @@ def resolve_command(issue_id, **overrides: object) -> ResolveQualityIssue:
 
 class MemoryRepository:
     def __init__(self) -> None:
+        self.session = object()
         self.records: dict[object, DataQualityIssue] = {}
         self.flush_error: Exception | None = None
         self.concurrent_record: DataQualityIssue | None = None
@@ -81,6 +83,47 @@ class MemoryRepository:
         self.flush_calls += 1
         if self.flush_error is not None:
             raise self.flush_error
+
+
+class RecordingEventPort:
+    def __init__(self, session: object) -> None:
+        self.session = session
+        self.issues: list[DataQualityIssue] = []
+
+    async def append_resolved(self, issue: DataQualityIssue) -> None:
+        self.issues.append(issue)
+
+
+class OrderedRepository(MemoryRepository):
+    def __init__(self, calls: list[str]) -> None:
+        super().__init__()
+        self.calls = calls
+
+    async def flush(self):
+        self.calls.append("flush")
+        await super().flush()
+
+
+class FailingEventPort(RecordingEventPort):
+    def __init__(self, session: object, calls: list[str]) -> None:
+        super().__init__(session)
+        self.calls = calls
+
+    async def append_resolved(self, issue: DataQualityIssue) -> None:
+        self.calls.append("event")
+        raise RuntimeError("forced event failure")
+
+
+def quality_service(
+    repository: MemoryRepository,
+    *,
+    now_provider=lambda: NOW,
+) -> tuple[QualityIssueService, RecordingEventPort]:
+    events = RecordingEventPort(repository.session)
+    return (
+        QualityIssueService(repository, events=events, now_provider=now_provider),
+        events,
+    )
 
 
 class ConcurrentRepository:
@@ -206,7 +249,7 @@ async def test_open_updates_active_duplicate_and_only_upgrades_severity() -> Non
 @pytest.mark.anyio
 async def test_open_terminal_duplicate_is_replayed_without_mutation() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     created = await service.open(open_command())
     await service.resolve(resolve_command(created.issue.id))
     before = (
@@ -359,7 +402,7 @@ async def test_resolve_applies_supported_terminal_transitions(
     expected_status: QualityIssueStatus,
 ) -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, events = quality_service(repository)
     opened = await service.open(open_command(requires_review=True))
     selected_source = (
         "SINA" if action is QualityResolutionAction.SELECT_SOURCE else None
@@ -380,12 +423,14 @@ async def test_resolve_applies_supported_terminal_transitions(
     assert result.issue.resolution_action == action
     assert result.issue.resolution_reason == "evidence checked"
     assert result.issue.selected_source == selected_source
+    assert events.issues == [result.issue]
 
 
 @pytest.mark.anyio
 async def test_resolve_identical_terminal_decision_is_idempotent() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    repository.session = AsyncMock(spec=AsyncSession)
+    service, events = quality_service(repository)
     opened = await service.open(open_command())
     command = resolve_command(opened.issue.id)
     first = await service.resolve(command)
@@ -396,12 +441,14 @@ async def test_resolve_identical_terminal_decision_is_idempotent() -> None:
     assert replay.issue is first.issue
     assert replay.replayed is True
     assert repository.flush_calls == flush_calls
+    assert events.issues == [first.issue]
+    repository.session.commit.assert_not_awaited()
 
 
 @pytest.mark.anyio
 async def test_resolve_rejects_a_different_terminal_decision() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command())
     await service.resolve(resolve_command(opened.issue.id))
 
@@ -419,10 +466,10 @@ async def test_resolve_rejects_a_different_terminal_decision() -> None:
 
 @pytest.mark.anyio
 async def test_resolve_missing_issue_is_404() -> None:
+    repository = MemoryRepository()
+    service, _ = quality_service(repository)
     with pytest.raises(AppError) as caught:
-        await QualityIssueService(MemoryRepository(), now_provider=lambda: NOW).resolve(
-            resolve_command(uuid4())
-        )
+        await service.resolve(resolve_command(uuid4()))
 
     assert caught.value.code == "QUALITY_ISSUE_NOT_FOUND"
     assert caught.value.status_code == 404
@@ -431,7 +478,7 @@ async def test_resolve_missing_issue_is_404() -> None:
 @pytest.mark.anyio
 async def test_select_source_rejects_source_not_present_in_evidence() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command())
 
     with pytest.raises(AppError) as caught:
@@ -458,7 +505,7 @@ async def test_select_source_rejects_source_not_present_in_evidence() -> None:
 )
 async def test_select_source_rejects_invalid_sources_shape(evidence) -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command(evidence=evidence))
 
     with pytest.raises(AppError) as caught:
@@ -477,7 +524,7 @@ async def test_select_source_rejects_invalid_sources_shape(evidence) -> None:
 @pytest.mark.anyio
 async def test_select_source_rejects_non_object_evidence_with_stable_error() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command())
     opened.issue.evidence = ["invalid"]  # type: ignore[assignment]
 
@@ -497,7 +544,7 @@ async def test_select_source_rejects_non_object_evidence_with_stable_error() -> 
 @pytest.mark.anyio
 async def test_resolve_rejects_invalid_persisted_status_with_stable_error() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command())
     opened.issue.status = "BROKEN"
 
@@ -511,7 +558,7 @@ async def test_resolve_rejects_invalid_persisted_status_with_stable_error() -> N
 @pytest.mark.anyio
 async def test_resolve_rejects_invalid_action_with_stable_error() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command())
     command = resolve_command(opened.issue.id)
     object.__setattr__(command, "action", "EDIT_PRICE")
@@ -526,7 +573,7 @@ async def test_resolve_rejects_invalid_action_with_stable_error() -> None:
 @pytest.mark.anyio
 async def test_refetch_is_not_a_terminal_resolution_action() -> None:
     repository = MemoryRepository()
-    service = QualityIssueService(repository, now_provider=lambda: NOW)
+    service, _ = quality_service(repository)
     opened = await service.open(open_command())
 
     with pytest.raises(AppError) as caught:
@@ -540,6 +587,70 @@ async def test_refetch_is_not_a_terminal_resolution_action() -> None:
     assert caught.value.code == "QUALITY_ACTION_NOT_ALLOWED"
     assert caught.value.status_code == 422
     assert opened.issue.status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_resolve_requires_event_integration_for_a_new_decision() -> None:
+    repository = MemoryRepository()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+
+    with pytest.raises(AppError) as caught:
+        await QualityIssueService(repository, now_provider=lambda: NOW).resolve(
+            resolve_command(opened.issue.id)
+        )
+
+    assert caught.value.code == "QUALITY_INTEGRATION_UNAVAILABLE"
+    assert caught.value.status_code == 503
+    assert opened.issue.status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_resolve_rejects_event_port_from_a_different_transaction() -> None:
+    repository = MemoryRepository()
+    repository.session = AsyncSession()
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    other_session = AsyncSession()
+    events = RecordingEventPort(other_session)
+
+    try:
+        with pytest.raises(AppError) as caught:
+            await QualityIssueService(
+                repository,
+                events=events,
+                now_provider=lambda: NOW,
+            ).resolve(resolve_command(opened.issue.id))
+    finally:
+        await repository.session.close()
+        await other_session.close()
+
+    assert caught.value.code == "QUALITY_TRANSACTION_MISMATCH"
+    assert caught.value.status_code == 500
+    assert opened.issue.status == QualityIssueStatus.OPEN
+
+
+@pytest.mark.anyio
+async def test_resolve_flushes_before_event_and_propagates_event_failure() -> None:
+    calls: list[str] = []
+    repository = OrderedRepository(calls)
+    repository.session = AsyncMock(spec=AsyncSession)
+    opened = await QualityIssueService(repository, now_provider=lambda: NOW).open(
+        open_command()
+    )
+    calls.clear()
+
+    with pytest.raises(RuntimeError, match="forced event failure"):
+        await QualityIssueService(
+            repository,
+            events=FailingEventPort(repository.session, calls),
+            now_provider=lambda: NOW,
+        ).resolve(resolve_command(opened.issue.id))
+
+    assert calls == ["flush", "event"]
+    repository.session.commit.assert_not_awaited()
 
 
 @pytest.mark.anyio

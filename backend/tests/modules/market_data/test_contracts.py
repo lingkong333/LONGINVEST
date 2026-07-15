@@ -113,9 +113,15 @@ def test_resolve_quality_issue_rejects_unsupported_action() -> None:
         _resolve_command(action="EDIT_PRICE")
 
 
-def test_resolve_quality_issue_rejects_blank_selected_source() -> None:
+@pytest.mark.parametrize("action", ["SELECT_SOURCE", "RESOLVE"])
+def test_resolve_quality_issue_rejects_blank_selected_source(action: str) -> None:
     with pytest.raises(ValueError):
-        _resolve_command(action="SELECT_SOURCE", selected_source="  ")
+        _resolve_command(action=action, selected_source="  ")
+
+
+def test_select_source_action_requires_selected_source() -> None:
+    with pytest.raises(ValueError):
+        _resolve_command(action="SELECT_SOURCE", selected_source=None)
 
 
 def test_quality_commands_are_frozen() -> None:

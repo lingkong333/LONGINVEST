@@ -74,5 +74,7 @@ class ResolveQualityIssue:
         _require_text(self.reason, "处理原因")
         if self.action not in _QUALITY_ACTIONS:
             raise ValueError("不支持的质量问题处理动作")
+        if self.action == "SELECT_SOURCE" and self.selected_source is None:
+            raise ValueError("选择来源不能为空")
         if self.selected_source is not None:
             _require_text(self.selected_source, "选择来源")

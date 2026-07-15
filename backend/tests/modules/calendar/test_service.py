@@ -174,12 +174,13 @@ def service_for(
     *,
     events: Recorder | None = None,
     audits: Recorder | None = None,
+    today_provider=None,
 ) -> TradingCalendarService:
     return TradingCalendarService(
         repository,
         audit_service=audits or Recorder(),
         event_sink=events or Recorder(),
-        today_provider=lambda: TODAY,
+        today_provider=today_provider or (lambda: TODAY),
     )
 
 
@@ -234,6 +235,26 @@ async def test_import_is_idempotent_and_rejects_key_reuse_with_other_content() -
         )
     assert caught.value.status_code == 409
     assert caught.value.code == "CALENDAR_IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.anyio
+async def test_identical_replay_returns_existing_version_after_today_moves() -> None:
+    repository = FakeRepository()
+    current_today = [TODAY]
+    service = service_for(
+        repository,
+        today_provider=lambda: current_today[0],
+    )
+    command = import_command(trading_day(TODAY), key="moving-day")
+    created = await service.import_version(command)
+    current_today[0] = TODAY + timedelta(days=365)
+
+    replay = await service.import_version(command)
+
+    assert replay.created is False
+    assert replay.version_id == created.version_id
+    assert replay.issues == ()
+    assert repository.add_calls == 1
 
 
 @pytest.mark.anyio
@@ -456,6 +477,108 @@ async def test_stale_override_conflicts_and_restore_creates_a_new_fact() -> None
         repository.versions[restored.version_id].based_on_version_id
         == imported.version_id
     )
+
+
+@pytest.mark.anyio
+async def test_expired_restore_is_rejected_before_create_or_switch() -> None:
+    repository = FakeRepository()
+    current_today = [TODAY]
+    service = service_for(
+        repository,
+        today_provider=lambda: current_today[0],
+    )
+    imported = await service.import_version(
+        import_command(trading_day(TODAY), key="historical")
+    )
+    add_calls = repository.add_calls
+    current_version = repository.current.version_id
+    current_today[0] = TODAY + timedelta(days=365)
+
+    result = await service.restore_version(
+        RestoreCalendarVersion(
+            market="CN_A",
+            version_id=imported.version_id,
+            expected_current_version=1,
+            reason="尝试恢复过期版本",
+            idempotency_key="restore-expired",
+            audit_context=audit_context("restore-expired"),
+        )
+    )
+
+    assert "CALENDAR_TODAY_MISSING" in {item.code for item in result.issues}
+    assert repository.add_calls == add_calls
+    assert repository.current.version_id == current_version
+
+
+@pytest.mark.anyio
+async def test_repeated_overrides_and_restore_preserve_every_daily_fact() -> None:
+    repository = FakeRepository()
+    service = service_for(repository)
+    await service.import_version(import_command(trading_day(TODAY), key="base"))
+    await service.override_day(
+        OverrideCalendarDay(
+            market="CN_A",
+            trade_date=TODAY,
+            is_trading_day=True,
+            sessions=(
+                TradingSessionInput(starts_at=time(10), ends_at=time(12)),
+            ),
+            expected_current_version=1,
+            reason="首日特殊时段",
+            idempotency_key="override-first",
+            note="首日备注",
+            audit_context=audit_context("override-first"),
+        )
+    )
+    second_date = TODAY + timedelta(days=1)
+    second = await service.override_day(
+        OverrideCalendarDay(
+            market="CN_A",
+            trade_date=second_date,
+            is_trading_day=False,
+            sessions=(),
+            expected_current_version=2,
+            reason="次日休市",
+            idempotency_key="override-second",
+            note="次日备注",
+            audit_context=audit_context("override-second"),
+        )
+    )
+    second_version = repository.versions[second.version_id]
+    first_fact = next(item for item in second_version.days if item.trade_date == TODAY)
+    second_fact = next(
+        item for item in second_version.days if item.trade_date == second_date
+    )
+
+    assert first_fact.source == "manual_override"
+    assert first_fact.override_reason == "首日特殊时段"
+    assert first_fact.note == "首日备注"
+    assert [(item.starts_at, item.ends_at) for item in first_fact.sessions] == [
+        (time(10), time(12))
+    ]
+    assert second_fact.source == "manual_override"
+    assert second_fact.override_reason == "次日休市"
+
+    restored = await service.restore_version(
+        RestoreCalendarVersion(
+            market="CN_A",
+            version_id=second.version_id,
+            expected_current_version=3,
+            reason="恢复完整事实",
+            idempotency_key="restore-facts",
+            audit_context=audit_context("restore-facts"),
+        )
+    )
+    restored_version = repository.versions[restored.version_id]
+    restored_first = next(
+        item for item in restored_version.days if item.trade_date == TODAY
+    )
+    assert restored_first.source == "manual_override"
+    assert restored_first.override_reason == "首日特殊时段"
+    assert restored_first.note == "首日备注"
+    assert [(item.starts_at, item.ends_at) for item in restored_first.sessions] == [
+        (time(10), time(12))
+    ]
 
 
 @pytest.mark.anyio

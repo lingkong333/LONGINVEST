@@ -75,32 +75,9 @@ class TradingCalendarService:
         self, command: CalendarImport
     ) -> CalendarVersionResult:
         self._require_write_ports(command.audit_context, command.idempotency_key)
-        today = self._today()
-        issues = (
-            *validate_calendar_import(command),
-            *validate_calendar_coverage(
-                command.days,
-                from_date=today,
-                required_days=31,
-            ),
-        )
-        today_item = next(
-            (item for item in command.days if item.trade_date == today), None
-        )
-        if today_item is None or today_item.status not in {
-            CalendarDayStatus.CONFIRMED,
-            CalendarDayStatus.OVERRIDDEN,
-        }:
-            issues = (
-                CalendarValidationIssue(
-                    code="CALENDAR_TODAY_MISSING",
-                    path=f"days[{today.isoformat()}]",
-                    message="当天日历缺失或尚未确认",
-                ),
-                *issues,
-            )
-        if issues:
-            return CalendarVersionResult(issues=tuple(issues))
+        static_issues = validate_calendar_import(command)
+        if static_issues:
+            return CalendarVersionResult(issues=static_issues)
         content_hash = _command_hash(command)
         replay = await self._repository.find_by_idempotency(
             command.market, command.idempotency_key
@@ -108,6 +85,10 @@ class TradingCalendarService:
         if replay is not None:
             _verify_replay(replay, content_hash)
             return _result(replay, created=False)
+
+        activation_issues = _activation_issues(command.days, self._today())
+        if activation_issues:
+            return CalendarVersionResult(issues=activation_issues)
 
         current = await self._repository.get_current(command.market)
         expected = current.pointer_version if current is not None else None
@@ -146,8 +127,6 @@ class TradingCalendarService:
         if current.pointer_version != command.expected_current_version:
             raise _optimistic_conflict()
         base = await self._required_version(current.version_id)
-        source_by_date = {item.trade_date: item.source for item in base.days}
-        source_by_date[command.trade_date] = "manual_override"
         days = [_day_contract(item) for item in base.days]
         replacement = CalendarDayInput(
             trade_date=command.trade_date,
@@ -179,14 +158,36 @@ class TradingCalendarService:
         issues = validate_calendar_import(imported)
         if issues:
             return CalendarVersionResult(issues=issues)
-        version = await self._build_version(
+        version = await self._new_version(
             imported,
             content_hash=desired_hash,
             based_on_version_id=base.id,
-            override_date=command.trade_date,
-            override_reason=command.reason,
-            source_by_date=source_by_date,
         )
+        version.days = []
+        replaced = False
+        for item in base.days:
+            if item.trade_date == command.trade_date:
+                version.days.append(
+                    _day_model(
+                        version.id,
+                        replacement,
+                        source="manual_override",
+                        override_reason=command.reason,
+                    )
+                )
+                replaced = True
+            else:
+                version.days.append(_clone_day(version.id, item))
+        if not replaced:
+            version.days.append(
+                _day_model(
+                    version.id,
+                    replacement,
+                    source="manual_override",
+                    override_reason=command.reason,
+                )
+            )
+        version.days.sort(key=lambda item: item.trade_date)
         await self._activate(version, command.expected_current_version)
         await self._record_change(
             version,
@@ -228,11 +229,18 @@ class TradingCalendarService:
             reason=command.reason,
             audit_context=command.audit_context,
         )
-        version = await self._build_version(
+        static_issues = validate_calendar_import(imported)
+        if static_issues:
+            return CalendarVersionResult(issues=static_issues)
+        activation_issues = _activation_issues(imported.days, self._today())
+        if activation_issues:
+            return CalendarVersionResult(issues=activation_issues)
+        version = await self._new_version(
             imported,
             content_hash=desired_hash,
             based_on_version_id=target.id,
         )
+        version.days = [_clone_day(version.id, item) for item in target.days]
         await self._activate(version, command.expected_current_version)
         await self._record_change(
             version,
@@ -313,9 +321,29 @@ class TradingCalendarService:
         *,
         content_hash: str,
         based_on_version_id: UUID | None,
-        override_date: date | None = None,
-        override_reason: str | None = None,
-        source_by_date: dict[date, str] | None = None,
+    ) -> TradingCalendarVersion:
+        version = await self._new_version(
+            command,
+            content_hash=content_hash,
+            based_on_version_id=based_on_version_id,
+        )
+        version.days = [
+            _day_model(
+                version.id,
+                item,
+                source=command.source,
+                override_reason=None,
+            )
+            for item in command.days
+        ]
+        return version
+
+    async def _new_version(
+        self,
+        command: CalendarImport,
+        *,
+        content_hash: str,
+        based_on_version_id: UUID | None,
     ) -> TradingCalendarVersion:
         version = TradingCalendarVersion(
             market=command.market,
@@ -327,17 +355,6 @@ class TradingCalendarService:
             based_on_version_id=based_on_version_id,
             reason=command.reason,
         )
-        version.days = [
-            _day_model(
-                version.id,
-                item,
-                source=(source_by_date or {}).get(item.trade_date, command.source),
-                override_reason=(
-                    override_reason if item.trade_date == override_date else None
-                ),
-            )
-            for item in command.days
-        ]
         return version
 
     async def _activate(
@@ -528,6 +545,56 @@ def _day_contract(item: TradingCalendarDay) -> CalendarDayInput:
             for session in item.sessions
         ),
         note=item.note,
+    )
+
+
+def _clone_day(
+    version_id: UUID,
+    item: TradingCalendarDay,
+) -> TradingCalendarDay:
+    result = TradingCalendarDay(
+        version_id=version_id,
+        trade_date=item.trade_date,
+        is_trading_day=item.is_trading_day,
+        status=item.status,
+        source=item.source,
+        note=item.note,
+        override_reason=item.override_reason,
+    )
+    result.sessions = [
+        TradingSession(
+            calendar_day_id=result.id,
+            sequence=session.sequence,
+            starts_at=session.starts_at,
+            ends_at=session.ends_at,
+        )
+        for session in item.sessions
+    ]
+    return result
+
+
+def _activation_issues(
+    days: tuple[CalendarDayInput, ...],
+    today: date,
+) -> tuple[CalendarValidationIssue, ...]:
+    issues = validate_calendar_coverage(
+        days,
+        from_date=today,
+        required_days=31,
+    )
+    today_item = next((item for item in days if item.trade_date == today), None)
+    if today_item is not None and today_item.status in {
+        CalendarDayStatus.CONFIRMED,
+        CalendarDayStatus.OVERRIDDEN,
+    }:
+        return issues
+    return (
+        CalendarValidationIssue(
+            code="CALENDAR_TODAY_MISSING",
+            path=f"days[{today.isoformat()}]",
+            message="当天日历缺失或尚未确认",
+        ),
+        *issues,
     )
 
 

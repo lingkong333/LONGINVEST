@@ -134,6 +134,8 @@ class ProviderRepositoryPort(Protocol):
         snapshot: dict[str, Any],
         occurred_at: datetime,
         error_code: str | None,
+        latency_ms: int = 0,
+        switched: bool = False,
     ) -> None: ...
     async def replay_mutation(
         self, idempotency_key: str, digest: str
@@ -505,6 +507,8 @@ class ProviderRepository:
         snapshot: dict[str, Any],
         occurred_at: datetime,
         error_code: str | None,
+        latency_ms: int = 0,
+        switched: bool = False,
     ) -> None:
         event_key = (
             f"runtime:{setting.provider.value}:{setting.capability.value}:"
@@ -540,7 +544,57 @@ class ProviderRepository:
                 health.last_success_at = occurred_at
             else:
                 health.last_failure_at = occurred_at
-            health.metrics = {**health.metrics, "last_error_code": error_code}
+            metrics = dict(health.metrics)
+            request_count = int(metrics.get("request_count", 0)) + 1
+            success_count = int(metrics.get("success_count", 0)) + int(success)
+            samples = [*metrics.get("latency_samples_ms", []), latency_ms][-100:]
+            ordered_samples = sorted(int(item) for item in samples)
+            p95_index = max(0, (len(ordered_samples) * 95 + 99) // 100 - 1)
+            opened_at = snapshot.get("opened_at")
+            cooldown_index = int(
+                snapshot.get("cooldown_index", snapshot.get("level", 0))
+            )
+            cooldown_remaining = self._cooldown_remaining_seconds(
+                opened_at, cooldown_index, occurred_at
+            )
+            health.metrics = {
+                **metrics,
+                "last_error_code": error_code,
+                "request_count": request_count,
+                "success_count": success_count,
+                "success_rate": success_count / request_count,
+                "latency_samples_ms": samples,
+                "p95_latency_ms": ordered_samples[p95_index],
+                "rate_limit_wait_ms": int(metrics.get("rate_limit_wait_ms", 0)),
+                "switch_count": int(metrics.get("switch_count", 0)) + int(switched),
+                "schema_error_count": int(metrics.get("schema_error_count", 0))
+                + int(error_code == "PROVIDER_SCHEMA_INCOMPATIBLE"),
+                "cooldown_remaining_seconds": cooldown_remaining,
+            }
+
+            if error_code == "PROVIDER_SCHEMA_INCOMPATIBLE":
+                self._session.add(
+                    redact_failure_sample(
+                        provider=setting.provider,
+                        capability=setting.capability,
+                        error_code=error_code,
+                        payload={
+                            "provider": setting.provider.value,
+                            "capability": setting.capability.value,
+                            "error_code": error_code,
+                        },
+                        now=occurred_at,
+                    )
+                )
+                await self._events.append(
+                    "provider.schema_changed",
+                    {
+                        "alert_code": "PROVIDER_SCHEMA_CHANGED",
+                        "provider": setting.provider.value,
+                        "capability": setting.capability.value,
+                    },
+                    idempotency_key=f"{event_key}:schema",
+                )
 
             circuit = await self._session.scalar(
                 select(ProviderCircuitState)
@@ -610,6 +664,25 @@ class ProviderRepository:
                 idempotency_key=f"{event_key}:outcome",
             )
             await self._session.flush()
+
+    @staticmethod
+    def _cooldown_remaining_seconds(
+        opened_at: Any,
+        cooldown_index: int,
+        occurred_at: datetime,
+    ) -> int:
+        if opened_at is None:
+            return 0
+        if isinstance(opened_at, datetime):
+            opened_timestamp = opened_at.timestamp()
+        else:
+            try:
+                opened_timestamp = float(opened_at)
+            except (TypeError, ValueError):
+                return 0
+        cooldowns = (60, 180, 300)
+        cooldown = cooldowns[min(max(cooldown_index, 0), len(cooldowns) - 1)]
+        return max(0, int(opened_timestamp + cooldown - occurred_at.timestamp()))
 
     async def add_failure_sample(self, sample: ProviderFailureSample) -> None:
         self._session.add(sample)

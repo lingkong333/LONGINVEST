@@ -153,6 +153,42 @@ def test_eastmoney_rejects_bar_code_range_or_duplicate_date(payload) -> None:
         EastmoneyProvider(None).parse_bars(payload, request=request)
 
 
+def test_eastmoney_rejects_descending_bars() -> None:
+    request = DailyBarRequest(
+        "600000.SH",
+        date(2025, 7, 14),
+        date(2025, 7, 15),
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+    )
+    payload = {
+        "rc": 0,
+        "data": {
+            "code": "600000",
+            "klines": [
+                "2025-07-15,9,10,10,9,1,1",
+                "2025-07-14,9,10,10,9,1,1",
+            ],
+        },
+    }
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        EastmoneyProvider(None).parse_bars(payload, request=request)
+
+
+def test_eastmoney_marks_empty_or_missing_weekdays_for_suspension_check() -> None:
+    request = DailyBarRequest(
+        "600000.SH",
+        date(2025, 7, 14),
+        date(2025, 7, 15),
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+    )
+    result = EastmoneyProvider(None).parse_bars(
+        {"rc": 0, "data": {"code": "600000", "klines": []}},
+        request=request,
+    )
+    assert result.items == ()
+    assert result.failures[0].code == "PROVIDER_TRADING_DATES_MISSING"
+
+
 def test_security_master_preserves_unknown_status_instead_of_fabricating_normal() -> (
     None
 ):
@@ -172,3 +208,27 @@ def test_security_master_preserves_unknown_status_instead_of_fabricating_normal(
     assert records[0].suspended is True
     assert records[1].listed is None
     assert records[1].suspended is None
+
+
+def test_security_master_recognizes_star_st_and_explicit_delisting_date() -> None:
+    payload = {
+        "rc": 0,
+        "data": {
+            "diff": [
+                {
+                    "f12": "600000",
+                    "f14": "*ST示例",
+                    "f26": "19991110",
+                    "f80": "20250714",
+                    "f2": "-",
+                }
+            ]
+        },
+    }
+    record = EastmoneyProvider(None).parse_security_master(
+        payload, observed_at=datetime(2025, 7, 15, tzinfo=UTC)
+    )[0]
+    assert record.is_st is True
+    assert record.delisted_on == date(2025, 7, 14)
+    assert record.listed is False
+    assert record.suspended is None

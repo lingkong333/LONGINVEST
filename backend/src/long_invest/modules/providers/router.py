@@ -61,12 +61,14 @@ class ProviderRouter:
             provider = self._providers.get(setting.provider)
             if provider is None:
                 continue
+            switched = attempted
             attempted = True
             try:
                 result = await self._pipeline.call(
                     setting,
                     lambda p=provider, s=requested: p.realtime_quotes(s, deadline),
                     deadline=deadline,
+                    switched=switched,
                 )
             except Exception as error:
                 last_batch_error = getattr(error, "code", "PROVIDER_FAILED")
@@ -124,15 +126,38 @@ class ProviderRouter:
         self,
         setting: ProviderRouteSetting,
         deadline: datetime,
+        *,
+        force_half_open: bool = False,
     ):
         provider = self._providers[setting.provider]
-        await self._runtime.force_half_open(setting)
+        if force_half_open:
+            await self._runtime.force_half_open(setting)
         return await self._pipeline.call(
             setting,
             lambda: provider.probe(setting.capability, deadline),
             deadline=deadline,
-            probe=True,
+            probe=force_half_open,
             observe=False,
+        )
+
+    async def diagnostic_quotes(
+        self,
+        provider_code: ProviderCode,
+        symbols: tuple[str, ...],
+        deadline: datetime,
+    ) -> ProviderBatchResult[RealtimeQuote]:
+        routes = await self._config.routes(ProviderCapability.REALTIME_QUOTE_BATCH)
+        setting = next(
+            (route for route in routes if route.provider is provider_code),
+            None,
+        )
+        provider = self._providers.get(provider_code)
+        if setting is None or provider is None:
+            raise RuntimeError("PROVIDER_UNAVAILABLE")
+        return await self._pipeline.call(
+            setting,
+            lambda: provider.realtime_quotes(symbols, deadline),
+            deadline=deadline,
         )
 
     async def _single(

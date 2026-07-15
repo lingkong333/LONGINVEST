@@ -1,8 +1,7 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from functools import wraps
-from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -227,6 +226,51 @@ async def test_runtime_outcome_persists_health_circuit_history_and_events() -> N
 
 
 @async_test
+async def test_schema_anomaly_persists_sample_alarm_and_health_metrics() -> None:
+    session = FakeSession([None, None])
+    events = RecordingEvents()
+    repository = ProviderRepository(session, audit=RecordingAudit(), events=events)
+    setting = ProviderRouteSetting(
+        ProviderCode.EASTMONEY,
+        ProviderCapability.REALTIME_QUOTE_BATCH,
+    )
+    occurred_at = datetime.now(UTC)
+    await repository.record_outcome(
+        setting,
+        success=False,
+        snapshot={
+            "state": "OPEN",
+            "consecutive_failures": 3,
+            "cooldown_index": 0,
+            "opened_at": occurred_at,
+        },
+        occurred_at=occurred_at,
+        error_code="PROVIDER_SCHEMA_INCOMPATIBLE",
+        latency_ms=37,
+        switched=True,
+    )
+    health = next(
+        item for item in session.added if item.__tablename__ == "provider_health_state"
+    )
+    sample = next(
+        item
+        for item in session.added
+        if item.__tablename__ == "provider_failure_sample"
+    )
+    assert sample.expires_at == occurred_at + timedelta(days=7)
+    assert sample.sample["error_code"] == "PROVIDER_SCHEMA_INCOMPATIBLE"
+    assert health.metrics["success_rate"] == 0
+    assert health.metrics["p95_latency_ms"] == 37
+    assert health.metrics["switch_count"] == 1
+    assert health.metrics["schema_error_count"] == 1
+    assert health.metrics["cooldown_remaining_seconds"] == 60
+    schema_event = next(
+        call for call in events.calls if call[0][0] == "provider.schema_changed"
+    )
+    assert schema_event[0][1]["alert_code"] == "PROVIDER_SCHEMA_CHANGED"
+
+
+@async_test
 async def test_same_idempotent_request_replays_persisted_summary() -> None:
     existing = ProviderMutationRequest(
         idempotency_key="idem-1",
@@ -303,11 +347,12 @@ class ServiceRepository:
 
 
 class ProbeRouter:
-    def __init__(self) -> None:
+    def __init__(self, providers=None) -> None:
         self.calls = []
+        self.providers = providers or {}
 
-    async def probe(self, setting, deadline):
-        self.calls.append((setting, deadline))
+    async def probe(self, setting, deadline, *, force_half_open=False):
+        self.calls.append((setting, deadline, force_half_open))
         return ProbeResult(
             setting.provider,
             setting.capability,
@@ -315,6 +360,9 @@ class ProbeRouter:
             datetime.now(UTC),
             1,
         )
+
+    async def diagnostic_quotes(self, provider_code, symbols, deadline):
+        return await self.providers[provider_code].realtime_quotes(symbols, deadline)
 
 
 class ProbeRuntime:
@@ -349,6 +397,26 @@ async def test_probe_uses_real_router_and_persists_result_with_audit_context() -
     assert repository.persisted_probe[2]["action_code"] == (
         "provider.circuit_reset_probed"
     )
+    assert router.calls[0][2] is True
+
+
+@async_test
+async def test_normal_probe_does_not_force_half_open() -> None:
+    repository = ServiceRepository()
+    router = ProbeRouter()
+    provider = DiagnosticProvider(ProviderCode.EASTMONEY, "10")
+    service = ProviderService(
+        router,
+        {ProviderCode.EASTMONEY: provider},
+        repository,
+        ProbeRuntime(),
+    )
+    await service.probe_circuit(
+        repository.circuit_id,
+        reason="operator probe",
+        audit_context=audit_context(),
+    )
+    assert router.calls[0][2] is False
 
 
 @async_test
@@ -378,7 +446,9 @@ async def test_diagnostic_contains_full_dto_and_structured_field_differences() -
     east = DiagnosticProvider(ProviderCode.EASTMONEY, "10.01")
     sina = DiagnosticProvider(ProviderCode.SINA, "10.02")
     service = ProviderService(
-        SimpleNamespace(),
+        ProbeRouter(
+            {ProviderCode.EASTMONEY: east, ProviderCode.SINA: sina}
+        ),
         {ProviderCode.EASTMONEY: east, ProviderCode.SINA: sina},
         repository,
         ProbeRuntime(),
@@ -402,6 +472,7 @@ async def test_diagnostic_contains_full_dto_and_structured_field_differences() -
     }
     comparison = result["comparisons"][0]
     assert comparison["missing_sources"] == []
+    assert comparison["status"] == "MATCH"
     assert comparison["differences"]["price"] == {
         "EASTMONEY": "10.01",
         "SINA": "10.02",
@@ -415,7 +486,7 @@ async def test_diagnostic_reports_missing_source_without_fabricating_values() ->
     repository = ServiceRepository()
     east = DiagnosticProvider(ProviderCode.EASTMONEY, "10.01")
     service = ProviderService(
-        SimpleNamespace(),
+        ProbeRouter({ProviderCode.EASTMONEY: east}),
         {ProviderCode.EASTMONEY: east},
         repository,
         ProbeRuntime(),
@@ -424,5 +495,25 @@ async def test_diagnostic_reports_missing_source_without_fabricating_values() ->
         ("600000.SH",), reason="compare", audit_context=audit_context()
     )
     comparison = result["comparisons"][0]
+    assert comparison["status"] == "INCOMPLETE"
     assert comparison["missing_sources"] == ["SINA"]
     assert comparison["differences"]["price"]["SINA"] is None
+
+
+@async_test
+async def test_diagnostic_marks_material_price_difference_as_conflict() -> None:
+    repository = ServiceRepository()
+    east = DiagnosticProvider(ProviderCode.EASTMONEY, "10.00")
+    sina = DiagnosticProvider(ProviderCode.SINA, "10.03")
+    service = ProviderService(
+        ProbeRouter(
+            {ProviderCode.EASTMONEY: east, ProviderCode.SINA: sina}
+        ),
+        {ProviderCode.EASTMONEY: east, ProviderCode.SINA: sina},
+        repository,
+        ProbeRuntime(),
+    )
+    result = await service.quote_diagnostics(
+        ("600000.SH",), reason="compare", audit_context=audit_context()
+    )
+    assert result["comparisons"][0]["status"] == "CONFLICT"

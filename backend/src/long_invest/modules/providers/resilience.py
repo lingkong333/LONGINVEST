@@ -238,6 +238,8 @@ class ProviderRuntimeObserverPort(Protocol):
         snapshot: dict[str, Any],
         occurred_at: datetime,
         error_code: str | None,
+        latency_ms: int,
+        switched: bool,
     ) -> None: ...
 
 
@@ -568,7 +570,9 @@ class ProviderInvocationPipeline:
         deadline: datetime,
         probe: bool = False,
         observe: bool = True,
+        switched: bool = False,
     ) -> T:
+        started = monotonic()
         if not setting.enabled:
             raise ProviderCallError("PROVIDER_DISABLED")
         if not await self._runtime.allow(setting, probe=probe):
@@ -579,6 +583,8 @@ class ProviderInvocationPipeline:
                     snapshot=await self._runtime.circuit_snapshot(setting),
                     occurred_at=datetime.now(UTC),
                     error_code="PROVIDER_CIRCUIT_OPEN",
+                    latency_ms=int((monotonic() - started) * 1000),
+                    switched=switched,
                 )
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
         lease = await self._runtime.acquire(setting)
@@ -590,6 +596,8 @@ class ProviderInvocationPipeline:
                     snapshot=await self._runtime.circuit_snapshot(setting),
                     occurred_at=datetime.now(UTC),
                     error_code="PROVIDER_RATE_LIMITED",
+                    latency_ms=int((monotonic() - started) * 1000),
+                    switched=switched,
                 )
             raise ProviderCallError("PROVIDER_RATE_LIMITED")
         try:
@@ -609,6 +617,8 @@ class ProviderInvocationPipeline:
                         snapshot=await self._runtime.circuit_snapshot(setting),
                         occurred_at=datetime.now(UTC),
                         error_code=getattr(error, "code", "PROVIDER_FAILED"),
+                        latency_ms=int((monotonic() - started) * 1000),
+                        switched=switched,
                     )
                 raise
             batch_error = getattr(result, "batch_error_code", None)
@@ -624,6 +634,8 @@ class ProviderInvocationPipeline:
                     snapshot=await self._runtime.circuit_snapshot(setting),
                     occurred_at=datetime.now(UTC),
                     error_code=batch_error or getattr(result, "error_code", None),
+                    latency_ms=int((monotonic() - started) * 1000),
+                    switched=switched,
                 )
             return result
         finally:

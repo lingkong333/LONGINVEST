@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -121,11 +122,10 @@ class ProviderService:
         sources: list[dict[str, Any]] = []
         by_source: dict[ProviderCode, dict[str, RealtimeQuote]] = {}
         for code in (ProviderCode.EASTMONEY, ProviderCode.SINA):
-            provider = self._providers.get(code)
-            if provider is None:
+            if code not in self._providers:
                 continue
             try:
-                result = await provider.realtime_quotes(symbols, deadline)
+                result = await self._router.diagnostic_quotes(code, symbols, deadline)
                 by_source[code] = {item.symbol: item for item in result.items}
                 sources.append(
                     {
@@ -202,7 +202,9 @@ class ProviderService:
             auto_switch=False,
         )
         result = await self._router.probe(
-            setting, datetime.now(UTC) + timedelta(seconds=10)
+            setting,
+            datetime.now(UTC) + timedelta(seconds=10),
+            force_half_open=action_code == "provider.circuit_reset_probed",
         )
         snapshot = await self._runtime.circuit_snapshot(setting)
         persisted = {
@@ -305,6 +307,7 @@ class ProviderService:
             }
         return {
             "symbol": symbol,
+            "status": cls._comparison_status(eastmoney, sina),
             "missing_sources": [
                 code.value
                 for code, item in (
@@ -315,3 +318,20 @@ class ProviderService:
             ],
             "differences": differences,
         }
+
+    @staticmethod
+    def _comparison_status(
+        eastmoney: RealtimeQuote | None,
+        sina: RealtimeQuote | None,
+    ) -> str:
+        if eastmoney is None or sina is None:
+            return "INCOMPLETE"
+        tolerance = max(
+            Decimal("0.02"),
+            max(abs(eastmoney.price), abs(sina.price)) * Decimal("0.002"),
+        )
+        return (
+            "CONFLICT"
+            if abs(eastmoney.price - sina.price) > tolerance
+            else "MATCH"
+        )

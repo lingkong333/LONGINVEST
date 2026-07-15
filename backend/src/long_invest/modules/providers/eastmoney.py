@@ -70,7 +70,7 @@ class EastmoneyProvider:
             self.MASTER_URL,
             {
                 "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
-                "fields": "f2,f12,f14,f26",
+                "fields": "f2,f12,f14,f26,f80",
                 "pz": "10000",
             },
             deadline,
@@ -232,6 +232,7 @@ class EastmoneyProvider:
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
         items: list[DailyBar] = []
         seen_dates: set[date] = set()
+        previous_date: date | None = None
         try:
             for row in rows:
                 fields = row.split(",")
@@ -242,9 +243,11 @@ class EastmoneyProvider:
                     trading_date < request.start
                     or trading_date > request.end
                     or trading_date in seen_dates
+                    or (previous_date is not None and trading_date <= previous_date)
                 ):
                     raise ValueError
                 seen_dates.add(trading_date)
+                previous_date = trading_date
                 items.append(
                     DailyBar(
                         request.symbol,
@@ -261,7 +264,24 @@ class EastmoneyProvider:
                 )
         except (AttributeError, ValueError, TypeError) as error:
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
-        return ProviderBatchResult(tuple(items))
+        expected_weekdays: set[date] = set()
+        cursor = request.start
+        while cursor <= request.end:
+            if cursor.weekday() < 5:
+                expected_weekdays.add(cursor)
+            cursor += timedelta(days=1)
+        missing_dates = sorted(expected_weekdays - seen_dates)
+        failures = ()
+        if missing_dates:
+            failures = (
+                ProviderItemFailure(
+                    request.symbol,
+                    "PROVIDER_TRADING_DATES_MISSING",
+                    "请求期内缺少交易日数据；需结合停牌或交易日历确认",
+                    self.code,
+                ),
+            )
+        return ProviderBatchResult(tuple(items), failures)
 
     def parse_security_master(
         self, payload: Any, *, observed_at: datetime
@@ -272,13 +292,27 @@ class EastmoneyProvider:
                 raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
             symbol = _symbol(str(row["f12"]))
             listed_on = None
+            delisted_on = None
             listing_value = row.get("f26")
             if listing_value not in (None, "", "-"):
                 try:
                     listed_on = datetime.strptime(str(listing_value), "%Y%m%d").date()
                 except ValueError as error:
                     raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
-            listed = None if listed_on is None else listed_on <= observed_at.date()
+            delisting_value = row.get("f80")
+            if delisting_value not in (None, "", "-"):
+                try:
+                    delisted_on = datetime.strptime(
+                        str(delisting_value), "%Y%m%d"
+                    ).date()
+                except ValueError as error:
+                    raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+            if delisted_on is not None and delisted_on <= observed_at.date():
+                listed = False
+            elif listed_on is not None:
+                listed = listed_on <= observed_at.date()
+            else:
+                listed = None
             price_value = row.get("f2")
             if listed is True and price_value == "-":
                 suspended = True
@@ -297,9 +331,9 @@ class EastmoneyProvider:
                     symbol[-2:],
                     "STOCK",
                     listed_on,
-                    None,
+                    delisted_on,
                     listed,
-                    str(row["f14"]).upper().startswith("ST"),
+                    str(row["f14"]).upper().startswith(("ST", "*ST")),
                     suspended,
                     self.code,
                     observed_at,

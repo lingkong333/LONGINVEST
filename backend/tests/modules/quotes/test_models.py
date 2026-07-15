@@ -46,3 +46,5 @@ def test_quote_item_persists_standard_quote_and_quality_fields() -> None:
 def test_cycle_persists_v31_schedule_and_subscription_tracking() -> None:
     columns = set(QuoteCycle.__table__.columns.keys())
     assert {"schedule_occurrence_id", "subscription_snapshot_version"} <= columns
+    constraints = {constraint.name for constraint in QuoteCycle.__table__.constraints}
+    assert "uq_quote_cycle_schedule_occurrence" in constraints

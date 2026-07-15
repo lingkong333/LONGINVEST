@@ -28,6 +28,27 @@ async def test_claim_cycle_uses_savepoint_and_rereads_conflict() -> None:
 
 
 @pytest.mark.anyio
+async def test_claim_cycle_rereads_by_non_null_schedule_occurrence() -> None:
+    session = Mock()
+    session.flush = AsyncMock(
+        side_effect=IntegrityError("insert", {}, Exception("duplicate occurrence"))
+    )
+    existing = Mock(spec=QuoteCycle)
+    session.scalar = AsyncMock(side_effect=[None, existing])
+    session.begin_nested.return_value = AsyncMock()
+    candidate = Mock(spec=QuoteCycle)
+    candidate.idempotency_scope = "automatic"
+    candidate.idempotency_key = "other-key"
+    candidate.schedule_occurrence_id = uuid4()
+    claimed, created = await QuoteCycleRepository(session).claim_cycle(candidate)
+    assert claimed is existing and created is False
+    occurrence_query = session.scalar.await_args_list[1].args[0]
+    compiled = occurrence_query.compile(dialect=postgresql.dialect())
+    assert "quote_cycle.schedule_occurrence_id" in str(compiled)
+    assert candidate.schedule_occurrence_id in compiled.params.values()
+
+
+@pytest.mark.anyio
 async def test_finalize_query_uses_lock_and_refreshes_identity_map() -> None:
     session = AsyncMock()
     await QuoteCycleRepository(session).get_for_finalize(uuid4())

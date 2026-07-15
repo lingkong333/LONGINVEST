@@ -26,6 +26,9 @@ class QuoteCycle(Base):
         UniqueConstraint(
             "idempotency_scope", "idempotency_key", name="uq_quote_cycle_idempotency"
         ),
+        UniqueConstraint(
+            "schedule_occurrence_id", name="uq_quote_cycle_schedule_occurrence"
+        ),
         CheckConstraint("deadline_at > started_at", name="deadline"),
         CheckConstraint("expected_count > 0", name="expected_positive"),
         CheckConstraint("timeout_seconds BETWEEN 10 AND 60", name="timeout_supported"),

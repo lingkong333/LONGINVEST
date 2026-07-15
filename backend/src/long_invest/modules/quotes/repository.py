@@ -31,6 +31,15 @@ class QuoteCycleRepository:
                     QuoteCycle.idempotency_key == cycle.idempotency_key,
                 )
             )
+            if existing is None and cycle.schedule_occurrence_id is not None:
+                existing = await self.session.scalar(
+                    select(QuoteCycle)
+                    .options(selectinload(QuoteCycle.items))
+                    .where(
+                        QuoteCycle.schedule_occurrence_id
+                        == cycle.schedule_occurrence_id
+                    )
+                )
             if existing is None:
                 raise
             return existing, False

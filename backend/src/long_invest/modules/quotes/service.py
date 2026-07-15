@@ -28,6 +28,7 @@ TERMINAL_CYCLES = frozenset(
         QuoteCycleStatus.CANCELED,
     }
 )
+MISSED_CLAIM_WINDOW_SECONDS = 60
 
 
 class QuoteRepositoryPort(Protocol):
@@ -109,20 +110,37 @@ class QuoteCycleService:
         claimed, created = await self._repository.claim_cycle(cycle)
         if created:
             await self._events.created(claimed)
+        elif not _same_create_request(claimed, command):
+            if command.schedule_occurrence_id is not None:
+                raise AppError(
+                    code="QUOTE_CYCLE_OCCURRENCE_CONFLICT",
+                    message="该计划发生号已用于不同的行情批次",
+                    status_code=409,
+                )
+            raise AppError(
+                code="IDEMPOTENCY_KEY_CONFLICT",
+                message="该幂等键已用于不同的行情批次",
+                status_code=409,
+            )
         return _summary(claimed)
 
     async def start(self, cycle_id: UUID, now: datetime) -> QuoteCycleSummary:
-        cycle = await self._required(cycle_id)
-        if QuoteCycleStatus(cycle.status) is QuoteCycleStatus.PENDING:
-            cycle.status = QuoteCycleStatus.FETCHING
-            cycle.started_at = now
-            cycle.deadline_at = now + timedelta(seconds=cycle.timeout_seconds)
-            await self._repository.flush()
-        elif QuoteCycleStatus(cycle.status) not in TERMINAL_CYCLES | {
-            QuoteCycleStatus.FETCHING
-        }:
-            raise _state_error()
-        return _summary(cycle)
+        cycle = await self._repository.get_for_update(cycle_id)
+        try:
+            if cycle is None:
+                raise _not_found()
+            if QuoteCycleStatus(cycle.status) is QuoteCycleStatus.PENDING:
+                cycle.status = QuoteCycleStatus.FETCHING
+                cycle.started_at = now
+                cycle.deadline_at = now + timedelta(seconds=cycle.timeout_seconds)
+                await self._repository.flush()
+            elif QuoteCycleStatus(cycle.status) not in TERMINAL_CYCLES | {
+                QuoteCycleStatus.FETCHING
+            }:
+                raise _state_error()
+            return _summary(cycle)
+        finally:
+            await _release_test_lock(self._repository)
 
     async def submit(
         self, cycle_id: UUID, submission: QuoteSubmission, now: datetime
@@ -135,7 +153,7 @@ class QuoteCycleService:
                 return
             if QuoteCycleStatus(cycle.status) is not QuoteCycleStatus.FETCHING:
                 raise _state_error()
-            if cycle.deadline_at is not None and now > cycle.deadline_at:
+            if cycle.deadline_at is not None and now >= cycle.deadline_at:
                 raise AppError(
                     code="QUOTE_CYCLE_DEADLINE_EXCEEDED",
                     message="行情批次已超过截止时间",
@@ -300,7 +318,8 @@ class QuoteCycleService:
             if (
                 QuoteCycleStatus(cycle.status) is not QuoteCycleStatus.PENDING
                 or cycle.started_at is not None
-                or now <= cycle.scheduled_at
+                or now
+                <= cycle.scheduled_at + timedelta(seconds=MISSED_CLAIM_WINDOW_SECONDS)
             ):
                 raise _state_error()
             cycle.status = QuoteCycleStatus.MISSED
@@ -327,6 +346,8 @@ class QuoteCycleService:
             cycle.status = QuoteCycleStatus.CANCELED
             cycle.finalized_at = now
             cycle.cancel_reason = reason
+            for item in cycle.items:
+                item.eligible_for_evaluation = False
             await self._repository.flush()
             return _summary(cycle)
         finally:
@@ -419,7 +440,11 @@ def _quote_evidence(quote: RealtimeQuote) -> dict[str, object]:
 
 
 def _summary(cycle: QuoteCycle) -> QuoteCycleSummary:
-    valid = [item for item in cycle.items if item.status == QuoteItemStatus.VALID]
+    valid = [
+        item
+        for item in cycle.items
+        if item.status == QuoteItemStatus.VALID and item.eligible_for_evaluation
+    ]
     return QuoteCycleSummary(
         id=cycle.id,
         status=QuoteCycleStatus(cycle.status),
@@ -480,3 +505,15 @@ async def _release_test_lock(repository: QuoteRepositoryPort) -> None:
     release = getattr(repository, "release_finalize", None)
     if release is not None:
         await release()
+
+
+def _same_create_request(cycle: QuoteCycle, command: CreateQuoteCycle) -> bool:
+    return (
+        tuple(item.symbol for item in cycle.items) == command.symbols
+        and cycle.scheduled_at == command.scheduled_at
+        and cycle.timeout_seconds == command.timeout_seconds
+        and cycle.universe_snapshot_id == command.universe_snapshot_id
+        and cycle.universe_snapshot_version == command.universe_snapshot_version
+        and cycle.schedule_occurrence_id == command.schedule_occurrence_id
+        and cycle.subscription_snapshot_version == command.subscription_snapshot_version
+    )

@@ -127,12 +127,13 @@ class SecurityMasterService:
         for missing in existing.values():
             if (
                 missing.symbol in incoming_symbols
-                or missing.listing_status == ListingStatus.DELISTED
+                or missing.listing_status
+                in {ListingStatus.DELISTED, ListingStatus.DATA_MISSING}
             ):
                 continue
             before = _security_data(missing)
             after = dict(before)
-            after["listing_status"] = ListingStatus.DELISTED.value
+            after["listing_status"] = ListingStatus.DATA_MISSING.value
             revision = SecurityRevision(
                 security_id=missing.id,
                 revision_no=await self._repository.next_revision_no(missing.id),
@@ -142,7 +143,7 @@ class SecurityMasterService:
                 after_data=_json_safe(after),
             )
             self._repository.add_revision(revision)
-            missing.listing_status = ListingStatus.DELISTED
+            missing.listing_status = ListingStatus.DATA_MISSING
             missing.source = snapshot.source
             missing.source_version = snapshot.source_version
             missing.master_version = master_version

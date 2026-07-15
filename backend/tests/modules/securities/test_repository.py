@@ -73,9 +73,16 @@ async def test_universe_query_filters_a_shares_without_excluding_suspensions() -
 
     statement = session.scalars.await_args.args[0]
     sql = str(statement.compile(dialect=postgresql.dialect()))
+    compiled = statement.compile(dialect=postgresql.dialect())
     assert "security.market IN" in sql
     assert "security.security_type IN" in sql
     assert "security.listing_status IN" in sql
+    status_values = next(
+        value
+        for key, value in compiled.params.items()
+        if key.startswith("listing_status_")
+    )
+    assert status_values == ["LISTED", "SUSPENDED"]
     where_clause = sql.split("WHERE", maxsplit=1)[1]
     assert "security.is_suspended" not in where_clause
 

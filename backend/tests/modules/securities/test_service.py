@@ -105,9 +105,23 @@ class FakeRepository:
     def add_revision(self, revision):
         self.revisions.append(revision)
 
-    async def list_for_universe(self, _query):
+    async def list_for_universe(self, query):
         self.read_trace.append("securities")
-        return sorted(self.securities.values(), key=lambda security: security.symbol)
+        allowed_markets = {item.value for item in query.markets}
+        allowed_types = {item.value for item in query.security_types}
+        allowed_statuses = {item.value for item in query.listing_statuses}
+        return sorted(
+            (
+                security
+                for security in self.securities.values()
+                if security.market in allowed_markets
+                and security.security_type in allowed_types
+                and security.listing_status in allowed_statuses
+                and (query.include_st or not security.is_st)
+                and (query.include_suspended or not security.is_suspended)
+            ),
+            key=lambda security: security.symbol,
+        )
 
     async def save_universe_snapshot(self, frozen, items):
         self.saved_universes.append((frozen, items))
@@ -179,7 +193,7 @@ async def test_same_source_version_with_a_new_key_has_one_formal_result() -> Non
 
 
 @pytest.mark.anyio
-async def test_missing_security_is_delisted_once_and_replay_adds_no_revision() -> None:
+async def test_truncated_snapshot_marks_missing_security_as_data_missing() -> None:
     repository = FakeRepository()
     subject, _session = service(repository)
     await subject.apply_snapshot(
@@ -190,17 +204,26 @@ async def test_missing_security_is_delisted_once_and_replay_adds_no_revision() -
     result = await subject.apply_snapshot(reduced)
 
     missing = repository.securities["000001.SZ"]
-    assert missing.listing_status == ListingStatus.DELISTED
+    assert missing.listing_status == ListingStatus.DATA_MISSING
     assert result.revision_count == 1
     assert repository.revisions[-1].changed_fields == ["listing_status"]
     eligibility = await subject.validate_monitoring_eligibility("000001.SZ")
-    assert eligibility.code == "SECURITY_DELISTED"
+    assert eligibility.code == "SECURITY_DATA_MISSING"
+    frozen = await subject.freeze_universe(UniverseQuery())
+    assert frozen.item_count == 1
+    assert [
+        frozen_item.symbol for frozen_item in repository.saved_universes[-1][1]
+    ] == ["600000.SH"]
 
     revision_count = len(repository.revisions)
     replay = await subject.apply_snapshot(reduced)
     assert replay.replayed is True
     assert len(repository.revisions) == revision_count
-    assert repository.master_lock_count == 3
+    await subject.apply_snapshot(
+        snapshot(item(), source_version="v3", key="key-3")
+    )
+    assert len(repository.revisions) == revision_count
+    assert repository.master_lock_count == 5
 
 
 @pytest.mark.anyio
@@ -221,6 +244,33 @@ async def test_later_snapshot_can_restore_a_previously_missing_security() -> Non
     assert restored.listing_status == ListingStatus.LISTED
     assert result.revision_count == 1
     assert repository.revisions[-1].changed_fields == ["listing_status"]
+
+
+@pytest.mark.anyio
+async def test_explicit_delisting_requires_a_delisting_date() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    explicitly_delisted_without_date = SecurityMasterItem(
+        symbol="000001.SZ",
+        exchange_code="000001",
+        name="平安银行",
+        market=Market.SZ,
+        security_type=SecurityType.A_SHARE,
+        listing_status=ListingStatus.DELISTED,
+        listed_on=date(1991, 4, 3),
+        delisted_on=None,
+        is_st=False,
+        is_suspended=False,
+        provider_codes={"eastmoney": "0.000001", "sina": "sz000001"},
+    )
+
+    with pytest.raises(AppError) as captured:
+        await subject.apply_snapshot(snapshot(explicitly_delisted_without_date))
+
+    assert captured.value.code == "SECURITY_SNAPSHOT_INCOMPLETE"
+    assert captured.value.details["errors"] == [
+        {"index": 0, "field": "delisted_on", "reason": "退市日期缺失"}
+    ]
 
 
 @pytest.mark.anyio

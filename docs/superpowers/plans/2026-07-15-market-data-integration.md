@@ -29,6 +29,7 @@
 - Create: `backend/tests/integration/test_quote_cycle_job.py`
 - Create: `backend/tests/integration/test_daily_data_job.py`
 - Create: `backend/tests/integration/test_market_data_migration.py`
+- Create: `backend/tests/integration/test_market_data_quality_transaction.py`
 - Create: `backend/tests/platform/jobs/test_execution_context.py`
 - Create: `backend/tests/platform/outbox/test_job_timeout_dispatch.py`
 
@@ -45,11 +46,19 @@ async def test_daily_bar_routes_to_year_partition(migrated_database) -> None:
     assert partition == "daily_bar_unadjusted_2026"
 ```
 
+同时在 `backend/tests/integration/test_market_data_quality_transaction.py` 使用真实 PostgreSQL 和真实 `AsyncSession` 验证质量裁决与事务发件箱的原子性：
+
+1. 先创建并提交一个 `OPEN` 质量问题；在新事务中使用故障事件适配器触发发件箱写入失败，确认异常导致事务回滚。再用全新 Session 查询，问题必须仍为 `OPEN`，且该问题没有任何 `event_outbox` 记录。
+2. 成功路径在同一事务完成裁决和事件写入；提交后用全新 Session 查询，问题必须为 `RESOLVED`，且恰好存在一条对应的 `data_quality_issue.resolved` 发件箱记录。
+3. 使用相同裁决命令重放后再次查询，问题终态不变，发件箱记录仍恰好一条。
+
+该测试是 `0008` 迁移升级的不可跳过验收，必须连接真实 PostgreSQL。禁止因数据库不可达、迁移未执行或表不存在而调用 `skip`；这些情况都必须让验收失败。
+
 - [ ] **Step 2: 运行测试并确认失败**
 
-Run: `cd backend; python -m pytest tests/integration/test_market_data_migration.py -q`
+Run: `cd backend; python -m pytest tests/integration/test_market_data_migration.py tests/integration/test_market_data_quality_transaction.py -q`
 
-Expected: FAIL，迁移 `0008` 尚不存在。
+Expected: FAIL，迁移 `0008` 尚不存在，质量问题与发件箱事务场景无法在真实表上完成。
 
 - [ ] **Step 3: 实现迁移**
 
@@ -57,14 +66,14 @@ Expected: FAIL，迁移 `0008` 尚不存在。
 
 - [ ] **Step 4: 验证升级、降级、再升级**
 
-Run: `cd backend; python -m alembic upgrade head; python -m alembic downgrade 20260715_0007; python -m alembic upgrade head; python -m pytest tests/integration/test_market_data_migration.py -q`
+Run: `cd backend; python -m alembic upgrade head; python -m alembic downgrade 20260715_0007; python -m alembic upgrade head; python -m pytest tests/integration/test_market_data_migration.py tests/integration/test_market_data_quality_transaction.py -q`
 
-Expected: 三次迁移命令成功，测试 PASS，`alembic heads` 只有一个版本。
+Expected: 三次迁移命令成功，两组真实 PostgreSQL 集成测试 PASS，`alembic heads` 只有一个版本。数据库不可用时本步骤必须失败，不得跳过质量事务测试。
 
 - [ ] **Step 5: 提交**
 
 ```text
-git add backend/alembic backend/src/long_invest/platform/database backend/tests/integration/test_market_data_migration.py
+git add backend/alembic backend/src/long_invest/platform/database backend/tests/integration/test_market_data_migration.py backend/tests/integration/test_market_data_quality_transaction.py
 git commit -m "feat: migrate market data collection"
 ```
 

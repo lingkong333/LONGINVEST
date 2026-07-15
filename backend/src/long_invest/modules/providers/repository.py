@@ -135,6 +135,9 @@ class ProviderRepositoryPort(Protocol):
         occurred_at: datetime,
         error_code: str | None,
     ) -> None: ...
+    async def replay_mutation(
+        self, idempotency_key: str, digest: str
+    ) -> dict[str, Any] | None: ...
 
 
 class ProviderRepository:
@@ -348,7 +351,6 @@ class ProviderRepository:
         payload = {
             "operation": action_code,
             "circuit_id": str(circuit_id),
-            "result": result,
             "reason": reason,
         }
         digest = request_digest(payload)
@@ -591,6 +593,11 @@ class ProviderRepository:
 
     async def add_failure_sample(self, sample: ProviderFailureSample) -> None:
         self._session.add(sample)
+
+    async def replay_mutation(
+        self, idempotency_key: str, digest: str
+    ) -> dict[str, Any] | None:
+        return await self._idempotent_replay(idempotency_key, digest)
 
     async def _latest_config(
         self, provider: ProviderCode

@@ -258,6 +258,11 @@ class ServiceRepository:
         self.diagnostic = None
         self.persisted_probe = None
         self.circuit_id = uuid4()
+        self.replay = None
+
+    async def replay_mutation(self, idempotency_key, digest):
+        del idempotency_key, digest
+        return self.replay
 
     async def audit_diagnostic(self, symbols, summary, *, reason, context):
         self.diagnostic = (symbols, summary, reason, context)
@@ -321,6 +326,27 @@ async def test_probe_uses_real_router_and_persists_result_with_audit_context() -
     assert repository.persisted_probe[2]["action_code"] == (
         "provider.circuit_reset_probed"
     )
+
+
+@async_test
+async def test_replayed_reset_does_not_repeat_external_probe() -> None:
+    repository = ServiceRepository()
+    repository.replay = {"id": str(repository.circuit_id), "state": "CLOSED"}
+    router = ProbeRouter()
+    provider = DiagnosticProvider(ProviderCode.EASTMONEY, "10")
+    service = ProviderService(
+        router,
+        {ProviderCode.EASTMONEY: provider},
+        repository,
+        ProbeRuntime(),
+    )
+    result = await service.reset_circuit(
+        repository.circuit_id,
+        reason="operator reset",
+        audit_context=audit_context(),
+    )
+    assert result["state"] == "CLOSED"
+    assert router.calls == []
 
 
 @async_test

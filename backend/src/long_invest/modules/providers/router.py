@@ -132,6 +132,7 @@ class ProviderRouter:
             lambda: provider.probe(setting.capability, deadline),
             deadline=deadline,
             probe=True,
+            observe=False,
         )
 
     async def _single(

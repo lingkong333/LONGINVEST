@@ -11,7 +11,10 @@ from long_invest.modules.providers.contracts import (
     ProviderCode,
     RealtimeQuote,
 )
-from long_invest.modules.providers.repository import ProviderRepositoryPort
+from long_invest.modules.providers.repository import (
+    ProviderRepositoryPort,
+    request_digest,
+)
 from long_invest.modules.providers.resilience import (
     ProviderRouteSetting,
     ProviderRuntimeStatePort,
@@ -102,6 +105,18 @@ class ProviderService:
         audit_context: AuditContext,
     ) -> dict[str, Any]:
         self._require_complete_audit(audit_context)
+        replay = await self._repository.replay_mutation(
+            audit_context.idempotency_key,
+            request_digest(
+                {
+                    "operation": "diagnostic",
+                    "symbols": symbols,
+                    "reason": reason,
+                }
+            ),
+        )
+        if replay is not None:
+            return replay
         deadline = datetime.now(UTC) + timedelta(seconds=10)
         sources: list[dict[str, Any]] = []
         by_source: dict[ProviderCode, dict[str, RealtimeQuote]] = {}
@@ -148,10 +163,7 @@ class ProviderService:
         }
         await self._repository.audit_diagnostic(
             symbols,
-            {
-                "providers": [item["provider"] for item in sources],
-                "comparison_count": len(comparisons),
-            },
+            response,
             reason=reason,
             context=audit_context,
         )
@@ -166,6 +178,18 @@ class ProviderService:
         action_code: str,
     ) -> dict[str, Any]:
         self._require_complete_audit(audit_context)
+        replay = await self._repository.replay_mutation(
+            audit_context.idempotency_key,
+            request_digest(
+                {
+                    "operation": action_code,
+                    "circuit_id": str(circuit_id),
+                    "reason": reason,
+                }
+            ),
+        )
+        if replay is not None:
+            return replay
         circuit = await self._repository.circuit(circuit_id)
         setting = ProviderRouteSetting(
             provider=ProviderCode(circuit["provider_code"]),

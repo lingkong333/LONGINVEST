@@ -505,26 +505,29 @@ class ProviderInvocationPipeline:
         *,
         deadline: datetime,
         probe: bool = False,
+        observe: bool = True,
     ) -> T:
         if not setting.enabled:
             raise ProviderCallError("PROVIDER_DISABLED")
         if not await self._runtime.allow(setting, probe=probe):
-            await self._observer.record_outcome(
-                setting,
-                success=False,
-                snapshot=await self._runtime.circuit_snapshot(setting),
-                occurred_at=datetime.now(UTC),
-                error_code="PROVIDER_CIRCUIT_OPEN",
-            )
+            if observe:
+                await self._observer.record_outcome(
+                    setting,
+                    success=False,
+                    snapshot=await self._runtime.circuit_snapshot(setting),
+                    occurred_at=datetime.now(UTC),
+                    error_code="PROVIDER_CIRCUIT_OPEN",
+                )
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
         if not await self._runtime.acquire(setting):
-            await self._observer.record_outcome(
-                setting,
-                success=False,
-                snapshot=await self._runtime.circuit_snapshot(setting),
-                occurred_at=datetime.now(UTC),
-                error_code="PROVIDER_RATE_LIMITED",
-            )
+            if observe:
+                await self._observer.record_outcome(
+                    setting,
+                    success=False,
+                    snapshot=await self._runtime.circuit_snapshot(setting),
+                    occurred_at=datetime.now(UTC),
+                    error_code="PROVIDER_RATE_LIMITED",
+                )
             raise ProviderCallError("PROVIDER_RATE_LIMITED")
         try:
             remaining = (deadline - datetime.now(UTC)).total_seconds()
@@ -539,23 +542,25 @@ class ProviderInvocationPipeline:
                 await self._runtime.record_failure(setting)
             else:
                 await self._runtime.record_success(setting)
-            await self._observer.record_outcome(
-                setting,
-                success=not (batch_error or unhealthy_probe),
-                snapshot=await self._runtime.circuit_snapshot(setting),
-                occurred_at=datetime.now(UTC),
-                error_code=batch_error or getattr(result, "error_code", None),
-            )
+            if observe:
+                await self._observer.record_outcome(
+                    setting,
+                    success=not (batch_error or unhealthy_probe),
+                    snapshot=await self._runtime.circuit_snapshot(setting),
+                    occurred_at=datetime.now(UTC),
+                    error_code=batch_error or getattr(result, "error_code", None),
+                )
             return result
         except Exception as error:
             await self._runtime.record_failure(setting)
-            await self._observer.record_outcome(
-                setting,
-                success=False,
-                snapshot=await self._runtime.circuit_snapshot(setting),
-                occurred_at=datetime.now(UTC),
-                error_code=getattr(error, "code", "PROVIDER_FAILED"),
-            )
+            if observe:
+                await self._observer.record_outcome(
+                    setting,
+                    success=False,
+                    snapshot=await self._runtime.circuit_snapshot(setting),
+                    occurred_at=datetime.now(UTC),
+                    error_code=getattr(error, "code", "PROVIDER_FAILED"),
+                )
             raise
         finally:
             await self._runtime.release(setting)

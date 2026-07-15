@@ -4,12 +4,14 @@ from collections.abc import Iterable, Sequence
 from uuid import UUID
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from long_invest.modules.securities.contracts import UniverseQuery
 from long_invest.modules.securities.models import (
     Security,
+    SecurityMasterVersion,
     SecurityRevision,
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
@@ -20,7 +22,9 @@ class SecurityRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_by_symbol(self, symbol: str, *, lock: bool = False) -> Security | None:
+    async def get_by_symbol(
+        self, symbol: str, *, lock: bool = False
+    ) -> Security | None:
         statement = select(Security).where(Security.symbol == symbol)
         if lock:
             statement = statement.with_for_update()
@@ -37,7 +41,8 @@ class SecurityRepository:
         return list(result.all())
 
     async def count(self) -> int:
-        return int(await self._session.scalar(select(func.count()).select_from(Security)) or 0)
+        statement = select(func.count()).select_from(Security)
+        return int(await self._session.scalar(statement) or 0)
 
     async def search(
         self, query: str, *, page: int, page_size: int
@@ -112,8 +117,57 @@ class SecurityRepository:
         return int(current or 0) + 1
 
     async def current_master_version(self) -> int:
-        current = await self._session.scalar(select(func.max(Security.master_version)))
+        current = await self._session.scalar(
+            select(func.max(SecurityMasterVersion.master_version))
+        )
         return int(current or 0)
+
+    async def find_master_import(
+        self,
+        *,
+        source: str,
+        idempotency_key: str | None = None,
+        source_version: str | None = None,
+    ) -> SecurityMasterVersion | None:
+        statement = select(SecurityMasterVersion).where(
+            SecurityMasterVersion.source == source
+        )
+        if idempotency_key is not None:
+            statement = statement.where(
+                SecurityMasterVersion.idempotency_key == idempotency_key
+            )
+        elif source_version is not None:
+            statement = statement.where(
+                SecurityMasterVersion.source_version == source_version
+            )
+        else:
+            raise ValueError("必须提供幂等键或来源版本")
+        return await self._session.scalar(statement)
+
+    async def claim_master_import(
+        self, record: SecurityMasterVersion
+    ) -> tuple[SecurityMasterVersion, bool]:
+        try:
+            async with self._session.begin_nested():
+                self._session.add(record)
+                await self._session.flush([record])
+        except IntegrityError:
+            existing = await self.find_master_import(
+                source=record.source,
+                idempotency_key=record.idempotency_key,
+            )
+            if existing is None:
+                existing = await self.find_master_import(
+                    source=record.source,
+                    source_version=record.source_version,
+                )
+            if existing is None:
+                raise
+            return existing, False
+        return record, True
+
+    def add_master_import(self, record: SecurityMasterVersion) -> None:
+        self._session.add(record)
 
     async def save_universe_snapshot(
         self,

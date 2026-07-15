@@ -73,6 +73,31 @@ class Security(Base):
     )
 
 
+class SecurityMasterVersion(Base):
+    __tablename__ = "security_master_version"
+    __table_args__ = (
+        UniqueConstraint("source", "source_version"),
+        UniqueConstraint("source", "idempotency_key"),
+        UniqueConstraint("master_version"),
+        CheckConstraint("master_version > 0", name="master_version_positive"),
+        CheckConstraint("item_count > 0", name="item_count_positive"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_version: Mapped[str] = mapped_column(String(160), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    master_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    result_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class SecurityRevision(Base):
     __tablename__ = "security_revision"
     __table_args__ = (
@@ -147,4 +172,3 @@ class SecurityUniverseSnapshotItem(Base):
     is_suspended: Mapped[bool] = mapped_column(Boolean, nullable=False)
     master_version: Mapped[int] = mapped_column(Integer, nullable=False)
     snapshot: Mapped[SecurityUniverseSnapshot] = relationship(back_populates="items")
-

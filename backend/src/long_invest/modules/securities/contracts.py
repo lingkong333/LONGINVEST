@@ -1,8 +1,8 @@
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
-from typing import Mapping
 
 
 class Market(StrEnum):

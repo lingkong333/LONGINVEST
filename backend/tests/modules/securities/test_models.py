@@ -2,6 +2,7 @@ from sqlalchemy import CheckConstraint, UniqueConstraint
 
 from long_invest.modules.securities.models import (
     Security,
+    SecurityMasterVersion,
     SecurityRevision,
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
@@ -66,6 +67,14 @@ def test_revision_is_append_only_fact_with_safe_before_and_after_snapshots() -> 
     }
 
 
+def test_master_version_serializes_source_version_and_idempotency_claims() -> None:
+    uniques = unique_columns(SecurityMasterVersion)
+
+    assert ("source", "source_version") in uniques
+    assert ("source", "idempotency_key") in uniques
+    assert ("master_version",) in uniques
+
+
 def test_universe_snapshot_freezes_filter_count_version_and_item_state() -> None:
     snapshot_columns = set(SecurityUniverseSnapshot.__table__.columns.keys())
     item_columns = set(SecurityUniverseSnapshotItem.__table__.columns.keys())
@@ -86,4 +95,3 @@ def test_universe_snapshot_freezes_filter_count_version_and_item_state() -> None
     assert ("snapshot_id", "symbol") in unique_columns(
         SecurityUniverseSnapshotItem
     )
-

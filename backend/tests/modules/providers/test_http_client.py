@@ -69,3 +69,22 @@ async def test_client_stops_when_total_deadline_has_expired() -> None:
         client = ProviderHttpClient(raw, allowed_hosts=frozenset({"x.test"}))
         with pytest.raises(ProviderHttpError, match="PROVIDER_TIMEOUT"):
             await client.request_json(ProviderHttpRequest("https://x.test/api"), deadline=datetime.now(timezone.utc) - timedelta(seconds=1))
+
+
+@async_test
+async def test_client_accepts_bounded_plain_text_for_sina() -> None:
+    transport = httpx.MockTransport(
+        lambda _: httpx.Response(
+            200,
+            headers={"content-type": "text/plain; charset=GB18030"},
+            content="var hq_str_sh600000=\"浦发银行,10\";".encode("gb18030"),
+        )
+    )
+    async with httpx.AsyncClient(transport=transport) as raw:
+        client = ProviderHttpClient(raw, allowed_hosts=frozenset({"hq.sinajs.cn"}))
+        text = await client.request_text(
+            ProviderHttpRequest("https://hq.sinajs.cn/list=sh600000"),
+            deadline=datetime.now(timezone.utc) + timedelta(seconds=1),
+            encoding="gb18030",
+        )
+    assert "浦发银行" in text

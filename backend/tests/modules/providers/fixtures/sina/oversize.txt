@@ -1,0 +1,1 @@
+var hq_str_sh600000="fixed oversized response fixture 012345678901234567890123456789";

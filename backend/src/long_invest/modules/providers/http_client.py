@@ -76,6 +76,46 @@ class ProviderHttpClient:
 
         return await run_with_retry(perform, deadline=deadline)
 
+    async def request_text(
+        self,
+        request: ProviderHttpRequest,
+        *,
+        deadline: datetime,
+        encoding: str = "utf-8",
+    ) -> str:
+        self._validate_target(request.url)
+
+        async def perform() -> str:
+            remaining = (deadline - datetime.now(timezone.utc)).total_seconds()
+            if remaining <= 0:
+                raise ProviderHttpError("PROVIDER_TIMEOUT")
+            try:
+                async with asyncio.timeout(remaining):
+                    async with self._client.stream("GET", request.url, params=request.params) as response:
+                        if response.status_code in RETRYABLE_STATUSES:
+                            raise ProviderHttpError("PROVIDER_UPSTREAM_TEMPORARY", retryable=True)
+                        if response.status_code >= 400:
+                            raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
+                        self._validate_headers(response)
+                        body = bytearray()
+                        async for chunk in response.aiter_bytes():
+                            body.extend(chunk)
+                            if len(body) > self._max_response_bytes:
+                                raise ProviderHttpError("PROVIDER_RESPONSE_TOO_LARGE")
+            except TimeoutError as error:
+                raise ProviderHttpError("PROVIDER_TIMEOUT", retryable=True) from error
+            lowered = bytes(body).lower()
+            if b"<html" in lowered:
+                raise ProviderHttpError("PROVIDER_UNEXPECTED_CONTENT")
+            if any(marker in lowered for marker in (b"captcha", b"validatecode")):
+                raise ProviderHttpError("PROVIDER_CAPTCHA_DETECTED")
+            try:
+                return bytes(body).decode(encoding)
+            except (LookupError, UnicodeDecodeError) as error:
+                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+
+        return await run_with_retry(perform, deadline=deadline)
+
     def _validate_target(self, url: str) -> None:
         parsed = urlsplit(url)
         if parsed.scheme != "https" or parsed.hostname not in self._allowed_hosts:

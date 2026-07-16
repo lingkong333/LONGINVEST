@@ -93,6 +93,7 @@ def test_qfq_refresh_run_freezes_inputs_and_has_stable_status_constraints() -> N
         table, UniqueConstraint
     )
     result_sql = _check_sql(table, "ck_qfq_refresh_run_result_consistent")
+    assert "candidate_dataset_id IS NOT NULL" in result_sql
     assert "candidate_dataset_id = activated_dataset_id" in result_sql
     assert "row_count IS NOT NULL" in result_sql
     assert "checksum IS NOT NULL" in result_sql

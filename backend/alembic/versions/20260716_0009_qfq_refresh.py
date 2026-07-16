@@ -208,6 +208,7 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "(status = 'SUCCEEDED' AND activated_dataset_id IS NOT NULL "
+            "AND candidate_dataset_id IS NOT NULL "
             "AND candidate_dataset_id = activated_dataset_id "
             "AND row_count IS NOT NULL AND checksum IS NOT NULL "
             "AND error_code IS NULL) "

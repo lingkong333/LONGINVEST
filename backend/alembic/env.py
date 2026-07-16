@@ -34,6 +34,11 @@ from long_invest.modules.providers.models import (  # noqa: F401
     ProviderHealthState,
     ProviderMutationRequest,
 )
+from long_invest.modules.qfq.models import (  # noqa: F401
+    QfqDataset,
+    QfqDatasetBar,
+    QfqRefreshRun,
+)
 from long_invest.modules.quotes.models import QuoteCycle, QuoteCycleItem  # noqa: F401
 from long_invest.modules.securities.models import (  # noqa: F401
     Security,

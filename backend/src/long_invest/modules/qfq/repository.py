@@ -88,6 +88,23 @@ class QfqRepository:
         )
         await self.session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
 
+    async def lock_request(self, security_id: UUID, request_hash: str) -> None:
+        raw_key = f"qfq-request:{security_id}:{request_hash}".encode("ascii")
+        lock_key = int.from_bytes(
+            blake2b(raw_key, digest_size=8).digest(), "big", signed=True
+        )
+        await self.session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
+
+    async def find_run_by_request_hash(
+        self, security_id: UUID, request_hash: str
+    ) -> QfqRefreshRun | None:
+        return await self.session.scalar(
+            select(QfqRefreshRun).where(
+                QfqRefreshRun.security_id == security_id,
+                QfqRefreshRun.request_hash == request_hash,
+            )
+        )
+
     async def current_dataset(
         self, security_id: UUID, *, for_update: bool = False
     ) -> QfqDataset | None:

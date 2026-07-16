@@ -27,6 +27,9 @@ class JobService:
         self._session = session
         self._jobs = JobRepository(session)
 
+    async def get(self, job_id: UUID) -> Job | None:
+        return await self._jobs.get(job_id)
+
     async def lock_submission(self, scope: str, key: str) -> None:
         await self._session.scalar(
             select(

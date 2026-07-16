@@ -65,3 +65,21 @@ async def test_security_advisory_lock_is_transaction_scoped() -> None:
 
     statement = session.scalar.await_args.args[0]
     assert "pg_advisory_xact_lock" in str(statement)
+
+
+@pytest.mark.anyio
+async def test_request_hash_lookup_can_be_serialized_before_job_submission() -> None:
+    session = AsyncMock()
+    security_id = uuid4()
+    request_hash = "a" * 64
+
+    repository = QfqRepository(session)
+    await repository.lock_request(security_id, request_hash)
+    await repository.find_run_by_request_hash(security_id, request_hash)
+
+    lock_statement = session.scalar.await_args_list[0].args[0]
+    lookup_statement = session.scalar.await_args_list[1].args[0]
+    compiled = lookup_statement.compile(dialect=postgresql.dialect())
+    assert "pg_advisory_xact_lock" in str(lock_statement)
+    assert security_id in compiled.params.values()
+    assert request_hash in compiled.params.values()

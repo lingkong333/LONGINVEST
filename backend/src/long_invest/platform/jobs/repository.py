@@ -10,6 +10,9 @@ class JobRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def get(self, job_id: UUID) -> Job | None:
+        return await self._session.get(Job, job_id)
+
     async def find_by_idempotency(
         self,
         *,
@@ -46,9 +49,7 @@ class JobRepository:
 
     async def lock_run_by_fence(self, fence_token: UUID) -> JobRun | None:
         return await self._session.scalar(
-            select(JobRun)
-            .where(JobRun.fence_token == fence_token)
-            .with_for_update()
+            select(JobRun).where(JobRun.fence_token == fence_token).with_for_update()
         )
 
     async def item_keys(self, job_id: UUID) -> set[str]:

@@ -224,12 +224,13 @@ async def test_snapshot_returns_none_when_bar_does_not_exist() -> None:
     assert await application.snapshot("600000.SH", date(2026, 7, 15)) is None
 
 
+@pytest.mark.parametrize("symbol", ["invalid", None, 600000])
 @async_test
-async def test_snapshot_rejects_invalid_symbol_before_database_access() -> None:
+async def test_snapshot_rejects_invalid_symbol_before_database_access(symbol) -> None:
     application = _snapshot_application(SnapshotDatabase())
 
     with pytest.raises(AppError) as captured:
-        await application.snapshot("invalid", date(2026, 7, 15))
+        await application.snapshot(symbol, date(2026, 7, 15))
 
     assert captured.value.code == "DAILY_BAR_SYMBOL_INVALID"
     assert captured.value.status_code == 422

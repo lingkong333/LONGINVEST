@@ -227,7 +227,7 @@ def get_daily_data_application() -> DailyDataApplication:
 def _validate_symbol(symbol: str) -> None:
     try:
         validate_symbol(symbol)
-    except ValueError as exc:
+    except (TypeError, ValueError) as exc:
         raise AppError(
             code="DAILY_BAR_SYMBOL_INVALID",
             message="股票代码格式无效",

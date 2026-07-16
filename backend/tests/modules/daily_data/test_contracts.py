@@ -30,6 +30,7 @@ def test_daily_batch_requires_snapshot() -> None:
             trading_date=date(2026, 7, 15),
             universe_snapshot_id=None,
             symbols=("600000.SH",),
+            security_ids=(uuid4(),),
             idempotency_key="daily:2026-07-15",
         )
 
@@ -41,6 +42,7 @@ def test_daily_batch_rejects_invalid_idempotency_key(value: str) -> None:
             trading_date=date(2026, 7, 15),
             universe_snapshot_id=uuid4(),
             symbols=("600000.SH",),
+            security_ids=(uuid4(),),
             idempotency_key=value,
         )
 
@@ -51,6 +53,7 @@ def test_daily_batch_rejects_empty_or_duplicate_scope() -> None:
             trading_date=date(2026, 7, 15),
             universe_snapshot_id=uuid4(),
             symbols=(),
+            security_ids=(),
             idempotency_key="daily:2026-07-15",
         )
     with pytest.raises(ValueError, match="重复"):
@@ -58,7 +61,29 @@ def test_daily_batch_rejects_empty_or_duplicate_scope() -> None:
             trading_date=date(2026, 7, 15),
             universe_snapshot_id=uuid4(),
             symbols=("600000.SH", "600000.SH"),
+            security_ids=(uuid4(), uuid4()),
             idempotency_key="daily:2026-07-15",
+        )
+
+
+def test_daily_batch_requires_one_unique_security_id_per_symbol() -> None:
+    security_id = uuid4()
+    common = {
+        "trading_date": date(2026, 7, 15),
+        "universe_snapshot_id": uuid4(),
+        "idempotency_key": "daily:2026-07-15",
+    }
+    with pytest.raises(ValueError, match="绑定"):
+        CreateDailyBatch(
+            symbols=("600000.SH", "000001.SZ"),
+            security_ids=(security_id,),
+            **common,
+        )
+    with pytest.raises(ValueError, match="重复"):
+        CreateDailyBatch(
+            symbols=("600000.SH", "000001.SZ"),
+            security_ids=(security_id, security_id),
+            **common,
         )
 
 

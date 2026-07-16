@@ -75,6 +75,7 @@ class CreateDailyBatch:
     trading_date: date
     universe_snapshot_id: UUID | None
     symbols: tuple[str, ...]
+    security_ids: tuple[UUID, ...]
     idempotency_key: str
     parent_batch_id: UUID | None = None
     deadline_at: datetime | None = None
@@ -90,6 +91,14 @@ class CreateDailyBatch:
         if len(symbols) != len(set(symbols)):
             raise ValueError("冻结股票范围不能包含重复代码")
         object.__setattr__(self, "symbols", symbols)
+        security_ids = tuple(self.security_ids)
+        if len(security_ids) != len(symbols):
+            raise ValueError("每个冻结股票代码必须绑定一个股票编号")
+        for security_id in security_ids:
+            _require_uuid(security_id, "股票编号")
+        if len(security_ids) != len(set(security_ids)):
+            raise ValueError("冻结股票范围不能包含重复股票编号")
+        object.__setattr__(self, "security_ids", security_ids)
         object.__setattr__(
             self, "idempotency_key", _require_idempotency_key(self.idempotency_key)
         )

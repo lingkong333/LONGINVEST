@@ -299,3 +299,63 @@ async def test_same_job_key_with_different_reason_keeps_job_conflict() -> None:
 
     assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
     assert len(database.state["audits"]) == 1
+
+
+@async_test
+async def test_retry_state_conflict_does_not_create_job_or_audit() -> None:
+    database = FakeDatabase()
+
+    class RejectingDomainService(FakeDomainService):
+        async def retry_scope(self, batch_id):
+            raise AppError(
+                code="DAILY_RETRY_STATE_CONFLICT",
+                message="batch is not retryable",
+                status_code=409,
+                details={"status": "FETCHING"},
+            )
+
+    application = DailyDataApplication(
+        database,
+        repository_factory=FakeRepository,
+        domain_service_factory=RejectingDomainService,
+        job_service_factory=lambda session: RecordingJobService(session, database),
+        audit_service_factory=lambda session: RecordingAuditService(session, database),
+    )
+
+    with pytest.raises(AppError) as captured:
+        await application.retry(
+            batch_id=FakeRepository.batch.id,
+            audit_context=_context(),
+        )
+
+    assert captured.value.code == "DAILY_RETRY_STATE_CONFLICT"
+    assert captured.value.status_code == 409
+    assert database.state == {"jobs": [], "audits": []}
+    assert database.rolled_back is True
+
+
+@async_test
+async def test_empty_retry_scope_does_not_create_job_or_audit() -> None:
+    database = FakeDatabase()
+
+    class EmptyDomainService(FakeDomainService):
+        async def retry_scope(self, batch_id):
+            return ()
+
+    application = DailyDataApplication(
+        database,
+        repository_factory=FakeRepository,
+        domain_service_factory=EmptyDomainService,
+        job_service_factory=lambda session: RecordingJobService(session, database),
+        audit_service_factory=lambda session: RecordingAuditService(session, database),
+    )
+
+    with pytest.raises(AppError) as captured:
+        await application.retry(
+            batch_id=FakeRepository.batch.id,
+            audit_context=_context(),
+        )
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_EMPTY"
+    assert captured.value.status_code == 409
+    assert database.state == {"jobs": [], "audits": []}

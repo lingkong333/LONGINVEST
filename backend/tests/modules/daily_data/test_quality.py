@@ -37,6 +37,18 @@ def test_valid_bar_passes_without_review() -> None:
     assert result.code == "OK"
 
 
+def test_volume_above_signed_32_bit_range_remains_valid() -> None:
+    result = validate_daily_bar(
+        _bar(volume=2_147_483_648),
+        expected_symbol="600000.SH",
+        expected_date=date(2026, 7, 15),
+        context=DailyQualityContext(),
+    )
+
+    assert result.valid is True
+    assert result.review_required is False
+
+
 def test_bar_rejects_wrong_trading_date() -> None:
     result = validate_daily_bar(
         _bar(trading_date=date(2026, 7, 14)),

@@ -84,6 +84,15 @@ class DailyDataService:
                 message="日线日期与批次日期不一致",
                 status_code=422,
             )
+        frozen_security_id = dict(
+            zip(batch.symbols, batch.security_ids, strict=True)
+        )[item.symbol]
+        if str(item.security_id) != str(frozen_security_id):
+            raise AppError(
+                code="DAILY_BAR_SECURITY_MISMATCH",
+                message="股票编号与批次冻结范围不一致",
+                status_code=422,
+            )
         await self._repository.upsert_stage(
             batch_id, item, self._now() + timedelta(days=7)
         )
@@ -328,7 +337,15 @@ class DailyDataService:
         return _summary(batch)
 
     async def retry_scope(self, batch_id: UUID) -> tuple[str, ...]:
-        batch = await self._batch(batch_id)
+        batch = await self._batch(batch_id, for_update=True)
+        status = DailyBatchStatus(batch.status)
+        if status not in {DailyBatchStatus.PARTIAL, DailyBatchStatus.FAILED}:
+            raise AppError(
+                code="DAILY_RETRY_STATE_CONFLICT",
+                message="日线批次当前状态不允许重试",
+                status_code=409,
+                details={"status": status.value},
+            )
         stages = {
             item.symbol: item for item in await self._repository.list_stages(batch_id)
         }

@@ -119,6 +119,30 @@ def test_retry_only_submits_daily_retry_job() -> None:
     assert kwargs["audit_context"].reason == "manual retry"
 
 
+def test_retry_non_retryable_batch_returns_stable_conflict() -> None:
+    batch_id = uuid4()
+    application = Mock()
+    application.retry = AsyncMock(
+        side_effect=AppError(
+            code="DAILY_RETRY_STATE_CONFLICT",
+            message="batch is not retryable",
+            status_code=409,
+            details={"status": "SUCCEEDED"},
+        )
+    )
+    client, _ = _client(application)
+
+    response = client.post(
+        f"/api/v1/daily-data/batches/{batch_id}/retry",
+        json={"confirm": True, "reason": "manual retry"},
+        headers={"Idempotency-Key": "retry-1"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "DAILY_RETRY_STATE_CONFLICT"
+    assert response.json()["details"] == {"status": "SUCCEEDED"}
+
+
 def test_retry_uses_real_origin_session_and_csrf_protection() -> None:
     application = Mock()
     application.retry = AsyncMock(

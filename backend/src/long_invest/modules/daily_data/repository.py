@@ -53,6 +53,7 @@ class DailyDataRepository:
             universe_snapshot_id=command.universe_snapshot_id,
             parent_batch_id=command.parent_batch_id,
             symbols=list(command.symbols),
+            security_ids=[str(value) for value in command.security_ids],
             idempotency_key=command.idempotency_key,
             status="PENDING",
             expected_count=len(command.symbols),
@@ -165,7 +166,15 @@ class DailyDataRepository:
     async def get_bar(
         self, security_id: UUID, trade_date: date
     ) -> DailyBarUnadjusted | None:
-        return await self.session.get(DailyBarUnadjusted, (security_id, trade_date))
+        return await self.session.scalar(
+            select(DailyBarUnadjusted)
+            .where(
+                DailyBarUnadjusted.security_id == security_id,
+                DailyBarUnadjusted.trade_date == trade_date,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
 
     async def add_bar(self, bar: DailyBarUnadjusted) -> None:
         self.session.add(bar)
@@ -173,10 +182,15 @@ class DailyDataRepository:
 
     async def next_revision_no(self, security_id: UUID, trade_date: date) -> int:
         value = await self.session.scalar(
-            select(func.max(DailyBarRevision.revision_no)).where(
+            select(DailyBarRevision.revision_no)
+            .where(
                 DailyBarRevision.daily_bar_security_id == security_id,
                 DailyBarRevision.daily_bar_trade_date == trade_date,
             )
+            .order_by(DailyBarRevision.revision_no.desc())
+            .limit(1)
+            .with_for_update()
+            .execution_options(populate_existing=True)
         )
         return int(value or 0) + 1
 
@@ -295,6 +309,7 @@ def _validate_batch_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         existing.trading_date != command.trading_date
         or existing.universe_snapshot_id != command.universe_snapshot_id
         or tuple(existing.symbols) != command.symbols
+        or tuple(existing.security_ids) != tuple(map(str, command.security_ids))
         or existing.parent_batch_id != command.parent_batch_id
     ):
         raise AppError(
@@ -311,6 +326,7 @@ def _validate_scope_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or existing.parent_batch_id is not None
         or command.parent_batch_id is not None
         or tuple(existing.symbols) != command.symbols
+        or tuple(existing.security_ids) != tuple(map(str, command.security_ids))
     ):
         raise AppError(
             code="DAILY_BATCH_SCOPE_CONFLICT",
@@ -339,7 +355,8 @@ def _validate_retry_parent(
     if (
         parent.trading_date != command.trading_date
         or parent.universe_snapshot_id != command.universe_snapshot_id
-        or not set(command.symbols).issubset(parent.symbols)
+        or not set(zip(command.symbols, map(str, command.security_ids), strict=True))
+        .issubset(set(zip(parent.symbols, parent.security_ids, strict=True)))
     ):
         raise AppError(
             code="DAILY_RETRY_SCOPE_CONFLICT",

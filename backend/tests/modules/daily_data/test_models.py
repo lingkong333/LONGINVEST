@@ -1,11 +1,12 @@
 from sqlalchemy import (
+    BigInteger,
     ForeignKeyConstraint,
     Index,
     PrimaryKeyConstraint,
     UniqueConstraint,
 )
 from sqlalchemy.dialects import postgresql
-from sqlalchemy.schema import CreateIndex
+from sqlalchemy.schema import CreateIndex, CreateTable
 
 from long_invest.modules.daily_data.models import (
     DailyBarRevision,
@@ -39,6 +40,9 @@ def test_unadjusted_bar_has_composite_primary_key_and_range_partition() -> None:
         "trade_date",
     ]
     assert table.dialect_options["postgresql"]["partition_by"] == ("RANGE (trade_date)")
+    assert isinstance(table.c.volume.type, BigInteger)
+    ddl = str(CreateTable(table).compile(dialect=postgresql.dialect()))
+    assert "volume BIGINT NOT NULL" in ddl
 
 
 def test_revision_has_composite_foreign_key_and_revision_uniqueness() -> None:

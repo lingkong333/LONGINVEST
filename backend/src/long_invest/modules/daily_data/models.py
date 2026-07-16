@@ -6,6 +6,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     Date,
     DateTime,
@@ -59,6 +60,7 @@ class DailyDataBatch(Base):
         ForeignKey("daily_data_batch.id", ondelete="RESTRICT"),
     )
     symbols: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    security_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     expected_count: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -143,7 +145,7 @@ class DailyBarUnadjusted(Base):
     low: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     close: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
     previous_close: Mapped[Decimal | None] = mapped_column(Numeric(18, 6))
-    volume: Mapped[int] = mapped_column(Integer, nullable=False)
+    volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     data_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

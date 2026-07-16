@@ -2,7 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from functools import wraps
-from uuid import uuid4
+from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 import pytest
 from sqlalchemy.exc import IntegrityError
@@ -37,6 +37,7 @@ def _command(
         universe_snapshot_id=snapshot_id or SNAPSHOT_ID,
         parent_batch_id=parent,
         symbols=symbols,
+        security_ids=tuple(uuid5(NAMESPACE_DNS, symbol) for symbol in symbols),
         idempotency_key=key,
     )
 
@@ -56,6 +57,7 @@ def _batch(
         universe_snapshot_id=snapshot_id or SNAPSHOT_ID,
         parent_batch_id=parent,
         symbols=list(symbols),
+        security_ids=[str(uuid5(NAMESPACE_DNS, symbol)) for symbol in symbols],
         idempotency_key=key,
         status=status,
         expected_count=len(symbols),
@@ -110,6 +112,25 @@ async def test_claim_rejects_idempotency_key_with_different_content() -> None:
 
     assert captured.value.code == "DAILY_BATCH_IDEMPOTENCY_CONFLICT"
     assert captured.value.status_code == 409
+
+
+@async_test
+async def test_claim_rejects_same_symbols_with_different_security_binding() -> None:
+    existing = _batch(symbols=("600000.SH",))
+    repository = DailyDataRepository(FakeSession([existing]))
+    command = _command(symbols=("600000.SH",))
+    command = CreateDailyBatch(
+        trading_date=command.trading_date,
+        universe_snapshot_id=command.universe_snapshot_id,
+        symbols=command.symbols,
+        security_ids=(uuid4(),),
+        idempotency_key=command.idempotency_key,
+    )
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(command, NOW)
+
+    assert captured.value.code == "DAILY_BATCH_IDEMPOTENCY_CONFLICT"
 
 
 @async_test
@@ -227,6 +248,26 @@ async def test_retry_cannot_add_symbol_outside_parent_scope() -> None:
 
 
 @async_test
+async def test_retry_cannot_change_parent_symbol_security_binding() -> None:
+    parent = _batch(symbols=("600000.SH",), status="FAILED")
+    repository = DailyDataRepository(FakeSession([None, parent]))
+    command = _command(parent=parent.id, symbols=("600000.SH",))
+    command = CreateDailyBatch(
+        trading_date=command.trading_date,
+        universe_snapshot_id=command.universe_snapshot_id,
+        parent_batch_id=command.parent_batch_id,
+        symbols=command.symbols,
+        security_ids=(uuid4(),),
+        idempotency_key=command.idempotency_key,
+    )
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(command, NOW)
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
+
+
+@async_test
 @pytest.mark.parametrize("status", ["PENDING", "FETCHING", "SUCCEEDED"])
 async def test_retry_rejects_parent_outside_retryable_terminal_states(status) -> None:
     parent = _batch(status=status)
@@ -283,3 +324,18 @@ async def test_batch_lock_refreshes_cached_state() -> None:
         statement.compile(compile_kwargs={"literal_binds": True})
     )
     assert statement.get_execution_options()["populate_existing"] is True
+
+
+@async_test
+async def test_current_bar_and_latest_revision_reads_request_row_locks() -> None:
+    session = FakeSession([None, 7])
+    repository = DailyDataRepository(session)
+    security_id = uuid4()
+
+    assert await repository.get_bar(security_id, DAY) is None
+    assert await repository.next_revision_no(security_id, DAY) == 8
+
+    for statement in session.scalar_statements:
+        compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
+        assert "FOR UPDATE" in compiled
+        assert statement.get_execution_options()["populate_existing"] is True

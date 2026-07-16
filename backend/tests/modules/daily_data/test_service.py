@@ -4,7 +4,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from functools import wraps
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 import pytest
 
@@ -52,6 +52,7 @@ class FakeRepository:
             universe_snapshot_id=command.universe_snapshot_id,
             parent_batch_id=command.parent_batch_id,
             symbols=list(command.symbols),
+            security_ids=[str(value) for value in command.security_ids],
             idempotency_key=command.idempotency_key,
             status=DailyBatchStatus.PENDING,
             expected_count=len(command.symbols),
@@ -145,11 +146,17 @@ class RecordingQuality:
         self.commands.append(command)
 
 
-def _command(symbols=("600000.SH",), key="daily:2026-07-15"):
+def _command(
+    symbols=("600000.SH",),
+    key="daily:2026-07-15",
+    security_ids=None,
+):
     return CreateDailyBatch(
         trading_date=DAY,
         universe_snapshot_id=uuid4(),
         symbols=symbols,
+        security_ids=security_ids
+        or tuple(uuid5(NAMESPACE_DNS, symbol) for symbol in symbols),
         idempotency_key=key,
     )
 
@@ -178,7 +185,7 @@ def _stage(
         }
     return StageDailyBar(
         symbol=symbol,
-        security_id=security_id or uuid4(),
+        security_id=security_id or uuid5(NAMESPACE_DNS, symbol),
         trading_date=DAY,
         status=status,
         provider_payload=payload,
@@ -279,15 +286,15 @@ async def test_same_value_replay_has_no_revision_and_changed_value_revises() -> 
     repo, events = FakeRepository(), RecordingEvents()
     service = _service(repo, events)
     security_id = uuid4()
-    first = await service.create(_command(key="first"))
+    first = await service.create(_command(key="first", security_ids=(security_id,)))
     await service.stage(first.id, _stage(security_id=security_id))
     await _validate_and_commit(service, first.id)
-    replay = await service.create(_command(key="replay"))
+    replay = await service.create(_command(key="replay", security_ids=(security_id,)))
     await service.stage(replay.id, _stage(security_id=security_id))
     await _validate_and_commit(service, replay.id)
     assert repo.revisions == []
 
-    changed = await service.create(_command(key="changed"))
+    changed = await service.create(_command(key="changed", security_ids=(security_id,)))
     await service.stage(changed.id, _stage(security_id=security_id, close="10.30"))
     await _validate_and_commit(service, changed.id)
     assert len(repo.revisions) == 1
@@ -328,6 +335,7 @@ async def test_retry_scope_only_contains_original_unexplained_or_failed_symbols(
             reason=DailyMissingReason.UNEXPLAINED,
         ),
     )
+    await _validate_and_commit(service, batch.id)
     assert await service.retry_scope(batch.id) == ("000001.SZ",)
 
 
@@ -341,7 +349,7 @@ async def test_stage_rejects_symbol_or_date_outside_frozen_contract() -> None:
         await service.stage(batch.id, _stage("000001.SZ"))
     wrong = StageDailyBar(
         symbol="600000.SH",
-        security_id=uuid4(),
+        security_id=uuid5(NAMESPACE_DNS, "600000.SH"),
         trading_date=date(2026, 7, 14),
         status=DailyStageStatus.MISSING,
         missing_reason=DailyMissingReason.UNEXPLAINED,
@@ -397,7 +405,25 @@ async def test_empty_staging_cannot_skip_validation_and_preserves_scope() -> Non
     with pytest.raises(AppError) as captured:
         await service.commit(batch.id)
     assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
-    assert await service.retry_scope(batch.id) == ("600000.SH", "000001.SZ")
+    with pytest.raises(AppError) as retry_error:
+        await service.retry_scope(batch.id)
+    assert retry_error.value.code == "DAILY_RETRY_STATE_CONFLICT"
+    assert retry_error.value.details == {"status": "PENDING"}
+
+
+@async_test
+async def test_stage_rejects_security_id_outside_frozen_symbol_binding() -> None:
+    from long_invest.platform.errors import AppError
+
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+
+    with pytest.raises(AppError) as captured:
+        await service.stage(batch.id, _stage(security_id=uuid4()))
+
+    assert captured.value.code == "DAILY_BAR_SECURITY_MISMATCH"
+    assert repo.stages == {}
 
 
 @async_test
@@ -408,7 +434,7 @@ async def test_provider_timeout_isolated_as_unexplained_failure() -> None:
         batch.id,
         StageDailyBar(
             symbol="600000.SH",
-            security_id=uuid4(),
+            security_id=uuid5(NAMESPACE_DNS, "600000.SH"),
             trading_date=DAY,
             status=DailyStageStatus.FAILED,
             error_code="DAILY_PROVIDER_TIMEOUT",
@@ -521,6 +547,54 @@ async def test_retry_scope_is_deduplicated_in_frozen_order_and_never_expands() -
         "000001.SZ",
         "430047.BJ",
     )
+    assert repo.batch_lock_requests[-1] == (batch.id, True)
+
+
+@async_test
+@pytest.mark.parametrize(
+    "status",
+    [
+        DailyBatchStatus.PENDING,
+        DailyBatchStatus.FETCHING,
+        DailyBatchStatus.VALIDATING,
+        DailyBatchStatus.COMMITTING,
+        DailyBatchStatus.SUCCEEDED,
+    ],
+)
+async def test_retry_scope_locks_and_rejects_non_retryable_batch_states(status) -> None:
+    from long_invest.platform.errors import AppError
+
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command(key=f"retry-state-{status.value}"))
+    repo.batches[batch.id].status = status
+
+    with pytest.raises(AppError) as captured:
+        await service.retry_scope(batch.id)
+
+    assert captured.value.code == "DAILY_RETRY_STATE_CONFLICT"
+    assert captured.value.status_code == 409
+    assert captured.value.details == {"status": status.value}
+    assert repo.batch_lock_requests[-1] == (batch.id, True)
+
+
+@async_test
+@pytest.mark.parametrize("status", [DailyBatchStatus.PARTIAL, DailyBatchStatus.FAILED])
+async def test_retry_scope_allows_terminal_failure_states(status) -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command(key=f"retry-allowed-{status.value}"))
+    repo.batches[batch.id].status = status
+    repo.missing[batch.id] = [
+        SimpleNamespace(
+            symbol="600000.SH",
+            explained=False,
+            reason=DailyMissingReason.UNEXPLAINED,
+        )
+    ]
+
+    assert await service.retry_scope(batch.id) == ("600000.SH",)
+    assert repo.batch_lock_requests[-1] == (batch.id, True)
 
 
 @async_test

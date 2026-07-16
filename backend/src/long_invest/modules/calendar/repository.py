@@ -1,7 +1,8 @@
+from dataclasses import dataclass
 from datetime import date
 from uuid import UUID
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -11,6 +12,13 @@ from long_invest.modules.calendar.models import (
     TradingCalendarDay,
     TradingCalendarVersion,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class CalendarDateWindowRecord:
+    version_id: UUID
+    version_number: int
+    dates: tuple[date, ...]
 
 
 class CalendarRepository:
@@ -54,6 +62,49 @@ class CalendarRepository:
             .order_by(TradingCalendarDay.trade_date)
         )
         return list(rows.all())
+
+    async def trading_date_window(
+        self,
+        market: str,
+        start: date,
+        end: date,
+    ) -> CalendarDateWindowRecord | None:
+        result = await self._session.execute(
+            select(
+                TradingCalendarVersion.id,
+                TradingCalendarVersion.version_number,
+                TradingCalendarDay.trade_date,
+            )
+            .join(
+                TradingCalendarCurrent,
+                TradingCalendarCurrent.version_id == TradingCalendarVersion.id,
+            )
+            .outerjoin(
+                TradingCalendarDay,
+                and_(
+                    TradingCalendarDay.version_id == TradingCalendarVersion.id,
+                    TradingCalendarDay.trade_date.between(start, end),
+                    TradingCalendarDay.is_trading_day.is_(True),
+                    TradingCalendarDay.status.in_(
+                        (
+                            CalendarDayStatus.CONFIRMED,
+                            CalendarDayStatus.OVERRIDDEN,
+                        )
+                    ),
+                ),
+            )
+            .where(TradingCalendarCurrent.market == market)
+            .order_by(TradingCalendarDay.trade_date)
+        )
+        rows = result.all()
+        if not rows:
+            return None
+        version_id, version_number, _ = rows[0]
+        return CalendarDateWindowRecord(
+            version_id=version_id,
+            version_number=version_number,
+            dates=tuple(row[2] for row in rows if row[2] is not None),
+        )
 
     async def next_trading_day(
         self, market: str, after_date: date

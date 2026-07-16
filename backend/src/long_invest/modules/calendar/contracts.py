@@ -136,6 +136,28 @@ class CalendarCoverage(StrictContract):
     missing_today: bool = False
 
 
+class TradingDateWindow(StrictContract):
+    market: str = Field(min_length=1, max_length=16)
+    start: date
+    end: date
+    version_id: UUID
+    version_number: int = Field(ge=1)
+    dates: tuple[date, ...]
+
+    @model_validator(mode="after")
+    def validate_window(self) -> TradingDateWindow:
+        if self.start > self.end:
+            raise ValueError("start must not be after end")
+        if any(item < self.start or item > self.end for item in self.dates):
+            raise ValueError("trading dates must stay inside the window")
+        if any(
+            current <= previous
+            for previous, current in zip(self.dates, self.dates[1:], strict=False)
+        ):
+            raise ValueError("trading dates must be strictly ascending")
+        return self
+
+
 class CalendarEvent(StrictContract):
     event_type: str
     aggregate_id: str

@@ -1,13 +1,54 @@
 from datetime import date, time
+from uuid import uuid4
+
+import pytest
 
 from long_invest.modules.calendar.contracts import (
     CalendarDayInput,
     CalendarDayStatus,
     CalendarImport,
+    TradingDateWindow,
     TradingSessionInput,
     validate_calendar_coverage,
     validate_calendar_import,
 )
+
+
+def test_trading_date_window_is_frozen_and_copies_dates() -> None:
+    dates = [date(2026, 7, 15), date(2026, 7, 16)]
+
+    window = TradingDateWindow(
+        market="CN_A",
+        start=date(2026, 7, 14),
+        end=date(2026, 7, 16),
+        version_id=uuid4(),
+        version_number=7,
+        dates=dates,
+    )
+    dates.clear()
+
+    assert window.dates == (date(2026, 7, 15), date(2026, 7, 16))
+    with pytest.raises((TypeError, ValueError)):
+        window.dates = ()
+
+
+@pytest.mark.parametrize(
+    "dates",
+    [
+        (date(2026, 7, 16), date(2026, 7, 15)),
+        (date(2026, 7, 13),),
+    ],
+)
+def test_trading_date_window_rejects_unordered_or_out_of_range_dates(dates) -> None:
+    with pytest.raises(ValueError):
+        TradingDateWindow(
+            market="CN_A",
+            start=date(2026, 7, 14),
+            end=date(2026, 7, 16),
+            version_id=uuid4(),
+            version_number=7,
+            dates=dates,
+        )
 
 
 def session(start: str, end: str) -> TradingSessionInput:

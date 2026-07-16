@@ -65,6 +65,52 @@ async def test_repository_persists_and_atomically_switches_current_pointer() -> 
     assert session.flush.await_count == 1
 
 
+@pytest.mark.anyio
+async def test_repository_reads_version_and_dates_in_one_query() -> None:
+    version_id = uuid4()
+    result = MagicMock()
+    result.all.return_value = [
+        (version_id, 4, date(2026, 7, 15)),
+        (version_id, 4, date(2026, 7, 16)),
+    ]
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+
+    window = await CalendarRepository(session).trading_date_window(
+        "CN_A", date(2026, 7, 14), date(2026, 7, 16)
+    )
+
+    assert window.version_id == version_id
+    assert window.version_number == 4
+    assert window.dates == (date(2026, 7, 15), date(2026, 7, 16))
+    session.execute.assert_awaited_once()
+    query = session.execute.await_args.args[0]
+    statement = str(query)
+    assert "trading_calendar_day.is_trading_day IS true" in statement
+    assert "trading_calendar_day.status IN" in statement
+    assert "ORDER BY trading_calendar_day.trade_date" in statement
+    assert set(query.compile().params["status_1"]) == {
+        CalendarDayStatus.CONFIRMED,
+        CalendarDayStatus.OVERRIDDEN,
+    }
+
+
+@pytest.mark.anyio
+async def test_repository_preserves_current_version_when_no_days_are_eligible() -> None:
+    version_id = uuid4()
+    result = MagicMock()
+    result.all.return_value = [(version_id, 4, None)]
+    session = MagicMock()
+    session.execute = AsyncMock(return_value=result)
+
+    window = await CalendarRepository(session).trading_date_window(
+        "CN_A", date(2026, 7, 18), date(2026, 7, 19)
+    )
+
+    assert window.version_id == version_id
+    assert window.dates == ()
+
+
 def test_confirmed_through_stops_at_first_natural_day_gap_or_unconfirmed_day() -> None:
     rows = [
         MagicMock(

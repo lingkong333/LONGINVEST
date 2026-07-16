@@ -23,6 +23,7 @@
 - Create `backend/alembic/versions/20260716_0009_qfq_refresh.py`: one serial migration after `20260715_0008`.
 - Modify `backend/src/long_invest/modules/securities/contracts.py` and `application.py`: publish immutable `SecurityIdentity` instead of exposing internal models to QFQ.
 - Modify `backend/src/long_invest/modules/daily_data/contracts.py` and `application.py`: publish immutable `DailyBarSnapshot` for the target-date gate.
+- Create `backend/src/long_invest/modules/calendar/application.py` and modify `calendar/contracts.py`: publish a frozen expected-trading-date window without exposing calendar persistence.
 - Modify `backend/src/long_invest/bootstrap/jobs.py`, `platform/jobs/worker.py`, `bootstrap/app.py`, `alembic/env.py`, and `deploy/compose.yaml`: serial shared integration.
 - Regenerate `backend/openapi.json` and `frontend/src/shared/api/generated/schema.d.ts` only after routes are final.
 
@@ -52,6 +53,7 @@ def test_refresh_command_freezes_window_and_input_versions() -> None:
         end=date(2026, 7, 16),
         as_of_date=date(2026, 7, 16),
         input_daily_version=3,
+        expected_trade_dates=(date(2022, 1, 4), date(2026, 7, 16)),
         trigger_reason="MANUAL",
         request_id="req-qfq-1",
         idempotency_key="qfq-1",
@@ -107,7 +109,7 @@ class QfqRefreshStatus(StrEnum):
     SUPERSEDED = "SUPERSEDED"
 ```
 
-Implement frozen `RefreshQfq`, `QfqBarInput`, `ValidatedQfqWindow`, `QfqDatasetView`, `QfqRefreshView`, `SecurityIdentity`, and `DailyBarSnapshot`. Validate symbol format, `start <= as_of_date == end`, positive input versions, nonblank request/audit fields, positive prices, valid OHLC, and nonnegative quantities.
+Implement frozen `RefreshQfq`, `QfqBarInput`, `ValidatedQfqWindow`, `QfqDatasetView`, `QfqRefreshView`, `SecurityIdentity`, and `DailyBarSnapshot`. Validate symbol format, `start <= as_of_date == end`, a nonempty/strictly ascending/unique `expected_trade_dates` tuple ending on `end`, positive input versions, nonblank request/audit fields, positive prices, valid OHLC, and nonnegative quantities. Enforce the future database limits before canonical rendering: OHLC `Numeric(18,6)`, amount `Numeric(24,4)`, and signed-bigint volume.
 
 - [ ] **Step 4: Implement pure validation and checksum**
 
@@ -119,17 +121,19 @@ if not ordered:
     raise QfqValidationError("QFQ_EMPTY_RESULT")
 if len({item.trade_date for item in ordered}) != len(ordered):
     raise QfqValidationError("QFQ_DUPLICATE_DATE")
-if ordered[0].trade_date < command.start or ordered[-1].trade_date != command.end:
+if tuple(item.trade_date for item in ordered) != command.expected_trade_dates:
     raise QfqValidationError("QFQ_WINDOW_INCOMPLETE")
 if daily_snapshot.trade_date != command.end:
     raise QfqValidationError("QFQ_DAILY_GATE_NOT_MET")
 ```
 
-Compare the final QFQ close with the same-date unadjusted close using exact normalized decimals, then hash canonical UTF-8 JSON with SHA-256. The canonical rows must be date-ascending and decimal strings must use fixed non-exponent form.
+Compare the final QFQ close with the same-date unadjusted close using exact normalized decimals, then hash canonical UTF-8 JSON with SHA-256. The canonical rows must be date-ascending and decimal strings must use fixed non-exponent form without depending on the active Decimal context. Tests must lock one golden SHA-256 and cover high-precision neighbors, extreme exponents, scale boundaries, and Decimal precision changes.
 
 - [ ] **Step 5: Publish security and daily snapshots**
 
 Add `SecurityApplication.resolve_identity(symbol) -> SecurityIdentity` and `DailyDataApplication.snapshot(symbol, trade_date) -> DailyBarSnapshot | None`. These methods may use their own repositories internally, but QFQ imports only the public dataclasses and application methods.
+
+Add a frozen `TradingDateWindow` public contract and `CalendarApplication.trading_dates(start, end, market="CN_A")`. It returns the current calendar version and the strictly ascending expected trading dates; QFQ never imports the calendar repository or ORM models.
 
 - [ ] **Step 6: Run focused tests and commit**
 
@@ -323,7 +327,7 @@ Expected: FAIL because application and router do not exist.
 
 - [ ] **Step 3: Implement job submission**
 
-`QfqApplication.submit_refresh()` must call public security and daily snapshot methods, freeze their IDs and versions, and submit:
+`QfqApplication.submit_refresh()` must call public security, calendar-window, and daily snapshot methods, freeze their IDs, expected dates, and versions, and submit:
 
 ```python
 SubmitJob(

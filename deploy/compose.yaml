@@ -122,7 +122,7 @@ services:
       api:
         condition: service_healthy
     ports:
-      - 127.0.0.1:15173:8080
+      - 15173:8080
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/"]
       interval: 10s

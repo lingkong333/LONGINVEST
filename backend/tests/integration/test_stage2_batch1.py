@@ -1,3 +1,5 @@
+import json
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -67,6 +69,25 @@ def test_daily_retry_publishes_required_idempotency_header() -> None:
     assert header["required"] is True
 
 
+def test_qfq_routes_publish_concrete_schemas_and_required_idempotency() -> None:
+    paths = create_app().openapi()["paths"]
+    read = paths["/api/v1/qfq-data/{symbol}"]["get"]
+    refresh = paths["/api/v1/qfq-data/{symbol}/refresh"]["post"]
+
+    assert "$ref" in read["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ]
+    assert "$ref" in refresh["responses"]["202"]["content"]["application/json"][
+        "schema"
+    ]
+    header = next(
+        parameter
+        for parameter in refresh["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+    assert header["required"] is True
+
+
 def test_calendar_import_is_available_from_the_main_cli() -> None:
     args = build_parser().parse_args(
         ["calendar", "import", "--file", "calendar.json"]
@@ -89,3 +110,19 @@ async def test_security_refresh_worker_rejects_missing_frozen_context() -> None:
 
     assert result.success is False
     assert result.code == "SECURITY_REFRESH_CONFIG_INVALID"
+
+
+def test_saved_openapi_matches_runtime_and_operation_ids_are_unique() -> None:
+    runtime = create_app().openapi()
+    saved = json.loads(
+        (Path(__file__).parents[2] / "openapi.json").read_text(encoding="utf-8")
+    )
+    operation_ids = [
+        operation["operationId"]
+        for path in runtime["paths"].values()
+        for method, operation in path.items()
+        if method in {"get", "post", "put", "patch", "delete"}
+    ]
+
+    assert saved == runtime
+    assert len(operation_ids) == len(set(operation_ids))

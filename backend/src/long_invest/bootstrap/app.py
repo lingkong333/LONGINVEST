@@ -23,6 +23,7 @@ from long_invest.modules.providers.api import (
 from long_invest.modules.providers.api import (
     router as providers_router,
 )
+from long_invest.modules.qfq.api import router as qfq_router
 from long_invest.modules.quotes.api import router as quotes_router
 from long_invest.modules.securities.api import router as securities_router
 from long_invest.platform.config.settings import get_settings
@@ -63,5 +64,6 @@ def create_app() -> FastAPI:
     app.include_router(providers_router)
     app.include_router(quotes_router)
     app.include_router(daily_data_router)
+    app.include_router(qfq_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

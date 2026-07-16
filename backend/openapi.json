@@ -717,7 +717,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/RefreshRequest"
+                "$ref": "#/components/schemas/long_invest__modules__securities__api__RefreshRequest"
               }
             }
           }
@@ -2291,6 +2291,167 @@
           }
         }
       }
+    },
+    "/api/v1/qfq-data/{symbol}": {
+      "get": {
+        "tags": [
+          "qfq-data"
+        ],
+        "summary": "Get Qfq Data",
+        "operationId": "get_qfq_data_api_v1_qfq_data__symbol__get",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "start",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Start"
+            }
+          },
+          {
+            "name": "end",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "End"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 200,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QfqDataResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/qfq-data/{symbol}/refresh": {
+      "post": {
+        "tags": [
+          "qfq-data"
+        ],
+        "summary": "Refresh Qfq Data",
+        "operationId": "refresh_qfq_data_api_v1_qfq_data__symbol__refresh_post",
+        "parameters": [
+          {
+            "name": "symbol",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/long_invest__modules__qfq__api__RefreshRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QfqJobResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -3337,6 +3498,336 @@
         ],
         "title": "ProviderCode"
       },
+      "QfqBarRecord": {
+        "properties": {
+          "trade_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Trade Date"
+          },
+          "open": {
+            "type": "string",
+            "title": "Open"
+          },
+          "high": {
+            "type": "string",
+            "title": "High"
+          },
+          "low": {
+            "type": "string",
+            "title": "Low"
+          },
+          "close": {
+            "type": "string",
+            "title": "Close"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          },
+          "amount": {
+            "type": "string",
+            "title": "Amount"
+          }
+        },
+        "type": "object",
+        "required": [
+          "trade_date",
+          "open",
+          "high",
+          "low",
+          "close",
+          "volume",
+          "amount"
+        ],
+        "title": "QfqBarRecord"
+      },
+      "QfqDataPage": {
+        "properties": {
+          "dataset": {
+            "$ref": "#/components/schemas/QfqDatasetRecord"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QfqBarRecord"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "items",
+          "pagination"
+        ],
+        "title": "QfqDataPage"
+      },
+      "QfqDataResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/QfqDataPage"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "QfqDataResponse"
+      },
+      "QfqDatasetLifecycle": {
+        "type": "string",
+        "enum": [
+          "STAGING",
+          "CURRENT",
+          "SUPERSEDED"
+        ],
+        "title": "QfqDatasetLifecycle"
+      },
+      "QfqDatasetRecord": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "security_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Security Id"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "requested_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Requested Start"
+          },
+          "requested_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Requested End"
+          },
+          "actual_start": {
+            "type": "string",
+            "format": "date",
+            "title": "Actual Start"
+          },
+          "actual_end": {
+            "type": "string",
+            "format": "date",
+            "title": "Actual End"
+          },
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of Date"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "provider_contract_version": {
+            "type": "string",
+            "title": "Provider Contract Version"
+          },
+          "anchor_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Anchor Date"
+          },
+          "anchor_close": {
+            "type": "string",
+            "title": "Anchor Close"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count"
+          },
+          "checksum": {
+            "type": "string",
+            "title": "Checksum"
+          },
+          "lifecycle": {
+            "$ref": "#/components/schemas/QfqDatasetLifecycle"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/QfqFreshness"
+          },
+          "stale_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "activated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Activated At"
+          },
+          "superseded_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Superseded At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "security_id",
+          "symbol",
+          "version",
+          "requested_start",
+          "requested_end",
+          "actual_start",
+          "actual_end",
+          "as_of_date",
+          "provider",
+          "provider_contract_version",
+          "anchor_date",
+          "anchor_close",
+          "row_count",
+          "checksum",
+          "lifecycle",
+          "freshness",
+          "stale_reason",
+          "created_at",
+          "activated_at",
+          "superseded_at"
+        ],
+        "title": "QfqDatasetRecord"
+      },
+      "QfqFreshness": {
+        "type": "string",
+        "enum": [
+          "FRESH",
+          "STALE"
+        ],
+        "title": "QfqFreshness"
+      },
+      "QfqJobData": {
+        "properties": {
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "job_type": {
+            "type": "string",
+            "title": "Job Type"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "job_id",
+          "job_type",
+          "status"
+        ],
+        "title": "QfqJobData"
+      },
+      "QfqJobResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/QfqJobData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "QfqJobResponse"
+      },
       "QuoteCyclePageData": {
         "properties": {
           "items": {
@@ -3895,19 +4386,6 @@
         ],
         "title": "QuoteJobResponse"
       },
-      "RefreshRequest": {
-        "properties": {
-          "confirm": {
-            "type": "boolean",
-            "title": "Confirm"
-          }
-        },
-        "type": "object",
-        "required": [
-          "confirm"
-        ],
-        "title": "RefreshRequest"
-      },
       "RestoreRequest": {
         "properties": {
           "market": {
@@ -4142,6 +4620,58 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "long_invest__modules__qfq__api__RefreshRequest": {
+        "properties": {
+          "start": {
+            "type": "string",
+            "format": "date",
+            "title": "Start"
+          },
+          "end": {
+            "type": "string",
+            "format": "date",
+            "title": "End"
+          },
+          "as_of_date": {
+            "type": "string",
+            "format": "date",
+            "title": "As Of Date"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "start",
+          "end",
+          "as_of_date",
+          "confirm",
+          "reason"
+        ],
+        "title": "RefreshRequest"
+      },
+      "long_invest__modules__securities__api__RefreshRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm"
+        ],
+        "title": "RefreshRequest"
       }
     }
   }

@@ -719,6 +719,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/qfq-data/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Qfq Data */
+        get: operations["get_qfq_data_api_v1_qfq_data__symbol__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/qfq-data/{symbol}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Qfq Data */
+        post: operations["refresh_qfq_data_api_v1_qfq_data__symbol__refresh_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1153,6 +1187,165 @@ export interface components {
          * @enum {string}
          */
         ProviderCode: "EASTMONEY" | "SINA";
+        /** QfqBarRecord */
+        QfqBarRecord: {
+            /**
+             * Trade Date
+             * Format: date
+             */
+            trade_date: string;
+            /** Open */
+            open: string;
+            /** High */
+            high: string;
+            /** Low */
+            low: string;
+            /** Close */
+            close: string;
+            /** Volume */
+            volume: number;
+            /** Amount */
+            amount: string;
+        };
+        /** QfqDataPage */
+        QfqDataPage: {
+            dataset: components["schemas"]["QfqDatasetRecord"];
+            /** Items */
+            items: components["schemas"]["QfqBarRecord"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** QfqDataResponse */
+        QfqDataResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["QfqDataPage"];
+        };
+        /**
+         * QfqDatasetLifecycle
+         * @enum {string}
+         */
+        QfqDatasetLifecycle: "STAGING" | "CURRENT" | "SUPERSEDED";
+        /** QfqDatasetRecord */
+        QfqDatasetRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            /** Version */
+            version: number;
+            /**
+             * Requested Start
+             * Format: date
+             */
+            requested_start: string;
+            /**
+             * Requested End
+             * Format: date
+             */
+            requested_end: string;
+            /**
+             * Actual Start
+             * Format: date
+             */
+            actual_start: string;
+            /**
+             * Actual End
+             * Format: date
+             */
+            actual_end: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Provider */
+            provider: string;
+            /** Provider Contract Version */
+            provider_contract_version: string;
+            /**
+             * Anchor Date
+             * Format: date
+             */
+            anchor_date: string;
+            /** Anchor Close */
+            anchor_close: string;
+            /** Row Count */
+            row_count: number;
+            /** Checksum */
+            checksum: string;
+            lifecycle: components["schemas"]["QfqDatasetLifecycle"];
+            freshness: components["schemas"]["QfqFreshness"];
+            /** Stale Reason */
+            stale_reason: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Activated At */
+            activated_at: string | null;
+            /** Superseded At */
+            superseded_at: string | null;
+        };
+        /**
+         * QfqFreshness
+         * @enum {string}
+         */
+        QfqFreshness: "FRESH" | "STALE";
+        /** QfqJobData */
+        QfqJobData: {
+            /**
+             * Job Id
+             * Format: uuid
+             */
+            job_id: string;
+            /** Job Type */
+            job_type: string;
+            /** Status */
+            status: string;
+        };
+        /** QfqJobResponse */
+        QfqJobResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["QfqJobData"];
+        };
         /** QuoteCyclePageData */
         QuoteCyclePageData: {
             /** Items */
@@ -1338,11 +1531,6 @@ export interface components {
             server_time: string;
             data: components["schemas"]["QuoteJobData"];
         };
-        /** RefreshRequest */
-        RefreshRequest: {
-            /** Confirm */
-            confirm: boolean;
-        };
         /** RestoreRequest */
         RestoreRequest: {
             /**
@@ -1420,6 +1608,33 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** RefreshRequest */
+        long_invest__modules__qfq__api__RefreshRequest: {
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
+            /**
+             * As Of Date
+             * Format: date
+             */
+            as_of_date: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** RefreshRequest */
+        long_invest__modules__securities__api__RefreshRequest: {
+            /** Confirm */
+            confirm: boolean;
         };
     };
     responses: never;
@@ -1902,7 +2117,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["RefreshRequest"];
+                "application/json": components["schemas"]["long_invest__modules__securities__api__RefreshRequest"];
             };
         };
         responses: {
@@ -2842,6 +3057,79 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DailyBarPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_qfq_data_api_v1_qfq_data__symbol__get: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QfqDataResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_qfq_data_api_v1_qfq_data__symbol__refresh_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["long_invest__modules__qfq__api__RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QfqJobResponse"];
                 };
             };
             /** @description Validation Error */

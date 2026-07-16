@@ -5,6 +5,7 @@ from long_invest.bootstrap.jobs import (
     daily_data_finalize,
     daily_data_item,
     daily_data_retry,
+    qfq_refresh,
     quote_diagnostic,
     realtime_quote_cycle,
     security_master_refresh,
@@ -19,6 +20,7 @@ HANDLERS["DAILY_DATA_COORDINATE"] = daily_data_coordinate
 HANDLERS["DAILY_DATA_ITEM"] = daily_data_item
 HANDLERS["DAILY_DATA_FINALIZE"] = daily_data_finalize
 HANDLERS["DAILY_DATA_RETRY"] = daily_data_retry
+HANDLERS["QFQ_REFRESH"] = qfq_refresh
 
 
 def execute_job(job_id: str, outbox_id: str) -> dict[str, Any]:

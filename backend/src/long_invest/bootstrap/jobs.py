@@ -1,12 +1,16 @@
 import asyncio
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
 from long_invest.bootstrap.providers import build_provider_service
 from long_invest.modules.auth.audit import AuditContext
+from long_invest.modules.daily_data.application import DailyDataApplication
 from long_invest.modules.daily_data.contracts import (
     CreateDailyBatch,
+    DailyBarSnapshot,
     DailyBatchStatus,
     DailyMissingReason,
     DailyStageStatus,
@@ -20,7 +24,17 @@ from long_invest.modules.market_data.service import QualityIssueService
 from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderCapability,
+    ProviderCode,
+    validate_symbol,
 )
+from long_invest.modules.qfq.contracts import (
+    QfqBarInput,
+    QfqRefreshStatus,
+    QfqValidationError,
+    RefreshQfq,
+    ValidatedQfqWindow,
+)
+from long_invest.modules.qfq.validation import validate_qfq_window
 from long_invest.modules.quotes.collection import QuoteCollectionService
 from long_invest.modules.quotes.contracts import (
     CreateQuoteCycle,
@@ -48,6 +62,21 @@ from long_invest.platform.jobs.contracts import (
 )
 from long_invest.platform.jobs.service import JobService
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
+
+
+@dataclass(frozen=True, slots=True)
+class _QfqJobConfig:
+    refresh_run_id: UUID
+    security_id: UUID
+    symbol: str
+    start: date
+    end: date
+    as_of_date: date
+    expected_trade_dates: tuple[date, ...]
+    input_daily_version: int
+    unadjusted_close: Decimal
+    trigger_reason: str
+    provider: ProviderCode
 
 
 class DatabaseQuoteProvider:
@@ -693,3 +722,299 @@ def _daily_batch_result(result: Any) -> JobResult:
         retryable=False,
         data=data,
     )
+
+
+async def qfq_refresh(context: JobExecutionContext) -> JobResult:
+    try:
+        config = _qfq_job_config(context)
+    except (KeyError, TypeError, ValueError):
+        return JobResult.failure(
+            code="QFQ_REFRESH_CONFIG_INVALID",
+            message="前复权刷新任务缺少有效的冻结上下文",
+            retryable=False,
+        )
+
+    application = _qfq_application()
+    begin_result = await application.begin_fetch(
+        config.refresh_run_id, now=datetime.now(UTC)
+    )
+    begin_status = _qfq_status(begin_result)
+    if begin_status is QfqRefreshStatus.SUCCEEDED:
+        return _qfq_replay_result(config.refresh_run_id, begin_result)
+    if begin_status in {
+        QfqRefreshStatus.FAILED,
+        QfqRefreshStatus.TIMED_OUT,
+        QfqRefreshStatus.SUPERSEDED,
+    }:
+        return _qfq_failure_replay_result(config.refresh_run_id, begin_result)
+
+    try:
+        provider_result, provider_contract_version = await _fetch_qfq_provider(config)
+    except TimeoutError:
+        return await _fail_qfq(
+            application,
+            config.refresh_run_id,
+            code="QFQ_REFRESH_TIMED_OUT",
+            retryable=True,
+        )
+    except Exception as exc:
+        code = str(getattr(exc, "code", ""))
+        if code == "PROVIDER_TIMEOUT":
+            failure_code = "QFQ_REFRESH_TIMED_OUT"
+        else:
+            failure_code = "QFQ_PROVIDER_FAILED"
+        return await _fail_qfq(
+            application,
+            config.refresh_run_id,
+            code=failure_code,
+            retryable=True,
+        )
+
+    if provider_result.batch_error_code or provider_result.failures:
+        return await _fail_qfq(
+            application,
+            config.refresh_run_id,
+            code="QFQ_PROVIDER_FAILED",
+            retryable=True,
+        )
+
+    await application.begin_validation(config.refresh_run_id, now=datetime.now(UTC))
+    try:
+        window = _validate_qfq_provider_result(config, provider_result.items, context)
+    except QfqValidationError as exc:
+        return await _fail_qfq(
+            application,
+            config.refresh_run_id,
+            code=exc.code,
+            retryable=False,
+        )
+    except (TypeError, ValueError):
+        return await _fail_qfq(
+            application,
+            config.refresh_run_id,
+            code="QFQ_VALIDATION_FAILED",
+            retryable=False,
+        )
+
+    snapshot = await _daily_data_application().snapshot(
+        config.symbol, config.as_of_date
+    )
+    if snapshot is None or not _same_daily_gate(config, snapshot):
+        return await _fail_qfq(
+            application,
+            config.refresh_run_id,
+            code="QFQ_DAILY_GATE_NOT_MET",
+            retryable=False,
+        )
+
+    dataset = await application.activate(
+        config.refresh_run_id,
+        window,
+        current_input_daily_version=snapshot.data_version,
+        provider_contract_version=provider_contract_version,
+        now=datetime.now(UTC),
+    )
+    if dataset is None:
+        return JobResult.failure(
+            code="QFQ_INPUT_SUPERSEDED",
+            message="前复权刷新使用的日线版本已被替代",
+            retryable=False,
+            data={"refresh_run_id": str(config.refresh_run_id)},
+        )
+    return JobResult.success_result(
+        data={
+            "refresh_run_id": str(config.refresh_run_id),
+            "dataset_id": str(dataset.id),
+            "version": dataset.version,
+            "row_count": dataset.row_count,
+            "checksum": dataset.checksum,
+            "replayed": False,
+        },
+        message="前复权数据刷新完成",
+    )
+
+
+def _qfq_job_config(context: JobExecutionContext) -> _QfqJobConfig:
+    values = context.config
+    refresh_run_id = UUID(str(values["refresh_run_id"]))
+    security_id = UUID(str(values["security_id"]))
+    symbol = validate_symbol(str(values["symbol"]))
+    start = date.fromisoformat(str(values["start"]))
+    end = date.fromisoformat(str(values["end"]))
+    as_of_date = date.fromisoformat(str(values["as_of_date"]))
+    expected_trade_dates = tuple(
+        date.fromisoformat(str(item)) for item in values["expected_trade_dates"]
+    )
+    input_daily_version = int(values["input_daily_version"])
+    unadjusted_close = Decimal(str(values["unadjusted_close"]))
+    trigger_reason = str(values["trigger_reason"]).strip()
+    provider = ProviderCode(str(values["provider"]))
+    RefreshQfq(
+        security_id=security_id,
+        symbol=symbol,
+        start=start,
+        end=end,
+        as_of_date=as_of_date,
+        expected_trade_dates=expected_trade_dates,
+        input_daily_version=input_daily_version,
+        trigger_reason=trigger_reason,
+        request_id=str(context.job_id),
+        idempotency_key=str(context.job_id),
+        actor_user_id="qfq-refresh-worker",
+    )
+    if (
+        provider is not ProviderCode.EASTMONEY
+        or not unadjusted_close.is_finite()
+        or unadjusted_close <= 0
+    ):
+        raise ValueError("invalid frozen QFQ provider or daily gate")
+    return _QfqJobConfig(
+        refresh_run_id=refresh_run_id,
+        security_id=security_id,
+        symbol=symbol,
+        start=start,
+        end=end,
+        as_of_date=as_of_date,
+        expected_trade_dates=expected_trade_dates,
+        input_daily_version=input_daily_version,
+        unadjusted_close=unadjusted_close,
+        trigger_reason=trigger_reason,
+        provider=provider,
+    )
+
+
+async def _fetch_qfq_provider(config: _QfqJobConfig):
+    database = get_database()
+    deadline = datetime.now(UTC) + timedelta(seconds=220)
+    async with asyncio.timeout(240):
+        async with database.session() as session:
+            provider = build_provider_service(session)
+            summary = await provider.get_provider(config.provider)
+            version = int(summary["version"])
+            if version <= 0:
+                raise ValueError("Provider config version must be positive")
+            result = await provider.daily_bars(
+                DailyBarRequest(
+                    symbol=config.symbol,
+                    start=config.start,
+                    end=config.end,
+                    capability=ProviderCapability.HISTORICAL_DAILY_QFQ,
+                ),
+                deadline,
+            )
+            return result, f"{config.provider.value}:config-v{version}"
+
+
+def _validate_qfq_provider_result(
+    config: _QfqJobConfig, records: Any, context: JobExecutionContext
+) -> ValidatedQfqWindow:
+    rows = tuple(records)
+    if any(
+        item.symbol != config.symbol
+        or item.source is not config.provider
+        or item.capability is not ProviderCapability.HISTORICAL_DAILY_QFQ
+        for item in rows
+    ):
+        raise QfqValidationError("QFQ_VALIDATION_FAILED")
+    command = RefreshQfq(
+        security_id=config.security_id,
+        symbol=config.symbol,
+        start=config.start,
+        end=config.end,
+        as_of_date=config.as_of_date,
+        expected_trade_dates=config.expected_trade_dates,
+        input_daily_version=config.input_daily_version,
+        trigger_reason=config.trigger_reason,
+        request_id=str(context.job_id),
+        idempotency_key=str(context.job_id),
+        actor_user_id="qfq-refresh-worker",
+    )
+    return validate_qfq_window(
+        command,
+        (
+            QfqBarInput(
+                trade_date=item.trading_date,
+                open=item.open,
+                high=item.high,
+                low=item.low,
+                close=item.close,
+                volume=item.volume,
+                amount=item.amount,
+            )
+            for item in rows
+        ),
+        config.unadjusted_close,
+    )
+
+
+def _same_daily_gate(config: _QfqJobConfig, snapshot: DailyBarSnapshot) -> bool:
+    if (
+        snapshot.security_id != config.security_id
+        or snapshot.symbol != config.symbol
+        or snapshot.trade_date != config.as_of_date
+    ):
+        return False
+    if snapshot.data_version != config.input_daily_version:
+        return True
+    return snapshot.close == config.unadjusted_close
+
+
+async def _fail_qfq(
+    application: Any,
+    refresh_run_id: UUID,
+    *,
+    code: str,
+    retryable: bool,
+) -> JobResult:
+    await application.fail(
+        refresh_run_id,
+        code=code,
+        retryable=retryable,
+        now=datetime.now(UTC),
+    )
+    return JobResult.failure(
+        code=code,
+        message="前复权刷新失败",
+        retryable=retryable,
+        data={"refresh_run_id": str(refresh_run_id)},
+    )
+
+
+def _qfq_status(value: Any) -> QfqRefreshStatus | None:
+    status = getattr(value, "status", None)
+    try:
+        return QfqRefreshStatus(str(status)) if status is not None else None
+    except ValueError:
+        return None
+
+
+def _qfq_replay_result(refresh_run_id: UUID, run: Any) -> JobResult:
+    return JobResult.success_result(
+        data={
+            "refresh_run_id": str(refresh_run_id),
+            "dataset_id": str(run.activated_dataset_id),
+            "row_count": run.row_count,
+            "checksum": run.checksum,
+            "replayed": True,
+        },
+        message="前复权刷新已完成",
+    )
+
+
+def _qfq_failure_replay_result(refresh_run_id: UUID, run: Any) -> JobResult:
+    return JobResult.failure(
+        code=str(run.error_code),
+        message="前复权刷新已结束",
+        retryable=bool(run.retryable),
+        data={"refresh_run_id": str(refresh_run_id), "replayed": True},
+    )
+
+
+def _qfq_application() -> Any:
+    from long_invest.modules.qfq.application import get_qfq_application
+
+    return get_qfq_application()
+
+
+def _daily_data_application() -> DailyDataApplication:
+    return DailyDataApplication(get_database())

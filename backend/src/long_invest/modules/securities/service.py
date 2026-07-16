@@ -317,6 +317,9 @@ class SecurityMasterService:
         items = [
             SecurityUniverseSnapshotItem(
                 snapshot_id=frozen.id,
+                security_id=security.id,
+                listed_on=security.listed_on,
+                delisted_on=security.delisted_on,
                 symbol=security.symbol,
                 market=security.market,
                 security_type=security.security_type,

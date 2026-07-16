@@ -112,6 +112,7 @@ class DailyDataService:
         }:
             return _summary(batch)
         if status not in {
+            DailyBatchStatus.PENDING,
             DailyBatchStatus.FETCHING,
             DailyBatchStatus.VALIDATING,
         }:

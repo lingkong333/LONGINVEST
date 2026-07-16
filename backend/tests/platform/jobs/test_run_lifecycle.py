@@ -49,9 +49,9 @@ async def test_claim_start_heartbeat_progress_and_complete_are_fenced() -> None:
             run = await service.claim(
                 job_id=job.id,
                 worker_id="worker-a",
-                soft_timeout_seconds=30,
-                hard_timeout_seconds=60,
             )
+            assert run.soft_timeout_seconds == 30
+            assert run.hard_timeout_seconds == 60
             assert await service.start(job_id=job.id, fence_token=run.fence_token)
             assert await service.heartbeat(job_id=job.id, fence_token=run.fence_token)
             assert await service.report_progress(
@@ -96,6 +96,34 @@ async def test_claim_start_heartbeat_progress_and_complete_are_fenced() -> None:
 
 
 @pytest.mark.anyio
+async def test_successful_partial_result_sets_partial_job_status() -> None:
+    database = Database(AppSettings(_env_file=None).database_url)
+    try:
+        job = await create_queued_job(database)
+        async with database.transaction() as session:
+            service = JobService(session)
+            run = await service.claim(job_id=job.id, worker_id="worker-partial")
+            await service.start(job_id=job.id, fence_token=run.fence_token)
+            await service.complete(
+                job_id=job.id,
+                fence_token=run.fence_token,
+                result=JobResult(
+                    success=True,
+                    code="PARTIAL",
+                    message="partial business result",
+                    retryable=False,
+                ),
+            )
+
+        async with database.session() as session:
+            stored_job = await session.get(Job, job.id)
+            assert stored_job is not None
+            assert stored_job.status == JobStatus.PARTIAL
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.anyio
 async def test_late_old_fence_is_superseded_and_cannot_overwrite_new_run() -> None:
     database = Database(AppSettings(_env_file=None).database_url)
     try:
@@ -104,8 +132,6 @@ async def test_late_old_fence_is_superseded_and_cannot_overwrite_new_run() -> No
             first = await JobService(session).claim(
                 job_id=job.id,
                 worker_id="worker-old",
-                soft_timeout_seconds=30,
-                hard_timeout_seconds=60,
             )
         async with database.transaction() as session:
             stored_job = await session.get(Job, job.id, with_for_update=True)
@@ -120,8 +146,6 @@ async def test_late_old_fence_is_superseded_and_cannot_overwrite_new_run() -> No
             second = await JobService(session).claim(
                 job_id=job.id,
                 worker_id="worker-new",
-                soft_timeout_seconds=30,
-                hard_timeout_seconds=60,
             )
         async with database.transaction() as session:
             accepted = await JobService(session).complete(

@@ -2,13 +2,18 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.securities.contracts import (
+    FrozenSecurity,
+    FrozenUniverse,
+    ListingStatus,
     SecurityAuditContext,
     SecurityMasterSnapshot,
     SnapshotResult,
+    SymbolUniverseQuery,
     validate_symbol,
 )
 from long_invest.modules.securities.integrations import (
@@ -118,6 +123,8 @@ class SecurityApplication:
             },
             business_object_type="security_master",
             created_by_user_id=created_by_user_id,
+            soft_timeout_seconds=30,
+            hard_timeout_seconds=60,
         )
         try:
             async with self._database.transaction() as session:
@@ -126,6 +133,38 @@ class SecurityApplication:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
+
+    async def freeze_symbols(self, symbols: tuple[str, ...]):
+        try:
+            async with self._database.transaction() as session:
+                repository = SecurityRepository(session)
+                snapshot = await SecurityMasterService(repository).freeze_symbols(
+                    SymbolUniverseQuery(symbols=symbols)
+                )
+                stored = await repository.get_universe_snapshot(snapshot.id)
+                if stored is None:
+                    raise RuntimeError("saved universe snapshot cannot be reloaded")
+                return _frozen_universe(stored)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
+    async def frozen_universe(self, snapshot_id: UUID) -> FrozenUniverse:
+        try:
+            async with self._database.session() as session:
+                snapshot = await SecurityRepository(session).get_universe_snapshot(
+                    snapshot_id
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        if snapshot is None:
+            raise AppError(
+                code="SECURITY_UNIVERSE_NOT_FOUND",
+                message="股票范围快照不存在",
+                status_code=404,
+            )
+        return _frozen_universe(snapshot)
 
     async def apply_snapshot(
         self,
@@ -158,6 +197,25 @@ class SecurityApplication:
 
 def get_security_application() -> SecurityApplication:
     return SecurityApplication(get_database())
+
+
+def _frozen_universe(snapshot: Any) -> FrozenUniverse:
+    return FrozenUniverse(
+        id=snapshot.id,
+        master_version=snapshot.master_version,
+        items=tuple(
+            FrozenSecurity(
+                security_id=item.security_id,
+                symbol=item.symbol,
+                listing_status=ListingStatus(item.listing_status),
+                is_suspended=item.is_suspended,
+                is_st=item.is_st,
+                listed_on=item.listed_on,
+                delisted_on=item.delisted_on,
+            )
+            for item in snapshot.items
+        ),
+    )
 
 
 def _backend_unavailable() -> AppError:

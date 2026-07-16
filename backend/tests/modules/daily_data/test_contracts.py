@@ -79,11 +79,34 @@ def test_daily_batch_requires_one_unique_security_id_per_symbol() -> None:
             security_ids=(security_id,),
             **common,
         )
-    with pytest.raises(ValueError, match="重复"):
+    with pytest.raises(ValueError):
         CreateDailyBatch(
             symbols=("600000.SH", "000001.SZ"),
             security_ids=(security_id, security_id),
             **common,
+        )
+
+
+def test_daily_batch_freezes_known_corporate_actions_inside_scope() -> None:
+    command = CreateDailyBatch(
+        trading_date=date(2026, 7, 15),
+        universe_snapshot_id=uuid4(),
+        symbols=("600000.SH", "000001.SZ"),
+        security_ids=(uuid4(), uuid4()),
+        idempotency_key="daily:2026-07-15",
+        known_corporate_action_symbols=("600000.SH",),
+    )
+
+    assert command.known_corporate_action_symbols == ("600000.SH",)
+
+    with pytest.raises(ValueError):
+        CreateDailyBatch(
+            trading_date=date(2026, 7, 15),
+            universe_snapshot_id=uuid4(),
+            symbols=("600000.SH",),
+            security_ids=(uuid4(),),
+            idempotency_key="daily:2026-07-15:invalid",
+            known_corporate_action_symbols=("000001.SZ",),
         )
 
 

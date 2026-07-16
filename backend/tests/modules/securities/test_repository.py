@@ -197,6 +197,7 @@ async def test_saved_snapshot_does_not_follow_later_security_changes() -> None:
             [
                 SecurityUniverseSnapshotItem(
                     snapshot_id=snapshot_id,
+                    security_id=security_id,
                     symbol="600000.SH",
                     market="SH",
                     security_type="A_SHARE",

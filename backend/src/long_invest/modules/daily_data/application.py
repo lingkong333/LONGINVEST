@@ -134,7 +134,7 @@ class DailyDataApplication:
                 batch = await repository.get_batch(batch_id)
                 command = SubmitJob(
                     job_type="DAILY_DATA_RETRY",
-                    queue="daily-data",
+                    queue="daily-market-data",
                     idempotency_scope=f"daily-data:retry:{batch_id}",
                     idempotency_key=audit_context.idempotency_key,
                     request_id=audit_context.request_id,
@@ -143,11 +143,18 @@ class DailyDataApplication:
                         "universe_snapshot_id": str(batch.universe_snapshot_id),
                         "trading_date": batch.trading_date.isoformat(),
                         "symbols": list(symbols),
+                        "known_corporate_action_symbols": [
+                            symbol
+                            for symbol in symbols
+                            if symbol in batch.known_corporate_action_symbols
+                        ],
                         "reason": audit_context.reason,
                     },
                     business_object_type="daily_data_batch",
                     business_object_id=str(batch_id),
                     created_by_user_id=audit_context.actor_user_id,
+                    soft_timeout_seconds=300,
+                    hard_timeout_seconds=600,
                 )
                 job = await self._job_service_factory(session).submit(command)
                 audit = self._audit_service_factory(session)

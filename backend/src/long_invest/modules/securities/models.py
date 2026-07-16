@@ -164,6 +164,13 @@ class SecurityUniverseSnapshotItem(Base):
         ForeignKey("security_universe_snapshot.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    security_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("security.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    listed_on: Mapped[date | None] = mapped_column(Date)
+    delisted_on: Mapped[date | None] = mapped_column(Date)
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     market: Mapped[str] = mapped_column(String(8), nullable=False)
     security_type: Mapped[str] = mapped_column(String(32), nullable=False)

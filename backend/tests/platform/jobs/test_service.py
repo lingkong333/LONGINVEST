@@ -17,7 +17,14 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
-def submit_command(*, scope: str, key: str, sample: int = 1) -> SubmitJob:
+def submit_command(
+    *,
+    scope: str,
+    key: str,
+    sample: int = 1,
+    soft_timeout_seconds: int = 30,
+    hard_timeout_seconds: int = 60,
+) -> SubmitJob:
     return SubmitJob(
         job_type="FOUNDATION_TEST",
         queue="maintenance",
@@ -25,6 +32,8 @@ def submit_command(*, scope: str, key: str, sample: int = 1) -> SubmitJob:
         idempotency_key=key,
         request_id=f"req_{uuid4().hex}",
         config_snapshot={"sample": sample},
+        soft_timeout_seconds=soft_timeout_seconds,
+        hard_timeout_seconds=hard_timeout_seconds,
     )
 
 
@@ -47,6 +56,8 @@ async def test_submit_writes_job_and_outbox_in_caller_transaction() -> None:
             )
 
         assert stored_job is not None
+        assert stored_job.soft_timeout_seconds == 30
+        assert stored_job.hard_timeout_seconds == 60
         assert stored_outbox is not None
         assert stored_outbox.payload == {
             "job_id": str(job.id),
@@ -132,6 +143,32 @@ async def test_different_content_reusing_idempotency_key_is_conflict() -> None:
                 )
 
         assert captured.value.status_code == 409
+        assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
+    finally:
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_different_timeout_reusing_idempotency_key_is_conflict() -> None:
+    database = Database(AppSettings(_env_file=None).database_url)
+    unique = uuid4().hex
+    try:
+        async with database.transaction() as session:
+            await JobService(session).submit(
+                submit_command(scope=f"test:{unique}", key="same-key")
+            )
+
+        with pytest.raises(AppError) as captured:
+            async with database.transaction() as session:
+                await JobService(session).submit(
+                    submit_command(
+                        scope=f"test:{unique}",
+                        key="same-key",
+                        soft_timeout_seconds=45,
+                        hard_timeout_seconds=60,
+                    )
+                )
+
         assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
     finally:
         await database.dispose()

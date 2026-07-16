@@ -101,6 +101,15 @@ def test_market_data_migration_is_the_single_successor_to_0007() -> None:
     assert 'down_revision: str | None = "20260715_0007"' in source
     assert "PARTITION_YEARS = (2025, 2026, 2027)" in source
     assert "CREATE TABLE daily_bar_unadjusted_{year}" in source
+    assert "known_corporate_action_symbols JSONB NOT NULL" in source
+    drop_at = source.index(
+        "DROP TRIGGER security_universe_snapshot_item_append_only"
+    )
+    update_at = source.index("UPDATE security_universe_snapshot_item AS item")
+    recreate_at = source.index(
+        "CREATE TRIGGER security_universe_snapshot_item_append_only"
+    )
+    assert drop_at < update_at < recreate_at
 
 
 @pytest.mark.anyio
@@ -118,6 +127,17 @@ async def test_market_data_schema_and_year_partition_exist() -> None:
 
             job_columns = schema["job_columns"]
             assert {"soft_timeout_seconds", "hard_timeout_seconds"} <= job_columns
+            assert (
+                "known_corporate_action_symbols"
+                in schema["daily_batch_columns"]
+            )
+            assert "security_id" in schema["security_snapshot_columns"]
+            assert "listed_on" in schema["security_snapshot_columns"]
+            assert "delisted_on" in schema["security_snapshot_columns"]
+            assert (
+                "fk_security_universe_snapshot_item_security_id_security"
+                in schema["security_snapshot_foreign_keys"]
+            )
 
             partitions = set(
                 (
@@ -210,5 +230,20 @@ def _inspect_market_data_schema(sync_session):
         "indexes": indexes,
         "job_columns": {
             column["name"] for column in inspector.get_columns("job")
+        },
+        "daily_batch_columns": {
+            column["name"]
+            for column in inspector.get_columns("daily_data_batch")
+        },
+        "security_snapshot_columns": {
+            column["name"]
+            for column in inspector.get_columns("security_universe_snapshot_item")
+        },
+        "security_snapshot_foreign_keys": {
+            item["name"]
+            for item in inspector.get_foreign_keys(
+                "security_universe_snapshot_item"
+            )
+            if item.get("name")
         },
     }

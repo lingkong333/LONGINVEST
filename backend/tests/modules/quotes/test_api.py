@@ -139,6 +139,8 @@ def test_diagnostic_submits_separate_job_and_does_not_call_manual() -> None:
     )
     assert response.status_code == 202
     assert [call[0] for call in application.calls] == ["diagnostic"]
+    assert application.calls[0][1]["session_id"] == "session-1"
+    assert application.calls[0][1]["trusted_ip"] == "127.0.0.1"
 
 
 def test_cycle_and_item_queries_forward_stable_pagination() -> None:

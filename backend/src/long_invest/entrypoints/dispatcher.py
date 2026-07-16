@@ -27,7 +27,6 @@ async def run() -> None:
         publisher=publisher,
         dispatcher_id=socket.gethostname(),
         batch_size=settings.dispatcher_batch_size,
-        queue_timeout_seconds=settings.queue_job_timeout_seconds,
     )
     try:
         while not stop.is_set():

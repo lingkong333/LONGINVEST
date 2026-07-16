@@ -31,6 +31,22 @@ TERMINAL_CYCLES = frozenset(
 MISSED_CLAIM_WINDOW_SECONDS = 60
 
 
+def fallback_symbols(
+    expected_symbols: tuple[str, ...],
+    primary_quotes: tuple[RealtimeQuote, ...],
+    *,
+    now: datetime,
+) -> tuple[str, ...]:
+    """Return the frozen symbols whose primary quote is absent or invalid."""
+    primary_by_symbol = {quote.symbol: quote for quote in primary_quotes}
+    return tuple(
+        symbol
+        for symbol in expected_symbols
+        if (quote := primary_by_symbol.get(symbol)) is None
+        or not validate_quote(quote, symbol=symbol, now=now).valid
+    )
+
+
 class QuoteRepositoryPort(Protocol):
     session: object
 

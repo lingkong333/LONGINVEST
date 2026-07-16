@@ -113,9 +113,9 @@ class JobExecutionContext:
 JobHandler = Callable[[JobExecutionContext], Awaitable[JobResult]]
 ```
 
-`bootstrap/jobs.py` 增加 `realtime_quote_cycle()`、`quote_diagnostic()`、`daily_data_collect()`、`daily_data_retry()`。处理器验证冻结配置，使用数据库事务调用公开服务，外部调用有明确 deadline；Provider 异常转成稳定且可重试的 `JobResult`。
+`bootstrap/jobs.py` 增加 `realtime_quote_cycle()`、`quote_diagnostic()`、`daily_data_coordinate()`、`daily_data_item()`、`daily_data_finalize()` 和 `daily_data_retry()`。处理器验证冻结配置，使用数据库事务调用公开服务，外部调用有明确 deadline；Provider 异常转成稳定且可重试的 `JobResult`。
 
-日线处理器从股票范围快照恢复待处理股票，以 4 个协程的有界并发逐股调用 `ProviderService.daily_bars()`；每只完成后提交暂存事实，并通过 `JobService.report_progress()` 使用任务编号和栅栏令牌更新进度。进程重启时跳过已经通过校验的暂存股票。实时处理器先显式请求东方财富，对缺失或领域质量无效的股票再显式请求新浪，随后一次性 finalize。
+日线父协调任务从股票范围快照恢复待处理股票，创建业务批次和持久化 `job_item`，再为每只股票提交独立的 `DAILY_DATA_ITEM` 子任务。子任务使用独立数据库会话和单股硬超时调用 `ProviderService.daily_bars()`，完成后提交暂存事实并通过任务编号和栅栏令牌更新持久化进度；不能让一个 3600 秒硬超时覆盖全市场。所有项目进入终态后由幂等的 `DAILY_DATA_FINALIZE` 任务统一校验和提交。进程重启时从 `job_item` 与暂存区恢复，跳过已经通过校验的股票。实时处理器先显式请求东方财富，对缺失或领域质量无效的股票再显式请求新浪，随后一次性 finalize。
 
 `worker.py` 显式登记：
 
@@ -124,7 +124,9 @@ HANDLERS.update({
     "SECURITY_MASTER_REFRESH": security_master_refresh,
     "REALTIME_QUOTE_CYCLE": realtime_quote_cycle,
     "QUOTE_DIAGNOSTIC": quote_diagnostic,
-    "DAILY_DATA_COLLECT": daily_data_collect,
+    "DAILY_DATA_COORDINATE": daily_data_coordinate,
+    "DAILY_DATA_ITEM": daily_data_item,
+    "DAILY_DATA_FINALIZE": daily_data_finalize,
     "DAILY_DATA_RETRY": daily_data_retry,
 })
 ```
@@ -133,7 +135,7 @@ HANDLERS.update({
 
 - [ ] **Step 4: 配置队列和超时**
 
-设置 `quote_cycle_timeout_seconds` 默认 30、限制 10～60；实时任务软/硬超时为 45/60 秒，日线任务为 3300/3600 秒。实时任务进入 `realtime` 队列，日线进入 `daily-data` 队列。`deploy/compose.yaml` 中消费者只监听自己的队列，不让日线占用实时 Worker。
+设置 `quote_cycle_timeout_seconds` 默认 30、限制 10～60；实时任务软/硬超时为 45/60 秒。日线父协调和最终提交任务只负责有界编排，单股项目使用独立软硬超时，不给全市场父任务设置覆盖全部股票的短硬超时。实时任务进入 `realtime-quotes` 队列，日线进入 `daily-market-data` 队列。`deploy/compose.yaml` 中消费者只监听自己的队列，不让日线占用实时 Worker。
 
 - [ ] **Step 5: 运行集成测试**
 

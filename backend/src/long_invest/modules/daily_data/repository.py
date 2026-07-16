@@ -55,6 +55,9 @@ class DailyDataRepository:
             parent_batch_id=command.parent_batch_id,
             symbols=list(command.symbols),
             security_ids=[str(value) for value in command.security_ids],
+            known_corporate_action_symbols=list(
+                command.known_corporate_action_symbols
+            ),
             idempotency_key=command.idempotency_key,
             status="PENDING",
             expected_count=len(command.symbols),
@@ -331,6 +334,8 @@ def _validate_batch_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or existing.universe_snapshot_id != command.universe_snapshot_id
         or tuple(existing.symbols) != command.symbols
         or tuple(existing.security_ids) != tuple(map(str, command.security_ids))
+        or tuple(existing.known_corporate_action_symbols)
+        != command.known_corporate_action_symbols
         or existing.parent_batch_id != command.parent_batch_id
     ):
         raise AppError(
@@ -348,6 +353,8 @@ def _validate_scope_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or command.parent_batch_id is not None
         or tuple(existing.symbols) != command.symbols
         or tuple(existing.security_ids) != tuple(map(str, command.security_ids))
+        or tuple(existing.known_corporate_action_symbols)
+        != command.known_corporate_action_symbols
     ):
         raise AppError(
             code="DAILY_BATCH_SCOPE_CONFLICT",
@@ -378,6 +385,8 @@ def _validate_retry_parent(
         or parent.universe_snapshot_id != command.universe_snapshot_id
         or not set(zip(command.symbols, map(str, command.security_ids), strict=True))
         .issubset(set(zip(parent.symbols, parent.security_ids, strict=True)))
+        or set(command.known_corporate_action_symbols)
+        != set(parent.known_corporate_action_symbols).intersection(command.symbols)
     ):
         raise AppError(
             code="DAILY_RETRY_SCOPE_CONFLICT",

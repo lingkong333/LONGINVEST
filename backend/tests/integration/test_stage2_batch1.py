@@ -1,8 +1,11 @@
+from uuid import uuid4
+
 import pytest
 
 from long_invest.bootstrap.app import create_app
 from long_invest.bootstrap.jobs import security_master_refresh
 from long_invest.entrypoints.cli import build_parser
+from long_invest.platform.jobs.contracts import JobExecutionContext
 
 
 def test_reviewed_stage2_routes_are_registered() -> None:
@@ -28,7 +31,13 @@ def test_calendar_import_is_available_from_the_main_cli() -> None:
 
 @pytest.mark.anyio
 async def test_security_refresh_worker_rejects_missing_frozen_context() -> None:
-    result = await security_master_refresh({"source": "eastmoney"})
+    result = await security_master_refresh(
+        JobExecutionContext(
+            job_id=uuid4(),
+            fence_token=uuid4(),
+            config={"source": "eastmoney"},
+        )
+    )
 
     assert result.success is False
     assert result.code == "SECURITY_REFRESH_CONFIG_INVALID"

@@ -3,6 +3,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date
 from enum import StrEnum
+from uuid import UUID
 
 
 class Market(StrEnum):
@@ -97,6 +98,24 @@ class SymbolUniverseQuery:
         for symbol in normalized:
             validate_symbol(symbol)
         object.__setattr__(self, "symbols", normalized)
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenSecurity:
+    security_id: UUID
+    symbol: str
+    listing_status: ListingStatus
+    is_suspended: bool
+    is_st: bool
+    listed_on: date | None
+    delisted_on: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenUniverse:
+    id: UUID
+    master_version: int
+    items: tuple[FrozenSecurity, ...]
 
 
 @dataclass(frozen=True, slots=True)

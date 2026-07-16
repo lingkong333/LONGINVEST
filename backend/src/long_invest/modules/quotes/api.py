@@ -111,6 +111,8 @@ async def diagnose_quotes(
         idempotency_key=_idempotency_key(idempotency_key),
         request_id=authenticated.audit_context.request_id,
         created_by_user_id=str(authenticated.user.id),
+        session_id=str(authenticated.session.id),
+        trusted_ip=authenticated.audit_context.trusted_ip or "unknown",
     )
     return success_response(data=_job_data(job), code="JOB_ACCEPTED")
 

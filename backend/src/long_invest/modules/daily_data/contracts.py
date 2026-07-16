@@ -77,6 +77,7 @@ class CreateDailyBatch:
     symbols: tuple[str, ...]
     security_ids: tuple[UUID, ...]
     idempotency_key: str
+    known_corporate_action_symbols: tuple[str, ...] = ()
     parent_batch_id: UUID | None = None
     deadline_at: datetime | None = None
 
@@ -99,6 +100,19 @@ class CreateDailyBatch:
         if len(security_ids) != len(set(security_ids)):
             raise ValueError("冻结股票范围不能包含重复股票编号")
         object.__setattr__(self, "security_ids", security_ids)
+        corporate_action_symbols = tuple(self.known_corporate_action_symbols)
+        if (
+            len(corporate_action_symbols) != len(set(corporate_action_symbols))
+            or not set(corporate_action_symbols).issubset(symbols)
+        ):
+            raise ValueError(
+                "known corporate action symbols must be unique and inside scope"
+            )
+        object.__setattr__(
+            self,
+            "known_corporate_action_symbols",
+            tuple(symbol for symbol in symbols if symbol in corporate_action_symbols),
+        )
         object.__setattr__(
             self, "idempotency_key", _require_idempotency_key(self.idempotency_key)
         )

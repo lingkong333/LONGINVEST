@@ -10,6 +10,7 @@ from long_invest.modules.quotes.quality import (
     compare_quotes,
     validate_quote,
 )
+from long_invest.modules.quotes.service import fallback_symbols
 
 NOW = datetime(2026, 7, 15, 2, 0, tzinfo=UTC)
 
@@ -125,3 +126,16 @@ def test_quote_accepts_database_size_boundaries() -> None:
         volume=2_147_483_647,
     )
     assert validate_quote(candidate, symbol="600000.SH", now=NOW).valid is True
+
+
+def test_fallback_scope_contains_missing_and_invalid_primary_quotes() -> None:
+    valid = quote()
+    stale = quote(
+        symbol="000001.SZ",
+        quote_time=NOW - timedelta(seconds=181),
+    )
+    assert fallback_symbols(
+        ("600000.SH", "000001.SZ", "430047.BJ"),
+        (valid, stale),
+        now=NOW,
+    ) == ("000001.SZ", "430047.BJ")

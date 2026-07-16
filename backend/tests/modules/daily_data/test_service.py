@@ -55,6 +55,9 @@ class FakeRepository:
             parent_batch_id=command.parent_batch_id,
             symbols=list(command.symbols),
             security_ids=[str(value) for value in command.security_ids],
+            known_corporate_action_symbols=list(
+                command.known_corporate_action_symbols
+            ),
             idempotency_key=command.idempotency_key,
             status=DailyBatchStatus.PENDING,
             expected_count=len(command.symbols),
@@ -437,6 +440,29 @@ async def test_empty_staging_cannot_skip_validation_and_preserves_scope() -> Non
 
 
 @async_test
+async def test_empty_staging_finalizes_as_failed_after_validation() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    symbols = ("600000.SH", "000001.SZ")
+    batch = await service.create(_command(symbols))
+
+    validated = await service.validate(batch.id)
+    result = await service.commit(batch.id)
+
+    assert validated.status is DailyBatchStatus.VALIDATING
+    assert result.status is DailyBatchStatus.FAILED
+    assert result.expected_count == 2
+    assert result.committed_count == 0
+    assert result.missing_count == 2
+    assert result.failed_count == 2
+    assert [item.symbol for item in repo.missing[batch.id]] == list(symbols)
+    assert {item.error_code for item in repo.missing[batch.id]} == {
+        "DAILY_MISSING_UNEXPLAINED"
+    }
+    assert await service.retry_scope(batch.id) == symbols
+
+
+@async_test
 async def test_stage_rejects_security_id_outside_frozen_symbol_binding() -> None:
     from long_invest.platform.errors import AppError
 
@@ -529,17 +555,18 @@ async def test_validate_preserves_every_terminal_status() -> None:
 
 
 @async_test
-async def test_validate_rejects_states_before_fetch_and_during_commit() -> None:
+async def test_validate_rejects_state_during_commit() -> None:
     from long_invest.platform.errors import AppError
 
     repo = FakeRepository()
     service = _service(repo)
-    for status in (DailyBatchStatus.PENDING, DailyBatchStatus.COMMITTING):
-        batch = await service.create(_command(key=f"invalid-{status.value}"))
-        repo.batches[batch.id].status = status
-        with pytest.raises(AppError) as captured:
-            await service.validate(batch.id)
-        assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
+    batch = await service.create(_command(key="invalid-COMMITTING"))
+    repo.batches[batch.id].status = DailyBatchStatus.COMMITTING
+
+    with pytest.raises(AppError) as captured:
+        await service.validate(batch.id)
+
+    assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
 
 
 @async_test

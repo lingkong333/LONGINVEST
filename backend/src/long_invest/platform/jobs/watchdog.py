@@ -5,9 +5,17 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from long_invest.platform.database.engine import Database
-from long_invest.platform.jobs.contracts import JobRunStatus, JobStatus
+from long_invest.platform.jobs.contracts import (
+    TERMINAL_JOB_STATUSES,
+    JobResult,
+    JobRunStatus,
+    JobStatus,
+    linked_job_item,
+    linked_parent_job_id,
+)
 from long_invest.platform.jobs.models import JobRun
 from long_invest.platform.jobs.repository import JobRepository
+from long_invest.platform.jobs.service import JobService
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
 
@@ -75,7 +83,7 @@ class JobsWatchdog:
             JobRun.started_at,
             JobRun.claimed_at,
         )
-        runs = (
+        candidates = (
             await session.scalars(
                 select(JobRun)
                 .where(
@@ -90,13 +98,19 @@ class JobsWatchdog:
                 )
                 .order_by(last_activity)
                 .limit(self._batch_size)
-                .with_for_update(skip_locked=True)
             )
         ).all()
         scheduled = 0
+        lost = 0
         jobs = JobRepository(session)
-        for run in runs:
-            job = await jobs.lock(run.job_id)
+        for candidate in candidates:
+            job = await jobs.lock(candidate.job_id)
+            run = await jobs.lock_run(candidate.id)
+            if run is None:
+                continue
+            await session.refresh(run)
+            if not _is_stale_active_run(run, cutoff):
+                continue
             if (
                 job is None
                 or job.current_run_id != run.id
@@ -105,11 +119,20 @@ class JobsWatchdog:
                 run.status = JobRunStatus.SUPERSEDED
                 run.ended_at = run.ended_at or now
                 continue
+            if JobStatus(job.status) in TERMINAL_JOB_STATUSES:
+                run.status = JobRunStatus.SUPERSEDED
+                run.ended_at = run.ended_at or now
+                job.current_run_id = None
+                job.current_fence_token = None
+                continue
             run.status = JobRunStatus.LOST
+            lost += 1
             run.ended_at = now
             run.exit_type = "HEARTBEAT_LOST"
             lost_count = await session.scalar(
-                select(func.count()).select_from(JobRun).where(
+                select(func.count())
+                .select_from(JobRun)
+                .where(
                     JobRun.job_id == job.id,
                     JobRun.status == JobRunStatus.LOST,
                 )
@@ -124,8 +147,28 @@ class JobsWatchdog:
                 job.terminal_at = now
                 job.updated_at = now
                 job.version += 1
+                linked = linked_job_item(job.config_snapshot)
+                if linked is not None:
+                    item_service = JobService(session)
+                    _completed, _total, all_terminal = await item_service.abandon_item(
+                        parent_job_id=linked.parent_job_id,
+                        item_key=linked.item_key,
+                        error_code="JOB_HEARTBEAT_LOST",
+                    )
+                    if all_terminal:
+                        await item_service.submit(linked.completion_job)
+                parent_job_id = linked_parent_job_id(job.config_snapshot)
+                if parent_job_id is not None:
+                    await JobService(session).finalize_parent(
+                        parent_job_id,
+                        JobResult.failure(
+                            code="JOB_HEARTBEAT_LOST",
+                            message="汇总任务执行进程丢失",
+                            retryable=False,
+                        ),
+                    )
         await session.flush()
-        return len(runs), scheduled
+        return lost, scheduled
 
     async def _schedule_recovery(self, session, jobs, job, lost_run, now) -> None:
         recovery_run = JobRun(
@@ -164,3 +207,14 @@ class JobsWatchdog:
         job.current_fence_token = recovery_run.fence_token
         job.updated_at = now
         job.version += 1
+
+
+def _is_stale_active_run(run: JobRun, cutoff) -> bool:
+    if run.status not in {
+        JobRunStatus.CLAIMED,
+        JobRunStatus.STARTING,
+        JobRunStatus.RUNNING,
+    }:
+        return False
+    last_activity = run.heartbeat_at or run.started_at or run.claimed_at
+    return last_activity < cutoff

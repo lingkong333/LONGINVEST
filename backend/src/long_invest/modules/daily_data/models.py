@@ -61,6 +61,9 @@ class DailyDataBatch(Base):
     )
     symbols: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     security_ids: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    known_corporate_action_symbols: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     expected_count: Mapped[int] = mapped_column(Integer, nullable=False)

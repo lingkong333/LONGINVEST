@@ -83,6 +83,9 @@ def test_universe_snapshot_freezes_filter_count_version_and_item_state() -> None
         snapshot_columns
     )
     assert {
+        "security_id",
+        "listed_on",
+        "delisted_on",
         "snapshot_id",
         "symbol",
         "market",

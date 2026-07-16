@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import String, cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.platform.jobs.contracts import JobStatus
@@ -16,6 +16,7 @@ class ClaimedOutbox:
     job_id: UUID
     queue: str
     attempt_count: int
+    hard_timeout_seconds: int
 
 
 class OutboxRepository:
@@ -34,9 +35,11 @@ class OutboxRepository:
         limit: int,
     ) -> tuple[ClaimedOutbox, ...]:
         rows = (
-            await self._session.scalars(
-                select(EventOutbox)
+            await self._session.execute(
+                select(EventOutbox, Job.hard_timeout_seconds)
+                .join(Job, cast(Job.id, String) == EventOutbox.aggregate_id)
                 .where(
+                    EventOutbox.topic == "jobs.dispatch",
                     EventOutbox.status == OutboxStatus.PENDING,
                     EventOutbox.next_attempt_at <= datetime.now(UTC),
                 )
@@ -47,7 +50,7 @@ class OutboxRepository:
         ).all()
         claimed: list[ClaimedOutbox] = []
         now = datetime.now(UTC)
-        for row in rows:
+        for row, hard_timeout_seconds in rows:
             row.status = OutboxStatus.DISPATCHING
             row.locked_at = now
             row.locked_by = dispatcher_id
@@ -58,6 +61,7 @@ class OutboxRepository:
                     job_id=UUID(row.aggregate_id),
                     queue=row.queue,
                     attempt_count=row.attempt_count,
+                    hard_timeout_seconds=hard_timeout_seconds,
                 )
             )
         await self._session.flush()

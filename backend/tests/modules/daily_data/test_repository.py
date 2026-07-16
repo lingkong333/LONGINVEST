@@ -32,6 +32,7 @@ def _command(
     symbols=("600000.SH",),
     trading_date=DAY,
     snapshot_id=None,
+    known_corporate_action_symbols=(),
 ):
     return CreateDailyBatch(
         trading_date=trading_date,
@@ -40,6 +41,7 @@ def _command(
         symbols=symbols,
         security_ids=tuple(uuid5(NAMESPACE_DNS, symbol) for symbol in symbols),
         idempotency_key=key,
+        known_corporate_action_symbols=known_corporate_action_symbols,
     )
 
 
@@ -51,6 +53,7 @@ def _batch(
     trading_date=DAY,
     snapshot_id=None,
     status="PENDING",
+    known_corporate_action_symbols=(),
 ):
     return DailyDataBatch(
         id=uuid4(),
@@ -59,6 +62,7 @@ def _batch(
         parent_batch_id=parent,
         symbols=list(symbols),
         security_ids=[str(uuid5(NAMESPACE_DNS, symbol)) for symbol in symbols],
+        known_corporate_action_symbols=list(known_corporate_action_symbols),
         idempotency_key=key,
         status=status,
         expected_count=len(symbols),
@@ -159,6 +163,7 @@ async def test_retry_batch_with_parent_can_claim_same_date_and_snapshot(
     parent = _batch(
         symbols=("600000.SH", "000001.SZ"),
         status=status,
+        known_corporate_action_symbols=("000001.SZ",),
     )
     session = FakeSession([None, parent])
     repository = DailyDataRepository(session)
@@ -168,6 +173,7 @@ async def test_retry_batch_with_parent_can_claim_same_date_and_snapshot(
             key="retry-1",
             parent=parent.id,
             symbols=("000001.SZ",),
+            known_corporate_action_symbols=("000001.SZ",),
         ),
         NOW,
     )
@@ -246,6 +252,72 @@ async def test_retry_cannot_add_symbol_outside_parent_scope() -> None:
     assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
     assert captured.value.status_code == 409
     assert session.added == []
+
+
+@async_test
+async def test_retry_cannot_drop_frozen_corporate_action_context() -> None:
+    parent = _batch(
+        symbols=("600000.SH",),
+        status="PARTIAL",
+        known_corporate_action_symbols=("600000.SH",),
+    )
+    repository = DailyDataRepository(FakeSession([None, parent]))
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(parent=parent.id, symbols=("600000.SH",)),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
+
+
+@async_test
+async def test_retry_cannot_add_frozen_corporate_action_context() -> None:
+    parent = _batch(symbols=("600000.SH",), status="PARTIAL")
+    repository = DailyDataRepository(FakeSession([None, parent]))
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(
+                parent=parent.id,
+                symbols=("600000.SH",),
+                known_corporate_action_symbols=("600000.SH",),
+            ),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
+
+
+@async_test
+async def test_idempotent_replay_rejects_corporate_action_context_drift() -> None:
+    existing = _batch(
+        known_corporate_action_symbols=("600000.SH",),
+    )
+    repository = DailyDataRepository(FakeSession([existing]))
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(_command(), NOW)
+
+    assert captured.value.code == "DAILY_BATCH_IDEMPOTENCY_CONFLICT"
+
+
+@async_test
+async def test_automatic_scope_replay_rejects_corporate_action_context_drift() -> None:
+    existing = _batch(
+        key="original-key",
+        known_corporate_action_symbols=("600000.SH",),
+    )
+    integrity_error = IntegrityError("insert", {}, RuntimeError("unique"))
+    repository = DailyDataRepository(
+        FakeSession([None, None, existing], flush_error=integrity_error)
+    )
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(_command(key="second-key"), NOW)
+
+    assert captured.value.code == "DAILY_BATCH_SCOPE_CONFLICT"
 
 
 @async_test

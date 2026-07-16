@@ -19,6 +19,48 @@ PARTITION_YEARS = (2025, 2026, 2027)
 
 
 def upgrade() -> None:
+    op.execute(
+        "DROP TRIGGER security_universe_snapshot_item_append_only "
+        "ON security_universe_snapshot_item"
+    )
+    op.add_column(
+        "security_universe_snapshot_item",
+        sa.Column("security_id", sa.UUID(), nullable=True),
+    )
+    op.add_column(
+        "security_universe_snapshot_item",
+        sa.Column("listed_on", sa.Date(), nullable=True),
+    )
+    op.add_column(
+        "security_universe_snapshot_item",
+        sa.Column("delisted_on", sa.Date(), nullable=True),
+    )
+    op.execute(
+        """
+        UPDATE security_universe_snapshot_item AS item
+        SET security_id = security.id,
+            listed_on = security.listed_on,
+            delisted_on = security.delisted_on
+        FROM security
+        WHERE security.symbol = item.symbol
+        """
+    )
+    op.alter_column(
+        "security_universe_snapshot_item", "security_id", nullable=False
+    )
+    op.create_foreign_key(
+        "fk_security_universe_snapshot_item_security_id_security",
+        "security_universe_snapshot_item",
+        "security",
+        ["security_id"],
+        ["id"],
+        ondelete="RESTRICT",
+    )
+    op.execute(
+        "CREATE TRIGGER security_universe_snapshot_item_append_only "
+        "BEFORE UPDATE OR DELETE ON security_universe_snapshot_item "
+        "FOR EACH ROW EXECUTE FUNCTION reject_stage2_fact_mutation()"
+    )
     op.add_column(
         "job",
         sa.Column(
@@ -185,6 +227,7 @@ def upgrade() -> None:
             parent_batch_id UUID,
             symbols JSONB NOT NULL,
             security_ids JSONB NOT NULL,
+            known_corporate_action_symbols JSONB NOT NULL,
             idempotency_key VARCHAR(160) NOT NULL,
             status VARCHAR(24) NOT NULL,
             expected_count INTEGER NOT NULL,
@@ -371,3 +414,11 @@ def downgrade() -> None:
     op.drop_constraint("ck_job_soft_timeout_positive", "job", type_="check")
     op.drop_column("job", "hard_timeout_seconds")
     op.drop_column("job", "soft_timeout_seconds")
+    op.drop_constraint(
+        "fk_security_universe_snapshot_item_security_id_security",
+        "security_universe_snapshot_item",
+        type_="foreignkey",
+    )
+    op.drop_column("security_universe_snapshot_item", "security_id")
+    op.drop_column("security_universe_snapshot_item", "delisted_on")
+    op.drop_column("security_universe_snapshot_item", "listed_on")

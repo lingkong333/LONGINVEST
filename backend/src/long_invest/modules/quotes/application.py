@@ -1,4 +1,5 @@
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from long_invest.modules.quotes.contracts import QuoteCycleStatus
 from long_invest.modules.quotes.repository import QuoteCycleRepository
 from long_invest.modules.quotes.service import _item_view, _summary
+from long_invest.modules.securities.application import get_security_application
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.contracts import SubmitJob
@@ -19,9 +21,11 @@ class QuoteApplication:
         database: Database,
         *,
         job_service_factory: Callable[..., JobService] = JobService,
+        universe_freezer: Callable[[tuple[str, ...]], Awaitable[Any]] | None = None,
     ) -> None:
         self._database = database
         self._job_service_factory = job_service_factory
+        self._universe_freezer = universe_freezer
 
     async def list_cycles(
         self,
@@ -89,6 +93,8 @@ class QuoteApplication:
             request_id=request_id,
             created_by_user_id=created_by_user_id,
             extra={"timeout_seconds": timeout_seconds},
+            soft_timeout_seconds=timeout_seconds + 5,
+            hard_timeout_seconds=timeout_seconds + 15,
         )
 
     async def submit_diagnostic(
@@ -98,6 +104,8 @@ class QuoteApplication:
         idempotency_key: str,
         request_id: str,
         created_by_user_id: str,
+        session_id: str,
+        trusted_ip: str,
     ) -> Any:
         return await self._submit(
             job_type="QUOTE_DIAGNOSTIC",
@@ -107,7 +115,18 @@ class QuoteApplication:
             idempotency_key=idempotency_key,
             request_id=request_id,
             created_by_user_id=created_by_user_id,
-            extra={},
+            extra={
+                "audit": {
+                    "request_id": request_id,
+                    "idempotency_key": idempotency_key,
+                    "actor_user_id": created_by_user_id,
+                    "session_id": session_id,
+                    "trusted_ip": trusted_ip,
+                    "reason": "manual quote diagnostic",
+                }
+            },
+            soft_timeout_seconds=45,
+            hard_timeout_seconds=60,
         )
 
     async def _submit(
@@ -121,20 +140,57 @@ class QuoteApplication:
         request_id: str,
         created_by_user_id: str,
         extra: dict[str, object],
+        soft_timeout_seconds: int,
+        hard_timeout_seconds: int,
     ) -> Any:
-        command = SubmitJob(
-            job_type=job_type,
-            queue=queue,
-            idempotency_scope=f"{scope}:{created_by_user_id}",
-            idempotency_key=idempotency_key,
-            request_id=request_id,
-            config_snapshot={"symbols": list(symbols), **extra},
-            business_object_type="quote_cycle_request",
-            created_by_user_id=created_by_user_id,
-        )
+        idempotency_scope = f"{scope}:{created_by_user_id}"
         try:
             async with self._database.transaction() as session:
-                return await self._job_service_factory(session).submit(command)
+                jobs = self._job_service_factory(session)
+                await jobs.lock_submission(idempotency_scope, idempotency_key)
+                existing = await jobs.find_submission(
+                    idempotency_scope, idempotency_key
+                )
+                if existing is None:
+                    freezer = self._universe_freezer
+                    if freezer is None:
+                        freezer = get_security_application().freeze_symbols
+                    snapshot = await freezer(symbols)
+                    snapshot_id = str(snapshot.id)
+                    snapshot_version = snapshot.master_version
+                    requested_at = datetime.now(UTC).isoformat()
+                else:
+                    snapshot_id = str(
+                        existing.config_snapshot.get("universe_snapshot_id", "")
+                    )
+                    snapshot_version = int(
+                        existing.config_snapshot.get("universe_snapshot_version", 0)
+                    )
+                    requested_at = str(
+                        existing.config_snapshot.get("requested_at", "")
+                    )
+                effective_extra = dict(extra)
+                if existing is not None and "audit" in existing.config_snapshot:
+                    effective_extra["audit"] = existing.config_snapshot["audit"]
+                command = SubmitJob(
+                    job_type=job_type,
+                    queue=queue,
+                    idempotency_scope=idempotency_scope,
+                    idempotency_key=idempotency_key,
+                    request_id=request_id,
+                    config_snapshot={
+                        "symbols": list(symbols),
+                        "universe_snapshot_id": snapshot_id,
+                        "universe_snapshot_version": snapshot_version,
+                        "requested_at": requested_at,
+                        **effective_extra,
+                    },
+                    business_object_type="quote_cycle_request",
+                    created_by_user_id=created_by_user_id,
+                    soft_timeout_seconds=soft_timeout_seconds,
+                    hard_timeout_seconds=hard_timeout_seconds,
+                )
+                return await jobs.submit(command)
         except AppError:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:

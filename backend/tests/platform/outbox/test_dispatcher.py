@@ -25,6 +25,7 @@ class FakePublisher:
     delay: float = 0
     published_ids: list[str] = field(default_factory=list)
     created_ids: set[str] = field(default_factory=set)
+    published_timeouts: list[int] = field(default_factory=list)
 
     async def publish(
         self,
@@ -34,7 +35,7 @@ class FakePublisher:
         job_id: UUID,
         timeout_seconds: int,
     ) -> str:
-        del queue, job_id, timeout_seconds
+        del queue, job_id
         if self.delay:
             await asyncio.sleep(self.delay)
         if self.fail:
@@ -42,6 +43,7 @@ class FakePublisher:
         rq_job_id = f"outbox-{outbox_id}"
         self.published_ids.append(rq_job_id)
         self.created_ids.add(rq_job_id)
+        self.published_timeouts.append(timeout_seconds)
         return rq_job_id
 
 
@@ -56,6 +58,8 @@ async def submit_test_job(database: Database) -> Job:
                 idempotency_key=f"key-{unique}",
                 request_id=f"req_{unique}",
                 config_snapshot={"sample": True},
+                soft_timeout_seconds=45,
+                hard_timeout_seconds=61,
             )
         )
 
@@ -109,6 +113,7 @@ async def test_successful_dispatch_marks_outbox_and_job_queued() -> None:
         assert stored_job is not None and stored_job.status == JobStatus.QUEUED
         assert outbox is not None and outbox.status == OutboxStatus.DISPATCHED
         assert outbox.rq_job_id == f"outbox-{outbox.id}"
+        assert publisher.published_timeouts == [61]
     finally:
         await clean_foundation_jobs(database)
         await database.dispose()
@@ -201,4 +206,44 @@ async def test_replayed_dispatch_uses_same_deterministic_rq_id() -> None:
         assert len(publisher.created_ids) == 1
     finally:
         await clean_foundation_jobs(database)
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_job_dispatcher_leaves_domain_events_for_their_consumer() -> None:
+    database = Database(AppSettings(_env_file=None).database_url)
+    dedupe_key = f"domain-event-{uuid4().hex}"
+    try:
+        async with database.transaction() as session:
+            session.add(
+                EventOutbox(
+                    topic="data_quality_issue.resolved",
+                    aggregate_type="data_quality_issue",
+                    aggregate_id=str(uuid4()),
+                    queue="domain-events",
+                    payload={"event_type": "data_quality_issue.resolved"},
+                    dedupe_key=dedupe_key,
+                    status=OutboxStatus.PENDING,
+                )
+            )
+
+        publisher = FakePublisher()
+        report = await OutboxDispatcher(
+            database=database,
+            publisher=publisher,
+            dispatcher_id="dispatcher-a",
+        ).dispatch_once()
+
+        assert report.claimed == 0
+        assert publisher.published_ids == []
+        async with database.session() as session:
+            event = await session.scalar(
+                select(EventOutbox).where(EventOutbox.dedupe_key == dedupe_key)
+            )
+            assert event is not None and event.status == OutboxStatus.PENDING
+    finally:
+        async with database.transaction() as session:
+            await session.execute(
+                delete(EventOutbox).where(EventOutbox.dedupe_key == dedupe_key)
+            )
         await database.dispose()

@@ -36,13 +36,11 @@ class OutboxDispatcher:
         publisher: QueuePublisher,
         dispatcher_id: str,
         batch_size: int = 50,
-        queue_timeout_seconds: int = 60,
     ) -> None:
         self._database = database
         self._publisher = publisher
         self._dispatcher_id = dispatcher_id
         self._batch_size = batch_size
-        self._queue_timeout_seconds = queue_timeout_seconds
 
     async def dispatch_once(self) -> DispatchReport:
         claimed = await self._claim()
@@ -54,7 +52,7 @@ class OutboxDispatcher:
                     queue=event.queue,
                     outbox_id=event.id,
                     job_id=event.job_id,
-                    timeout_seconds=self._queue_timeout_seconds,
+                    timeout_seconds=event.hard_timeout_seconds,
                 )
             except Exception as exc:
                 failed += 1

@@ -41,5 +41,6 @@ RUN uv sync --frozen --extra dev
 
 COPY backend/tests ./tests
 COPY backend/openapi.json ./openapi.json
+COPY deploy/compose.yaml /deploy/compose.yaml
 
 CMD ["pytest", "-q"]

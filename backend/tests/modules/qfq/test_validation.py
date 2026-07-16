@@ -1,6 +1,6 @@
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from uuid import uuid4
 
 import pytest
@@ -119,5 +119,64 @@ def test_checksum_is_stable_for_equivalent_decimal_encodings() -> None:
         for item in valid_bars()
     )
     second = validate_qfq_window(command(), equivalent, Decimal("10.5"))
+
+    assert first.checksum == second.checksum
+
+
+def high_precision_bars(close: str) -> tuple[QfqBarInput, ...]:
+    final_close = Decimal(close)
+    return (
+        bar(date(2026, 7, 14), "1.1"),
+        bar(date(2026, 7, 15), "1.1"),
+        QfqBarInput(
+            trade_date=date(2026, 7, 16),
+            open=final_close,
+            high=Decimal("2"),
+            low=Decimal("1"),
+            close=final_close,
+            volume=100,
+            amount=Decimal("1000"),
+        ),
+    )
+
+
+def test_checksum_preserves_adjacent_high_precision_values() -> None:
+    first_close = "1.1234567890123456789012345678901"
+    second_close = "1.1234567890123456789012345678902"
+
+    first = validate_qfq_window(
+        command(), high_precision_bars(first_close), Decimal(first_close)
+    )
+    second = validate_qfq_window(
+        command(), high_precision_bars(second_close), Decimal(second_close)
+    )
+
+    assert first.checksum != second.checksum
+
+
+def test_checksum_does_not_depend_on_decimal_context_precision() -> None:
+    close = "1.1234567890123456789012345678901"
+    with localcontext() as context:
+        context.prec = 6
+        low_precision = validate_qfq_window(
+            command(), high_precision_bars(close), Decimal(close)
+        )
+    with localcontext() as context:
+        context.prec = 50
+        high_precision = validate_qfq_window(
+            command(), high_precision_bars(close), Decimal(close)
+        )
+
+    assert low_precision.checksum == high_precision.checksum
+
+
+def test_checksum_canonicalizes_negative_zero() -> None:
+    positive_zero = tuple(replace(item, amount=Decimal("0")) for item in valid_bars())
+    negative_zero = tuple(
+        replace(item, amount=Decimal("-0.000")) for item in valid_bars()
+    )
+
+    first = validate_qfq_window(command(), positive_zero, Decimal("10.5"))
+    second = validate_qfq_window(command(), negative_zero, Decimal("10.5"))
 
     assert first.checksum == second.checksum

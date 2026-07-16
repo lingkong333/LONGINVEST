@@ -12,9 +12,24 @@ from .contracts import (
 
 
 def _canonical_decimal(value: Decimal) -> str:
-    if value == 0:
+    parts = value.as_tuple()
+    digits = "".join(str(digit) for digit in parts.digits)
+    if not digits.strip("0"):
         return "0"
-    return format(value.normalize(), "f")
+
+    exponent = parts.exponent
+    while digits.endswith("0"):
+        digits = digits[:-1]
+        exponent += 1
+
+    decimal_at = len(digits) + exponent
+    if decimal_at <= 0:
+        rendered = f"0.{('0' * -decimal_at)}{digits}"
+    elif decimal_at < len(digits):
+        rendered = f"{digits[:decimal_at]}.{digits[decimal_at:]}"
+    else:
+        rendered = f"{digits}{'0' * (decimal_at - len(digits))}"
+    return f"-{rendered}" if parts.sign else rendered
 
 
 def _checksum(bars: tuple[QfqBarInput, ...]) -> str:

@@ -219,4 +219,3 @@ class Page[T]:
         object.__setattr__(self, "items", tuple(self.items))
         if self.total < 0 or self.page < 1 or self.page_size < 1:
             raise ValueError("invalid pagination")
-

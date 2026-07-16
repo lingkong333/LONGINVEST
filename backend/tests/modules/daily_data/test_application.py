@@ -2,13 +2,14 @@ import asyncio
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import replace
-from datetime import date
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from functools import wraps
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.daily_data.application import DailyDataApplication
 from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
@@ -150,6 +151,101 @@ def _application(database, *, audit_fail=False):
             session, database, fail=audit_fail
         ),
     )
+
+
+class SnapshotDatabase:
+    def __init__(self) -> None:
+        self.read_session = object()
+
+    @asynccontextmanager
+    async def session(self):
+        yield self.read_session
+
+
+class SnapshotRepository:
+    bar = None
+    error = None
+    calls = []
+
+    def __init__(self, session) -> None:
+        self.session = session
+
+    async def get_bar_by_symbol_date(self, symbol, trade_date):
+        type(self).calls.append((self.session, symbol, trade_date))
+        if self.error is not None:
+            raise self.error
+        return self.bar
+
+
+def _snapshot_application(database):
+    SnapshotRepository.calls = []
+    SnapshotRepository.error = None
+    SnapshotRepository.bar = None
+    return DailyDataApplication(database, repository_factory=SnapshotRepository)
+
+
+@async_test
+async def test_snapshot_maps_internal_bar_to_public_contract() -> None:
+    database = SnapshotDatabase()
+    application = _snapshot_application(database)
+    security_id = uuid4()
+    updated_at = datetime(2026, 7, 15, 17, 1, tzinfo=UTC)
+    SnapshotRepository.bar = SimpleNamespace(
+        security_id=security_id,
+        symbol="600000.SH",
+        trade_date=date(2026, 7, 15),
+        close=Decimal("10.123456789012345678"),
+        data_version=3,
+        source="EASTMONEY",
+        updated_at=updated_at,
+        internal_state="must not leak",
+    )
+
+    result = await application.snapshot("600000.SH", date(2026, 7, 15))
+
+    assert result is not SnapshotRepository.bar
+    assert result.security_id == security_id
+    assert result.symbol == "600000.SH"
+    assert result.trade_date == date(2026, 7, 15)
+    assert result.close == Decimal("10.123456789012345678")
+    assert result.data_version == 3
+    assert result.source == "EASTMONEY"
+    assert result.updated_at == updated_at
+    assert not hasattr(result, "internal_state")
+    assert SnapshotRepository.calls == [
+        (database.read_session, "600000.SH", date(2026, 7, 15))
+    ]
+
+
+@async_test
+async def test_snapshot_returns_none_when_bar_does_not_exist() -> None:
+    application = _snapshot_application(SnapshotDatabase())
+
+    assert await application.snapshot("600000.SH", date(2026, 7, 15)) is None
+
+
+@async_test
+async def test_snapshot_rejects_invalid_symbol_before_database_access() -> None:
+    application = _snapshot_application(SnapshotDatabase())
+
+    with pytest.raises(AppError) as captured:
+        await application.snapshot("invalid", date(2026, 7, 15))
+
+    assert captured.value.code == "DAILY_BAR_SYMBOL_INVALID"
+    assert captured.value.status_code == 422
+    assert SnapshotRepository.calls == []
+
+
+@async_test
+async def test_snapshot_maps_database_failure_to_service_unavailable() -> None:
+    application = _snapshot_application(SnapshotDatabase())
+    SnapshotRepository.error = SQLAlchemyError("database unavailable")
+
+    with pytest.raises(AppError) as captured:
+        await application.snapshot("600000.SH", date(2026, 7, 15))
+
+    assert captured.value.code == "DAILY_DATA_BACKEND_UNAVAILABLE"
+    assert captured.value.status_code == 503
 
 
 @async_test

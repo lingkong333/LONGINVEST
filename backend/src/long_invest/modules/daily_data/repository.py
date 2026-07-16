@@ -180,6 +180,16 @@ class DailyDataRepository:
             .execution_options(populate_existing=True)
         )
 
+    async def get_bar_by_symbol_date(
+        self, symbol: str, trade_date: date
+    ) -> DailyBarUnadjusted | None:
+        return await self.session.scalar(
+            select(DailyBarUnadjusted).where(
+                DailyBarUnadjusted.symbol == symbol,
+                DailyBarUnadjusted.trade_date == trade_date,
+            )
+        )
+
     async def lock_bar_key(self, security_id: UUID, trade_date: date) -> None:
         raw_key = f"{security_id}:{trade_date.isoformat()}".encode("ascii")
         lock_key = int.from_bytes(

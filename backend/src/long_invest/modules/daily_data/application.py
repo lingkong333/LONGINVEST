@@ -8,7 +8,10 @@ from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
+from long_invest.modules.daily_data.contracts import (
+    DailyBarSnapshot,
+    DailyRetryAuditContext,
+)
 from long_invest.modules.daily_data.repository import DailyDataRepository
 from long_invest.modules.daily_data.service import DailyDataService
 from long_invest.modules.providers.contracts import validate_symbol
@@ -110,6 +113,26 @@ class DailyDataApplication:
                         symbol, page=page, page_size=page_size
                     ),
                     await repository.count_revisions(symbol),
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
+    async def snapshot(self, symbol: str, trade_date: date) -> DailyBarSnapshot | None:
+        _validate_symbol(symbol)
+        try:
+            async with self._database.session() as session:
+                repository = self._repository_factory(session)
+                bar = await repository.get_bar_by_symbol_date(symbol, trade_date)
+                if bar is None:
+                    return None
+                return DailyBarSnapshot(
+                    security_id=bar.security_id,
+                    symbol=bar.symbol,
+                    trade_date=bar.trade_date,
+                    close=bar.close,
+                    data_version=bar.data_version,
+                    source=bar.source,
+                    updated_at=bar.updated_at,
                 )
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc

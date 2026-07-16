@@ -443,3 +443,19 @@ async def test_previous_close_reads_latest_formal_fact_before_target_date() -> N
     assert "trade_date <" in sql
     assert "ORDER BY daily_bar_unadjusted.trade_date DESC" in sql
     assert "LIMIT 1" in sql
+
+
+@async_test
+async def test_get_bar_by_symbol_date_reads_one_matching_internal_bar() -> None:
+    bar = object()
+    session = FakeSession([bar])
+    repository = DailyDataRepository(session)
+
+    result = await repository.get_bar_by_symbol_date("600000.SH", DAY)
+
+    assert result is bar
+    statement = session.scalar_statements[0]
+    sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+    assert "daily_bar_unadjusted.symbol = '600000.SH'" in sql
+    assert "daily_bar_unadjusted.trade_date = '2026-07-15'" in sql
+    assert "FOR UPDATE" not in sql

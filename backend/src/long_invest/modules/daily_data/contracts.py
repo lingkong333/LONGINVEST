@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any
@@ -68,6 +69,40 @@ def _require_idempotency_key(value: str) -> str:
     if not isinstance(value, str) or not value.strip() or len(value) > 160:
         raise ValueError("幂等键必须为 1 到 160 个字符")
     return value.strip()
+
+
+@dataclass(frozen=True, slots=True)
+class DailyBarSnapshot:
+    security_id: UUID
+    symbol: str
+    trade_date: date
+    close: Decimal
+    data_version: int
+    source: str
+    updated_at: datetime
+
+    def __post_init__(self) -> None:
+        _require_uuid(self.security_id, "股票编号")
+        try:
+            validate_symbol(self.symbol)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("股票代码格式无效") from exc
+        _require_date(self.trade_date, "交易日期")
+        if (
+            not isinstance(self.close, Decimal)
+            or not self.close.is_finite()
+            or self.close <= 0
+        ):
+            raise ValueError("收盘价必须是正数 Decimal")
+        if (
+            not isinstance(self.data_version, int)
+            or isinstance(self.data_version, bool)
+            or self.data_version <= 0
+        ):
+            raise ValueError("数据版本必须是正整数")
+        if not isinstance(self.source, str) or not self.source.strip():
+            raise ValueError("数据来源不能为空")
+        _require_aware(self.updated_at, "更新时间")
 
 
 @dataclass(frozen=True, slots=True)

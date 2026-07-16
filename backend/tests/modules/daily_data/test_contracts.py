@@ -1,15 +1,61 @@
+from dataclasses import FrozenInstanceError
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from uuid import UUID, uuid4
 
 import pytest
 
 from long_invest.modules.daily_data.contracts import (
     CreateDailyBatch,
+    DailyBarSnapshot,
     DailyBatchStatus,
     DailyMissingReason,
     DailyStageStatus,
     StageDailyBar,
 )
+
+
+def _snapshot(**changes) -> DailyBarSnapshot:
+    values = {
+        "security_id": uuid4(),
+        "symbol": "600000.SH",
+        "trade_date": date(2026, 7, 15),
+        "close": Decimal("10.123456"),
+        "data_version": 2,
+        "source": "EASTMONEY",
+        "updated_at": datetime(2026, 7, 15, 17, tzinfo=UTC),
+    }
+    values.update(changes)
+    return DailyBarSnapshot(**values)
+
+
+def test_daily_bar_snapshot_is_frozen_and_preserves_decimal_precision() -> None:
+    snapshot = _snapshot(close=Decimal("10.123456789012345678"))
+
+    assert snapshot.close == Decimal("10.123456789012345678")
+    with pytest.raises(FrozenInstanceError):
+        snapshot.close = Decimal("11")
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"symbol": "invalid"}, "股票代码"),
+        ({"symbol": None}, "股票代码"),
+        ({"close": Decimal("0")}, "收盘价"),
+        ({"close": Decimal("-0.01")}, "收盘价"),
+        ({"close": Decimal("NaN")}, "收盘价"),
+        ({"close": "10.00"}, "收盘价"),
+        ({"data_version": 0}, "数据版本"),
+        ({"data_version": 1.0}, "数据版本"),
+        ({"source": "   "}, "数据来源"),
+        ({"source": None}, "数据来源"),
+        ({"updated_at": datetime(2026, 7, 15, 17)}, "时区"),
+    ],
+)
+def test_daily_bar_snapshot_rejects_invalid_values(changes, message) -> None:
+    with pytest.raises(ValueError, match=message):
+        _snapshot(**changes)
 
 
 def test_daily_batch_has_seven_states() -> None:

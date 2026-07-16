@@ -21,6 +21,7 @@ from long_invest.modules.daily_data.models import (
     DailyBatchMissingItem,
     DailyDataBatch,
 )
+from long_invest.platform.errors import AppError
 
 
 class DailyDataRepository:
@@ -38,6 +39,14 @@ class DailyDataRepository:
         if existing is not None:
             _validate_batch_replay(existing, command)
             return existing, False
+        if command.parent_batch_id is not None:
+            parent = await self.session.scalar(
+                select(DailyDataBatch)
+                .where(DailyDataBatch.id == command.parent_batch_id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+            _validate_retry_parent(parent, command)
         candidate = DailyDataBatch(
             id=uuid4(),
             trading_date=command.trading_date,
@@ -286,8 +295,6 @@ def _validate_batch_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or tuple(existing.symbols) != command.symbols
         or existing.parent_batch_id != command.parent_batch_id
     ):
-        from long_invest.platform.errors import AppError
-
         raise AppError(
             code="DAILY_BATCH_IDEMPOTENCY_CONFLICT",
             message="该幂等键已用于不同的日线批次请求",
@@ -303,11 +310,38 @@ def _validate_scope_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or command.parent_batch_id is not None
         or tuple(existing.symbols) != command.symbols
     ):
-        from long_invest.platform.errors import AppError
-
         raise AppError(
             code="DAILY_BATCH_SCOPE_CONFLICT",
             message="同一交易日和范围快照已有不同的自动日线批次",
+            status_code=409,
+        )
+
+
+def _validate_retry_parent(
+    parent: DailyDataBatch | None,
+    command: CreateDailyBatch,
+) -> None:
+    if parent is None:
+        raise AppError(
+            code="DAILY_PARENT_BATCH_NOT_FOUND",
+            message="原日线批次不存在",
+            status_code=404,
+        )
+    if parent.status not in {"PARTIAL", "FAILED"}:
+        raise AppError(
+            code="DAILY_PARENT_BATCH_STATE_CONFLICT",
+            message="原日线批次当前状态不允许重试",
+            status_code=409,
+            details={"status": parent.status},
+        )
+    if (
+        parent.trading_date != command.trading_date
+        or parent.universe_snapshot_id != command.universe_snapshot_id
+        or not set(command.symbols).issubset(parent.symbols)
+    ):
+        raise AppError(
+            code="DAILY_RETRY_SCOPE_CONFLICT",
+            message="重试范围必须属于原日线批次的同日同快照范围",
             status_code=409,
         )
 

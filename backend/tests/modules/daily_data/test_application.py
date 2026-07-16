@@ -1,12 +1,14 @@
 import asyncio
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from dataclasses import replace
 from datetime import date
 from functools import wraps
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.daily_data.application import DailyDataApplication
 from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
@@ -21,9 +23,19 @@ def async_test(function):
     return run
 
 
+class FakeSession:
+    def __init__(self) -> None:
+        self.begin_nested_calls = 0
+
+    @asynccontextmanager
+    async def begin_nested(self):
+        self.begin_nested_calls += 1
+        yield
+
+
 class FakeDatabase:
     def __init__(self) -> None:
-        self.session = object()
+        self.session = FakeSession()
         self.state = {"jobs": [], "audits": []}
         self.rolled_back = False
 
@@ -68,10 +80,13 @@ class RecordingJobService:
         database.job_session = session
 
     async def submit(self, command):
+        if self.database.state["jobs"]:
+            return self.database.job
         self.database.state["jobs"].append(command)
-        return SimpleNamespace(
+        self.database.job = SimpleNamespace(
             id=uuid4(), job_type=command.job_type, status="PENDING_DISPATCH"
         )
+        return self.database.job
 
 
 class RecordingAuditService:
@@ -94,8 +109,23 @@ class RecordingAuditService:
     async def append(self, event):
         if self.fail:
             raise RuntimeError("forced audit failure")
+        if await self.find_by_idempotency(event.idempotency_key) is not None:
+            raise IntegrityError("insert audit", {}, RuntimeError("unique"))
         self.database.state["audits"].append(event)
         return event
+
+
+class RacingAuditService(RecordingAuditService):
+    def __init__(self, session, database, *, different=False) -> None:
+        super().__init__(session, database)
+        self.different = different
+
+    async def append(self, event):
+        concurrent = (
+            replace(event, reason="different reason") if self.different else event
+        )
+        self.database.state["audits"].append(concurrent)
+        raise IntegrityError("insert audit", {}, RuntimeError("unique"))
 
 
 def _context(key="retry-key"):
@@ -154,10 +184,62 @@ async def test_retry_replay_does_not_duplicate_audit() -> None:
     database = FakeDatabase()
     application = _application(database)
 
-    await application.retry(batch_id=FakeRepository.batch.id, audit_context=_context())
-    await application.retry(batch_id=FakeRepository.batch.id, audit_context=_context())
+    first = await application.retry(
+        batch_id=FakeRepository.batch.id, audit_context=_context()
+    )
+    second = await application.retry(
+        batch_id=FakeRepository.batch.id, audit_context=_context()
+    )
 
+    assert first is second
+    assert len(database.state["jobs"]) == 1
     assert len(database.state["audits"]) == 1
+
+
+@async_test
+async def test_concurrent_audit_replay_uses_savepoint_and_same_job() -> None:
+    database = FakeDatabase()
+    application = DailyDataApplication(
+        database,
+        repository_factory=FakeRepository,
+        domain_service_factory=FakeDomainService,
+        job_service_factory=lambda session: RecordingJobService(session, database),
+        audit_service_factory=lambda session: RacingAuditService(session, database),
+    )
+
+    job = await application.retry(
+        batch_id=FakeRepository.batch.id,
+        audit_context=_context(),
+    )
+
+    assert job is database.job
+    assert len(database.state["jobs"]) == 1
+    assert len(database.state["audits"]) == 1
+    assert database.session.begin_nested_calls == 1
+    assert database.rolled_back is False
+
+
+@async_test
+async def test_concurrent_audit_with_different_content_is_conflict_not_503() -> None:
+    database = FakeDatabase()
+    application = DailyDataApplication(
+        database,
+        repository_factory=FakeRepository,
+        domain_service_factory=FakeDomainService,
+        job_service_factory=lambda session: RecordingJobService(session, database),
+        audit_service_factory=lambda session: RacingAuditService(
+            session, database, different=True
+        ),
+    )
+
+    with pytest.raises(AppError) as captured:
+        await application.retry(
+            batch_id=FakeRepository.batch.id,
+            audit_context=_context(),
+        )
+
+    assert captured.value.code == "DAILY_RETRY_AUDIT_CONFLICT"
+    assert captured.value.status_code == 409
 
 
 @async_test

@@ -24,25 +24,40 @@ def async_test(function):
     return run
 
 
-def _command(*, key="daily-1", parent=None, symbols=("600000.SH",)):
+def _command(
+    *,
+    key="daily-1",
+    parent=None,
+    symbols=("600000.SH",),
+    trading_date=DAY,
+    snapshot_id=None,
+):
     return CreateDailyBatch(
-        trading_date=DAY,
-        universe_snapshot_id=SNAPSHOT_ID,
+        trading_date=trading_date,
+        universe_snapshot_id=snapshot_id or SNAPSHOT_ID,
         parent_batch_id=parent,
         symbols=symbols,
         idempotency_key=key,
     )
 
 
-def _batch(*, key="daily-1", parent=None, symbols=("600000.SH",)):
+def _batch(
+    *,
+    key="daily-1",
+    parent=None,
+    symbols=("600000.SH",),
+    trading_date=DAY,
+    snapshot_id=None,
+    status="PENDING",
+):
     return DailyDataBatch(
         id=uuid4(),
-        trading_date=DAY,
-        universe_snapshot_id=SNAPSHOT_ID,
+        trading_date=trading_date,
+        universe_snapshot_id=snapshot_id or SNAPSHOT_ID,
         parent_batch_id=parent,
         symbols=list(symbols),
         idempotency_key=key,
-        status="PENDING",
+        status=status,
         expected_count=len(symbols),
         fetched_count=0,
         validated_count=0,
@@ -59,9 +74,11 @@ class FakeSession:
         self.flush_error = flush_error
         self.added = []
         self.begin_nested_calls = 0
+        self.scalar_statements = []
 
     async def scalar(self, statement):
         assert statement is not None
+        self.scalar_statements.append(statement)
         return self.scalar_results.pop(0) if self.scalar_results else None
 
     def add(self, value):
@@ -113,19 +130,116 @@ async def test_claim_rejects_automatic_scope_collision_with_different_content() 
 
 
 @async_test
-async def test_retry_batch_with_parent_can_claim_same_date_and_snapshot() -> None:
-    parent_id = uuid4()
-    session = FakeSession([None])
+@pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
+async def test_retry_batch_with_parent_can_claim_same_date_and_snapshot(
+    status,
+) -> None:
+    parent = _batch(
+        symbols=("600000.SH", "000001.SZ"),
+        status=status,
+    )
+    session = FakeSession([None, parent])
     repository = DailyDataRepository(session)
 
     claimed, created = await repository.claim_batch(
-        _command(key="retry-1", parent=parent_id),
+        _command(
+            key="retry-1",
+            parent=parent.id,
+            symbols=("000001.SZ",),
+        ),
         NOW,
     )
 
     assert created is True
-    assert claimed.parent_batch_id == parent_id
+    assert claimed.parent_batch_id == parent.id
+    parent_statement = session.scalar_statements[1]
+    assert "FOR UPDATE" in str(
+        parent_statement.compile(compile_kwargs={"literal_binds": True})
+    )
+    assert parent_statement.get_execution_options()["populate_existing"] is True
     assert session.begin_nested_calls == 1
+
+
+@async_test
+async def test_retry_rejects_missing_parent_before_insert() -> None:
+    session = FakeSession([None, None])
+    repository = DailyDataRepository(session)
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(parent=uuid4()),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_PARENT_BATCH_NOT_FOUND"
+    assert captured.value.status_code == 404
+    assert session.added == []
+
+
+@async_test
+async def test_retry_rejects_different_parent_trading_date() -> None:
+    parent = _batch(trading_date=date(2026, 7, 14), status="PARTIAL")
+    repository = DailyDataRepository(FakeSession([None, parent]))
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(parent=parent.id),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
+    assert captured.value.status_code == 409
+
+
+@async_test
+async def test_retry_rejects_different_parent_snapshot() -> None:
+    parent = _batch(snapshot_id=uuid4(), status="PARTIAL")
+    repository = DailyDataRepository(FakeSession([None, parent]))
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(parent=parent.id),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
+    assert captured.value.status_code == 409
+
+
+@async_test
+async def test_retry_cannot_add_symbol_outside_parent_scope() -> None:
+    parent = _batch(symbols=("600000.SH",), status="PARTIAL")
+    session = FakeSession([None, parent])
+    repository = DailyDataRepository(session)
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(
+                parent=parent.id,
+                symbols=("600000.SH", "000001.SZ"),
+            ),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_RETRY_SCOPE_CONFLICT"
+    assert captured.value.status_code == 409
+    assert session.added == []
+
+
+@async_test
+@pytest.mark.parametrize("status", ["PENDING", "FETCHING", "SUCCEEDED"])
+async def test_retry_rejects_parent_outside_retryable_terminal_states(status) -> None:
+    parent = _batch(status=status)
+    repository = DailyDataRepository(FakeSession([None, parent]))
+
+    with pytest.raises(AppError) as captured:
+        await repository.claim_batch(
+            _command(parent=parent.id),
+            NOW,
+        )
+
+    assert captured.value.code == "DAILY_PARENT_BATCH_STATE_CONFLICT"
+    assert captured.value.status_code == 409
 
 
 @async_test

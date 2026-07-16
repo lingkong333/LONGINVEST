@@ -6,7 +6,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
 from long_invest.modules.daily_data.repository import DailyDataRepository
@@ -152,27 +152,37 @@ class DailyDataApplication:
                 job = await self._job_service_factory(session).submit(command)
                 audit = self._audit_service_factory(session)
                 audit_key = _retry_audit_key(batch_id, audit_context.idempotency_key)
-                if await audit.find_by_idempotency(audit_key) is None:
-                    await audit.append(
-                        AuditWrite(
-                            action_code="daily_data.batch_retry_requested",
-                            object_type="daily_data_batch",
-                            object_id=str(batch_id),
-                            result="SUCCESS",
-                            request_id=audit_context.request_id,
-                            idempotency_key=audit_key,
-                            risk_level="HIGH",
-                            reason=audit_context.reason,
-                            before_summary=None,
-                            after_summary={
-                                "retry_symbols": list(symbols),
-                                "trading_date": batch.trading_date.isoformat(),
-                            },
-                            actor_user_id=audit_context.actor_user_id,
-                            session_id=audit_context.session_id,
-                            trusted_ip=audit_context.trusted_ip,
-                        )
-                    )
+                audit_write = AuditWrite(
+                    action_code="daily_data.batch_retry_requested",
+                    object_type="daily_data_batch",
+                    object_id=str(batch_id),
+                    result="SUCCESS",
+                    request_id=audit_context.request_id,
+                    idempotency_key=audit_key,
+                    risk_level="HIGH",
+                    reason=audit_context.reason,
+                    before_summary=None,
+                    after_summary={
+                        "retry_symbols": list(symbols),
+                        "trading_date": batch.trading_date.isoformat(),
+                    },
+                    actor_user_id=audit_context.actor_user_id,
+                    session_id=audit_context.session_id,
+                    trusted_ip=audit_context.trusted_ip,
+                )
+                try:
+                    async with session.begin_nested():
+                        await audit.append(audit_write)
+                except IntegrityError:
+                    existing_audit = await audit.find_by_idempotency(audit_key)
+                    if existing_audit is None:
+                        raise
+                    if not _same_audit_content(existing_audit, audit_write):
+                        raise AppError(
+                            code="DAILY_RETRY_AUDIT_CONFLICT",
+                            message="该重试请求的审计幂等键已用于不同内容",
+                            status_code=409,
+                        ) from None
                 return job
         except AppError:
             raise
@@ -206,3 +216,24 @@ def _backend_unavailable() -> AppError:
 def _retry_audit_key(batch_id: UUID, idempotency_key: str) -> str:
     digest = sha256(f"{batch_id}\0{idempotency_key}".encode()).hexdigest()
     return f"daily-retry:{digest}"
+
+
+def _same_audit_content(existing: Any, candidate: AuditWrite) -> bool:
+    fields = (
+        "action_code",
+        "object_type",
+        "object_id",
+        "result",
+        "request_id",
+        "idempotency_key",
+        "risk_level",
+        "reason",
+        "before_summary",
+        "after_summary",
+        "actor_user_id",
+        "session_id",
+        "trusted_ip",
+    )
+    return all(
+        getattr(existing, field) == getattr(candidate, field) for field in fields
+    )

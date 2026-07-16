@@ -17,6 +17,7 @@ from long_invest.bootstrap.jobs import (
     daily_data_finalize,
     daily_data_item,
     daily_data_retry,
+    qfq_refresh,
     quote_diagnostic,
     realtime_quote_cycle,
     security_master_refresh,
@@ -42,6 +43,7 @@ def test_market_data_handlers_are_registered_on_the_real_worker() -> None:
         "DAILY_DATA_ITEM": daily_data_item,
         "DAILY_DATA_FINALIZE": daily_data_finalize,
         "DAILY_DATA_RETRY": daily_data_retry,
+        "QFQ_REFRESH": qfq_refresh,
     }
     assert expected == HANDLERS
 

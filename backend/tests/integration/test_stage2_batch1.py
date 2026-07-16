@@ -19,6 +19,54 @@ def test_reviewed_stage2_routes_are_registered() -> None:
     assert "post" in paths["/api/v1/providers/quote-diagnostics"]
 
 
+def test_market_data_routes_are_registered() -> None:
+    paths = create_app().openapi()["paths"]
+
+    assert "get" in paths["/api/v1/quote-cycles"]
+    assert "get" in paths["/api/v1/quote-cycles/{cycle_id}/items"]
+    assert "post" in paths["/api/v1/quote-cycles/manual"]
+    assert "post" in paths["/api/v1/quotes/diagnose"]
+    assert "get" in paths["/api/v1/daily-data/batches"]
+    assert "get" in paths["/api/v1/daily-data/batches/{batch_id}/missing"]
+    assert "post" in paths["/api/v1/daily-data/batches/{batch_id}/retry"]
+    assert "get" in paths["/api/v1/daily-bars/{symbol}"]
+    assert "get" in paths["/api/v1/daily-bars/{symbol}/revisions"]
+
+
+def test_market_data_success_responses_publish_concrete_schemas() -> None:
+    paths = create_app().openapi()["paths"]
+    operations = (
+        ("/api/v1/quote-cycles", "get", "200"),
+        ("/api/v1/quote-cycles/{cycle_id}/items", "get", "200"),
+        ("/api/v1/quote-cycles/manual", "post", "202"),
+        ("/api/v1/quotes/diagnose", "post", "202"),
+        ("/api/v1/daily-data/batches", "get", "200"),
+        ("/api/v1/daily-data/batches/{batch_id}/missing", "get", "200"),
+        ("/api/v1/daily-data/batches/{batch_id}/retry", "post", "202"),
+        ("/api/v1/daily-bars/{symbol}", "get", "200"),
+        ("/api/v1/daily-bars/{symbol}/revisions", "get", "200"),
+    )
+
+    for path, method, status in operations:
+        schema = paths[path][method]["responses"][status]["content"][
+            "application/json"
+        ]["schema"]
+        assert "$ref" in schema, f"{method.upper()} {path} has no response model"
+
+
+def test_daily_retry_publishes_required_idempotency_header() -> None:
+    operation = create_app().openapi()["paths"][
+        "/api/v1/daily-data/batches/{batch_id}/retry"
+    ]["post"]
+    header = next(
+        parameter
+        for parameter in operation["parameters"]
+        if parameter["in"] == "header" and parameter["name"] == "Idempotency-Key"
+    )
+
+    assert header["required"] is True
+
+
 def test_calendar_import_is_available_from_the_main_cli() -> None:
     args = build_parser().parse_args(
         ["calendar", "import", "--file", "calendar.json"]

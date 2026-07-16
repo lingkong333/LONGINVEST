@@ -56,16 +56,59 @@ def test_batch_and_missing_reads_require_authentication() -> None:
     application = Mock()
     application.list_batches = AsyncMock()
     client, _ = _client(application, authenticated=False)
-    response = client.get("/api/v1/daily-data/batches")
-    assert response.status_code == 401
-    assert response.json()["code"] == "AUTH_SESSION_INVALID"
+    batch_id = uuid4()
+    urls = (
+        "/api/v1/daily-data/batches",
+        f"/api/v1/daily-data/batches/{batch_id}/missing",
+        "/api/v1/daily-bars/600000.SH?start=2026-07-01&end=2026-07-15",
+        "/api/v1/daily-bars/600000.SH/revisions",
+    )
+
+    for url in urls:
+        response = client.get(url)
+        assert response.status_code == 401
+        assert response.json()["code"] == "AUTH_SESSION_INVALID"
 
 
 def test_batch_and_missing_pages_are_exposed() -> None:
     batch_id = uuid4()
+    snapshot_id = uuid4()
+    security_id = uuid4()
+    now = datetime(2026, 7, 15, 17, tzinfo=UTC)
+    batch = SimpleNamespace(
+        id=batch_id,
+        trading_date=date(2026, 7, 15),
+        universe_snapshot_id=snapshot_id,
+        parent_batch_id=None,
+        symbols=["600000.SH"],
+        security_ids=[str(security_id)],
+        known_corporate_action_symbols=[],
+        idempotency_key="daily-20260715",
+        status="SUCCEEDED",
+        expected_count=1,
+        fetched_count=1,
+        validated_count=1,
+        committed_count=1,
+        missing_count=0,
+        failed_count=0,
+        created_at=now,
+        started_at=now,
+        deadline_at=now,
+        completed_at=now,
+    )
+    missing_item = SimpleNamespace(
+        id=uuid4(),
+        batch_id=batch_id,
+        security_id=security_id,
+        symbol="600000.SH",
+        reason="SUSPENDED",
+        error_code=None,
+        explained=True,
+        created_at=now,
+    )
     application = Mock()
-    application.list_batches = AsyncMock(return_value=([], 0))
-    application.list_missing = AsyncMock(return_value=([], 0))
+    application.list_batches = AsyncMock(return_value=([batch], 1))
+    application.list_missing = AsyncMock(return_value=([missing_item], 1))
     client, _ = _client(application)
     batches = client.get("/api/v1/daily-data/batches?page=2&page_size=20")
     missing = client.get(
@@ -73,7 +116,9 @@ def test_batch_and_missing_pages_are_exposed() -> None:
     )
     assert batches.status_code == 200
     assert batches.json()["data"]["pagination"]["page"] == 2
+    assert batches.json()["data"]["items"][0]["id"] == str(batch_id)
     assert missing.status_code == 200
+    assert missing.json()["data"]["items"][0]["symbol"] == "600000.SH"
     application.list_missing.assert_awaited_once_with(batch_id, page=1, page_size=10)
 
 
@@ -111,6 +156,7 @@ def test_retry_only_submits_daily_retry_job() -> None:
         headers={"Idempotency-Key": "retry-1"},
     )
     assert response.status_code == 202
+    assert response.json()["code"] == "JOB_ACCEPTED"
     assert response.json()["data"]["job_type"] == "DAILY_DATA_RETRY"
     application.retry.assert_awaited_once()
     kwargs = application.retry.await_args.kwargs
@@ -162,6 +208,9 @@ def test_retry_uses_real_origin_session_and_csrf_protection() -> None:
     app = FastAPI()
     app.add_middleware(RequestContextMiddleware)
     app.add_exception_handler(AppError, app_error_handler)
+    from fastapi.exceptions import RequestValidationError
+
+    app.add_exception_handler(RequestValidationError, validation_error_handler)
     app.include_router(router)
     app.dependency_overrides[get_daily_data_application] = lambda: application
     app.dependency_overrides[get_auth_application] = lambda: FakeAuthApplication()

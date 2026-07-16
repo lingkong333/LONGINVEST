@@ -15,6 +15,7 @@ from long_invest.modules.auth.application import (
     get_auth_application,
 )
 from long_invest.modules.calendar.api import router as calendar_router
+from long_invest.modules.daily_data.api import router as daily_data_router
 from long_invest.modules.health.api import router as health_router
 from long_invest.modules.providers.api import (
     get_provider_service,
@@ -22,6 +23,7 @@ from long_invest.modules.providers.api import (
 from long_invest.modules.providers.api import (
     router as providers_router,
 )
+from long_invest.modules.quotes.api import router as quotes_router
 from long_invest.modules.securities.api import router as securities_router
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.http.exception_handlers import register_exception_handlers
@@ -59,5 +61,7 @@ def create_app() -> FastAPI:
     app.include_router(securities_router)
     app.include_router(calendar_router)
     app.include_router(providers_router)
+    app.include_router(quotes_router)
+    app.include_router(daily_data_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

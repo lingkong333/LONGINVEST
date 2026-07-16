@@ -1,4 +1,6 @@
 from dataclasses import asdict, is_dataclass
+from datetime import datetime
+from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -18,6 +20,7 @@ from long_invest.modules.quotes.application import (
 from long_invest.modules.quotes.contracts import QuoteCycleStatus
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
+from long_invest.platform.http.schemas import SuccessEnvelope
 
 router = APIRouter(tags=["quotes"])
 
@@ -54,7 +57,77 @@ class DiagnoseQuoteRequest(StrictRequest):
         return _validate_symbols(value)
 
 
-@router.get("/api/v1/quote-cycles")
+class QuoteCycleRecord(BaseModel):
+    id: UUID
+    status: QuoteCycleStatus
+    expected_count: int
+    valid_count: int
+    missing_count: int
+    conflict_count: int
+    failed_count: int
+    eligible_item_ids: list[UUID]
+    eligible_symbols: list[str]
+    scheduled_at: datetime
+    started_at: datetime | None
+    deadline_at: datetime | None
+    finalized_at: datetime | None
+    schedule_occurrence_id: UUID | None
+    subscription_snapshot_version: int | None
+
+
+class QuoteCyclePageData(BaseModel):
+    items: list[QuoteCycleRecord]
+    total: int
+    page: int
+    page_size: int
+
+
+class QuoteItemRecord(BaseModel):
+    id: UUID
+    cycle_id: UUID
+    symbol: str
+    status: str
+    price: Decimal | None
+    open: Decimal | None
+    high: Decimal | None
+    low: Decimal | None
+    previous_close: Decimal | None
+    volume: int | None
+    amount: Decimal | None
+    quote_time: datetime | None
+    received_at: datetime | None
+    provider: str | None
+    error_code: str | None
+    conflict_evidence: dict[str, Any] | None
+    eligible_for_evaluation: bool
+    expected_subscription_version: int | None
+
+
+class QuoteItemsData(BaseModel):
+    items: list[QuoteItemRecord]
+
+
+class QuoteJobData(BaseModel):
+    job_id: UUID
+    status: str
+
+
+class QuoteCyclePageResponse(SuccessEnvelope):
+    data: QuoteCyclePageData
+
+
+class QuoteItemsResponse(SuccessEnvelope):
+    data: QuoteItemsData
+
+
+class QuoteJobResponse(SuccessEnvelope):
+    data: QuoteJobData
+
+
+@router.get(
+    "/api/v1/quote-cycles",
+    response_model=QuoteCyclePageResponse,
+)
 async def list_cycles(
     application: ApplicationDependency,
     _authenticated: ReadAuth,
@@ -68,7 +141,10 @@ async def list_cycles(
     return success_response(data=_json_data(result))
 
 
-@router.get("/api/v1/quote-cycles/{cycle_id}/items")
+@router.get(
+    "/api/v1/quote-cycles/{cycle_id}/items",
+    response_model=QuoteItemsResponse,
+)
 async def list_cycle_items(
     cycle_id: UUID,
     application: ApplicationDependency,
@@ -80,7 +156,11 @@ async def list_cycle_items(
     return success_response(data={"items": _json_data(result)})
 
 
-@router.post("/api/v1/quote-cycles/manual", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/api/v1/quote-cycles/manual",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=QuoteJobResponse,
+)
 async def submit_manual_cycle(
     body: ManualQuoteRequest,
     application: ApplicationDependency,
@@ -98,7 +178,11 @@ async def submit_manual_cycle(
     return success_response(data=_job_data(job), code="JOB_ACCEPTED")
 
 
-@router.post("/api/v1/quotes/diagnose", status_code=status.HTTP_202_ACCEPTED)
+@router.post(
+    "/api/v1/quotes/diagnose",
+    status_code=status.HTTP_202_ACCEPTED,
+    response_model=QuoteJobResponse,
+)
 async def diagnose_quotes(
     body: DiagnoseQuoteRequest,
     application: ApplicationDependency,

@@ -40,5 +40,6 @@ FROM base AS test
 RUN uv sync --frozen --extra dev
 
 COPY backend/tests ./tests
+COPY backend/openapi.json ./openapi.json
 
 CMD ["pytest", "-q"]

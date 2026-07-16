@@ -70,6 +70,31 @@ def _require_decimal(value: Decimal, field_name: str, *, positive: bool) -> Deci
     return value
 
 
+def _decimal_shape(value: Decimal) -> tuple[int, int]:
+    parts = value.as_tuple()
+    digits = list(parts.digits)
+    exponent = parts.exponent
+    while digits and digits[-1] == 0:
+        digits.pop()
+        exponent += 1
+    if not digits:
+        return (0, 0)
+    return (max(len(digits) + exponent, 0), max(-exponent, 0))
+
+
+def _require_storage_shape(
+    value: Decimal,
+    field_name: str,
+    *,
+    max_integer_digits: int,
+    max_scale: int,
+    storage_name: str,
+) -> None:
+    integer_digits, scale = _decimal_shape(value)
+    if integer_digits > max_integer_digits or scale > max_scale:
+        raise ValueError(f"{field_name} exceeds {storage_name} storage limit")
+
+
 @dataclass(frozen=True, slots=True)
 class RefreshQfq:
     security_id: UUID
@@ -77,6 +102,7 @@ class RefreshQfq:
     start: date
     end: date
     as_of_date: date
+    expected_trade_dates: tuple[date, ...]
     input_daily_version: int
     trigger_reason: str
     request_id: str
@@ -92,6 +118,28 @@ class RefreshQfq:
         _require_date(self.as_of_date, "as_of_date")
         if self.start > self.as_of_date or self.as_of_date != self.end:
             raise ValueError("window must satisfy start <= as_of_date == end")
+        try:
+            expected_trade_dates = tuple(self.expected_trade_dates)
+        except TypeError as exc:
+            raise ValueError("expected_trade_dates must be a nonempty tuple") from exc
+        if not expected_trade_dates:
+            raise ValueError("expected_trade_dates must not be empty")
+        for trade_date in expected_trade_dates:
+            _require_date(trade_date, "expected_trade_dates")
+            if trade_date < self.start or trade_date > self.end:
+                raise ValueError("expected_trade_dates must stay inside the window")
+        if any(
+            current <= previous
+            for previous, current in zip(
+                expected_trade_dates,
+                expected_trade_dates[1:],
+                strict=False,
+            )
+        ):
+            raise ValueError("expected_trade_dates must be strictly ascending")
+        if expected_trade_dates[-1] != self.end:
+            raise ValueError("expected_trade_dates must end on end")
+        object.__setattr__(self, "expected_trade_dates", expected_trade_dates)
         if (
             not isinstance(self.input_daily_version, int)
             or isinstance(self.input_daily_version, bool)
@@ -124,7 +172,16 @@ class QfqBarInput:
     def __post_init__(self) -> None:
         _require_date(self.trade_date, "trade_date")
         for field_name in ("open", "high", "low", "close"):
-            _require_decimal(getattr(self, field_name), field_name, positive=True)
+            value = _require_decimal(
+                getattr(self, field_name), field_name, positive=True
+            )
+            _require_storage_shape(
+                value,
+                field_name,
+                max_integer_digits=12,
+                max_scale=6,
+                storage_name="price",
+            )
         if self.high < max(self.open, self.close, self.low):
             raise ValueError("high must be the greatest OHLC price")
         if self.low > min(self.open, self.close, self.high):
@@ -133,9 +190,17 @@ class QfqBarInput:
             not isinstance(self.volume, int)
             or isinstance(self.volume, bool)
             or self.volume < 0
+            or self.volume > 9223372036854775807
         ):
-            raise ValueError("volume must be a nonnegative integer")
-        _require_decimal(self.amount, "amount", positive=False)
+            raise ValueError("volume must fit a nonnegative BIGINT")
+        amount = _require_decimal(self.amount, "amount", positive=False)
+        _require_storage_shape(
+            amount,
+            "amount",
+            max_integer_digits=20,
+            max_scale=4,
+            storage_name="amount",
+        )
 
 
 @dataclass(frozen=True, slots=True)

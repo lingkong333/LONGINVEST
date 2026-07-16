@@ -20,6 +20,11 @@ def command() -> RefreshQfq:
         start=date(2026, 7, 14),
         end=date(2026, 7, 16),
         as_of_date=date(2026, 7, 16),
+        expected_trade_dates=(
+            date(2026, 7, 14),
+            date(2026, 7, 15),
+            date(2026, 7, 16),
+        ),
         input_daily_version=3,
         trigger_reason="MANUAL",
         request_id="req-qfq-1",
@@ -100,6 +105,12 @@ def test_out_of_window_or_missing_end_is_rejected(
     assert_error("QFQ_WINDOW_INCOMPLETE", bars, bars[-1].close.to_eng_string())
 
 
+def test_missing_expected_intermediate_trade_date_is_rejected() -> None:
+    bars = (valid_bars()[0], valid_bars()[2])
+
+    assert_error("QFQ_WINDOW_INCOMPLETE", bars)
+
+
 def test_adjustment_basis_mismatch_is_rejected() -> None:
     assert_error("QFQ_ADJUSTMENT_BASIS_MISMATCH", valid_bars(), "10.51")
 
@@ -123,6 +134,14 @@ def test_checksum_is_stable_for_equivalent_decimal_encodings() -> None:
     assert first.checksum == second.checksum
 
 
+def test_checksum_matches_canonical_json_golden_value() -> None:
+    result = validate_qfq_window(command(), valid_bars(), Decimal("10.5"))
+
+    assert result.checksum == (
+        "82eef4ae022c4bb35ec64bb7e036e1a94cb89e8f26ba31b33689439ea6622e64"
+    )
+
+
 def high_precision_bars(close: str) -> tuple[QfqBarInput, ...]:
     final_close = Decimal(close)
     return (
@@ -131,7 +150,7 @@ def high_precision_bars(close: str) -> tuple[QfqBarInput, ...]:
         QfqBarInput(
             trade_date=date(2026, 7, 16),
             open=final_close,
-            high=Decimal("2"),
+            high=final_close,
             low=Decimal("1"),
             close=final_close,
             volume=100,
@@ -141,8 +160,8 @@ def high_precision_bars(close: str) -> tuple[QfqBarInput, ...]:
 
 
 def test_checksum_preserves_adjacent_high_precision_values() -> None:
-    first_close = "1.1234567890123456789012345678901"
-    second_close = "1.1234567890123456789012345678902"
+    first_close = "123456789012.123455"
+    second_close = "123456789012.123456"
 
     first = validate_qfq_window(
         command(), high_precision_bars(first_close), Decimal(first_close)
@@ -155,7 +174,7 @@ def test_checksum_preserves_adjacent_high_precision_values() -> None:
 
 
 def test_checksum_does_not_depend_on_decimal_context_precision() -> None:
-    close = "1.1234567890123456789012345678901"
+    close = "123456789012.123456"
     with localcontext() as context:
         context.prec = 6
         low_precision = validate_qfq_window(

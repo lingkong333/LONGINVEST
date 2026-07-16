@@ -69,13 +69,8 @@ def validate_qfq_window(
         raise QfqValidationError("QFQ_DATE_ORDER_INVALID")
     if len({item.trade_date for item in ordered}) != len(ordered):
         raise QfqValidationError("QFQ_DUPLICATE_DATE")
-    if (
-        any(
-            item.trade_date < command.start or item.trade_date > command.end
-            for item in ordered
-        )
-        or ordered[-1].trade_date != command.end
-    ):
+    actual_trade_dates = tuple(item.trade_date for item in ordered)
+    if actual_trade_dates != command.expected_trade_dates:
         raise QfqValidationError("QFQ_WINDOW_INCOMPLETE")
     if (
         not isinstance(expected_daily_close, Decimal)

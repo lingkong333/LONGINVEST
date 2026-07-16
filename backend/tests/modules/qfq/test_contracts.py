@@ -26,6 +26,11 @@ def make_command(**overrides: object) -> RefreshQfq:
         "start": date(2026, 7, 14),
         "end": date(2026, 7, 16),
         "as_of_date": date(2026, 7, 16),
+        "expected_trade_dates": (
+            date(2026, 7, 14),
+            date(2026, 7, 15),
+            date(2026, 7, 16),
+        ),
         "input_daily_version": 3,
         "trigger_reason": "MANUAL",
         "request_id": "req-qfq-1",
@@ -73,6 +78,7 @@ def test_refresh_command_is_frozen_and_accepts_a_bounded_window() -> None:
     command = make_command()
 
     assert command.start <= command.as_of_date == command.end
+    assert command.expected_trade_dates[-1] == command.end
     assert command.input_daily_version == 3
     with pytest.raises(FrozenInstanceError):
         command.symbol = "000001.SZ"  # type: ignore[misc]
@@ -99,6 +105,36 @@ def test_refresh_command_rejects_invalid_values(
 
 
 @pytest.mark.parametrize(
+    "expected_trade_dates",
+    [
+        (),
+        (date(2026, 7, 14), date(2026, 7, 14), date(2026, 7, 16)),
+        (date(2026, 7, 15), date(2026, 7, 14), date(2026, 7, 16)),
+        (date(2026, 7, 13), date(2026, 7, 16)),
+        (date(2026, 7, 14), date(2026, 7, 15)),
+    ],
+)
+def test_refresh_command_rejects_invalid_expected_trade_dates(
+    expected_trade_dates: tuple[date, ...],
+) -> None:
+    with pytest.raises(ValueError, match="expected_trade_dates"):
+        make_command(expected_trade_dates=expected_trade_dates)
+
+
+def test_refresh_command_copies_expected_trade_dates() -> None:
+    dates = [date(2026, 7, 14), date(2026, 7, 15), date(2026, 7, 16)]
+
+    command = make_command(expected_trade_dates=dates)
+    dates.clear()
+
+    assert command.expected_trade_dates == (
+        date(2026, 7, 14),
+        date(2026, 7, 15),
+        date(2026, 7, 16),
+    )
+
+
+@pytest.mark.parametrize(
     "overrides",
     [
         {"open": Decimal("0")},
@@ -112,6 +148,61 @@ def test_refresh_command_rejects_invalid_values(
 def test_bar_rejects_invalid_ohlc_or_quantities(overrides: dict[str, object]) -> None:
     with pytest.raises(ValueError):
         make_bar(**overrides)
+
+
+def test_bar_accepts_storage_boundaries_and_trailing_zeroes() -> None:
+    bar = QfqBarInput(
+        trade_date=date(2026, 7, 16),
+        open=Decimal("999999999999.9999990"),
+        high=Decimal("999999999999.9999990"),
+        low=Decimal("0.0000010"),
+        close=Decimal("0.0000010"),
+        volume=9223372036854775807,
+        amount=Decimal("99999999999999999999.99990"),
+    )
+
+    assert bar.volume == 9223372036854775807
+
+
+@pytest.mark.parametrize(
+    "price",
+    [
+        Decimal("1e1000000"),
+        Decimal("1000000000000"),
+        Decimal("0.0000001"),
+        Decimal("999999999999.9999991"),
+    ],
+)
+def test_bar_rejects_price_outside_numeric_18_6(price: Decimal) -> None:
+    with pytest.raises(ValueError, match="price storage limit"):
+        QfqBarInput(
+            trade_date=date(2026, 7, 16),
+            open=price,
+            high=price,
+            low=price,
+            close=price,
+            volume=0,
+            amount=Decimal("0"),
+        )
+
+
+@pytest.mark.parametrize(
+    "amount",
+    [
+        Decimal("1e1000000"),
+        Decimal("100000000000000000000"),
+        Decimal("0.00001"),
+        Decimal("99999999999999999999.99991"),
+    ],
+)
+def test_bar_rejects_amount_outside_numeric_24_4(amount: Decimal) -> None:
+    with pytest.raises(ValueError, match="amount storage limit"):
+        make_bar(amount=amount)
+
+
+def test_bar_rejects_volume_above_bigint() -> None:
+    with pytest.raises(ValueError, match="volume"):
+        make_bar(volume=9223372036854775808)
 
 
 def test_bar_is_frozen() -> None:

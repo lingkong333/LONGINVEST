@@ -154,6 +154,19 @@ class OccurrenceRepository(MemoryRepository):
         return await super().claim_cycle(cycle)
 
 
+class ReloadingOccurrenceRepository(OccurrenceRepository):
+    def __init__(self, cycles, by_key):
+        super().__init__()
+        self.cycles = cycles
+        self.by_key = by_key
+
+    async def claim_cycle(self, cycle):
+        claimed, created = await super().claim_cycle(cycle)
+        if not created:
+            claimed.items = sorted(claimed.items, key=lambda item: item.symbol)
+        return claimed, created
+
+
 def service(repository=None, events=None, quality=None):
     repository = repository or MemoryRepository()
     events = events or RecordingEvents(repository.session)
@@ -262,6 +275,92 @@ async def test_same_schedule_occurrence_replays_identical_cycle() -> None:
     )
     assert replay.id == first.id
     assert [event[0] for event in events.records].count("quote_cycle.created") == 1
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("replay_by_occurrence", [False, True])
+async def test_create_replays_original_scope_after_repository_rereads_sorted_items(
+    replay_by_occurrence: bool,
+) -> None:
+    cycles = {}
+    by_key = {}
+    first_subject, _, first_events, _ = service(
+        ReloadingOccurrenceRepository(cycles, by_key)
+    )
+    replay_subject, _, replay_events, _ = service(
+        ReloadingOccurrenceRepository(cycles, by_key)
+    )
+    occurrence_id = uuid4() if replay_by_occurrence else None
+    values = dict(
+        symbols=("600001.SH", "000001.SZ"),
+        scheduled_at=NOW,
+        timeout_seconds=30,
+        idempotency_scope="automatic",
+        universe_snapshot_id="universe",
+        universe_snapshot_version=7,
+        schedule_occurrence_id=occurrence_id,
+        subscription_snapshot_version=11,
+    )
+    first = await first_subject.create(
+        CreateQuoteCycle(idempotency_key="worker-a", **values)
+    )
+    assert [item.symbol for item in cycles[first.id].items] == [
+        "600001.SH",
+        "000001.SZ",
+    ]
+    replay = await replay_subject.create(
+        CreateQuoteCycle(
+            idempotency_key="worker-b" if replay_by_occurrence else "worker-a",
+            **values,
+        )
+    )
+
+    assert replay.id == first.id
+    assert [event[0] for event in first_events.records] == ["quote_cycle.created"]
+    assert replay_events.records == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("overrides", "expected_code"),
+    [
+        ({"symbols": ("600001.SH", "000002.SZ")}, "IDEMPOTENCY_KEY_CONFLICT"),
+        (
+            {"subscription_snapshot_version": 12},
+            "QUOTE_CYCLE_OCCURRENCE_CONFLICT",
+        ),
+    ],
+)
+async def test_sorted_repository_reread_still_rejects_different_create_request(
+    overrides: dict[str, object], expected_code: str
+) -> None:
+    cycles = {}
+    by_key = {}
+    first_subject, _, _, _ = service(ReloadingOccurrenceRepository(cycles, by_key))
+    replay_subject, _, _, _ = service(ReloadingOccurrenceRepository(cycles, by_key))
+    occurrence_id = (
+        uuid4() if expected_code == "QUOTE_CYCLE_OCCURRENCE_CONFLICT" else None
+    )
+    values = {
+        "symbols": ("600001.SH", "000001.SZ"),
+        "scheduled_at": NOW,
+        "timeout_seconds": 30,
+        "idempotency_scope": "automatic",
+        "idempotency_key": "worker-a",
+        "universe_snapshot_id": "universe",
+        "universe_snapshot_version": 7,
+        "schedule_occurrence_id": occurrence_id,
+        "subscription_snapshot_version": 11,
+    }
+    await first_subject.create(CreateQuoteCycle(**values))  # type: ignore[arg-type]
+    values.update(overrides)
+    if occurrence_id is not None:
+        values["idempotency_key"] = "worker-b"
+
+    with pytest.raises(AppError) as caught:
+        await replay_subject.create(CreateQuoteCycle(**values))  # type: ignore[arg-type]
+
+    assert caught.value.code == expected_code
 
 
 @pytest.mark.anyio

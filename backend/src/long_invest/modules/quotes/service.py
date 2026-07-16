@@ -509,7 +509,8 @@ async def _release_test_lock(repository: QuoteRepositoryPort) -> None:
 
 def _same_create_request(cycle: QuoteCycle, command: CreateQuoteCycle) -> bool:
     return (
-        tuple(item.symbol for item in cycle.items) == command.symbols
+        tuple(sorted(item.symbol for item in cycle.items))
+        == tuple(sorted(command.symbols))
         and cycle.scheduled_at == command.scheduled_at
         and cycle.timeout_seconds == command.timeout_seconds
         and cycle.universe_snapshot_id == command.universe_snapshot_id

@@ -12,6 +12,14 @@ from long_invest.modules.calendar.models import (  # noqa: F401
     TradingCalendarVersion,
     TradingSession,
 )
+from long_invest.modules.daily_data.models import (  # noqa: F401
+    DailyBarRevision,
+    DailyBarStage,
+    DailyBarUnadjusted,
+    DailyBatchMissingItem,
+    DailyDataBatch,
+)
+from long_invest.modules.market_data.models import DataQualityIssue  # noqa: F401
 from long_invest.modules.notifications.models import (  # noqa: F401
     NotificationDelivery,
     NotificationDeliveryAttempt,
@@ -26,6 +34,7 @@ from long_invest.modules.providers.models import (  # noqa: F401
     ProviderHealthState,
     ProviderMutationRequest,
 )
+from long_invest.modules.quotes.models import QuoteCycle, QuoteCycleItem  # noqa: F401
 from long_invest.modules.securities.models import (  # noqa: F401
     Security,
     SecurityMasterVersion,

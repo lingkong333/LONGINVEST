@@ -42,6 +42,11 @@ class QuoteCycle(Base):
             "AND failed_count >= 0",
             name="counts_nonnegative",
         ),
+        CheckConstraint(
+            "status IN ('PENDING','FETCHING','FINALIZING','READY','PARTIAL',"
+            "'FAILED','MISSED','CANCELED')",
+            name="status_valid",
+        ),
         Index("ix_quote_cycle_status_deadline", "status", "deadline_at"),
     )
 
@@ -93,6 +98,11 @@ class QuoteCycleItem(Base):
             "expected_subscription_version IS NULL OR "
             "expected_subscription_version > 0",
             name="expected_subscription_positive",
+        ),
+        CheckConstraint(
+            "status IN ('VALID','MISSING','STALE','CONFLICT','INVALID','TIMEOUT',"
+            "'PROVIDER_FAILED','NOT_EXPECTED_TO_TRADE')",
+            name="status_valid",
         ),
         Index("ix_quote_cycle_item_cycle_status", "cycle_id", "status"),
     )

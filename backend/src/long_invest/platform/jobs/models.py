@@ -35,6 +35,12 @@ class Job(Base):
             name="priority_range",
         ),
         CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint("soft_timeout_seconds > 0", name="soft_timeout_positive"),
+        CheckConstraint(
+            "hard_timeout_seconds >= soft_timeout_seconds "
+            "AND hard_timeout_seconds <= 3600",
+            name="hard_timeout_not_less_than_soft",
+        ),
         CheckConstraint(
             "status IN ('PENDING_DISPATCH','QUEUED','RUNNING','WAITING_RETRY',"
             "'PAUSING','PAUSED','CANCEL_REQUESTED','SUCCEEDED','PARTIAL','FAILED',"
@@ -71,6 +77,18 @@ class Job(Base):
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     request_id: Mapped[str] = mapped_column(String(64), nullable=False)
     created_by_user_id: Mapped[str | None] = mapped_column(String(64))
+    soft_timeout_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=300,
+        server_default="300",
+    )
+    hard_timeout_seconds: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=360,
+        server_default="360",
+    )
     progress: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,

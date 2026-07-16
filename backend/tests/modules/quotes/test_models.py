@@ -12,7 +12,9 @@ def test_quote_models_have_stable_database_constraints() -> None:
     }
     assert "uq_quote_cycle_idempotency" in cycle_constraints
     assert "ck_quote_cycle_deadline" in cycle_constraints
+    assert "ck_quote_cycle_status_valid" in cycle_constraints
     assert "uq_quote_cycle_item_symbol" in item_constraints
+    assert "ck_quote_cycle_item_status_valid" in item_constraints
     assert any(
         isinstance(c, UniqueConstraint) for c in QuoteCycle.__table__.constraints
     )

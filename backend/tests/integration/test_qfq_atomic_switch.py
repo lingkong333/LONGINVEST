@@ -119,6 +119,7 @@ async def _seed(database: Database, run_count: int = 1):
     async with database.transaction() as session:
         session.add(security)
         session.add_all(jobs)
+        await session.flush()
         session.add_all(runs)
     return security, runs
 

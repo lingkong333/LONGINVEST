@@ -1,6 +1,7 @@
 import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from functools import wraps
 from uuid import NAMESPACE_DNS, uuid4, uuid5
 
@@ -339,3 +340,34 @@ async def test_current_bar_and_latest_revision_reads_request_row_locks() -> None
         compiled = str(statement.compile(compile_kwargs={"literal_binds": True}))
         assert "FOR UPDATE" in compiled
         assert statement.get_execution_options()["populate_existing"] is True
+
+
+@async_test
+async def test_bar_key_advisory_lock_is_stable_and_transaction_scoped() -> None:
+    session = FakeSession([None, None])
+    repository = DailyDataRepository(session)
+    security_id = uuid4()
+
+    await repository.lock_bar_key(security_id, DAY)
+    await repository.lock_bar_key(security_id, DAY)
+
+    first, second = session.scalar_statements
+    first_sql = str(first.compile(compile_kwargs={"literal_binds": True}))
+    second_sql = str(second.compile(compile_kwargs={"literal_binds": True}))
+    assert "pg_advisory_xact_lock" in first_sql
+    assert first_sql == second_sql
+
+
+@async_test
+async def test_previous_close_reads_latest_formal_fact_before_target_date() -> None:
+    session = FakeSession([Decimal("9.80")])
+    repository = DailyDataRepository(session)
+    security_id = uuid4()
+
+    assert await repository.get_previous_close(security_id, DAY) == Decimal("9.80")
+    sql = str(
+        session.scalar_statements[0].compile(compile_kwargs={"literal_binds": True})
+    )
+    assert "trade_date <" in sql
+    assert "ORDER BY daily_bar_unadjusted.trade_date DESC" in sql
+    assert "LIMIT 1" in sql

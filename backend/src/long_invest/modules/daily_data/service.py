@@ -134,17 +134,60 @@ class DailyDataService:
                     validated += 1
                 continue
             payload = _restore_provider_payload(stage.provider_payload or {})
+            is_new_listing = bool(payload.pop("is_new_listing", False))
+            is_st = bool(payload.pop("is_st", False))
+            has_known_corporate_action = bool(
+                payload.pop("has_known_corporate_action", False)
+            )
+            if "previous_close" in payload:
+                try:
+                    previous_close = _positive_previous_close(
+                        payload["previous_close"]
+                    )
+                except (InvalidOperation, TypeError, ValueError):
+                    _invalidate_stage(
+                        stage,
+                        "DAILY_BAR_PREVIOUS_CLOSE_INVALID",
+                        self._now(),
+                    )
+                    continue
+            else:
+                previous_close = await self._repository.get_previous_close(
+                    stage.security_id, batch.trading_date
+                )
+                if previous_close is None:
+                    if not is_new_listing:
+                        _invalidate_stage(
+                            stage,
+                            "DAILY_BAR_PREVIOUS_CLOSE_MISSING",
+                            self._now(),
+                        )
+                        continue
+                else:
+                    try:
+                        previous_close = _positive_previous_close(previous_close)
+                    except (InvalidOperation, TypeError, ValueError):
+                        _invalidate_stage(
+                            stage,
+                            "DAILY_BAR_PREVIOUS_CLOSE_INVALID",
+                            self._now(),
+                        )
+                        continue
+            if previous_close is not None:
+                payload["previous_close"] = previous_close
+                stage.provider_payload = {
+                    **(stage.provider_payload or {}),
+                    "previous_close": str(previous_close),
+                }
             result = validate_daily_bar(
                 payload,
                 expected_symbol=stage.symbol,
                 expected_date=batch.trading_date,
                 context=DailyQualityContext(
-                    is_new_listing=bool(payload.pop("is_new_listing", False)),
-                    is_st=bool(payload.pop("is_st", False)),
-                    has_known_corporate_action=bool(
-                        payload.pop("has_known_corporate_action", False)
-                    ),
-                    previous_close=_optional_decimal(payload.get("previous_close")),
+                    is_new_listing=is_new_listing,
+                    is_st=is_st,
+                    has_known_corporate_action=has_known_corporate_action,
+                    previous_close=previous_close,
                 ),
                 seen_keys=seen,
             )
@@ -383,6 +426,7 @@ class DailyDataService:
 
     async def _commit_stage(self, stage: DailyBarStage) -> int:
         values = _bar_values(stage)
+        await self._repository.lock_bar_key(stage.security_id, stage.trading_date)
         existing = await self._repository.get_bar(stage.security_id, stage.trading_date)
         if existing is None:
             await self._repository.add_bar(
@@ -524,6 +568,22 @@ def _json_values(values: dict[str, Any]) -> dict[str, Any]:
 
 def _optional_decimal(value: object) -> Decimal | None:
     return None if value is None else Decimal(str(value))
+
+
+def _positive_previous_close(value: object) -> Decimal:
+    if isinstance(value, bool):
+        raise ValueError
+    result = Decimal(str(value))
+    if not result.is_finite() or result <= 0:
+        raise ValueError
+    return result
+
+
+def _invalidate_stage(stage: DailyBarStage, code: str, now: datetime) -> None:
+    stage.status = DailyStageStatus.INVALID
+    stage.quality_code = code
+    stage.error_code = code
+    stage.validated_at = now
 
 
 def _restore_provider_payload(payload: dict[str, Any]) -> dict[str, Any]:

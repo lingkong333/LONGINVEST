@@ -86,8 +86,18 @@ def validate_daily_bar(
             review_required=True,
         )
 
-    previous_close = context.previous_close
-    if previous_close is not None and previous_close > 0:
+    previous_close_value = bar.get("previous_close", context.previous_close)
+    if previous_close_value is not None:
+        try:
+            previous_close = _decimal(previous_close_value)
+        except (InvalidOperation, TypeError, ValueError):
+            return _invalid(
+                "DAILY_BAR_PREVIOUS_CLOSE_INVALID", "日线昨收字段无效"
+            )
+        if previous_close <= 0:
+            return _invalid(
+                "DAILY_BAR_PREVIOUS_CLOSE_INVALID", "日线昨收必须大于零"
+            )
         change = abs(close - previous_close) / previous_close
         if change > Decimal("0.30"):
             if (

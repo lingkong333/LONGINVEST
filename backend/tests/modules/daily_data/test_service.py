@@ -39,6 +39,8 @@ class FakeRepository:
         self.missing = {}
         self.fail_symbols = set()
         self.batch_lock_requests = []
+        self.bar_write_order = []
+        self.previous_closes = {}
 
     async def claim_batch(self, command, now):
         existing = self.by_key.get(command.idempotency_key)
@@ -102,7 +104,14 @@ class FakeRepository:
         return list(self.missing.get(batch_id, ()))
 
     async def get_bar(self, security_id, trade_date):
+        self.bar_write_order.append(("get", security_id, trade_date))
         return self.bars.get((security_id, trade_date))
+
+    async def lock_bar_key(self, security_id, trade_date):
+        self.bar_write_order.append(("lock", security_id, trade_date))
+
+    async def get_previous_close(self, security_id, trading_date):
+        return self.previous_closes.get((security_id, trading_date))
 
     async def add_bar(self, bar):
         if bar.symbol in self.fail_symbols:
@@ -300,6 +309,22 @@ async def test_same_value_replay_has_no_revision_and_changed_value_revises() -> 
     assert len(repo.revisions) == 1
     assert repo.bars[(security_id, DAY)].data_version == 2
     assert "daily_bar.corrected" in [event[0] for event in events.items]
+
+
+@async_test
+async def test_commit_locks_bar_key_before_reading_current_fact() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    staged = _stage()
+    await service.stage(batch.id, staged)
+
+    await _validate_and_commit(service, batch.id)
+
+    assert repo.bar_write_order[:2] == [
+        ("lock", staged.security_id, DAY),
+        ("get", staged.security_id, DAY),
+    ]
 
 
 @async_test
@@ -623,6 +648,149 @@ async def test_validate_restores_json_payload_types_after_restart() -> None:
     assert result.validated_count == 1
     assert persisted.status is DailyStageStatus.VALID
     assert persisted.validated_at == NOW
+
+
+@async_test
+async def test_missing_previous_close_uses_last_formal_close_and_persists_it() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage()
+    payload = dict(fetched.provider_payload)
+    del payload["previous_close"]
+    fetched = StageDailyBar(
+        symbol=fetched.symbol,
+        security_id=fetched.security_id,
+        trading_date=fetched.trading_date,
+        status=fetched.status,
+        provider_payload=payload,
+        received_at=fetched.received_at,
+    )
+    repo.previous_closes[(fetched.security_id, DAY)] = Decimal("9.80")
+    await service.stage(batch.id, fetched)
+
+    await service.validate(batch.id)
+    result = await service.commit(batch.id)
+
+    stage = repo.stages[(batch.id, fetched.symbol)]
+    assert stage.provider_payload["previous_close"] == "9.80"
+    assert result.status is DailyBatchStatus.SUCCEEDED
+    assert repo.bars[(fetched.security_id, DAY)].previous_close == Decimal("9.80")
+
+
+@async_test
+async def test_normal_stock_without_previous_close_is_invalid() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage()
+    payload = dict(fetched.provider_payload)
+    del payload["previous_close"]
+    await service.stage(
+        batch.id,
+        StageDailyBar(
+            symbol=fetched.symbol,
+            security_id=fetched.security_id,
+            trading_date=fetched.trading_date,
+            status=fetched.status,
+            provider_payload=payload,
+            received_at=fetched.received_at,
+        ),
+    )
+
+    result = await service.validate(batch.id)
+
+    stage = repo.stages[(batch.id, fetched.symbol)]
+    assert result.validated_count == 0
+    assert stage.status is DailyStageStatus.INVALID
+    assert stage.error_code == "DAILY_BAR_PREVIOUS_CLOSE_MISSING"
+
+
+@async_test
+async def test_new_listing_without_previous_close_is_explicitly_allowed() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage()
+    payload = dict(fetched.provider_payload)
+    del payload["previous_close"]
+    payload["is_new_listing"] = True
+    await service.stage(
+        batch.id,
+        StageDailyBar(
+            symbol=fetched.symbol,
+            security_id=fetched.security_id,
+            trading_date=fetched.trading_date,
+            status=fetched.status,
+            provider_payload=payload,
+            received_at=fetched.received_at,
+        ),
+    )
+
+    await service.validate(batch.id)
+    result = await service.commit(batch.id)
+
+    assert result.status is DailyBatchStatus.SUCCEEDED
+    assert repo.bars[(fetched.security_id, DAY)].previous_close is None
+
+
+@async_test
+@pytest.mark.parametrize("previous_close", ["bad", "NaN", "Infinity", "0", "-1"])
+async def test_invalid_previous_close_marks_only_that_stage_invalid(
+    previous_close,
+) -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage()
+    payload = {**dict(fetched.provider_payload), "previous_close": previous_close}
+    await service.stage(
+        batch.id,
+        StageDailyBar(
+            symbol=fetched.symbol,
+            security_id=fetched.security_id,
+            trading_date=fetched.trading_date,
+            status=fetched.status,
+            provider_payload=payload,
+            received_at=fetched.received_at,
+        ),
+    )
+
+    result = await service.validate(batch.id)
+
+    stage = repo.stages[(batch.id, fetched.symbol)]
+    assert result.validated_count == 0
+    assert stage.status is DailyStageStatus.INVALID
+    assert stage.error_code == "DAILY_BAR_PREVIOUS_CLOSE_INVALID"
+
+
+@async_test
+async def test_bad_previous_close_does_not_interrupt_other_symbols() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command(("600000.SH", "000001.SZ")))
+    bad = _stage()
+    good = _stage("000001.SZ")
+    await service.stage(
+        batch.id,
+        StageDailyBar(
+            symbol=bad.symbol,
+            security_id=bad.security_id,
+            trading_date=bad.trading_date,
+            status=bad.status,
+            provider_payload={**dict(bad.provider_payload), "previous_close": "NaN"},
+            received_at=bad.received_at,
+        ),
+    )
+    await service.stage(batch.id, good)
+
+    validated = await service.validate(batch.id)
+    committed = await service.commit(batch.id)
+
+    assert validated.validated_count == 1
+    assert committed.status is DailyBatchStatus.PARTIAL
+    assert (good.security_id, DAY) in repo.bars
+    assert (bad.security_id, DAY) not in repo.bars
 
 
 @async_test

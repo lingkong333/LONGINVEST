@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
+from hashlib import blake2b
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -174,6 +175,26 @@ class DailyDataRepository:
             )
             .with_for_update()
             .execution_options(populate_existing=True)
+        )
+
+    async def lock_bar_key(self, security_id: UUID, trade_date: date) -> None:
+        raw_key = f"{security_id}:{trade_date.isoformat()}".encode("ascii")
+        lock_key = int.from_bytes(
+            blake2b(raw_key, digest_size=8).digest(), "big", signed=True
+        )
+        await self.session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
+
+    async def get_previous_close(
+        self, security_id: UUID, trading_date: date
+    ) -> Decimal | None:
+        return await self.session.scalar(
+            select(DailyBarUnadjusted.close)
+            .where(
+                DailyBarUnadjusted.security_id == security_id,
+                DailyBarUnadjusted.trade_date < trading_date,
+            )
+            .order_by(DailyBarUnadjusted.trade_date.desc())
+            .limit(1)
         )
 
     async def add_bar(self, bar: DailyBarUnadjusted) -> None:

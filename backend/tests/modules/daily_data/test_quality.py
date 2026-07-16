@@ -121,6 +121,19 @@ def test_previous_close_jump_requires_review_without_dropping_bar() -> None:
     assert result.code == "DAILY_BAR_PREVIOUS_CLOSE_ANOMALY"
 
 
+@pytest.mark.parametrize("previous_close", ["bad", "NaN", "Infinity", 0, -1])
+def test_invalid_previous_close_returns_stable_quality_error(previous_close) -> None:
+    result = validate_daily_bar(
+        _bar(previous_close=previous_close),
+        expected_symbol="600000.SH",
+        expected_date=date(2026, 7, 15),
+        context=DailyQualityContext(previous_close=previous_close),
+    )
+
+    assert result.valid is False
+    assert result.code == "DAILY_BAR_PREVIOUS_CLOSE_INVALID"
+
+
 @pytest.mark.parametrize(
     "context",
     [

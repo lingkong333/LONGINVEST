@@ -12,6 +12,7 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
         "worker-maintenance": "maintenance",
         "worker-realtime-quotes": "realtime-quotes",
         "worker-daily-market-data": "daily-market-data",
+        "worker-qfq-refresh": "qfq-refresh",
     }
     for service_name, queue_name in expected.items():
         service = services[service_name]

@@ -67,7 +67,7 @@ def test_stage_contract_validates_uuid_date_symbol_and_aware_time() -> None:
         symbol="600000.SH",
         security_id=uuid4(),
         trading_date=date(2026, 7, 15),
-        status=DailyStageStatus.VALID,
+        status=DailyStageStatus.FETCHED,
         provider_payload={
             "open": "10.00",
             "high": "10.50",
@@ -103,4 +103,24 @@ def test_missing_stage_requires_reason_and_valid_stage_requires_payload() -> Non
     with pytest.raises(ValueError, match="缺失原因"):
         StageDailyBar(status=DailyStageStatus.MISSING, **common)
     with pytest.raises(ValueError, match="日线数据"):
-        StageDailyBar(status=DailyStageStatus.VALID, **common)
+        StageDailyBar(status=DailyStageStatus.FETCHED, **common)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        DailyStageStatus.VALID,
+        DailyStageStatus.REVIEW_REQUIRED,
+        DailyStageStatus.INVALID,
+    ],
+)
+def test_stage_contract_rejects_internal_quality_statuses(status) -> None:
+    with pytest.raises(ValueError):
+        StageDailyBar(
+            symbol="600000.SH",
+            security_id=uuid4(),
+            trading_date=date(2026, 7, 15),
+            status=status,
+            provider_payload={"close": "10.20"},
+            received_at=datetime(2026, 7, 15, 9, tzinfo=UTC),
+        )

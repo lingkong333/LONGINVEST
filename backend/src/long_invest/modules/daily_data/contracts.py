@@ -147,6 +147,12 @@ class StageDailyBar:
         except (TypeError, ValueError) as exc:
             raise ValueError("不支持的暂存状态") from exc
         object.__setattr__(self, "status", status)
+        if status not in {
+            DailyStageStatus.FETCHED,
+            DailyStageStatus.MISSING,
+            DailyStageStatus.FAILED,
+        }:
+            raise ValueError("外部暂存不允许使用内部校验状态")
         reason = self.missing_reason
         if reason is not None:
             try:
@@ -159,12 +165,7 @@ class StageDailyBar:
         if status is not DailyStageStatus.MISSING and reason is not None:
             raise ValueError("只有缺失状态可以提供缺失原因")
         if (
-            status
-            in {
-                DailyStageStatus.FETCHED,
-                DailyStageStatus.VALID,
-                DailyStageStatus.REVIEW_REQUIRED,
-            }
+            status is DailyStageStatus.FETCHED
             and not self.provider_payload
         ):
             raise ValueError("有效暂存状态必须提供日线数据")

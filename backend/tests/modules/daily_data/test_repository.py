@@ -267,3 +267,19 @@ async def test_repository_item_path_uses_database_savepoint() -> None:
         pass
 
     assert session.begin_nested_calls == 1
+
+
+@async_test
+async def test_batch_lock_refreshes_cached_state() -> None:
+    batch = _batch(status="VALIDATING")
+    session = FakeSession([batch])
+    repository = DailyDataRepository(session)
+
+    loaded = await repository.get_batch(batch.id, for_update=True)
+
+    assert loaded is batch
+    statement = session.scalar_statements[0]
+    assert "FOR UPDATE" in str(
+        statement.compile(compile_kwargs={"literal_binds": True})
+    )
+    assert statement.get_execution_options()["populate_existing"] is True

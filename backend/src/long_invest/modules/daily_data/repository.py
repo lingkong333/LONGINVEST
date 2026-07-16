@@ -97,7 +97,9 @@ class DailyDataRepository:
     ) -> DailyDataBatch | None:
         statement = select(DailyDataBatch).where(DailyDataBatch.id == batch_id)
         if for_update:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
         return await self.session.scalar(statement)
 
     async def upsert_stage(

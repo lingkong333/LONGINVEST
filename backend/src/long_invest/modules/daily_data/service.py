@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from contextlib import suppress
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any, Protocol
 from uuid import UUID, uuid4
 
@@ -62,16 +63,14 @@ class DailyDataService:
         return _summary(batch)
 
     async def stage(self, batch_id: UUID, item: StageDailyBar) -> None:
-        batch = await self._batch(batch_id)
-        if DailyBatchStatus(batch.status) in {
-            DailyBatchStatus.SUCCEEDED,
-            DailyBatchStatus.PARTIAL,
-            DailyBatchStatus.FAILED,
-        }:
+        batch = await self._batch(batch_id, for_update=True)
+        status = DailyBatchStatus(batch.status)
+        if status not in {DailyBatchStatus.PENDING, DailyBatchStatus.FETCHING}:
             raise AppError(
-                code="DAILY_BATCH_ALREADY_COMMITTED",
-                message="日线批次已经结束",
+                code="DAILY_BATCH_STATE_CONFLICT",
+                message="日线批次当前状态不允许暂存",
                 status_code=409,
+                details={"status": status.value},
             )
         if item.symbol not in batch.symbols:
             raise AppError(
@@ -125,7 +124,7 @@ class DailyDataService:
                 }:
                     validated += 1
                 continue
-            payload = dict(stage.provider_payload or {})
+            payload = _restore_provider_payload(stage.provider_payload or {})
             result = validate_daily_bar(
                 payload,
                 expected_symbol=stage.symbol,
@@ -168,6 +167,13 @@ class DailyDataService:
             DailyBatchStatus.FAILED,
         }:
             return _summary(batch)
+        if current_status is not DailyBatchStatus.VALIDATING:
+            raise AppError(
+                code="DAILY_BATCH_STATE_CONFLICT",
+                message="日线批次必须完成校验后才能提交",
+                status_code=409,
+                details={"status": current_status.value},
+            )
         batch.status = DailyBatchStatus.COMMITTING
         stages = await self._repository.list_stages(batch_id)
         committed_symbols: list[str] = []
@@ -210,6 +216,18 @@ class DailyDataService:
                         stage.security_id,
                         DailyMissingReason.UNEXPLAINED,
                         stage.error_code or "DAILY_BAR_INVALID",
+                        self._now(),
+                    )
+                )
+                continue
+            if stage.validated_at is None:
+                missing.append(
+                    _missing(
+                        batch.id,
+                        symbol,
+                        stage.security_id,
+                        DailyMissingReason.UNEXPLAINED,
+                        "DAILY_BAR_NOT_VALIDATED",
                         self._now(),
                     )
                 )
@@ -489,6 +507,25 @@ def _json_values(values: dict[str, Any]) -> dict[str, Any]:
 
 def _optional_decimal(value: object) -> Decimal | None:
     return None if value is None else Decimal(str(value))
+
+
+def _restore_provider_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    restored = dict(payload)
+    trading_date = restored.get("trading_date")
+    if isinstance(trading_date, str):
+        with suppress(ValueError):
+            restored["trading_date"] = date.fromisoformat(trading_date)
+    for field in ("open", "high", "low", "close", "previous_close", "amount"):
+        value = restored.get(field)
+        if value is None or isinstance(value, bool):
+            continue
+        with suppress(InvalidOperation, TypeError, ValueError):
+            restored[field] = Decimal(str(value))
+    volume = restored.get("volume")
+    if isinstance(volume, str):
+        with suppress(ValueError):
+            restored["volume"] = int(volume)
+    return restored
 
 
 def _missing(batch_id, symbol, security_id, reason, error_code, now):

@@ -38,6 +38,7 @@ class FakeRepository:
         self.revisions = []
         self.missing = {}
         self.fail_symbols = set()
+        self.batch_lock_requests = []
 
     async def claim_batch(self, command, now):
         existing = self.by_key.get(command.idempotency_key)
@@ -67,6 +68,7 @@ class FakeRepository:
         return batch, True
 
     async def get_batch(self, batch_id, *, for_update=False):
+        self.batch_lock_requests.append((batch_id, for_update))
         return self.batches.get(batch_id)
 
     async def upsert_stage(self, batch_id, item, expires_at):
@@ -156,12 +158,12 @@ def _stage(
     symbol="600000.SH",
     *,
     security_id=None,
-    status=DailyStageStatus.VALID,
+    status=DailyStageStatus.FETCHED,
     reason=None,
     close="10.20",
 ):
     payload = None
-    if status is DailyStageStatus.VALID:
+    if status is DailyStageStatus.FETCHED:
         payload = {
             "symbol": symbol,
             "trading_date": DAY,
@@ -194,6 +196,11 @@ def _service(repo=None, events=None, quality=None):
     )
 
 
+async def _validate_and_commit(service, batch_id):
+    await service.validate(batch_id)
+    return await service.commit(batch_id)
+
+
 @async_test
 async def test_create_is_idempotent_and_empty_scope_is_rejected_by_contract() -> None:
     repo = FakeRepository()
@@ -212,7 +219,7 @@ async def test_successful_batch_commits_valid_bar_and_completed_event() -> None:
     batch = await service.create(_command())
     item = _stage()
     await service.stage(batch.id, item)
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
     assert result.status is DailyBatchStatus.SUCCEEDED
     assert result.committed_count == 1
     assert repo.bars[(item.security_id, DAY)].close == Decimal("10.20")
@@ -228,7 +235,7 @@ async def test_explained_missing_does_not_degrade_batch() -> None:
         batch.id,
         _stage(status=DailyStageStatus.MISSING, reason=DailyMissingReason.SUSPENDED),
     )
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
     assert result.status is DailyBatchStatus.SUCCEEDED
     assert result.committed_count == 0
 
@@ -247,7 +254,7 @@ async def test_unexplained_missing_makes_partial_when_one_bar_commits() -> None:
             reason=DailyMissingReason.UNEXPLAINED,
         ),
     )
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
     assert result.status is DailyBatchStatus.PARTIAL
     assert result.committed_count == 1
     assert len(quality.commands) == 1
@@ -262,7 +269,7 @@ async def test_zero_commits_with_unexplained_missing_is_failed() -> None:
         batch.id,
         _stage(status=DailyStageStatus.MISSING, reason=DailyMissingReason.UNEXPLAINED),
     )
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
     assert result.status is DailyBatchStatus.FAILED
     assert events.items == []
 
@@ -274,15 +281,15 @@ async def test_same_value_replay_has_no_revision_and_changed_value_revises() -> 
     security_id = uuid4()
     first = await service.create(_command(key="first"))
     await service.stage(first.id, _stage(security_id=security_id))
-    await service.commit(first.id)
+    await _validate_and_commit(service, first.id)
     replay = await service.create(_command(key="replay"))
     await service.stage(replay.id, _stage(security_id=security_id))
-    await service.commit(replay.id)
+    await _validate_and_commit(service, replay.id)
     assert repo.revisions == []
 
     changed = await service.create(_command(key="changed"))
     await service.stage(changed.id, _stage(security_id=security_id, close="10.30"))
-    await service.commit(changed.id)
+    await _validate_and_commit(service, changed.id)
     assert len(repo.revisions) == 1
     assert repo.bars[(security_id, DAY)].data_version == 2
     assert "daily_bar.corrected" in [event[0] for event in events.items]
@@ -297,7 +304,7 @@ async def test_one_symbol_failure_does_not_rollback_another_symbol() -> None:
     good, bad = _stage(), _stage("000001.SZ")
     await service.stage(batch.id, good)
     await service.stage(batch.id, bad)
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
     assert result.status is DailyBatchStatus.PARTIAL
     assert (good.security_id, DAY) in repo.bars
     assert (bad.security_id, DAY) not in repo.bars
@@ -349,6 +356,7 @@ async def test_outbox_failure_rolls_back_completion_by_propagating() -> None:
     service = _service(events=RecordingEvents(fail=True))
     batch = await service.create(_command())
     await service.stage(batch.id, _stage())
+    await service.validate(batch.id)
     with pytest.raises(RuntimeError, match="outbox"):
         await service.commit(batch.id)
 
@@ -358,7 +366,7 @@ async def test_validate_opens_review_issue_for_unexplained_price_jump() -> None:
     quality = RecordingQuality()
     service = _service(quality=quality)
     batch = await service.create(_command())
-    fetched = _stage(status=DailyStageStatus.VALID)
+    fetched = _stage()
     fetched = StageDailyBar(
         symbol=fetched.symbol,
         security_id=fetched.security_id,
@@ -381,12 +389,14 @@ async def test_validate_opens_review_issue_for_unexplained_price_jump() -> None:
 
 
 @async_test
-async def test_empty_staging_fails_with_frozen_scope_preserved() -> None:
+async def test_empty_staging_cannot_skip_validation_and_preserves_scope() -> None:
+    from long_invest.platform.errors import AppError
+
     service = _service()
     batch = await service.create(_command(("600000.SH", "000001.SZ")))
-    result = await service.commit(batch.id)
-    assert result.status is DailyBatchStatus.FAILED
-    assert result.failed_count == 2
+    with pytest.raises(AppError) as captured:
+        await service.commit(batch.id)
+    assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
     assert await service.retry_scope(batch.id) == ("600000.SH", "000001.SZ")
 
 
@@ -405,7 +415,7 @@ async def test_provider_timeout_isolated_as_unexplained_failure() -> None:
             received_at=NOW,
         ),
     )
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
     assert result.status is DailyBatchStatus.FAILED
     assert result.failed_count == 1
 
@@ -415,11 +425,11 @@ async def test_new_service_instance_recovers_persisted_staging() -> None:
     repo, events, quality = FakeRepository(), RecordingEvents(), RecordingQuality()
     first_worker = _service(repo, events, quality)
     batch = await first_worker.create(_command())
-    fetched = _stage(status=DailyStageStatus.VALID)
+    fetched = _stage()
     await first_worker.stage(batch.id, fetched)
 
     recovered_worker = _service(repo, events, quality)
-    result = await recovered_worker.commit(batch.id)
+    result = await _validate_and_commit(recovered_worker, batch.id)
     assert result.status is DailyBatchStatus.SUCCEEDED
     assert (fetched.security_id, DAY) in repo.bars
 
@@ -430,7 +440,7 @@ async def test_validate_terminal_batch_is_an_idempotent_replay() -> None:
     service = _service(repo)
     batch = await service.create(_command())
     await service.stage(batch.id, _stage())
-    committed = await service.commit(batch.id)
+    committed = await _validate_and_commit(service, batch.id)
 
     replayed = await service.validate(batch.id)
 
@@ -447,7 +457,7 @@ async def test_commit_savepoint_failure_remains_in_retry_scope() -> None:
     batch = await service.create(_command())
     await service.stage(batch.id, _stage())
 
-    result = await service.commit(batch.id)
+    result = await _validate_and_commit(service, batch.id)
 
     assert result.status is DailyBatchStatus.FAILED
     assert await service.retry_scope(batch.id) == ("600000.SH",)
@@ -494,7 +504,7 @@ async def test_retry_scope_is_deduplicated_in_frozen_order_and_never_expands() -
             reason=DailyMissingReason.UNEXPLAINED,
         ),
     )
-    await service.commit(batch.id)
+    await _validate_and_commit(service, batch.id)
     repo.missing[batch.id].extend(
         [
             repo.missing[batch.id][0],
@@ -511,3 +521,126 @@ async def test_retry_scope_is_deduplicated_in_frozen_order_and_never_expands() -
         "000001.SZ",
         "430047.BJ",
     )
+
+
+@async_test
+async def test_validate_restores_json_payload_types_after_restart() -> None:
+    repo = FakeRepository()
+    first_worker = _service(repo)
+    batch = await first_worker.create(_command())
+    fetched = _stage(status=DailyStageStatus.FETCHED)
+    await first_worker.stage(batch.id, fetched)
+    persisted = repo.stages[(batch.id, fetched.symbol)]
+    persisted.provider_payload = {
+        **persisted.provider_payload,
+        "trading_date": DAY.isoformat(),
+        "open": "10.00",
+        "high": "10.50",
+        "low": "9.90",
+        "close": "10.20",
+        "previous_close": "10.00",
+        "volume": "100",
+        "amount": "1020.00",
+    }
+
+    recovered_worker = _service(repo)
+    result = await recovered_worker.validate(batch.id)
+
+    assert result.validated_count == 1
+    assert persisted.status is DailyStageStatus.VALID
+    assert persisted.validated_at == NOW
+
+
+@async_test
+async def test_commit_rejects_batch_that_has_not_completed_validation() -> None:
+    from long_invest.platform.errors import AppError
+
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage(status=DailyStageStatus.FETCHED)
+    await service.stage(batch.id, fetched)
+
+    with pytest.raises(AppError) as captured:
+        await service.commit(batch.id)
+
+    assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
+    assert repo.bars == {}
+    assert repo.batches[batch.id].status is DailyBatchStatus.FETCHING
+
+
+@async_test
+async def test_mismatched_provider_payload_cannot_reach_formal_daily_bars() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage(status=DailyStageStatus.FETCHED)
+    malicious = StageDailyBar(
+        symbol=fetched.symbol,
+        security_id=fetched.security_id,
+        trading_date=fetched.trading_date,
+        status=DailyStageStatus.FETCHED,
+        provider_payload={
+            **dict(fetched.provider_payload),
+            "symbol": "000001.SZ",
+            "trading_date": date(2026, 7, 14),
+        },
+        received_at=fetched.received_at,
+    )
+    await service.stage(batch.id, malicious)
+
+    validated = await service.validate(batch.id)
+    committed = await service.commit(batch.id)
+
+    stage = repo.stages[(batch.id, fetched.symbol)]
+    assert validated.validated_count == 0
+    assert stage.status is DailyStageStatus.INVALID
+    assert stage.error_code == "DAILY_BAR_SYMBOL_MISMATCH"
+    assert committed.status is DailyBatchStatus.FAILED
+    assert repo.bars == {}
+
+
+@async_test
+async def test_commit_refuses_valid_status_without_validation_timestamp() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage(status=DailyStageStatus.FETCHED)
+    await service.stage(batch.id, fetched)
+    stage = repo.stages[(batch.id, fetched.symbol)]
+    stage.status = DailyStageStatus.VALID
+    stage.validated_at = None
+    repo.batches[batch.id].status = DailyBatchStatus.VALIDATING
+
+    result = await service.commit(batch.id)
+
+    assert result.status is DailyBatchStatus.FAILED
+    assert repo.missing[batch.id][0].error_code == "DAILY_BAR_NOT_VALIDATED"
+    assert repo.bars == {}
+
+
+@async_test
+@pytest.mark.parametrize(
+    "status",
+    [
+        DailyBatchStatus.VALIDATING,
+        DailyBatchStatus.COMMITTING,
+        DailyBatchStatus.SUCCEEDED,
+        DailyBatchStatus.PARTIAL,
+        DailyBatchStatus.FAILED,
+    ],
+)
+async def test_stage_locks_batch_and_cannot_reopen_late_states(status) -> None:
+    from long_invest.platform.errors import AppError
+
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command(key=f"late-{status.value}"))
+    repo.batches[batch.id].status = status
+
+    with pytest.raises(AppError) as captured:
+        await service.stage(batch.id, _stage(status=DailyStageStatus.FETCHED))
+
+    assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
+    assert repo.batch_lock_requests[-1] == (batch.id, True)
+    assert repo.batches[batch.id].status is status

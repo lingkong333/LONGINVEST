@@ -1,16 +1,71 @@
+from dataclasses import FrozenInstanceError, fields
 from datetime import date
+from uuid import uuid4
 
 import pytest
 
 from long_invest.modules.securities.contracts import (
     ListingStatus,
     Market,
+    SecurityIdentity,
     SecurityMasterItem,
     SecurityType,
     SymbolUniverseQuery,
     assess_monitoring_eligibility,
     validate_symbol,
 )
+
+
+def test_security_identity_has_only_the_public_read_fields() -> None:
+    assert tuple(field.name for field in fields(SecurityIdentity)) == (
+        "security_id",
+        "symbol",
+        "listing_status",
+        "is_suspended",
+        "is_st",
+        "listed_on",
+        "delisted_on",
+        "master_version",
+    )
+
+
+def test_security_identity_is_frozen() -> None:
+    identity = SecurityIdentity(
+        security_id=uuid4(),
+        symbol="600000.SH",
+        listing_status=ListingStatus.LISTED,
+        is_suspended=False,
+        is_st=False,
+        listed_on=date(1999, 11, 10),
+        delisted_on=None,
+        master_version=3,
+    )
+
+    with pytest.raises(FrozenInstanceError):
+        identity.symbol = "000001.SZ"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("symbol", "master_version", "message"),
+    [
+        ("600000", 1, "统一代码"),
+        ("600000.SH", 0, "主数据版本必须大于 0"),
+    ],
+)
+def test_security_identity_rejects_invalid_values(
+    symbol: str, master_version: int, message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        SecurityIdentity(
+            security_id=uuid4(),
+            symbol=symbol,
+            listing_status=ListingStatus.LISTED,
+            is_suspended=False,
+            is_st=False,
+            listed_on=None,
+            delisted_on=None,
+            master_version=master_version,
+        )
 
 
 @pytest.mark.parametrize("symbol", ["600000.SH", "000001.SZ", "430047.BJ"])

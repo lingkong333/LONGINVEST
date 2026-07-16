@@ -11,6 +11,7 @@ from long_invest.modules.securities.contracts import (
     FrozenUniverse,
     ListingStatus,
     SecurityAuditContext,
+    SecurityIdentity,
     SecurityMasterSnapshot,
     SnapshotResult,
     SymbolUniverseQuery,
@@ -101,6 +102,39 @@ class SecurityApplication:
                 status_code=404,
             )
         return security
+
+    async def resolve_identity(self, symbol: str) -> SecurityIdentity:
+        try:
+            validate_symbol(symbol)
+        except ValueError as exc:
+            raise AppError(
+                code="SECURITY_SYMBOL_INVALID",
+                message=str(exc),
+                status_code=422,
+            ) from exc
+        try:
+            async with self._database.session() as session:
+                security = await SecurityRepository(session).get_by_symbol(symbol)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        if security is None:
+            raise AppError(
+                code="SECURITY_NOT_FOUND",
+                message="股票不存在",
+                status_code=404,
+            )
+        return SecurityIdentity(
+            security_id=security.id,
+            symbol=security.symbol,
+            listing_status=ListingStatus(security.listing_status),
+            is_suspended=security.is_suspended,
+            is_st=security.is_st,
+            listed_on=security.listed_on,
+            delisted_on=security.delisted_on,
+            master_version=security.master_version,
+        )
 
     async def refresh(
         self,

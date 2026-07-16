@@ -101,6 +101,23 @@ class SymbolUniverseQuery:
 
 
 @dataclass(frozen=True, slots=True)
+class SecurityIdentity:
+    security_id: UUID
+    symbol: str
+    listing_status: ListingStatus
+    is_suspended: bool
+    is_st: bool
+    listed_on: date | None
+    delisted_on: date | None
+    master_version: int
+
+    def __post_init__(self) -> None:
+        validate_symbol(self.symbol)
+        if self.master_version <= 0:
+            raise ValueError("主数据版本必须大于 0")
+
+
+@dataclass(frozen=True, slots=True)
 class FrozenSecurity:
     security_id: UUID
     symbol: str

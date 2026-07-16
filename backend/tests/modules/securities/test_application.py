@@ -1,13 +1,20 @@
 from contextlib import asynccontextmanager
 from copy import deepcopy
+from datetime import date
+from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
+import long_invest.modules.securities.application as application_module
 from long_invest.modules.securities.application import SecurityApplication
-from long_invest.modules.securities.contracts import SecurityAuditContext
+from long_invest.modules.securities.contracts import (
+    ListingStatus,
+    SecurityAuditContext,
+    SecurityIdentity,
+)
 from long_invest.platform.errors import AppError
 
 
@@ -18,6 +25,116 @@ class FakeDatabase:
     @asynccontextmanager
     async def transaction(self):
         yield self.session
+
+
+class IdentityDatabase:
+    def __init__(self) -> None:
+        self.db_session = Mock()
+
+    @asynccontextmanager
+    async def session(self):
+        yield self.db_session
+
+
+@pytest.mark.anyio
+async def test_resolve_identity_returns_a_public_snapshot(monkeypatch) -> None:
+    database = IdentityDatabase()
+    security_id = uuid4()
+    security = SimpleNamespace(
+        id=security_id,
+        symbol="600000.SH",
+        listing_status="LISTED",
+        is_suspended=False,
+        is_st=True,
+        listed_on=date(1999, 11, 10),
+        delisted_on=None,
+        master_version=7,
+        _sa_instance_state=object(),
+    )
+    captured = {}
+
+    class Repository:
+        def __init__(self, session) -> None:
+            captured["session"] = session
+
+        async def get_by_symbol(self, symbol: str):
+            captured["symbol"] = symbol
+            return security
+
+    monkeypatch.setattr(application_module, "SecurityRepository", Repository)
+
+    identity = await SecurityApplication(database).resolve_identity("600000.SH")
+
+    assert identity == SecurityIdentity(
+        security_id=security_id,
+        symbol="600000.SH",
+        listing_status=ListingStatus.LISTED,
+        is_suspended=False,
+        is_st=True,
+        listed_on=date(1999, 11, 10),
+        delisted_on=None,
+        master_version=7,
+    )
+    assert captured == {
+        "session": database.db_session,
+        "symbol": "600000.SH",
+    }
+    assert not hasattr(identity, "_sa_instance_state")
+    assert not hasattr(identity, "__dict__")
+
+
+@pytest.mark.anyio
+async def test_resolve_identity_rejects_invalid_symbol_without_database() -> None:
+    class DatabaseThatMustNotBeUsed:
+        def session(self):
+            raise AssertionError("database must not be accessed")
+
+    with pytest.raises(AppError) as captured:
+        await SecurityApplication(DatabaseThatMustNotBeUsed()).resolve_identity(
+            "600000"
+        )
+
+    assert captured.value.code == "SECURITY_SYMBOL_INVALID"
+    assert captured.value.status_code == 422
+
+
+@pytest.mark.anyio
+async def test_resolve_identity_reports_a_missing_security(monkeypatch) -> None:
+    class Repository:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def get_by_symbol(self, _symbol: str):
+            return None
+
+    monkeypatch.setattr(application_module, "SecurityRepository", Repository)
+
+    with pytest.raises(AppError) as captured:
+        await SecurityApplication(IdentityDatabase()).resolve_identity("600000.SH")
+
+    assert captured.value.code == "SECURITY_NOT_FOUND"
+    assert captured.value.status_code == 404
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("failure", [SQLAlchemyError("database down"), TimeoutError()])
+async def test_resolve_identity_maps_database_failures_to_stable_503(
+    monkeypatch, failure
+) -> None:
+    class Repository:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def get_by_symbol(self, _symbol: str):
+            raise failure
+
+    monkeypatch.setattr(application_module, "SecurityRepository", Repository)
+
+    with pytest.raises(AppError) as captured:
+        await SecurityApplication(IdentityDatabase()).resolve_identity("600000.SH")
+
+    assert captured.value.code == "SECURITY_BACKEND_UNAVAILABLE"
+    assert captured.value.status_code == 503
 
 
 @pytest.mark.anyio

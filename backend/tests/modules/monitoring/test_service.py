@@ -49,6 +49,14 @@ class Repository:
             x for x in self.revisions.values() if x.subscription_id == subscription_id
         ]
 
+    async def enabled_schedule_rows(self):
+        return [
+            (owner, self.revisions[owner.current_revision_id])
+            for owner in self.owners.values()
+            if str(owner.status) == SubscriptionStatus.ENABLED
+            and self.revisions[owner.current_revision_id].schedule_id is not None
+        ]
+
     async def create(self, owner):
         self.owners[owner.id] = owner
 
@@ -407,3 +415,41 @@ async def test_pause_fence_supersedes_old_snapshot_without_side_effects() -> Non
     eligibility = await svc.final_eligibility(snapshot)
     assert eligibility.status == "SUPERSEDED"
     assert len(events.items) == count
+
+
+@pytest.mark.anyio
+async def test_enabled_schedule_snapshots_are_grouped_and_frozen() -> None:
+    svc, _, _, _ = service(ready=True)
+    schedule_id = uuid4()
+    created = []
+    for index, symbol in enumerate(("600000.SH", "000001.SZ"), start=1):
+        result = await svc.create(
+            security_id=uuid4(),
+            symbol=symbol,
+            config=config(
+                schedule_id=schedule_id,
+                schedule_revision_id=uuid4(),
+                idempotency_key=f"create-{index}",
+            ),
+        )
+        created.append(
+            await svc.enable(
+                result.subscription.id,
+                expected_version=1,
+                reason="enable",
+                idempotency_key=f"enable-{index}",
+            )
+        )
+
+    groups = await svc.enabled_schedule_snapshots()
+
+    assert len(groups) == 1
+    assert groups[0].schedule_id == schedule_id
+    assert [item.symbol for item in groups[0].subscriptions] == [
+        "000001.SZ",
+        "600000.SH",
+    ]
+    assert {item.version for item in groups[0].subscriptions} == {2}
+    assert {item.revision_id for item in groups[0].subscriptions} == {
+        item.revision.id for item in created
+    }

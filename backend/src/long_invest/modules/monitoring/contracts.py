@@ -46,6 +46,11 @@ class FrozenSubscription(StrictContract):
     revision_id: UUID
 
 
+class FrozenScheduleSubscriptions(StrictContract):
+    schedule_id: UUID
+    subscriptions: tuple[FrozenSubscription, ...]
+
+
 class MonitorSubscriptionView(StrictContract):
     id: UUID
     security_id: UUID

@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from long_invest.modules.monitoring.contracts import (
+    FrozenScheduleSubscriptions,
     FrozenSubscription,
     MonitorSubscriptionRevisionView,
     MonitorSubscriptionView,
@@ -61,6 +62,27 @@ def test_subscription_and_occurrence_views_are_frozen() -> None:
     assert occurrence.subscriptions == (subscription,)
     with pytest.raises(ValidationError):
         view.status = SubscriptionStatus.PAUSED
+
+
+def test_enabled_schedule_snapshot_copies_subscription_input() -> None:
+    subscriptions = [
+        FrozenSubscription(
+            subscription_id=uuid4(),
+            security_id=uuid4(),
+            symbol="600000.SH",
+            version=2,
+            revision_id=uuid4(),
+        )
+    ]
+    snapshot = FrozenScheduleSubscriptions(
+        schedule_id=uuid4(),
+        subscriptions=subscriptions,
+    )
+    subscriptions.clear()
+
+    assert len(snapshot.subscriptions) == 1
+    with pytest.raises(ValidationError):
+        snapshot.schedule_id = uuid4()
 
 
 def test_readiness_ports_publish_only_boundary_methods() -> None:

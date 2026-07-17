@@ -9,6 +9,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from long_invest.modules.monitoring.contracts import (
+    FrozenScheduleSubscriptions,
     FrozenSubscription,
     SubscriptionStatus,
 )
@@ -105,6 +106,33 @@ class MonitorSubscriptionService:
     async def revisions(self, subscription_id):
         await self.get(subscription_id)
         return await self.repo.list_revisions(subscription_id)
+
+    async def enabled_schedule_snapshots(self):
+        grouped: dict[UUID, list[FrozenSubscription]] = {}
+        for owner, revision in await self.repo.enabled_schedule_rows():
+            grouped.setdefault(revision.schedule_id, []).append(
+                FrozenSubscription(
+                    subscription_id=owner.id,
+                    security_id=owner.security_id,
+                    symbol=owner.symbol,
+                    version=owner.version,
+                    revision_id=revision.id,
+                )
+            )
+        return tuple(
+            FrozenScheduleSubscriptions(
+                schedule_id=schedule_id,
+                subscriptions=tuple(
+                    sorted(
+                        subscriptions,
+                        key=lambda item: (item.symbol, str(item.subscription_id)),
+                    )
+                ),
+            )
+            for schedule_id, subscriptions in sorted(
+                grouped.items(), key=lambda item: str(item[0])
+            )
+        )
 
     async def create(
         self, *, security_id, symbol, config: SubscriptionConfig, audit_context=None

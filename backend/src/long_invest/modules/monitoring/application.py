@@ -131,6 +131,9 @@ class MonitorSubscriptionApplication:
     async def revisions(self, subscription_id):
         return await self._read("revisions", subscription_id)
 
+    async def enabled_schedule_snapshots(self):
+        return await self._read("enabled_schedule_snapshots")
+
     async def create(
         self,
         *,

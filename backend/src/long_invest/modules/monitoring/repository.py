@@ -27,6 +27,22 @@ class MonitorSubscriptionRepository:
             MonitorSubscription.version == 1, MonitorSubscription.status == "PAUSED"
         )
 
+    @staticmethod
+    def enabled_schedule_statement():
+        return (
+            select(MonitorSubscription, MonitorSubscriptionRevision)
+            .join(
+                MonitorSubscriptionRevision,
+                MonitorSubscription.current_revision_id
+                == MonitorSubscriptionRevision.id,
+            )
+            .where(
+                MonitorSubscription.status == "ENABLED",
+                MonitorSubscription.archived_at.is_(None),
+                MonitorSubscriptionRevision.schedule_id.is_not(None),
+            )
+        )
+
     async def lock_security(self, security_id: UUID) -> None:
         await self.session.execute(self.security_lock_statement(str(security_id)))
 
@@ -77,6 +93,11 @@ class MonitorSubscriptionRepository:
                     .order_by(MonitorSubscriptionRevision.revision_no.desc())
                 )
             ).all()
+        )
+
+    async def enabled_schedule_rows(self):
+        return list(
+            (await self.session.execute(self.enabled_schedule_statement())).all()
         )
 
     async def create(self, owner) -> None:

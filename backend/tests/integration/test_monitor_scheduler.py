@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import String, cast, delete, func, select, update
 
 import long_invest.bootstrap.jobs as jobs_module
 import long_invest.platform.jobs.worker as worker_module
@@ -137,7 +137,7 @@ def _scanner(db, events=OccurrenceEventAdapter, jobs=JobService):
 
 async def _clean_dispatch_outboxes(db: Database) -> None:
     async with db.transaction() as session:
-        job_ids = select(Job.id).where(
+        job_ids = select(cast(Job.id, String)).where(
             Job.job_type == "REALTIME_QUOTE_CYCLE",
             Job.request_id.like("monitor-%"),
         )

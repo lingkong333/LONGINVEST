@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 
 import long_invest.bootstrap.jobs as jobs_module
 import long_invest.platform.jobs.worker as worker_module
@@ -16,6 +16,7 @@ from long_invest.modules.monitor_schedules.models import (
 from long_invest.modules.monitoring.contracts import FrozenSubscription
 from long_invest.modules.monitoring.models import ScheduleOccurrence
 from long_invest.modules.monitoring.scheduler import (
+    MonitorOccurrenceApplication,
     MonitorScanner,
     OccurrenceEventAdapter,
     PlannedBatch,
@@ -34,6 +35,7 @@ from long_invest.platform.jobs.contracts import (
 )
 from long_invest.platform.jobs.models import Job, JobRun
 from long_invest.platform.jobs.service import JobService
+from long_invest.platform.outbox.models import EventOutbox
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("LONGINVEST_MONITOR_SCHEDULER_POSTGRES_TESTS") != "1",
@@ -133,6 +135,20 @@ def _scanner(db, events=OccurrenceEventAdapter, jobs=JobService):
     )
 
 
+async def _clean_dispatch_outboxes(db: Database) -> None:
+    async with db.transaction() as session:
+        job_ids = select(Job.id).where(
+            Job.job_type == "REALTIME_QUOTE_CYCLE",
+            Job.request_id.like("monitor-%"),
+        )
+        await session.execute(
+            delete(EventOutbox).where(
+                EventOutbox.aggregate_type == "job",
+                EventOutbox.aggregate_id.in_(job_ids),
+            )
+        )
+
+
 @pytest.mark.anyio
 async def test_duplicate_scanners_create_one_occurrence_and_job() -> None:
     db = Database(AppSettings(_env_file=None).database_url)
@@ -175,6 +191,7 @@ async def test_duplicate_scanners_create_one_occurrence_and_job() -> None:
         assert occurrences == 2 and jobs == 1
         assert universe_after == universe_before + 1
     finally:
+        await _clean_dispatch_outboxes(db)
         await db.dispose()
 
 
@@ -198,6 +215,7 @@ async def test_restart_after_grace_is_missed_without_job() -> None:
         assert jobs_after == jobs_before
         assert occurrence is not None and occurrence.job_id is None
     finally:
+        await _clean_dispatch_outboxes(db)
         await db.dispose()
 
 
@@ -245,6 +263,7 @@ async def test_job_and_outbox_failure_roll_back_occurrence(failure) -> None:
         assert count == 0
         assert universe_after == universe_before
     finally:
+        await _clean_dispatch_outboxes(db)
         await db.dispose()
 
 
@@ -272,6 +291,11 @@ async def test_worker_claim_after_deadline_marks_occurrence_missed(monkeypatch) 
         monkeypatch.setitem(
             worker_module.HANDLERS, "REALTIME_QUOTE_CYCLE", realtime_quote_cycle
         )
+        monkeypatch.setattr(
+            jobs_module,
+            "get_monitor_occurrence_application",
+            lambda: MonitorOccurrenceApplication(db),
+        )
         result = await worker_module._execute_job(job.id, uuid4())
 
         async with db.session() as session:
@@ -293,4 +317,5 @@ async def test_worker_claim_after_deadline_marks_occurrence_missed(monkeypatch) 
             scheduled + timedelta(seconds=60)
         ).isoformat()
     finally:
+        await _clean_dispatch_outboxes(db)
         await db.dispose()

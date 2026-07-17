@@ -20,7 +20,11 @@ from long_invest.modules.monitoring.scheduler import (
     PlannedBatch,
     PlannedOccurrence,
 )
-from long_invest.modules.securities.models import Security, SecurityUniverseSnapshot
+from long_invest.modules.securities.models import (
+    Security,
+    SecurityMasterVersion,
+    SecurityUniverseSnapshot,
+)
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
 from long_invest.platform.jobs.contracts import JobExecutionContext
@@ -36,10 +40,23 @@ NOW = datetime(2026, 7, 17, 2, 15, tzinfo=UTC)
 
 async def _seed(db):
     token = uuid4().hex
+    master_version = int(token[:8], 16) % 1_000_000_000 + 1
     symbol = f"{int(token[:8], 16) % 1_000_000:06d}.SH"
     schedule = MonitorSchedule(id=uuid4(), name="integration", version=1)
     security_id = uuid4()
     async with db.transaction() as session:
+        session.add(
+            SecurityMasterVersion(
+                id=uuid4(),
+                source="test",
+                source_version=token,
+                idempotency_key=token,
+                content_hash=token * 2,
+                master_version=master_version,
+                item_count=1,
+                result_summary={},
+            )
+        )
         session.add(
             Security(
                 id=security_id,
@@ -52,7 +69,7 @@ async def _seed(db):
                 is_st=False,
                 is_suspended=False,
                 provider_codes={},
-                master_version=1,
+                master_version=master_version,
                 source="test",
                 source_version=token,
                 updated_at=NOW,

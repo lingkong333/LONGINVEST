@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import date
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
@@ -224,6 +224,16 @@ class TargetSnapshotPort(Protocol):
 
 
 def _validate_signal_price(value: Decimal) -> Decimal:
-    if not value.is_finite() or value <= 0 or value >= MAX_SIGNAL_PRICE:
+    try:
+        if not value.is_finite():
+            raise ValueError("price must be finite")
+        normalized = value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+    except DecimalException as exc:
+        raise ValueError("price cannot be represented at 0.000001") from exc
+    if (
+        not normalized.is_finite()
+        or normalized <= 0
+        or normalized >= MAX_SIGNAL_PRICE
+    ):
         raise ValueError("price is outside Numeric(20,6) capacity")
-    return value
+    return normalized

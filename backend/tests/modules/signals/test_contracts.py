@@ -78,6 +78,32 @@ def _evaluation_view(
     return SignalEvaluationView(**values)
 
 
+def _event_view(price: str) -> SignalEventView:
+    return SignalEventView(
+        id=uuid4(),
+        subscription_id=uuid4(),
+        evaluation_id=uuid4(),
+        before_zone=SignalZone.NORMAL,
+        after_zone=SignalZone.LOW,
+        reason=EvaluationReason.SCHEDULED_QUOTE,
+        price=price,
+        price_at=datetime(2026, 7, 17, 9, 30, tzinfo=UTC),
+        targets=TargetValues(
+            low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+        ),
+        target_revision_id=uuid4(),
+        target_version=1,
+        target_date=date(2026, 7, 17),
+        position_status="NOT_HOLDING",
+        position_version=0,
+        used_stale_target=False,
+        state_version=1,
+        notification_class=NotificationClass.LOW,
+        notification_eligible=True,
+        created_at=datetime(2026, 7, 17, 9, 31, tzinfo=UTC),
+    )
+
+
 def test_signal_enums_are_exact() -> None:
     assert {item.value for item in SignalZone} == {
         "UNKNOWN",
@@ -158,6 +184,25 @@ def test_signal_price_matches_numeric_20_6_capacity() -> None:
     assert accepted.price == Decimal("99999999999999.999999")
     with pytest.raises(ValidationError):
         _signal_input(price="100000000000000.000000")
+
+
+def test_signal_public_contracts_share_six_decimal_half_up_quantization() -> None:
+    expected = Decimal("1.000001")
+    assert _signal_input(price="1.0000009").price == expected
+    assert (
+        _evaluation_view(EvaluationResult.APPLIED, price="1.0000009").price
+        == expected
+    )
+    assert _event_view("1.0000009").price == expected
+
+
+def test_signal_public_contracts_reject_price_that_quantizes_to_zero() -> None:
+    with pytest.raises(ValidationError):
+        _signal_input(price="0.0000004")
+    with pytest.raises(ValidationError):
+        _evaluation_view(EvaluationResult.APPLIED, price="0.0000004")
+    with pytest.raises(ValidationError):
+        _event_view("0.0000004")
 
 
 def test_signal_input_allows_position_version_zero_and_rejects_negative() -> None:

@@ -68,3 +68,4 @@ class PositionRepository:
         await self._session.flush()
         position.latest_history_id = latest_history_id
         await self._session.flush()
+        await self._session.refresh(position, attribute_names=["updated_at"])

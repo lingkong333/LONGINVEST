@@ -30,6 +30,7 @@ async def test_new_position_is_flushed_before_its_history_pointer() -> None:
         def __init__(self):
             self.added = []
             self.snapshots = []
+            self.refreshed = []
 
         def add(self, value):
             self.added.append(value)
@@ -38,6 +39,9 @@ async def test_new_position_is_flushed_before_its_history_pointer() -> None:
             self.snapshots.append(
                 tuple(getattr(value, "latest_history_id", None) for value in self.added)
             )
+
+        async def refresh(self, value, *, attribute_names):
+            self.refreshed.append((value, attribute_names))
 
     security_id = uuid4()
     position_id = uuid4()
@@ -72,3 +76,4 @@ async def test_new_position_is_flushed_before_its_history_pointer() -> None:
     assert session.snapshots[0] == (None,)
     assert history.position_id == position.id == position_id
     assert position.latest_history_id == history.id == history_id
+    assert session.refreshed == [(position, ["updated_at"])]

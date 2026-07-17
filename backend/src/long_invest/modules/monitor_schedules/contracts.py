@@ -56,3 +56,16 @@ class MonitorScheduleView(StrictContract):
     current_revision_id: UUID | None
     version: int = Field(ge=1)
     archived_at: datetime | None
+
+
+class ScheduleMutationContext(StrictContract):
+    request_id: str = Field(min_length=1, max_length=64)
+    actor_user_id: str = Field(min_length=1, max_length=64)
+    session_id: str = Field(min_length=1, max_length=64)
+    trusted_ip: str = Field(min_length=1, max_length=128)
+
+
+class ScheduleMutationResult(StrictContract):
+    schedule: MonitorScheduleView
+    revision: ScheduleRevisionView
+    replayed: bool = False

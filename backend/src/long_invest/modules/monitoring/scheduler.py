@@ -1,0 +1,226 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from uuid import UUID, uuid4
+
+from sqlalchemy.exc import IntegrityError
+
+from long_invest.modules.monitoring.contracts import (
+    FrozenSubscription,
+    OccurrenceStatus,
+)
+from long_invest.modules.monitoring.models import ScheduleOccurrence
+from long_invest.platform.jobs.contracts import SubmitJob
+from long_invest.platform.outbox.service import TransactionalOutboxWriter
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedOccurrence:
+    schedule_id: UUID
+    schedule_revision_id: UUID
+    scheduled_at: datetime
+    subscriptions: tuple[FrozenSubscription, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class PlannedBatch:
+    scheduled_at: datetime
+    occurrences: tuple[PlannedOccurrence, ...]
+
+    def __post_init__(self):
+        if not self.occurrences or any(
+            x.scheduled_at != self.scheduled_at for x in self.occurrences
+        ):
+            raise ValueError("batch occurrences must share scheduled_at")
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimResult:
+    status: str
+    created: bool = True
+    job_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ScanResult:
+    dispatched: int = 0
+    missed: int = 0
+    duplicates: int = 0
+    failed: int = 0
+
+
+class OccurrenceStore:
+    def __init__(self, session):
+        self.session = session
+
+    async def add_many(self, occurrences):
+        self.session.add_all(occurrences)
+        await self.session.flush()
+
+
+class OccurrenceEventAdapter:
+    def __init__(self, session, writer=None):
+        self.session = session
+        self.writer = writer or TransactionalOutboxWriter()
+
+    async def append(self, occurrence, action):
+        await self.writer.append(
+            session=self.session,
+            topic=f"schedule_occurrence.{action}",
+            aggregate_type="schedule_occurrence",
+            aggregate_id=str(occurrence.id),
+            queue="domain-events",
+            payload={
+                "event_type": f"schedule_occurrence.{action}",
+                "occurrence_id": str(occurrence.id),
+                "schedule_id": str(occurrence.schedule_id),
+                "schedule_revision_id": str(occurrence.schedule_revision_id),
+                "scheduled_at": occurrence.scheduled_at.isoformat(),
+                "status": str(occurrence.status),
+                "job_id": str(occurrence.job_id) if occurrence.job_id else None,
+            },
+            dedupe_key=f"schedule-occurrence:{occurrence.schedule_id}:{occurrence.scheduled_at.isoformat()}:{action}",
+        )
+
+
+class MonitorScanner:
+    def __init__(
+        self,
+        database,
+        calendar,
+        schedules,
+        subscriptions,
+        *,
+        job_factory,
+        event_factory,
+        universe_freezer,
+        store_factory=OccurrenceStore,
+    ):
+        self.database = database
+        self.calendar = calendar
+        self.schedules = schedules
+        self.subscriptions = subscriptions
+        self.job_factory = job_factory
+        self.event_factory = event_factory
+        self.universe_freezer = universe_freezer
+        self.store_factory = store_factory
+
+    async def claim(self, plan: PlannedOccurrence, *, now: datetime) -> ClaimResult:
+        return await self.claim_batch(PlannedBatch(plan.scheduled_at, (plan,)), now=now)
+
+    async def claim_batch(self, batch: PlannedBatch, *, now: datetime) -> ClaimResult:
+        late = now > batch.scheduled_at + timedelta(seconds=60)
+        async with self.database.transaction() as session:
+            rows = [
+                ScheduleOccurrence(
+                    id=uuid4(),
+                    occurrence_type="REALTIME_QUOTE",
+                    schedule_id=plan.schedule_id,
+                    schedule_revision_id=plan.schedule_revision_id,
+                    scheduled_at=batch.scheduled_at,
+                    subscription_snapshot=[
+                        x.model_dump(mode="json") for x in plan.subscriptions
+                    ],
+                    status=OccurrenceStatus.MISSED
+                    if late
+                    else OccurrenceStatus.PENDING,
+                    error_code="SCHEDULE_OCCURRENCE_MISSED" if late else None,
+                )
+                for plan in batch.occurrences
+            ]
+            try:
+                async with session.begin_nested():
+                    await self.store_factory(session).add_many(rows)
+            except IntegrityError:
+                return ClaimResult("DUPLICATE", False)
+            if late:
+                for row in rows:
+                    await self.event_factory(session).append(row, "missed")
+                return ClaimResult("MISSED")
+            by_id = {
+                x.subscription_id: x
+                for plan in batch.occurrences
+                for x in plan.subscriptions
+            }
+            frozen = tuple(
+                sorted(by_id.values(), key=lambda x: (x.symbol, str(x.subscription_id)))
+            )
+            symbols = tuple(x.symbol for x in frozen)
+            universe = await self.universe_freezer(session, symbols)
+            deadline = batch.scheduled_at + timedelta(seconds=60)
+            command = SubmitJob(
+                job_type="REALTIME_QUOTE_CYCLE",
+                queue="realtime-quotes",
+                idempotency_scope="monitor-occurrence-batch",
+                idempotency_key=batch.scheduled_at.isoformat(),
+                request_id=f"monitor-{rows[0].id}",
+                config_snapshot={
+                    "occurrence_ids": [str(x.id) for x in rows],
+                    "scheduled_at": batch.scheduled_at.isoformat(),
+                    "claim_deadline_at": deadline.isoformat(),
+                    "subscriptions": [x.model_dump(mode="json") for x in frozen],
+                    "symbols": list(symbols),
+                    "universe_snapshot_id": str(universe.id),
+                    "universe_snapshot_version": universe.master_version,
+                    "requested_at": batch.scheduled_at.isoformat(),
+                    "timeout_seconds": 30,
+                },
+                business_object_type="schedule_occurrence_batch",
+                business_object_id=batch.scheduled_at.isoformat(),
+                soft_timeout_seconds=30,
+                hard_timeout_seconds=60,
+            )
+            job = await self.job_factory(session).submit(command)
+            for row in rows:
+                row.job_id = job.id
+                row.status = OccurrenceStatus.DISPATCHED
+                row.claimed_at = now
+                row.dispatched_at = now
+                await self.event_factory(session).append(row, "created")
+            return ClaimResult("DISPATCHED", job_id=job.id)
+
+    async def scan(self, *, now: datetime) -> ScanResult:
+        local_date = (now + timedelta(hours=8)).date()
+        window = await self.calendar.trading_dates(local_date, local_date)
+        if local_date not in window.dates:
+            return ScanResult()
+        groups = {
+            x.schedule_id: x.subscriptions
+            for x in await self.subscriptions.enabled_schedule_snapshots()
+        }
+        batches = {}
+        failed = 0
+        for schedule in await self.schedules.list():
+            subscriptions = groups.get(schedule.id, ())
+            if not subscriptions:
+                continue
+            try:
+                revision = await self.schedules.current_revision(schedule.id)
+                for at in revision.times:
+                    scheduled = datetime.combine(
+                        local_date, at, tzinfo=UTC
+                    ) - timedelta(hours=8)
+                    if scheduled <= now:
+                        batches.setdefault(scheduled, []).append(
+                            PlannedOccurrence(
+                                schedule.id, revision.id, scheduled, subscriptions
+                            )
+                        )
+            except Exception:
+                failed += 1
+        counts = {"DISPATCHED": 0, "MISSED": 0, "DUPLICATE": 0}
+        for scheduled, plans in sorted(batches.items()):
+            try:
+                counts[
+                    (
+                        await self.claim_batch(
+                            PlannedBatch(scheduled, tuple(plans)), now=now
+                        )
+                    ).status
+                ] += 1
+            except Exception:
+                failed += 1
+        return ScanResult(
+            counts["DISPATCHED"], counts["MISSED"], counts["DUPLICATE"], failed
+        )

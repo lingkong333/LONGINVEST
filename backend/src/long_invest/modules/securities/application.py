@@ -175,18 +175,21 @@ class SecurityApplication:
     async def freeze_symbols(self, symbols: tuple[str, ...]):
         try:
             async with self._database.transaction() as session:
-                repository = SecurityRepository(session)
-                snapshot = await SecurityMasterService(repository).freeze_symbols(
-                    SymbolUniverseQuery(symbols=symbols)
-                )
-                stored = await repository.get_universe_snapshot(snapshot.id)
-                if stored is None:
-                    raise RuntimeError("saved universe snapshot cannot be reloaded")
-                return _frozen_universe(stored)
+                return await self.freeze_symbols_in_transaction(session, symbols)
         except AppError:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
+
+    async def freeze_symbols_in_transaction(self, session, symbols: tuple[str, ...]):
+        repository = SecurityRepository(session)
+        snapshot = await SecurityMasterService(repository).freeze_symbols(
+            SymbolUniverseQuery(symbols=symbols)
+        )
+        stored = await repository.get_universe_snapshot(snapshot.id)
+        if stored is None:
+            raise RuntimeError("saved universe snapshot cannot be reloaded")
+        return _frozen_universe(stored)
 
     async def frozen_universe(self, snapshot_id: UUID) -> FrozenUniverse:
         try:

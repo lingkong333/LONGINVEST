@@ -105,6 +105,42 @@ async def test_resolve_identity_rejects_invalid_symbol_without_database() -> Non
 
 
 @pytest.mark.anyio
+async def test_freeze_symbols_can_join_a_caller_owned_transaction(monkeypatch) -> None:
+    session = object()
+    snapshot_id = uuid4()
+    calls = {}
+
+    class Repository:
+        def __init__(self, value) -> None:
+            calls["session"] = value
+
+        async def get_universe_snapshot(self, value):
+            calls["snapshot_id"] = value
+            return SimpleNamespace(id=value, master_version=4, items=())
+
+    class Service:
+        def __init__(self, repository) -> None:
+            calls["repository"] = repository
+
+        async def freeze_symbols(self, query):
+            calls["symbols"] = query.symbols
+            return SimpleNamespace(id=snapshot_id)
+
+    monkeypatch.setattr(application_module, "SecurityRepository", Repository)
+    monkeypatch.setattr(application_module, "SecurityMasterService", Service)
+    application = SecurityApplication(FakeDatabase())
+
+    frozen = await application.freeze_symbols_in_transaction(
+        session, ("600000.SH",)
+    )
+
+    assert frozen.id == snapshot_id
+    assert frozen.master_version == 4
+    assert calls["session"] is session
+    assert calls["symbols"] == ("600000.SH",)
+
+
+@pytest.mark.anyio
 async def test_resolve_identity_reports_a_missing_security(monkeypatch) -> None:
     class Repository:
         def __init__(self, _session) -> None:

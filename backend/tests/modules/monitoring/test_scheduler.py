@@ -7,6 +7,7 @@ import pytest
 
 from long_invest.modules.monitoring.contracts import FrozenSubscription
 from long_invest.modules.monitoring.scheduler import (
+    MonitorOccurrenceApplication,
     MonitorScanner,
     PlannedBatch,
     PlannedOccurrence,
@@ -400,3 +401,41 @@ async def test_one_schedule_failure_does_not_block_another() -> None:
     result = await scanner.scan(now=datetime(2026, 7, 17, 2, 15, tzinfo=UTC))
     assert result.failed == 1 and result.dispatched == 1
     assert calls[0].schedule_id == healthy
+
+
+@pytest.mark.anyio
+async def test_mark_job_missed_updates_occurrences_and_events_atomically() -> None:
+    occurrence = SimpleNamespace(id=uuid4())
+    calls = []
+
+    class Database:
+        @asynccontextmanager
+        async def transaction(self):
+            yield object()
+
+    class Store:
+        def __init__(self, session):
+            calls.append(("store", session))
+
+        async def mark_job_missed(self, job_id, now):
+            calls.append(("missed", job_id, now))
+            return (occurrence,)
+
+    class Events:
+        def __init__(self, session):
+            calls.append(("events", session))
+
+        async def append(self, item, action):
+            calls.append(("event", item.id, action))
+
+    now = datetime(2026, 7, 17, 2, 16, 1, tzinfo=UTC)
+    job_id = uuid4()
+    application = MonitorOccurrenceApplication(
+        Database(), store_factory=Store, event_factory=Events
+    )
+
+    updated = await application.mark_job_missed(job_id, now)
+
+    assert updated == 1
+    assert ("missed", job_id, now) in calls
+    assert ("event", occurrence.id, "missed") in calls

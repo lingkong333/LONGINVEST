@@ -21,6 +21,9 @@ from long_invest.modules.daily_data.repository import DailyDataRepository
 from long_invest.modules.daily_data.service import DailyDataService
 from long_invest.modules.market_data.repository import QualityIssueRepository
 from long_invest.modules.market_data.service import QualityIssueService
+from long_invest.modules.monitoring.scheduler import (
+    get_monitor_occurrence_application,
+)
 from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderCapability,
@@ -94,9 +97,7 @@ class DatabaseQuoteCycles:
     def __init__(self, database: Any) -> None:
         self._database = database
 
-    async def create_and_start(
-        self, command: CreateQuoteCycle, now: datetime
-    ):
+    async def create_and_start(self, command: CreateQuoteCycle, now: datetime):
         async with self._database.transaction() as session:
             service = _quote_cycle_service(session)
             cycle = await service.create(command)
@@ -128,10 +129,19 @@ def _quote_cycle_service(session: Any) -> QuoteCycleService:
 async def realtime_quote_cycle(context: JobExecutionContext) -> JobResult:
     try:
         command = _quote_command(context)
+        claim_deadline = _monitor_claim_deadline(context)
     except (KeyError, TypeError, ValueError):
         return JobResult.failure(
             code="QUOTE_CYCLE_CONFIG_INVALID",
             message="实时行情任务缺少有效的冻结范围或截止时间",
+            retryable=False,
+        )
+    now = _utc_now()
+    if claim_deadline is not None and now > claim_deadline:
+        await get_monitor_occurrence_application().mark_job_missed(context.job_id, now)
+        return JobResult.failure(
+            code="SCHEDULE_OCCURRENCE_MISSED",
+            message="监控行情任务超过领取宽限期，已跳过",
             retryable=False,
         )
     database = get_database()
@@ -178,6 +188,20 @@ def _quote_command(context: JobExecutionContext) -> CreateQuoteCycle:
         universe_snapshot_id=str(config["universe_snapshot_id"]),
         universe_snapshot_version=int(config["universe_snapshot_version"]),
     )
+
+
+def _monitor_claim_deadline(context: JobExecutionContext) -> datetime | None:
+    value = context.config.get("claim_deadline_at")
+    if value is None:
+        return None
+    deadline = datetime.fromisoformat(str(value))
+    if deadline.tzinfo is None or deadline.utcoffset() is None:
+        raise ValueError("claim deadline must include timezone")
+    return deadline
+
+
+def _utc_now() -> datetime:
+    return datetime.now(UTC)
 
 
 async def quote_diagnostic(context: JobExecutionContext) -> JobResult:
@@ -387,8 +411,7 @@ async def _daily_coordinate(
                     batch.id,
                     trading_date,
                     item,
-                    has_known_corporate_action=item.symbol
-                    in corporate_action_symbols,
+                    has_known_corporate_action=item.symbol in corporate_action_symbols,
                 )
             )
     return JobResult(
@@ -400,9 +423,7 @@ async def _daily_coordinate(
     )
 
 
-def _corporate_action_scope(
-    config: Any, symbols: tuple[str, ...]
-) -> frozenset[str]:
+def _corporate_action_scope(config: Any, symbols: tuple[str, ...]) -> frozenset[str]:
     values = tuple(
         str(item) for item in config.get("known_corporate_action_symbols", ())
     )
@@ -492,9 +513,7 @@ async def daily_data_item(context: JobExecutionContext) -> JobResult:
                 and date.fromisoformat(str(config["listed_on"])) == trading_date
             ),
             is_st=bool(config.get("is_st")),
-            has_known_corporate_action=bool(
-                config.get("has_known_corporate_action")
-            ),
+            has_known_corporate_action=bool(config.get("has_known_corporate_action")),
         )
     item_status = _daily_item_status(stage)
     database = get_database()
@@ -589,9 +608,7 @@ async def _fetch_daily_stage(
             security_id,
             symbol,
             trading_date,
-            failure.code
-            if failure
-            else result.batch_error_code or "DAILY_BAR_MISSING",
+            failure.code if failure else result.batch_error_code or "DAILY_BAR_MISSING",
         )
     return StageDailyBar(
         symbol=symbol,

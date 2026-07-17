@@ -32,3 +32,20 @@ def test_compose_publishes_only_the_frontend_on_public_port() -> None:
     assert services["api"]["ports"] == ["127.0.0.1:18080:8000"]
     assert "ports" not in services["postgres"]
     assert "ports" not in services["redis"]
+
+
+def test_monitor_scheduler_is_an_isolated_private_service() -> None:
+    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
+        "monitor-scheduler"
+    ]
+
+    assert service["command"] == [
+        "python",
+        "-m",
+        "long_invest.entrypoints.monitor_scheduler",
+    ]
+    assert "ports" not in service
+    assert service["read_only"] is True
+    assert service["mem_limit"] == "128m"
+    assert "no-new-privileges:true" in service["security_opt"]

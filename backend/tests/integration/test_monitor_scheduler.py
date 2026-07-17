@@ -6,6 +6,8 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select, update
 
+import long_invest.bootstrap.jobs as jobs_module
+from long_invest.bootstrap.jobs import realtime_quote_cycle
 from long_invest.modules.monitor_schedules.models import (
     MonitorSchedule,
     MonitorScheduleRevision,
@@ -21,6 +23,7 @@ from long_invest.modules.monitoring.scheduler import (
 from long_invest.modules.securities.models import Security, SecurityUniverseSnapshot
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
+from long_invest.platform.jobs.contracts import JobExecutionContext
 from long_invest.platform.jobs.models import Job
 from long_invest.platform.jobs.service import JobService
 
@@ -220,5 +223,44 @@ async def test_job_and_outbox_failure_roll_back_occurrence(failure) -> None:
             )
         assert count == 0
         assert universe_after == universe_before
+    finally:
+        await db.dispose()
+
+
+@pytest.mark.anyio
+async def test_worker_claim_after_deadline_marks_occurrence_missed(monkeypatch) -> None:
+    db = Database(AppSettings(_env_file=None).database_url)
+    schedule, revision, frozen = await _seed(db)
+    scheduled = NOW + timedelta(minutes=3)
+    try:
+        claimed = await _scanner(db).claim(
+            PlannedOccurrence(schedule, revision, scheduled, (frozen,)),
+            now=scheduled,
+        )
+        async with db.session() as session:
+            job = await session.get(Job, claimed.job_id)
+            assert job is not None
+
+        monkeypatch.setattr(
+            jobs_module,
+            "_utc_now",
+            lambda: scheduled + timedelta(seconds=61),
+        )
+        result = await realtime_quote_cycle(
+            JobExecutionContext(
+                job_id=job.id,
+                fence_token=uuid4(),
+                config=job.config_snapshot,
+            )
+        )
+
+        async with db.session() as session:
+            occurrence = await session.scalar(
+                select(ScheduleOccurrence).where(ScheduleOccurrence.job_id == job.id)
+            )
+        assert result.code == "SCHEDULE_OCCURRENCE_MISSED"
+        assert occurrence is not None
+        assert str(occurrence.status) == "MISSED"
+        assert occurrence.error_code == "SCHEDULE_OCCURRENCE_MISSED"
     finally:
         await db.dispose()

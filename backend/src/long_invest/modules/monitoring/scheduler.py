@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.monitoring.contracts import (
@@ -11,6 +12,7 @@ from long_invest.modules.monitoring.contracts import (
     OccurrenceStatus,
 )
 from long_invest.modules.monitoring.models import ScheduleOccurrence
+from long_invest.platform.database.engine import get_database
 from long_invest.platform.jobs.contracts import SubmitJob
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
@@ -58,6 +60,22 @@ class OccurrenceStore:
         self.session.add_all(occurrences)
         await self.session.flush()
 
+    async def mark_job_missed(self, job_id: UUID, now: datetime):
+        rows = await self.session.scalars(
+            update(ScheduleOccurrence)
+            .where(
+                ScheduleOccurrence.job_id == job_id,
+                ScheduleOccurrence.status == OccurrenceStatus.DISPATCHED,
+            )
+            .values(
+                status=OccurrenceStatus.MISSED,
+                error_code="SCHEDULE_OCCURRENCE_MISSED",
+                updated_at=now,
+            )
+            .returning(ScheduleOccurrence)
+        )
+        return tuple(rows.all())
+
 
 class OccurrenceEventAdapter:
     def __init__(self, session, writer=None):
@@ -82,6 +100,31 @@ class OccurrenceEventAdapter:
             },
             dedupe_key=f"schedule-occurrence:{occurrence.schedule_id}:{occurrence.scheduled_at.isoformat()}:{action}",
         )
+
+
+class MonitorOccurrenceApplication:
+    def __init__(
+        self,
+        database,
+        *,
+        store_factory=OccurrenceStore,
+        event_factory=OccurrenceEventAdapter,
+    ):
+        self.database = database
+        self.store_factory = store_factory
+        self.event_factory = event_factory
+
+    async def mark_job_missed(self, job_id: UUID, now: datetime) -> int:
+        async with self.database.transaction() as session:
+            occurrences = await self.store_factory(session).mark_job_missed(job_id, now)
+            events = self.event_factory(session)
+            for occurrence in occurrences:
+                await events.append(occurrence, "missed")
+            return len(occurrences)
+
+
+def get_monitor_occurrence_application() -> MonitorOccurrenceApplication:
+    return MonitorOccurrenceApplication(get_database())
 
 
 class MonitorScanner:

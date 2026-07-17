@@ -28,9 +28,7 @@ from long_invest.platform.jobs.contracts import JobExecutionContext
 
 
 def context(config=None):
-    return JobExecutionContext(
-        job_id=uuid4(), fence_token=uuid4(), config=config or {}
-    )
+    return JobExecutionContext(job_id=uuid4(), fence_token=uuid4(), config=config or {})
 
 
 def test_market_data_handlers_are_registered_on_the_real_worker() -> None:
@@ -128,9 +126,7 @@ def test_daily_item_job_freezes_known_corporate_action_context() -> None:
 
 def test_daily_parent_rejects_corporate_action_context_outside_scope() -> None:
     config = {"known_corporate_action_symbols": ["600000.SH"]}
-    assert _corporate_action_scope(config, ("600000.SH", "000001.SZ")) == {
-        "600000.SH"
-    }
+    assert _corporate_action_scope(config, ("600000.SH", "000001.SZ")) == {"600000.SH"}
 
     with pytest.raises(ValueError):
         _corporate_action_scope(config, ("000001.SZ",))
@@ -205,3 +201,46 @@ async def test_database_quote_cycles_delegates_cancellation(monkeypatch) -> None
 
     assert result.id == cycle_id
     assert calls == [(cycle_id, now, "JOB_EXECUTION_CANCELED")]
+
+
+@pytest.mark.anyio
+async def test_expired_monitor_quote_job_is_missed_before_collection(
+    monkeypatch,
+) -> None:
+    now = datetime(2026, 7, 17, 2, 16, 1, tzinfo=UTC)
+    job_id = uuid4()
+    calls = []
+
+    class Occurrences:
+        async def mark_job_missed(self, requested_job_id, requested_at):
+            calls.append((requested_job_id, requested_at))
+
+    monkeypatch.setattr(jobs_module, "_utc_now", lambda: now)
+    monkeypatch.setattr(
+        jobs_module,
+        "get_monitor_occurrence_application",
+        lambda: Occurrences(),
+    )
+    monkeypatch.setattr(
+        jobs_module,
+        "QuoteCollectionService",
+        lambda *_args, **_kwargs: pytest.fail("expired job must not collect quotes"),
+    )
+    result = await realtime_quote_cycle(
+        JobExecutionContext(
+            job_id=job_id,
+            fence_token=uuid4(),
+            config={
+                "symbols": ["600000.SH"],
+                "timeout_seconds": 30,
+                "universe_snapshot_id": str(uuid4()),
+                "universe_snapshot_version": 1,
+                "requested_at": "2026-07-17T02:15:00+00:00",
+                "claim_deadline_at": "2026-07-17T02:16:00+00:00",
+            },
+        )
+    )
+
+    assert result.code == "SCHEDULE_OCCURRENCE_MISSED"
+    assert result.retryable is False
+    assert calls == [(job_id, now)]

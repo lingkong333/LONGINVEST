@@ -20,10 +20,23 @@ from long_invest.modules.daily_data.models import (  # noqa: F401
     DailyDataBatch,
 )
 from long_invest.modules.market_data.models import DataQualityIssue  # noqa: F401
+from long_invest.modules.monitor_schedules.models import (  # noqa: F401
+    MonitorSchedule,
+    MonitorScheduleRevision,
+)
+from long_invest.modules.monitoring.models import (  # noqa: F401
+    MonitorSubscription,
+    MonitorSubscriptionRevision,
+    ScheduleOccurrence,
+)
 from long_invest.modules.notifications.models import (  # noqa: F401
     NotificationDelivery,
     NotificationDeliveryAttempt,
     NotificationEvent,
+)
+from long_invest.modules.positions.models import (  # noqa: F401
+    UserPosition,
+    UserPositionHistory,
 )
 from long_invest.modules.providers.models import (  # noqa: F401
     ProviderCapabilitySetting,
@@ -47,6 +60,7 @@ from long_invest.modules.securities.models import (  # noqa: F401
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
 )
+from long_invest.modules.watchlists.models import Watchlist, WatchlistItem  # noqa: F401
 from long_invest.platform.audit.models import AuditEvent  # noqa: F401
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.base import Base

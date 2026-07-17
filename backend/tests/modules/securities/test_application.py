@@ -119,7 +119,8 @@ async def test_freeze_symbols_can_join_a_caller_owned_transaction(monkeypatch) -
             return SimpleNamespace(id=value, master_version=4, items=())
 
     class Service:
-        def __init__(self, repository) -> None:
+        def __init__(self, value, *, repository) -> None:
+            calls["service_session"] = value
             calls["repository"] = repository
 
         async def freeze_symbols(self, query):
@@ -137,6 +138,7 @@ async def test_freeze_symbols_can_join_a_caller_owned_transaction(monkeypatch) -
     assert frozen.id == snapshot_id
     assert frozen.master_version == 4
     assert calls["session"] is session
+    assert calls["service_session"] is session
     assert calls["symbols"] == ("600000.SH",)
 
 

@@ -183,7 +183,9 @@ class SecurityApplication:
 
     async def freeze_symbols_in_transaction(self, session, symbols: tuple[str, ...]):
         repository = SecurityRepository(session)
-        snapshot = await SecurityMasterService(repository).freeze_symbols(
+        snapshot = await SecurityMasterService(
+            session, repository=repository
+        ).freeze_symbols(
             SymbolUniverseQuery(symbols=symbols)
         )
         stored = await repository.get_universe_snapshot(snapshot.id)

@@ -289,6 +289,8 @@ async def test_worker_claim_after_deadline_marks_occurrence_missed(monkeypatch) 
         assert stored_job.result_summary is not None
         assert stored_job.result_summary["code"] == "SCHEDULE_OCCURRENCE_MISSED"
         assert run is not None and run.status == JobRunStatus.FAILED
-        assert job_config["claim_deadline_at"] == scheduled.isoformat()
+        assert job_config["claim_deadline_at"] == (
+            scheduled + timedelta(seconds=60)
+        ).isoformat()
     finally:
         await db.dispose()

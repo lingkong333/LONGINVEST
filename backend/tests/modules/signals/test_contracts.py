@@ -1,5 +1,6 @@
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from inspect import signature
 from uuid import uuid4
 
 import pytest
@@ -9,6 +10,7 @@ from long_invest.modules.signals.contracts import (
     EvaluationReason,
     EvaluationResult,
     NotificationClass,
+    PositionSnapshotPort,
     SignalEvaluationView,
     SignalEventView,
     SignalInput,
@@ -21,6 +23,7 @@ from long_invest.modules.targets.contracts import TargetValues
 def _signal_input(**overrides: object) -> SignalInput:
     values: dict[str, object] = {
         "subscription_id": uuid4(),
+        "security_id": uuid4(),
         "symbol": "600000.SH",
         "subscription_version": 1,
         "price": "10.01",
@@ -28,6 +31,7 @@ def _signal_input(**overrides: object) -> SignalInput:
         "price_version": 1,
         "target_revision_id": uuid4(),
         "target_version": 1,
+        "target_date": date(2026, 7, 17),
         "targets": TargetValues(
             low_strong="8", low_watch="9", high_watch="11", high_strong="12"
         ),
@@ -81,6 +85,8 @@ def test_signal_input_accepts_valid_values_and_is_frozen() -> None:
     assert value.price == Decimal("10.01")
     assert value.idempotency_key == "signal-1"
     assert value.targets.low_watch == Decimal("9.00")
+    assert value.security_id is not None
+    assert value.target_date == date(2026, 7, 17)
     assert value.quote_cycle_id is not None
     assert value.quote_item_id is not None
     with pytest.raises(ValidationError):
@@ -173,6 +179,7 @@ def test_signal_views_reject_naive_business_times(view: str) -> None:
                 ),
                 target_revision_id=uuid4(),
                 target_version=1,
+                target_date=date(2026, 7, 17),
                 position_status="NOT_HOLDING",
                 position_version=0,
                 quote_cycle_id=None,
@@ -202,6 +209,7 @@ def test_skipped_evaluation_view_allows_missing_market_and_target_inputs() -> No
         created_at=datetime(2026, 7, 17, 9, 31, tzinfo=UTC),
     )
     assert view.target_revision_id is None
+    assert view.target_date is None
     assert view.targets is None
     assert view.price_version is None
 
@@ -236,6 +244,7 @@ def test_signal_evaluation_and_event_views_reject_naive_created_at() -> None:
         ),
         "target_revision_id": uuid4(),
         "target_version": 1,
+        "target_date": date(2026, 7, 17),
         "position_status": "NOT_HOLDING",
         "position_version": 0,
         "used_stale_target": False,
@@ -246,3 +255,10 @@ def test_signal_evaluation_and_event_views_reject_naive_created_at() -> None:
     }
     with pytest.raises(ValidationError):
         SignalEventView(**signal_event)
+
+
+def test_position_snapshot_port_is_keyed_by_security_id() -> None:
+    parameters = tuple(
+        signature(PositionSnapshotPort.get_position_snapshot).parameters
+    )
+    assert parameters == ("self", "security_id")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol
@@ -51,6 +52,7 @@ class NotificationClass(StrEnum):
 
 class SignalInput(StrictContract):
     subscription_id: UUID
+    security_id: UUID
     symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
     subscription_version: int = Field(ge=1)
     price: Decimal
@@ -58,6 +60,7 @@ class SignalInput(StrictContract):
     price_version: int = Field(ge=1)
     target_revision_id: UUID
     target_version: int = Field(ge=1)
+    target_date: date
     targets: TargetValues
     quote_cycle_id: UUID | None = None
     quote_item_id: UUID | None = None
@@ -112,6 +115,7 @@ class SignalEvaluationView(StrictContract):
     subscription_version: int | None = Field(default=None, ge=1)
     target_revision_id: UUID | None = None
     target_version: int | None = Field(default=None, ge=1)
+    target_date: date | None = None
     targets: TargetValues | None = None
     position_status: PositionStatus | None = None
     position_version: int | None = Field(default=None, ge=0)
@@ -139,6 +143,7 @@ class SignalEventView(StrictContract):
     targets: TargetValues
     target_revision_id: UUID
     target_version: int = Field(ge=1)
+    target_date: date
     position_status: PositionStatus
     position_version: int = Field(ge=0)
     quote_cycle_id: UUID | None = None
@@ -168,7 +173,7 @@ class SubscriptionSnapshotPort(Protocol):
 
 class PositionSnapshotPort(Protocol):
     async def get_position_snapshot(
-        self, subscription_id: UUID
+        self, security_id: UUID
     ) -> PositionView | None: ...
 
 

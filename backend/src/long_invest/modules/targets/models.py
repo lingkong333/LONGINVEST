@@ -38,8 +38,18 @@ class TargetRevision(Base):
             "source IN ('MANUAL','RESTORED')", name="source_valid"
         ),
         CheckConstraint(
-            "0 < low_strong AND low_strong < low_watch "
-            "AND low_watch < high_watch AND high_watch < high_strong",
+            "low_strong > 0 AND low_watch > 0 "
+            "AND high_watch > 0 AND high_strong > 0 "
+            "AND low_strong <> 'NaN'::numeric "
+            "AND low_watch <> 'NaN'::numeric "
+            "AND high_watch <> 'NaN'::numeric "
+            "AND high_strong <> 'NaN'::numeric "
+            "AND low_strong < 'Infinity'::numeric "
+            "AND low_watch < 'Infinity'::numeric "
+            "AND high_watch < 'Infinity'::numeric "
+            "AND high_strong < 'Infinity'::numeric "
+            "AND low_strong < low_watch AND low_watch < high_watch "
+            "AND high_watch < high_strong",
             name="values_ordered",
         ),
         CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),

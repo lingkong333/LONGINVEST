@@ -60,6 +60,15 @@ def test_target_revision_has_order_source_and_version_constraints() -> None:
     } <= names
     assert ("subscription_id", "revision_no") in _unique_columns(TargetRevision)
     assert ("subscription_id", "idempotency_key") in _unique_columns(TargetRevision)
+    values_check = next(
+        item
+        for item in TargetRevision.__table__.constraints
+        if item.name == "ck_target_revision_values_ordered"
+    )
+    sql = str(values_check.sqltext)
+    for field in ("low_strong", "low_watch", "high_watch", "high_strong"):
+        assert f"{field} <> 'NaN'::numeric" in sql
+        assert f"{field} < 'Infinity'::numeric" in sql
 
 
 def test_target_binding_is_unique_and_constrained() -> None:

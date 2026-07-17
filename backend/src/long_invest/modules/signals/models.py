@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -146,6 +147,7 @@ class SignalEvaluation(Base):
         ForeignKey("target_revision.id", ondelete="RESTRICT"),
     )
     target_version: Mapped[int | None] = mapped_column(Integer)
+    target_date: Mapped[date | None] = mapped_column(Date)
     low_strong: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
     low_watch: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
     high_watch: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
@@ -229,6 +231,7 @@ class SignalEvent(Base):
         nullable=False,
     )
     target_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
     low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)

@@ -6,7 +6,14 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from long_invest.modules.monitoring.contracts import FrozenSubscription
 from long_invest.modules.positions.contracts import PositionStatus, PositionView
@@ -15,6 +22,9 @@ from long_invest.modules.targets.contracts import TargetSnapshot, TargetValues
 
 class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+MAX_SIGNAL_PRICE = Decimal("100000000000000")
 
 
 class SignalZone(StrEnum):
@@ -73,9 +83,7 @@ class SignalInput(StrictContract):
     @field_validator("price")
     @classmethod
     def validate_price(cls, value: Decimal) -> Decimal:
-        if not value.is_finite() or value <= 0:
-            raise ValueError("price must be positive and finite")
-        return value
+        return _validate_signal_price(value)
 
     @field_validator("hysteresis_ratio", "hysteresis_min")
     @classmethod
@@ -130,6 +138,33 @@ class SignalEvaluationView(StrictContract):
     content_hash: str = Field(min_length=64, max_length=64)
     created_at: AwareDatetime
 
+    @field_validator("price")
+    @classmethod
+    def validate_price_capacity(cls, value: Decimal | None) -> Decimal | None:
+        return _validate_signal_price(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_non_skipped_inputs(self) -> SignalEvaluationView:
+        if self.result is EvaluationResult.SKIPPED:
+            return self
+        required = (
+            self.subscription_version,
+            self.target_revision_id,
+            self.target_version,
+            self.target_date,
+            self.targets,
+            self.position_version,
+            self.position_status,
+            self.price,
+            self.price_at,
+            self.price_version,
+        )
+        if any(value is None for value in required):
+            raise ValueError(
+                "non-skipped evaluation requires a complete input snapshot"
+            )
+        return self
+
 
 class SignalEventView(StrictContract):
     id: UUID
@@ -154,6 +189,11 @@ class SignalEventView(StrictContract):
     notification_eligible: bool
     suppression_reason: str | None = None
     created_at: AwareDatetime
+
+    @field_validator("price")
+    @classmethod
+    def validate_price_capacity(cls, value: Decimal) -> Decimal:
+        return _validate_signal_price(value)
 
 
 class EvaluationOutcome(StrictContract):
@@ -181,3 +221,9 @@ class TargetSnapshotPort(Protocol):
     async def get_target_snapshot(
         self, subscription_id: UUID
     ) -> TargetSnapshot | None: ...
+
+
+def _validate_signal_price(value: Decimal) -> Decimal:
+    if not value.is_finite() or value <= 0 or value >= MAX_SIGNAL_PRICE:
+        raise ValueError("price is outside Numeric(20,6) capacity")
+    return value

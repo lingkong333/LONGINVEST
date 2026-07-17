@@ -100,6 +100,19 @@ class SignalEvaluation(Base):
             name="versions_positive",
         ),
         CheckConstraint(
+            "result = 'SKIPPED' OR ("
+            "subscription_version IS NOT NULL "
+            "AND target_revision_id IS NOT NULL "
+            "AND target_version IS NOT NULL "
+            "AND target_date IS NOT NULL "
+            "AND low_strong IS NOT NULL AND low_watch IS NOT NULL "
+            "AND high_watch IS NOT NULL AND high_strong IS NOT NULL "
+            "AND position_version IS NOT NULL AND position_status IS NOT NULL "
+            "AND price IS NOT NULL AND price_at IS NOT NULL "
+            "AND price_version IS NOT NULL)",
+            name="non_skipped_inputs_complete",
+        ),
+        CheckConstraint(
             "price IS NULL OR (price > 0 AND price <> 'NaN'::numeric "
             "AND price < 'Infinity'::numeric)",
             name="price_valid",

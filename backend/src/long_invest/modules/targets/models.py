@@ -38,6 +38,11 @@ class TargetRevision(Base):
             "source IN ('MANUAL','RESTORED')", name="source_valid"
         ),
         CheckConstraint(
+            "(source = 'RESTORED' AND source_revision_id IS NOT NULL) OR "
+            "(source = 'MANUAL' AND source_revision_id IS NULL)",
+            name="source_revision_consistent",
+        ),
+        CheckConstraint(
             "low_strong > 0 AND low_watch > 0 "
             "AND high_watch > 0 AND high_strong > 0 "
             "AND low_strong <> 'NaN'::numeric "

@@ -81,6 +81,23 @@ def test_target_values_reject_price_that_rounds_to_zero() -> None:
         )
 
 
+def test_target_values_match_numeric_20_2_capacity() -> None:
+    accepted = TargetValues(
+        low_strong="1",
+        low_watch="2",
+        high_watch="3",
+        high_strong="999999999999999999.99",
+    )
+    assert accepted.high_strong == Decimal("999999999999999999.99")
+    with pytest.raises(ValidationError):
+        TargetValues(
+            low_strong="1",
+            low_watch="2",
+            high_watch="3",
+            high_strong="1000000000000000000.00",
+        )
+
+
 @pytest.mark.parametrize(
     "levels",
     [
@@ -202,6 +219,41 @@ def test_target_views_freeze_reproducibility_snapshot_and_serialize_mapping() ->
         activated_at=created_at,
     )
     assert snapshot.content_hash == "a" * 64
+
+
+@pytest.mark.parametrize(
+    ("source", "source_revision_id", "valid"),
+    [
+        (TargetSource.MANUAL, None, True),
+        (TargetSource.RESTORED, uuid4(), True),
+        (TargetSource.MANUAL, uuid4(), False),
+        (TargetSource.RESTORED, None, False),
+    ],
+)
+def test_target_revision_source_matches_source_revision(
+    source: TargetSource, source_revision_id: object, valid: bool
+) -> None:
+    values = {
+        "id": uuid4(),
+        "subscription_id": uuid4(),
+        "revision_no": 1,
+        "values": TargetValues(
+            low_strong="1", low_watch="2", high_watch="3", high_strong="4"
+        ),
+        "source": source,
+        "source_revision_id": source_revision_id,
+        "target_date": date(2026, 7, 17),
+        "parameter_snapshot": {},
+        "content_hash": "a" * 64,
+        "reason": "manual or restored",
+        "created_at": datetime(2026, 7, 17, 10, tzinfo=UTC),
+    }
+    if valid:
+        revision = TargetRevisionView(**values)
+        assert revision.source_revision_id == source_revision_id
+    else:
+        with pytest.raises(ValidationError):
+            TargetRevisionView(**values)
 
 
 @pytest.mark.parametrize("view", ["revision", "binding", "snapshot"])

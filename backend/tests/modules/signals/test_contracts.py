@@ -47,6 +47,37 @@ def _signal_input(**overrides: object) -> SignalInput:
     return SignalInput(**values)
 
 
+def _evaluation_view(
+    result: EvaluationResult, **overrides: object
+) -> SignalEvaluationView:
+    values: dict[str, object] = {
+        "id": uuid4(),
+        "subscription_id": uuid4(),
+        "reason": EvaluationReason.SCHEDULED_QUOTE,
+        "result": result,
+        "before_zone": SignalZone.NORMAL,
+        "after_zone": SignalZone.LOW,
+        "subscription_version": 1,
+        "target_revision_id": uuid4(),
+        "target_version": 1,
+        "target_date": date(2026, 7, 17),
+        "targets": TargetValues(
+            low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+        ),
+        "position_status": "NOT_HOLDING",
+        "position_version": 0,
+        "price": "9",
+        "price_at": datetime(2026, 7, 17, 9, 30, tzinfo=UTC),
+        "price_version": 1,
+        "hysteresis_applied": False,
+        "used_stale_target": False,
+        "content_hash": "a" * 64,
+        "created_at": datetime(2026, 7, 17, 9, 31, tzinfo=UTC),
+    }
+    values.update(overrides)
+    return SignalEvaluationView(**values)
+
+
 def test_signal_enums_are_exact() -> None:
     assert {item.value for item in SignalZone} == {
         "UNKNOWN",
@@ -120,6 +151,13 @@ def test_signal_input_requires_aware_time_and_valid_symbol() -> None:
         _signal_input(price_at=datetime(2026, 7, 17, 9, 30))
     with pytest.raises(ValidationError):
         _signal_input(symbol="600000")
+
+
+def test_signal_price_matches_numeric_20_6_capacity() -> None:
+    accepted = _signal_input(price="99999999999999.999999")
+    assert accepted.price == Decimal("99999999999999.999999")
+    with pytest.raises(ValidationError):
+        _signal_input(price="100000000000000.000000")
 
 
 def test_signal_input_allows_position_version_zero_and_rejects_negative() -> None:
@@ -212,6 +250,93 @@ def test_skipped_evaluation_view_allows_missing_market_and_target_inputs() -> No
     assert view.target_date is None
     assert view.targets is None
     assert view.price_version is None
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        EvaluationResult.APPLIED,
+        EvaluationResult.UNCHANGED,
+        EvaluationResult.SUPERSEDED,
+    ],
+)
+def test_non_skipped_evaluation_view_accepts_complete_snapshot(
+    result: EvaluationResult,
+) -> None:
+    assert _evaluation_view(result).result is result
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "subscription_version",
+        "target_revision_id",
+        "target_version",
+        "target_date",
+        "targets",
+        "position_version",
+        "position_status",
+        "price",
+        "price_at",
+        "price_version",
+    ],
+)
+@pytest.mark.parametrize(
+    "result",
+    [
+        EvaluationResult.APPLIED,
+        EvaluationResult.UNCHANGED,
+        EvaluationResult.SUPERSEDED,
+    ],
+)
+def test_non_skipped_evaluation_view_rejects_any_incomplete_input(
+    result: EvaluationResult, field: str
+) -> None:
+    with pytest.raises(ValidationError):
+        _evaluation_view(result, **{field: None})
+
+
+def test_signal_output_views_match_numeric_price_capacity() -> None:
+    assert (
+        _evaluation_view(
+            EvaluationResult.APPLIED, price="99999999999999.999999"
+        ).price
+        == Decimal("99999999999999.999999")
+    )
+    with pytest.raises(ValidationError):
+        _evaluation_view(
+            EvaluationResult.APPLIED, price="100000000000000.000000"
+        )
+
+    event_values = {
+        "id": uuid4(),
+        "subscription_id": uuid4(),
+        "evaluation_id": uuid4(),
+        "before_zone": SignalZone.NORMAL,
+        "after_zone": SignalZone.LOW,
+        "reason": EvaluationReason.SCHEDULED_QUOTE,
+        "price": "99999999999999.999999",
+        "price_at": datetime(2026, 7, 17, 9, 30, tzinfo=UTC),
+        "targets": TargetValues(
+            low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+        ),
+        "target_revision_id": uuid4(),
+        "target_version": 1,
+        "target_date": date(2026, 7, 17),
+        "position_status": "NOT_HOLDING",
+        "position_version": 0,
+        "used_stale_target": False,
+        "state_version": 1,
+        "notification_class": NotificationClass.LOW,
+        "notification_eligible": True,
+        "created_at": datetime(2026, 7, 17, 9, 31, tzinfo=UTC),
+    }
+    assert SignalEventView(**event_values).price == Decimal(
+        "99999999999999.999999"
+    )
+    event_values["price"] = "100000000000000.000000"
+    with pytest.raises(ValidationError):
+        SignalEventView(**event_values)
 
 
 def test_signal_evaluation_and_event_views_reject_naive_created_at() -> None:

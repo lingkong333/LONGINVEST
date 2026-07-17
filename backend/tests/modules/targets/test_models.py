@@ -57,6 +57,7 @@ def test_target_revision_has_order_source_and_version_constraints() -> None:
         "ck_target_revision_source_valid",
         "ck_target_revision_revision_positive",
         "ck_target_revision_content_hash_sha256",
+        "ck_target_revision_source_revision_consistent",
     } <= names
     assert ("subscription_id", "revision_no") in _unique_columns(TargetRevision)
     assert ("subscription_id", "idempotency_key") in _unique_columns(TargetRevision)

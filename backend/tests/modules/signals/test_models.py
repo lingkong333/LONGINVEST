@@ -66,6 +66,7 @@ def test_signal_evaluation_preserves_inputs_and_guards_idempotency() -> None:
         "ck_signal_evaluation_before_zone_valid",
         "ck_signal_evaluation_after_zone_valid",
         "ck_signal_evaluation_versions_positive",
+        "ck_signal_evaluation_non_skipped_inputs_complete",
     } <= _constraint_names(SignalEvaluation)
     assert "ck_signal_evaluation_price_valid" in _constraint_names(SignalEvaluation)
     for name in (

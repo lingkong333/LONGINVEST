@@ -23,6 +23,9 @@ class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+MAX_TARGET_PRICE = Decimal("1000000000000000000")
+
+
 class TargetSource(StrEnum):
     MANUAL = "MANUAL"
     RESTORED = "RESTORED"
@@ -51,8 +54,12 @@ class TargetValues(StrictContract):
             if not value.is_finite():
                 raise ValueError("target prices must be positive and finite")
             quantized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-            if not quantized.is_finite() or quantized <= 0:
-                raise ValueError("target prices must be positive after quantization")
+            if (
+                not quantized.is_finite()
+                or quantized <= 0
+                or quantized >= MAX_TARGET_PRICE
+            ):
+                raise ValueError("target price is outside Numeric(20,2) capacity")
             return quantized
         except DecimalException as exc:
             raise ValueError("target price cannot be represented at 0.01") from exc
@@ -132,6 +139,14 @@ class TargetRevisionView(FrozenParametersContract):
     content_hash: str = Field(min_length=64, max_length=64)
     reason: str
     created_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_source_revision(self) -> TargetRevisionView:
+        source_is_restored = self.source is TargetSource.RESTORED
+        has_source_revision = self.source_revision_id is not None
+        if source_is_restored != has_source_revision:
+            raise ValueError("source revision must match target source")
+        return self
 
 
 class TargetBindingView(StrictContract):

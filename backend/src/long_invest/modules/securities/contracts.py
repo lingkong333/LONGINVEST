@@ -104,6 +104,8 @@ class SymbolUniverseQuery:
 class SecurityIdentity:
     security_id: UUID
     symbol: str
+    market: Market
+    security_type: SecurityType
     listing_status: ListingStatus
     is_suspended: bool
     is_st: bool

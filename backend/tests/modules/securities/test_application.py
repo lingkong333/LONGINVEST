@@ -12,8 +12,10 @@ import long_invest.modules.securities.application as application_module
 from long_invest.modules.securities.application import SecurityApplication
 from long_invest.modules.securities.contracts import (
     ListingStatus,
+    Market,
     SecurityAuditContext,
     SecurityIdentity,
+    SecurityType,
 )
 from long_invest.platform.errors import AppError
 
@@ -43,6 +45,8 @@ async def test_resolve_identity_returns_a_public_snapshot(monkeypatch) -> None:
     security = SimpleNamespace(
         id=security_id,
         symbol="600000.SH",
+        market="SH",
+        security_type="A_SHARE",
         listing_status="LISTED",
         is_suspended=False,
         is_st=True,
@@ -68,6 +72,8 @@ async def test_resolve_identity_returns_a_public_snapshot(monkeypatch) -> None:
     assert identity == SecurityIdentity(
         security_id=security_id,
         symbol="600000.SH",
+        market=Market.SH,
+        security_type=SecurityType.A_SHARE,
         listing_status=ListingStatus.LISTED,
         is_suspended=False,
         is_st=True,

@@ -20,7 +20,12 @@ from long_invest.modules.qfq.contracts import (
     QfqRefreshStatus,
     ValidatedQfqWindow,
 )
-from long_invest.modules.securities.contracts import ListingStatus, SecurityIdentity
+from long_invest.modules.securities.contracts import (
+    ListingStatus,
+    Market,
+    SecurityIdentity,
+    SecurityType,
+)
 from long_invest.platform.errors import AppError
 
 TODAY = date(2026, 7, 16)
@@ -262,6 +267,8 @@ def identity() -> SecurityIdentity:
     return SecurityIdentity(
         security_id=uuid4(),
         symbol="600000.SH",
+        market=Market.SH,
+        security_type=SecurityType.A_SHARE,
         listing_status=ListingStatus.LISTED,
         is_suspended=False,
         is_st=False,

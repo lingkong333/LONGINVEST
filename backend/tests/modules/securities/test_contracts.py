@@ -20,6 +20,8 @@ def test_security_identity_has_only_the_public_read_fields() -> None:
     assert tuple(field.name for field in fields(SecurityIdentity)) == (
         "security_id",
         "symbol",
+        "market",
+        "security_type",
         "listing_status",
         "is_suspended",
         "is_st",
@@ -33,6 +35,8 @@ def test_security_identity_is_frozen() -> None:
     identity = SecurityIdentity(
         security_id=uuid4(),
         symbol="600000.SH",
+        market=Market.SH,
+        security_type=SecurityType.A_SHARE,
         listing_status=ListingStatus.LISTED,
         is_suspended=False,
         is_st=False,
@@ -59,6 +63,8 @@ def test_security_identity_rejects_invalid_values(
         SecurityIdentity(
             security_id=uuid4(),
             symbol=symbol,
+            market=Market.SH,
+            security_type=SecurityType.A_SHARE,
             listing_status=ListingStatus.LISTED,
             is_suspended=False,
             is_st=False,

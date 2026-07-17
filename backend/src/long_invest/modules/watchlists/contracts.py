@@ -69,3 +69,15 @@ class WatchlistBatchItem(StrictContract):
     status: WatchlistBatchStatus
     item: WatchlistItemView | None = None
     error_code: str | None = None
+
+
+class WatchlistItemMutationResult(StrictContract):
+    item: WatchlistItemView
+    version: int = Field(ge=1)
+    created: bool
+
+
+class WatchlistItemRemovalResult(StrictContract):
+    removed: bool
+    pause_recommended: bool
+    version: int = Field(ge=1)

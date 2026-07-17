@@ -9,6 +9,8 @@ from long_invest.modules.watchlists.contracts import (
     WatchlistBatchInput,
     WatchlistBatchItem,
     WatchlistBatchStatus,
+    WatchlistItemMutationResult,
+    WatchlistItemRemovalResult,
     WatchlistItemView,
     WatchlistMutation,
     WatchlistView,
@@ -129,3 +131,23 @@ async def test_wrong_watchlist_json_type_returns_fastapi_422() -> None:
             },
         )
     assert response.status_code == 422
+
+
+def test_watchlist_mutation_results_are_frozen_and_versioned() -> None:
+    item = WatchlistItemView(
+        id=uuid4(),
+        watchlist_id=uuid4(),
+        security_id=uuid4(),
+        symbol="600000.SH",
+    )
+    added = WatchlistItemMutationResult(item=item, version=2, created=True)
+    removed = WatchlistItemRemovalResult(
+        removed=True,
+        pause_recommended=True,
+        version=3,
+    )
+
+    assert added.item is item
+    assert removed.pause_recommended is True
+    with pytest.raises(ValidationError):
+        removed.version = 4

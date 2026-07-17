@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-from datetime import datetime
+from collections.abc import Mapping
+from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from enum import StrEnum
-from typing import Protocol
+from types import MappingProxyType
+from typing import Any, Protocol
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AwareDatetime,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_serializer,
+    field_validator,
+    model_validator,
+)
 
 
 class StrictContract(BaseModel):
@@ -38,9 +48,12 @@ class TargetValues(StrictContract):
     @classmethod
     def quantize_price(cls, value: Decimal) -> Decimal:
         try:
-            if not value.is_finite() or value <= 0:
+            if not value.is_finite():
                 raise ValueError("target prices must be positive and finite")
-            return value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            quantized = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+            if not quantized.is_finite() or quantized <= 0:
+                raise ValueError("target prices must be positive after quantization")
+            return quantized
         except DecimalException as exc:
             raise ValueError("target price cannot be represented at 0.01") from exc
 
@@ -81,6 +94,7 @@ class TargetCommand(StrictContract):
 
 
 class ManualTargetCommand(TargetCommand):
+    target_date: date
     values: TargetValues
     large_change_confirmed: bool = False
     switch_to_manual_confirmed: bool = False
@@ -91,15 +105,33 @@ class RestoreTargetCommand(TargetCommand):
     switch_to_manual_confirmed: bool = False
 
 
-class TargetRevisionView(StrictContract):
+class FrozenParametersContract(StrictContract):
+    parameter_snapshot: Mapping[str, Any]
+
+    @field_validator("parameter_snapshot", mode="after")
+    @classmethod
+    def freeze_parameters(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _deep_freeze(value)
+
+    @field_serializer("parameter_snapshot")
+    def serialize_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return _deep_thaw(value)
+
+
+class TargetRevisionView(FrozenParametersContract):
     id: UUID
     subscription_id: UUID
     revision_no: int = Field(ge=1)
     values: TargetValues
     source: TargetSource
     source_revision_id: UUID | None = None
+    target_date: date
+    strategy_version_id: UUID | None = None
+    data_version: int | None = Field(default=None, ge=1)
+    source_code_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    content_hash: str = Field(min_length=64, max_length=64)
     reason: str
-    created_at: datetime
+    created_at: AwareDatetime
 
 
 class TargetBindingView(StrictContract):
@@ -107,11 +139,11 @@ class TargetBindingView(StrictContract):
     current_revision_id: UUID | None
     status: TargetStatus
     version: int = Field(ge=1)
-    activated_at: datetime | None = None
+    activated_at: AwareDatetime | None = None
     stale_reason: str | None = None
 
 
-class TargetSnapshot(StrictContract):
+class TargetSnapshot(FrozenParametersContract):
     subscription_id: UUID
     revision_id: UUID
     revision_no: int = Field(ge=1)
@@ -119,7 +151,12 @@ class TargetSnapshot(StrictContract):
     values: TargetValues
     source: TargetSource
     status: TargetStatus
-    activated_at: datetime
+    target_date: date
+    strategy_version_id: UUID | None = None
+    data_version: int | None = Field(default=None, ge=1)
+    source_code_hash: str | None = Field(default=None, min_length=64, max_length=64)
+    content_hash: str = Field(min_length=64, max_length=64)
+    activated_at: AwareDatetime
 
 
 class TargetMutationResult(StrictContract):
@@ -133,3 +170,23 @@ class TargetSnapshotPort(Protocol):
     async def get_target_snapshot(
         self, subscription_id: UUID
     ) -> TargetSnapshot | None: ...
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _deep_freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_deep_freeze(item) for item in value)
+    return value
+
+
+def _deep_thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _deep_thaw(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return [_deep_thaw(item) for item in value]
+    return value

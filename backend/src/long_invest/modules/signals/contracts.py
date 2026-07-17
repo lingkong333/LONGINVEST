@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
 from typing import Protocol
@@ -9,8 +8,8 @@ from uuid import UUID
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
 
 from long_invest.modules.monitoring.contracts import FrozenSubscription
-from long_invest.modules.positions.contracts import PositionView
-from long_invest.modules.targets.contracts import TargetSnapshot
+from long_invest.modules.positions.contracts import PositionStatus, PositionView
+from long_invest.modules.targets.contracts import TargetSnapshot, TargetValues
 
 
 class StrictContract(BaseModel):
@@ -59,6 +58,9 @@ class SignalInput(StrictContract):
     price_version: int = Field(ge=1)
     target_revision_id: UUID
     target_version: int = Field(ge=1)
+    targets: TargetValues
+    quote_cycle_id: UUID | None = None
+    quote_item_id: UUID | None = None
     position_version: int = Field(ge=0)
     hysteresis_ratio: Decimal = Field(ge=0)
     hysteresis_min: Decimal = Field(ge=0)
@@ -90,7 +92,11 @@ class SignalStateView(StrictContract):
     zone: SignalZone
     version: int = Field(ge=1)
     last_price: Decimal | None = None
-    last_price_at: datetime | None = None
+    last_price_at: AwareDatetime | None = None
+    last_subscription_version: int | None = Field(default=None, ge=1)
+    last_price_version: int | None = Field(default=None, ge=1)
+    last_quote_cycle_id: UUID | None = None
+    last_quote_item_id: UUID | None = None
     last_target_revision_id: UUID | None = None
     last_target_version: int | None = Field(default=None, ge=1)
     last_position_version: int | None = Field(default=None, ge=0)
@@ -103,12 +109,22 @@ class SignalEvaluationView(StrictContract):
     result: EvaluationResult
     before_zone: SignalZone
     after_zone: SignalZone
-    price: Decimal
-    price_at: datetime
+    subscription_version: int | None = Field(default=None, ge=1)
+    target_revision_id: UUID | None = None
+    target_version: int | None = Field(default=None, ge=1)
+    targets: TargetValues | None = None
+    position_status: PositionStatus | None = None
+    position_version: int | None = Field(default=None, ge=0)
+    price: Decimal | None = Field(default=None, gt=0)
+    price_at: AwareDatetime | None = None
+    price_version: int | None = Field(default=None, ge=1)
+    quote_cycle_id: UUID | None = None
+    quote_item_id: UUID | None = None
     hysteresis_applied: bool
     used_stale_target: bool
     skip_code: str | None = None
-    created_at: datetime
+    content_hash: str = Field(min_length=64, max_length=64)
+    created_at: AwareDatetime
 
 
 class SignalEventView(StrictContract):
@@ -117,11 +133,22 @@ class SignalEventView(StrictContract):
     evaluation_id: UUID
     before_zone: SignalZone
     after_zone: SignalZone
+    reason: EvaluationReason
+    price: Decimal = Field(gt=0)
+    price_at: AwareDatetime
+    targets: TargetValues
+    target_revision_id: UUID
+    target_version: int = Field(ge=1)
+    position_status: PositionStatus
+    position_version: int = Field(ge=0)
+    quote_cycle_id: UUID | None = None
+    quote_item_id: UUID | None = None
+    used_stale_target: bool
     state_version: int = Field(ge=1)
     notification_class: NotificationClass
     notification_eligible: bool
     suppression_reason: str | None = None
-    created_at: datetime
+    created_at: AwareDatetime
 
 
 class EvaluationOutcome(StrictContract):

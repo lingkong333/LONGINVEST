@@ -1,4 +1,5 @@
-from sqlalchemy import CheckConstraint, Index, UniqueConstraint
+from sqlalchemy import CheckConstraint, Date, Index, UniqueConstraint
+from sqlalchemy.dialects.postgresql import JSONB
 
 from long_invest.modules.targets.models import (
     SubscriptionTargetBinding,
@@ -28,6 +29,12 @@ def test_target_tables_own_expected_columns() -> None:
         "high_strong",
         "source",
         "source_revision_id",
+        "target_date",
+        "strategy_version_id",
+        "parameter_snapshot",
+        "data_version",
+        "source_code_hash",
+        "content_hash",
         "created_at",
     } <= set(TargetRevision.__table__.c.keys())
     for name in ("low_strong", "low_watch", "high_watch", "high_strong"):
@@ -36,6 +43,11 @@ def test_target_tables_own_expected_columns() -> None:
         assert column_type.scale == 2
     assert not TargetRevision.__mapper__.relationships
     assert not SubscriptionTargetBinding.__mapper__.relationships
+    assert isinstance(TargetRevision.__table__.c.target_date.type, Date)
+    assert TargetRevision.__table__.c.target_date.nullable is False
+    assert isinstance(TargetRevision.__table__.c.parameter_snapshot.type, JSONB)
+    assert TargetRevision.__table__.c.parameter_snapshot.nullable is False
+    assert TargetRevision.__table__.c.content_hash.nullable is False
 
 
 def test_target_revision_has_order_source_and_version_constraints() -> None:
@@ -44,6 +56,7 @@ def test_target_revision_has_order_source_and_version_constraints() -> None:
         "ck_target_revision_values_ordered",
         "ck_target_revision_source_valid",
         "ck_target_revision_revision_positive",
+        "ck_target_revision_content_hash_sha256",
     } <= names
     assert ("subscription_id", "revision_no") in _unique_columns(TargetRevision)
     assert ("subscription_id", "idempotency_key") in _unique_columns(TargetRevision)

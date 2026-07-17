@@ -1,10 +1,12 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
+from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -13,7 +15,9 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -37,6 +41,14 @@ class TargetRevision(Base):
             "0 < low_strong AND low_strong < low_watch "
             "AND low_watch < high_watch AND high_watch < high_strong",
             name="values_ordered",
+        ),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+        CheckConstraint(
+            "source_code_hash IS NULL OR length(source_code_hash) = 64",
+            name="source_code_hash_sha256",
+        ),
+        CheckConstraint(
+            "data_version IS NULL OR data_version > 0", name="data_version_positive"
         ),
         Index(
             "ix_target_revision_subscription_created",
@@ -63,6 +75,17 @@ class TargetRevision(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("target_revision.id", ondelete="RESTRICT"),
     )
+    target_date: Mapped[date] = mapped_column(Date, nullable=False)
+    strategy_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    data_version: Mapped[int | None] = mapped_column(Integer)
+    source_code_hash: Mapped[str | None] = mapped_column(String(64))
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     large_change_confirmed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False

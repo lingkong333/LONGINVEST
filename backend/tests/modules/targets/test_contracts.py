@@ -1,5 +1,6 @@
-from dataclasses import FrozenInstanceError
+from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import MappingProxyType
 from uuid import uuid4
 
 import pytest
@@ -8,6 +9,9 @@ from pydantic import ValidationError
 from long_invest.modules.targets.contracts import (
     ManualTargetCommand,
     RestoreTargetCommand,
+    TargetBindingView,
+    TargetRevisionView,
+    TargetSnapshot,
     TargetSource,
     TargetStatus,
     TargetValues,
@@ -67,6 +71,16 @@ def test_target_values_reject_non_finite_or_non_positive_values(value: str) -> N
         )
 
 
+def test_target_values_reject_price_that_rounds_to_zero() -> None:
+    with pytest.raises(ValidationError):
+        TargetValues(
+            low_strong="0.004",
+            low_watch="1",
+            high_watch="2",
+            high_strong="3",
+        )
+
+
 @pytest.mark.parametrize(
     "levels",
     [
@@ -91,6 +105,7 @@ def test_target_values_reject_non_increasing_quantized_levels(
 def test_manual_command_trims_audit_text_and_forbids_extra_fields() -> None:
     command = ManualTargetCommand(
         subscription_id=uuid4(),
+        target_date=date(2026, 7, 17),
         values=TargetValues(
             low_strong="1", low_watch="2", high_watch="3", high_strong="4"
         ),
@@ -115,7 +130,7 @@ def test_restore_command_freezes_source_revision_and_audit_context() -> None:
     )
     assert command.source_revision_id == source_revision_id
     assert command.request_id == "req-1"
-    with pytest.raises((ValidationError, FrozenInstanceError)):
+    with pytest.raises(ValidationError):
         command.reason = "changed"
 
 
@@ -140,3 +155,95 @@ def test_target_commands_reject_blank_audit_text(field: str) -> None:
             switch_to_manual_confirmed=True,
             **audit,
         )
+
+
+def test_target_views_freeze_reproducibility_snapshot_and_serialize_mapping() -> None:
+    revision_id = uuid4()
+    subscription_id = uuid4()
+    created_at = datetime(2026, 7, 17, 10, tzinfo=UTC)
+    values = TargetValues(
+        low_strong="1", low_watch="2", high_watch="3", high_strong="4"
+    )
+    revision = TargetRevisionView(
+        id=revision_id,
+        subscription_id=subscription_id,
+        revision_no=1,
+        values=values,
+        source=TargetSource.MANUAL,
+        target_date=date(2026, 7, 17),
+        strategy_version_id=None,
+        parameter_snapshot={"window": 20, "nested": {"enabled": True}},
+        data_version=None,
+        source_code_hash=None,
+        content_hash="a" * 64,
+        reason="manual",
+        created_at=created_at,
+    )
+    assert isinstance(revision.parameter_snapshot, MappingProxyType)
+    assert isinstance(revision.parameter_snapshot["nested"], MappingProxyType)
+    assert revision.model_dump(mode="json")["parameter_snapshot"] == {
+        "window": 20,
+        "nested": {"enabled": True},
+    }
+    snapshot = TargetSnapshot(
+        subscription_id=subscription_id,
+        revision_id=revision_id,
+        revision_no=1,
+        binding_version=1,
+        values=values,
+        source=TargetSource.MANUAL,
+        status=TargetStatus.READY,
+        target_date=revision.target_date,
+        strategy_version_id=None,
+        parameter_snapshot=revision.parameter_snapshot,
+        data_version=None,
+        source_code_hash=None,
+        content_hash=revision.content_hash,
+        activated_at=created_at,
+    )
+    assert snapshot.content_hash == "a" * 64
+
+
+@pytest.mark.parametrize("view", ["revision", "binding", "snapshot"])
+def test_target_views_reject_naive_business_times(view: str) -> None:
+    common = {
+        "subscription_id": uuid4(),
+        "values": TargetValues(
+            low_strong="1", low_watch="2", high_watch="3", high_strong="4"
+        ),
+    }
+    naive = datetime(2026, 7, 17, 10)
+    with pytest.raises(ValidationError):
+        if view == "revision":
+            TargetRevisionView(
+                id=uuid4(),
+                revision_no=1,
+                source=TargetSource.MANUAL,
+                target_date=date(2026, 7, 17),
+                parameter_snapshot={},
+                content_hash="a" * 64,
+                reason="manual",
+                created_at=naive,
+                **common,
+            )
+        elif view == "binding":
+            TargetBindingView(
+                subscription_id=common["subscription_id"],
+                current_revision_id=uuid4(),
+                status=TargetStatus.READY,
+                version=1,
+                activated_at=naive,
+            )
+        else:
+            TargetSnapshot(
+                revision_id=uuid4(),
+                revision_no=1,
+                binding_version=1,
+                source=TargetSource.MANUAL,
+                status=TargetStatus.READY,
+                target_date=date(2026, 7, 17),
+                parameter_snapshot={},
+                content_hash="a" * 64,
+                activated_at=naive,
+                **common,
+            )

@@ -33,6 +33,17 @@ class SignalState(Base):
         UniqueConstraint("subscription_id", name="subscription"),
         CheckConstraint(f"zone IN ({ZONES})", name="zone_valid"),
         CheckConstraint("version > 0", name="version_positive"),
+        CheckConstraint(
+            "(last_price IS NULL OR (last_price > 0 "
+            "AND last_price <> 'NaN'::numeric "
+            "AND last_price < 'Infinity'::numeric)) "
+            "AND (last_subscription_version IS NULL "
+            "OR last_subscription_version > 0) "
+            "AND (last_price_version IS NULL OR last_price_version > 0) "
+            "AND (last_target_version IS NULL OR last_target_version > 0) "
+            "AND (last_position_version IS NULL OR last_position_version >= 0)",
+            name="last_inputs_valid",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -47,7 +58,10 @@ class SignalState(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False)
     last_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     last_price_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_subscription_version: Mapped[int | None] = mapped_column(Integer)
     last_price_version: Mapped[int | None] = mapped_column(Integer)
+    last_quote_cycle_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    last_quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     last_target_revision_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("target_revision.id", ondelete="RESTRICT")
     )
@@ -78,10 +92,34 @@ class SignalEvaluation(Base):
         CheckConstraint(f"before_zone IN ({ZONES})", name="before_zone_valid"),
         CheckConstraint(f"after_zone IN ({ZONES})", name="after_zone_valid"),
         CheckConstraint(
-            "subscription_version > 0 AND price_version > 0 "
-            "AND target_version > 0 AND position_version >= 0",
+            "(subscription_version IS NULL OR subscription_version > 0) "
+            "AND (price_version IS NULL OR price_version > 0) "
+            "AND (target_version IS NULL OR target_version > 0) "
+            "AND (position_version IS NULL OR position_version >= 0)",
             name="versions_positive",
         ),
+        CheckConstraint(
+            "price IS NULL OR (price > 0 AND price <> 'NaN'::numeric "
+            "AND price < 'Infinity'::numeric)",
+            name="price_valid",
+        ),
+        CheckConstraint(
+            "position_status IS NULL OR "
+            "position_status IN ('HOLDING','NOT_HOLDING')",
+            name="position_status_valid",
+        ),
+        CheckConstraint(
+            "(low_strong IS NULL AND low_watch IS NULL "
+            "AND high_watch IS NULL AND high_strong IS NULL) OR "
+            "(low_strong IS NOT NULL AND low_watch IS NOT NULL "
+            "AND high_watch IS NOT NULL AND high_strong IS NOT NULL "
+            "AND low_strong > 0 AND low_strong <> 'NaN'::numeric "
+            "AND high_strong < 'Infinity'::numeric "
+            "AND low_strong < low_watch AND low_watch < high_watch "
+            "AND high_watch < high_strong)",
+            name="target_values_valid",
+        ),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
         Index(
             "ix_signal_evaluation_subscription_created",
             "subscription_id",
@@ -102,20 +140,27 @@ class SignalEvaluation(Base):
     result: Mapped[str] = mapped_column(String(16), nullable=False)
     before_zone: Mapped[str] = mapped_column(String(16), nullable=False)
     after_zone: Mapped[str] = mapped_column(String(16), nullable=False)
-    subscription_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    target_revision_id: Mapped[UUID] = mapped_column(
+    subscription_version: Mapped[int | None] = mapped_column(Integer)
+    target_revision_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("target_revision.id", ondelete="RESTRICT"),
-        nullable=False,
     )
-    target_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    position_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    price: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
-    price_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    price_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    target_version: Mapped[int | None] = mapped_column(Integer)
+    low_strong: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    low_watch: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    high_watch: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    high_strong: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    position_status: Mapped[str | None] = mapped_column(String(16))
+    position_version: Mapped[int | None] = mapped_column(Integer)
+    price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    price_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    price_version: Mapped[int | None] = mapped_column(Integer)
+    quote_cycle_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     hysteresis_applied: Mapped[bool] = mapped_column(Boolean, nullable=False)
     used_stale_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
     skip_code: Mapped[str | None] = mapped_column(String(100))
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     job_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("job.id", ondelete="RESTRICT")
     )
@@ -139,6 +184,22 @@ class SignalEvent(Base):
         CheckConstraint(
             "target_version > 0 AND position_version >= 0 AND state_version > 0",
             name="versions_positive",
+        ),
+        CheckConstraint(
+            "price > 0 AND price <> 'NaN'::numeric "
+            "AND price < 'Infinity'::numeric",
+            name="price_valid",
+        ),
+        CheckConstraint(
+            "low_strong > 0 AND low_strong <> 'NaN'::numeric "
+            "AND high_strong < 'Infinity'::numeric "
+            "AND low_strong < low_watch AND low_watch < high_watch "
+            "AND high_watch < high_strong",
+            name="target_values_valid",
+        ),
+        CheckConstraint(
+            "position_status IN ('HOLDING','NOT_HOLDING')",
+            name="position_status_valid",
         ),
         Index("ix_signal_event_subscription_created", "subscription_id", "created_at"),
         Index("ix_signal_event_notification_eligible", "notification_eligible"),
@@ -168,7 +229,15 @@ class SignalEvent(Base):
         nullable=False,
     )
     target_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    position_status: Mapped[str] = mapped_column(String(16), nullable=False)
     position_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    quote_cycle_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    used_stale_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
     state_version: Mapped[int] = mapped_column(Integer, nullable=False)
     notification_class: Mapped[str] = mapped_column(String(16), nullable=False)
     notification_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)

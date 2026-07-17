@@ -753,10 +753,494 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/watchlists": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Watchlists */
+        get: operations["list_watchlists_api_v1_watchlists_get"];
+        put?: never;
+        /** Create Watchlist */
+        post: operations["create_watchlist_api_v1_watchlists_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watchlists/{watchlist_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Watchlist */
+        get: operations["get_watchlist_api_v1_watchlists__watchlist_id__get"];
+        put?: never;
+        post?: never;
+        /** Archive Watchlist */
+        delete: operations["archive_watchlist_api_v1_watchlists__watchlist_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Watchlist */
+        patch: operations["update_watchlist_api_v1_watchlists__watchlist_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/watchlists/{watchlist_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Item */
+        post: operations["add_item_api_v1_watchlists__watchlist_id__items_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watchlists/{watchlist_id}/items/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Batch */
+        post: operations["add_batch_api_v1_watchlists__watchlist_id__items_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/watchlists/{watchlist_id}/items/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Item */
+        delete: operations["remove_item_api_v1_watchlists__watchlist_id__items__symbol__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-schedules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Schedules */
+        get: operations["list_schedules_api_v1_monitor_schedules_get"];
+        put?: never;
+        /** Create Schedule */
+        post: operations["create_schedule_api_v1_monitor_schedules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-schedules/{schedule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Schedule */
+        get: operations["get_schedule_api_v1_monitor_schedules__schedule_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Schedule */
+        patch: operations["update_schedule_api_v1_monitor_schedules__schedule_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/monitor-schedules/{schedule_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Schedule */
+        post: operations["archive_schedule_api_v1_monitor_schedules__schedule_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-schedules/{schedule_id}/versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Versions */
+        get: operations["list_versions_api_v1_monitor_schedules__schedule_id__versions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-schedules/{schedule_id}/versions/{revision_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Schedule */
+        post: operations["restore_schedule_api_v1_monitor_schedules__schedule_id__versions__revision_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Positions */
+        get: operations["list_positions_api_v1_positions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/position-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** All Position History */
+        get: operations["all_position_history_api_v1_position_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Batch Positions */
+        post: operations["batch_positions_api_v1_positions_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/{symbol}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Position */
+        get: operations["get_position_api_v1_positions__symbol__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/{symbol}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Position History */
+        get: operations["position_history_api_v1_positions__symbol__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/{symbol}/hold": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Hold Position */
+        post: operations["hold_position_api_v1_positions__symbol__hold_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/positions/{symbol}/clear": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Clear Position */
+        post: operations["clear_position_api_v1_positions__symbol__clear_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Subscriptions */
+        get: operations["list_subscriptions_api_v1_monitor_subscriptions_get"];
+        put?: never;
+        /** Create Subscription */
+        post: operations["create_subscription_api_v1_monitor_subscriptions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Subscription */
+        get: operations["get_subscription_api_v1_monitor_subscriptions__subscription_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Configure Subscription */
+        patch: operations["configure_subscription_api_v1_monitor_subscriptions__subscription_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable */
+        post: operations["enable_api_v1_monitor_subscriptions__subscription_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable */
+        post: operations["disable_api_v1_monitor_subscriptions__subscription_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive */
+        post: operations["archive_api_v1_monitor_subscriptions__subscription_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore */
+        post: operations["restore_api_v1_monitor_subscriptions__subscription_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}/check-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Check Now */
+        post: operations["check_now_api_v1_monitor_subscriptions__subscription_id__check_now_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/monitor-subscriptions/{subscription_id}/diagnose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Diagnose */
+        post: operations["diagnose_api_v1_monitor_subscriptions__subscription_id__diagnose_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** ArchiveBody */
+        ArchiveBody: {
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** ArchiveScheduleRequest */
+        ArchiveScheduleRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+        };
+        /** BatchBody */
+        BatchBody: {
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Symbols */
+            symbols: string[];
+            /**
+             * Source
+             * @default manual
+             */
+            source: string;
+        };
+        /** BatchPositionItem */
+        BatchPositionItem: {
+            /** Symbol */
+            symbol: string;
+            target: components["schemas"]["PositionStatus"];
+            /** Note */
+            note?: string | null;
+            /** Expected Version */
+            expected_version?: number | null;
+        };
+        /** BatchPositionRequest */
+        BatchPositionRequest: {
+            /** Items */
+            items: components["schemas"]["BatchPositionItem"][];
+            /** Reason */
+            reason: string;
+            /**
+             * Source
+             * @default manual
+             */
+            source: string;
+        };
         /** CalendarDayInput */
         CalendarDayInput: {
             /**
@@ -787,6 +1271,48 @@ export interface components {
             /** Confirmation */
             confirmation: string;
         };
+        /** ConfigureRequest */
+        ConfigureRequest: {
+            /** Schedule Id */
+            schedule_id?: string | null;
+            /**
+             * Target Mode
+             * @default MANUAL
+             */
+            target_mode: string;
+            /** Target Version Id */
+            target_version_id?: string | null;
+            /** Strategy Version Id */
+            strategy_version_id?: string | null;
+            /**
+             * Parameters
+             * @default {}
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /**
+             * Hysteresis Ratio
+             * @default 0
+             */
+            hysteresis_ratio: number | string;
+            /**
+             * Hysteresis Min
+             * @default 0
+             */
+            hysteresis_min: number | string;
+            /**
+             * Notification Mode
+             * @default DEFAULT
+             */
+            notification_mode: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+        };
         /** ConfirmSessionsRequest */
         ConfirmSessionsRequest: {
             /**
@@ -803,6 +1329,62 @@ export interface components {
             confirm: boolean;
             /** Reason */
             reason: string;
+        };
+        /** CreateRequest */
+        CreateRequest: {
+            /** Schedule Id */
+            schedule_id?: string | null;
+            /**
+             * Target Mode
+             * @default MANUAL
+             */
+            target_mode: string;
+            /** Target Version Id */
+            target_version_id?: string | null;
+            /** Strategy Version Id */
+            strategy_version_id?: string | null;
+            /**
+             * Parameters
+             * @default {}
+             */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /**
+             * Hysteresis Ratio
+             * @default 0
+             */
+            hysteresis_ratio: number | string;
+            /**
+             * Hysteresis Min
+             * @default 0
+             */
+            hysteresis_min: number | string;
+            /**
+             * Notification Mode
+             * @default DEFAULT
+             */
+            notification_mode: string;
+            /** Symbol */
+            symbol: string;
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+        };
+        /** CreateScheduleRequest */
+        CreateScheduleRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Times
+             * @default []
+             */
+            times: string[];
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
         };
         /** DailyBarPageData */
         DailyBarPageData: {
@@ -1105,6 +1687,32 @@ export interface components {
              */
             created_at: string;
         };
+        /** DetailData */
+        DetailData: {
+            subscription: components["schemas"]["SubscriptionRecord"];
+            /** Revisions */
+            revisions: components["schemas"]["RevisionRecord"][];
+        };
+        /** DetailResponse */
+        DetailResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["DetailData"];
+        };
         /** DiagnoseQuoteRequest */
         DiagnoseQuoteRequest: {
             /** Symbols */
@@ -1133,6 +1741,45 @@ export interface components {
             reason: string;
             /** Confirm */
             confirm: boolean;
+        };
+        /** ItemBody */
+        ItemBody: {
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Symbol */
+            symbol: string;
+            /**
+             * Source
+             * @default manual
+             */
+            source: string;
+        };
+        /** ListData */
+        ListData: {
+            /** Items */
+            items: components["schemas"]["SubscriptionRecord"][];
+        };
+        /** ListResponse */
+        ListResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ListData"];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -1181,6 +1828,208 @@ export interface components {
             page_size: number;
             /** Total */
             total: number;
+        };
+        /** PositionBatchItems */
+        PositionBatchItems: {
+            /** Items */
+            items: components["schemas"]["PositionBatchResult"][];
+        };
+        /** PositionBatchResponse */
+        PositionBatchResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["PositionBatchItems"];
+        };
+        /** PositionBatchResult */
+        PositionBatchResult: {
+            /** Symbol */
+            symbol: string;
+            /** Status */
+            status: string;
+            /** Code */
+            code: string;
+            position?: components["schemas"]["PositionView"] | null;
+        };
+        /** PositionChangeRequest */
+        PositionChangeRequest: {
+            /** Note */
+            note?: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Source
+             * @default manual
+             */
+            source: string;
+            /** Expected Version */
+            expected_version?: number | null;
+        };
+        /** PositionChangeResponse */
+        PositionChangeResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["PositionResult"];
+        };
+        /** PositionHistoryItems */
+        PositionHistoryItems: {
+            /** Items */
+            items: components["schemas"]["PositionHistoryRecord"][];
+        };
+        /** PositionHistoryRecord */
+        PositionHistoryRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            before_status: components["schemas"]["PositionStatus"] | null;
+            after_status: components["schemas"]["PositionStatus"];
+            /** Version */
+            version: number;
+            /** Note */
+            note: string | null;
+            /** Source */
+            source: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Effective At
+             * Format: date-time
+             */
+            effective_at: string;
+        };
+        /** PositionHistoryResponse */
+        PositionHistoryResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["PositionHistoryItems"];
+        };
+        /** PositionItems */
+        PositionItems: {
+            /** Items */
+            items: components["schemas"]["PositionView"][];
+        };
+        /** PositionListResponse */
+        PositionListResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["PositionItems"];
+        };
+        /** PositionResponse */
+        PositionResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["PositionView"];
+        };
+        /** PositionResult */
+        PositionResult: {
+            /** Code */
+            code: string;
+            position: components["schemas"]["PositionView"];
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+        };
+        /**
+         * PositionStatus
+         * @enum {string}
+         */
+        PositionStatus: "HOLDING" | "NOT_HOLDING";
+        /** PositionView */
+        PositionView: {
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            status: components["schemas"]["PositionStatus"];
+            /** Version */
+            version: number;
+            /** Source */
+            source?: string | null;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /**
          * ProviderCode
@@ -1531,6 +2380,13 @@ export interface components {
             server_time: string;
             data: components["schemas"]["QuoteJobData"];
         };
+        /** RemoveItemBody */
+        RemoveItemBody: {
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** RestoreRequest */
         RestoreRequest: {
             /**
@@ -1545,10 +2401,83 @@ export interface components {
             /** Confirm */
             confirm: boolean;
         };
+        /** RestoreScheduleRequest */
+        RestoreScheduleRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+        };
+        /** ResultData */
+        ResultData: {
+            subscription: components["schemas"]["SubscriptionRecord"];
+            revision: components["schemas"]["RevisionRecord"];
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** ResultResponse */
+        ResultResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ResultData"];
+        };
         /** RetryRequest */
         RetryRequest: {
             /** Confirm */
             confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** RevisionRecord */
+        RevisionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /** Revision No */
+            revision_no: number;
+            /** Schedule Id */
+            schedule_id: string | null;
+            /** Schedule Revision Id */
+            schedule_revision_id: string | null;
+            /** Target Mode */
+            target_mode: string;
+            /** Target Version Id */
+            target_version_id: string | null;
+            /** Strategy Version Id */
+            strategy_version_id: string | null;
+            /** Parameters */
+            parameters: {
+                [key: string]: unknown;
+            };
+            /** Hysteresis Ratio */
+            hysteresis_ratio: string;
+            /** Hysteresis Min */
+            hysteresis_min: string;
+            /** Notification Mode */
+            notification_mode: string;
             /** Reason */
             reason: string;
         };
@@ -1561,6 +2490,150 @@ export interface components {
             reason: string;
             /** Confirm */
             confirm: boolean;
+        };
+        /** ScheduleDetailData */
+        ScheduleDetailData: {
+            schedule: components["schemas"]["ScheduleRecord"];
+            revision: components["schemas"]["ScheduleRevisionRecord"];
+        };
+        /** ScheduleDetailResponse */
+        ScheduleDetailResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ScheduleDetailData"];
+        };
+        /** ScheduleListData */
+        ScheduleListData: {
+            /** Items */
+            items: components["schemas"]["ScheduleRecord"][];
+        };
+        /** ScheduleListResponse */
+        ScheduleListResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ScheduleListData"];
+        };
+        /** ScheduleMutationData */
+        ScheduleMutationData: {
+            schedule: components["schemas"]["ScheduleRecord"];
+            revision: components["schemas"]["ScheduleRevisionRecord"];
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** ScheduleMutationResponse */
+        ScheduleMutationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ScheduleMutationData"];
+        };
+        /** ScheduleRecord */
+        ScheduleRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            /** Version */
+            version: number;
+            /** Archived At */
+            archived_at: string | null;
+        };
+        /** ScheduleRevisionListData */
+        ScheduleRevisionListData: {
+            /** Items */
+            items: components["schemas"]["ScheduleRevisionRecord"][];
+        };
+        /** ScheduleRevisionListResponse */
+        ScheduleRevisionListResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ScheduleRevisionListData"];
+        };
+        /** ScheduleRevisionRecord */
+        ScheduleRevisionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Schedule Id
+             * Format: uuid
+             */
+            schedule_id: string;
+            /** Revision No */
+            revision_no: number;
+            /** Times */
+            times: string[];
+            /** Timezone */
+            timezone: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
         };
         /** SettingsRequest */
         SettingsRequest: {
@@ -1583,6 +2656,29 @@ export interface components {
             /** Auto Switch */
             auto_switch?: boolean | null;
         };
+        /** SubscriptionRecord */
+        SubscriptionRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            /** Status */
+            status: string;
+            /** Version */
+            version: number;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            /** Archived At */
+            archived_at: string | null;
+        };
         /** TradingSessionInput */
         TradingSessionInput: {
             /**
@@ -1596,6 +2692,31 @@ export interface components {
              */
             ends_at: string;
         };
+        /** TransitionRequest */
+        TransitionRequest: {
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+        };
+        /** UpdateScheduleRequest */
+        UpdateScheduleRequest: {
+            /** Name */
+            name: string;
+            /**
+             * Times
+             * @default []
+             */
+            times: string[];
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1608,6 +2729,213 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WatchlistBatchData */
+        WatchlistBatchData: {
+            /** Items */
+            items: components["schemas"]["WatchlistBatchItem"][];
+        };
+        /** WatchlistBatchItem */
+        WatchlistBatchItem: {
+            /** Symbol */
+            symbol: string;
+            status: components["schemas"]["WatchlistBatchStatus"];
+            item?: components["schemas"]["WatchlistItemView"] | null;
+            /** Error Code */
+            error_code?: string | null;
+        };
+        /** WatchlistBatchResponse */
+        WatchlistBatchResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["WatchlistBatchData"];
+        };
+        /**
+         * WatchlistBatchStatus
+         * @enum {string}
+         */
+        WatchlistBatchStatus: "CREATED" | "REUSED" | "REJECTED" | "FAILED";
+        /** WatchlistBody */
+        WatchlistBody: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Display Order
+             * @default 0
+             */
+            display_order: number;
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version?: number | null;
+        };
+        /** WatchlistItemMutationResult */
+        WatchlistItemMutationResult: {
+            item: components["schemas"]["WatchlistItemView"];
+            /** Version */
+            version: number;
+            /** Created */
+            created: boolean;
+        };
+        /** WatchlistItemRemovalResult */
+        WatchlistItemRemovalResult: {
+            /** Removed */
+            removed: boolean;
+            /** Pause Recommended */
+            pause_recommended: boolean;
+            /** Version */
+            version: number;
+        };
+        /** WatchlistItemResponse */
+        WatchlistItemResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["WatchlistItemMutationResult"];
+        };
+        /** WatchlistItemView */
+        WatchlistItemView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Watchlist Id
+             * Format: uuid
+             */
+            watchlist_id: string;
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            /** Source */
+            source?: string | null;
+        };
+        /** WatchlistListData */
+        WatchlistListData: {
+            /** Items */
+            items: components["schemas"]["WatchlistView"][];
+        };
+        /** WatchlistListResponse */
+        WatchlistListResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["WatchlistListData"];
+        };
+        /** WatchlistRemovalResponse */
+        WatchlistRemovalResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["WatchlistItemRemovalResult"];
+        };
+        /** WatchlistResponse */
+        WatchlistResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["WatchlistView"];
+        };
+        /** WatchlistView */
+        WatchlistView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Owner User Id
+             * Format: uuid
+             */
+            owner_user_id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Display Order */
+            display_order: number;
+            /** Version */
+            version: number;
+            /** Archived */
+            archived: boolean;
+            /**
+             * Items
+             * @default []
+             */
+            items: components["schemas"]["WatchlistItemView"][];
         };
         /** RefreshRequest */
         long_invest__modules__qfq__api__RefreshRequest: {
@@ -3130,6 +4458,1096 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["QfqJobResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_watchlists_api_v1_watchlists_get: {
+        parameters: {
+            query?: {
+                include_archived?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_watchlist_api_v1_watchlists_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchlistBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_watchlist_api_v1_watchlists__watchlist_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                watchlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_watchlist_api_v1_watchlists__watchlist_id__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                watchlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_watchlist_api_v1_watchlists__watchlist_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                watchlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WatchlistBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_item_api_v1_watchlists__watchlist_id__items_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                watchlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistItemResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_batch_api_v1_watchlists__watchlist_id__items_batch_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                watchlist_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_item_api_v1_watchlists__watchlist_id__items__symbol__delete: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                watchlist_id: string;
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemoveItemBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WatchlistRemovalResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_schedules_api_v1_monitor_schedules_get: {
+        parameters: {
+            query?: {
+                include_archived?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_schedule_api_v1_monitor_schedules_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_schedule_api_v1_monitor_schedules__schedule_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_schedule_api_v1_monitor_schedules__schedule_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_schedule_api_v1_monitor_schedules__schedule_id__archive_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ArchiveScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_versions_api_v1_monitor_schedules__schedule_id__versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                schedule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleRevisionListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_schedule_api_v1_monitor_schedules__schedule_id__versions__revision_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                schedule_id: string;
+                revision_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreScheduleRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_positions_api_v1_positions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionListResponse"];
+                };
+            };
+        };
+    };
+    all_position_history_api_v1_position_history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionHistoryResponse"];
+                };
+            };
+        };
+    };
+    batch_positions_api_v1_positions_batch_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BatchPositionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_position_api_v1_positions__symbol__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    position_history_api_v1_positions__symbol__history_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    hold_position_api_v1_positions__symbol__hold_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PositionChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionChangeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_position_api_v1_positions__symbol__clear_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                symbol: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PositionChangeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PositionChangeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_subscriptions_api_v1_monitor_subscriptions_get: {
+        parameters: {
+            query?: {
+                include_archived?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_subscription_api_v1_monitor_subscriptions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_subscription_api_v1_monitor_subscriptions__subscription_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    configure_subscription_api_v1_monitor_subscriptions__subscription_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConfigureRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_api_v1_monitor_subscriptions__subscription_id__enable_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_api_v1_monitor_subscriptions__subscription_id__disable_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_api_v1_monitor_subscriptions__subscription_id__archive_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_api_v1_monitor_subscriptions__subscription_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_now_api_v1_monitor_subscriptions__subscription_id__check_now_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    diagnose_api_v1_monitor_subscriptions__subscription_id__diagnose_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TransitionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResultResponse"];
                 };
             };
             /** @description Validation Error */

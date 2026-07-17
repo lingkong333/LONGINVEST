@@ -104,10 +104,10 @@ WriteAuth = Annotated[AuthenticatedRequest, Depends(require_verified_write_reque
 
 def _idempotency_key(
     value: Annotated[
-        str | None, Header(alias="Idempotency-Key", max_length=200)
-    ] = None,
+        str, Header(alias="Idempotency-Key", max_length=200)
+    ],
 ) -> str:
-    normalized = value.strip() if value else ""
+    normalized = value.strip()
     if not normalized:
         raise AppError(
             code="IDEMPOTENCY_KEY_REQUIRED",

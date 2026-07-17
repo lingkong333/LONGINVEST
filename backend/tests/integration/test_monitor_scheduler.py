@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy import func, select, update
 
 import long_invest.bootstrap.jobs as jobs_module
+import long_invest.platform.jobs.worker as worker_module
 from long_invest.bootstrap.jobs import realtime_quote_cycle
 from long_invest.modules.monitor_schedules.models import (
     MonitorSchedule,
@@ -27,8 +28,11 @@ from long_invest.modules.securities.models import (
 )
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
-from long_invest.platform.jobs.contracts import JobExecutionContext
-from long_invest.platform.jobs.models import Job
+from long_invest.platform.jobs.contracts import (
+    JobRunStatus,
+    JobStatus,
+)
+from long_invest.platform.jobs.models import Job, JobRun
 from long_invest.platform.jobs.service import JobService
 
 pytestmark = pytest.mark.skipif(
@@ -254,30 +258,37 @@ async def test_worker_claim_after_deadline_marks_occurrence_missed(monkeypatch) 
             PlannedOccurrence(schedule, revision, scheduled, (frozen,)),
             now=scheduled,
         )
-        async with db.session() as session:
+        async with db.transaction() as session:
             job = await session.get(Job, claimed.job_id)
             assert job is not None
+            job.status = JobStatus.QUEUED
+            job_config = dict(job.config_snapshot)
 
         monkeypatch.setattr(
             jobs_module,
             "_utc_now",
             lambda: scheduled + timedelta(seconds=61),
         )
-        result = await realtime_quote_cycle(
-            JobExecutionContext(
-                job_id=job.id,
-                fence_token=uuid4(),
-                config=job.config_snapshot,
-            )
+        monkeypatch.setitem(
+            worker_module.HANDLERS, "REALTIME_QUOTE_CYCLE", realtime_quote_cycle
         )
+        result = await worker_module._execute_job(job.id, uuid4())
 
         async with db.session() as session:
             occurrence = await session.scalar(
                 select(ScheduleOccurrence).where(ScheduleOccurrence.job_id == job.id)
             )
+            stored_job = await session.get(Job, job.id)
+            run = await session.scalar(select(JobRun).where(JobRun.job_id == job.id))
         assert result.code == "SCHEDULE_OCCURRENCE_MISSED"
         assert occurrence is not None
         assert str(occurrence.status) == "MISSED"
         assert occurrence.error_code == "SCHEDULE_OCCURRENCE_MISSED"
+        assert stored_job is not None
+        assert stored_job.status == JobStatus.FAILED
+        assert stored_job.result_summary is not None
+        assert stored_job.result_summary["code"] == "SCHEDULE_OCCURRENCE_MISSED"
+        assert run is not None and run.status == JobRunStatus.FAILED
+        assert job_config["claim_deadline_at"] == scheduled.isoformat()
     finally:
         await db.dispose()

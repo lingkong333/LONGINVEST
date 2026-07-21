@@ -44,6 +44,7 @@ def signal_input(
         subscription_id=UUID("10000000-0000-0000-0000-000000000001"),
         security_id=UUID("20000000-0000-0000-0000-000000000001"),
         symbol="600000.SH",
+        security_name="浦发银行",
         subscription_version=1,
         price=Decimal(price),
         price_at=datetime(2026, 7, 17, 15, tzinfo=UTC),
@@ -57,6 +58,7 @@ def signal_input(
         hysteresis_min=Decimal(minimum),
         reason=reason,
         idempotency_key=f"state-machine-{price}-{reason.value}",
+        request_id="state-machine-test",
     )
 
 

@@ -83,3 +83,22 @@ def _backend_unavailable() -> AppError:
         message="目标服务暂时不可用",
         status_code=503,
     )
+
+
+class TransactionalTargetSnapshotPort:
+    """Public read port for callers already owning the database transaction."""
+
+    def __init__(self, session, *, repository_factory=TargetRepository) -> None:
+        self._repository = repository_factory(session)
+
+    async def get_target_snapshot(self, subscription_id):
+        service = TargetService(
+            self._repository, subscriptions=None, audit=None, events=None
+        )
+        return await service.get(subscription_id)
+
+
+def transactional_target_snapshot_port(
+    session, **factories
+) -> TransactionalTargetSnapshotPort:
+    return TransactionalTargetSnapshotPort(session, **factories)

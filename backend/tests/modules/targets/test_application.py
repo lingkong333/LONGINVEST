@@ -4,7 +4,10 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
-from long_invest.modules.targets.application import TargetApplication
+from long_invest.modules.targets.application import (
+    TargetApplication,
+    transactional_target_snapshot_port,
+)
 from long_invest.platform.errors import AppError
 
 
@@ -51,9 +54,7 @@ async def test_write_binds_every_port_to_same_transaction() -> None:
         repository_factory=factory("repository", object()),
         audit_factory=factory("audit", object()),
         event_factory=factory("event", object()),
-        service_factory=lambda repo, **ports: (
-            seen.append("service") or service
-        ),
+        service_factory=lambda repo, **ports: seen.append("service") or service,
     )
 
     result = await application.set_manual(object())
@@ -91,3 +92,18 @@ async def test_read_uses_session_and_maps_timeout(method) -> None:
             await getattr(application, method)("subscription-id")
 
     assert caught.value.code == "TARGET_BACKEND_UNAVAILABLE"
+
+
+@pytest.mark.anyio
+async def test_transactional_snapshot_port_uses_caller_session() -> None:
+    session = object()
+
+    class Repository:
+        def __init__(self, received_session):
+            assert received_session is session
+
+        async def get_binding(self, subscription_id):
+            return None
+
+    port = transactional_target_snapshot_port(session, repository_factory=Repository)
+    assert await port.get_target_snapshot("subscription-id") is None

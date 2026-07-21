@@ -299,6 +299,12 @@ class TransactionalMonitorSubscriptionPort:
     async def get_subscription_snapshot(self, subscription_id):
         return await self.lock(subscription_id)
 
+    async def get_subscription_snapshot_by_symbol(self, symbol):
+        owner = await self._repository.find_open_by_symbol(symbol)
+        if owner is None or owner.current_revision_id is None:
+            return None
+        return await self.get_subscription_snapshot(owner.id)
+
     async def switch_to_manual(
         self,
         *,

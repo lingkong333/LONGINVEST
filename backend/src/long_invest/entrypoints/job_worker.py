@@ -9,6 +9,8 @@ from long_invest.bootstrap.jobs import (
     quote_diagnostic,
     realtime_quote_cycle,
     security_master_refresh,
+    signal_evaluate_batch,
+    signal_reevaluate,
 )
 from long_invest.platform.jobs.worker import HANDLERS
 from long_invest.platform.jobs.worker import execute_job as execute_platform_job
@@ -21,6 +23,8 @@ HANDLERS["DAILY_DATA_ITEM"] = daily_data_item
 HANDLERS["DAILY_DATA_FINALIZE"] = daily_data_finalize
 HANDLERS["DAILY_DATA_RETRY"] = daily_data_retry
 HANDLERS["QFQ_REFRESH"] = qfq_refresh
+HANDLERS["SIGNAL_EVALUATE_BATCH"] = signal_evaluate_batch
+HANDLERS["SIGNAL_REEVALUATE"] = signal_reevaluate
 
 
 def execute_job(job_id: str, outbox_id: str) -> dict[str, Any]:

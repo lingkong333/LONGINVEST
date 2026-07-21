@@ -1,4 +1,6 @@
+from dataclasses import FrozenInstanceError
 from datetime import UTC, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
@@ -7,6 +9,7 @@ from long_invest.modules.quotes.contracts import (
     CreateQuoteCycle,
     QuoteCycleStatus,
     QuoteItemStatus,
+    SignalQuoteSnapshot,
 )
 
 NOW = datetime(2026, 7, 15, 1, 30, tzinfo=UTC)
@@ -79,3 +82,25 @@ def test_create_cycle_tracks_optional_schedule_and_subscription_versions() -> No
     assert value.subscription_snapshot_version == 9
     with pytest.raises(ValueError, match="subscription"):
         command(subscription_snapshot_version=0)
+
+
+def test_signal_quote_snapshot_is_immutable_and_complete() -> None:
+    cycle_id = uuid4()
+    item_id = uuid4()
+    snapshot = SignalQuoteSnapshot(
+        cycle_id=cycle_id,
+        item_id=item_id,
+        symbol="600000.SH",
+        status=QuoteItemStatus.VALID,
+        price=Decimal("10.250000"),
+        quote_time=NOW,
+        scheduled_at=NOW,
+        eligible_for_evaluation=True,
+        expected_subscription_version=7,
+    )
+
+    assert snapshot.cycle_id == cycle_id
+    assert snapshot.item_id == item_id
+    assert snapshot.expected_subscription_version == 7
+    with pytest.raises(FrozenInstanceError):
+        snapshot.price = Decimal("11")  # type: ignore[misc]

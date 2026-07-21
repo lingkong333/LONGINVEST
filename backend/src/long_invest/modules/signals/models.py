@@ -62,6 +62,9 @@ class SignalState(Base):
     last_subscription_version: Mapped[int | None] = mapped_column(Integer)
     last_price_version: Mapped[int | None] = mapped_column(Integer)
     last_quote_cycle_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    last_quote_scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     last_quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     last_target_revision_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("target_revision.id", ondelete="RESTRICT")
@@ -100,7 +103,7 @@ class SignalEvaluation(Base):
             name="versions_positive",
         ),
         CheckConstraint(
-            "result = 'SKIPPED' OR ("
+            "result IN ('SKIPPED','SUPERSEDED') OR ("
             "subscription_version IS NOT NULL "
             "AND target_revision_id IS NOT NULL "
             "AND target_version IS NOT NULL "
@@ -171,6 +174,9 @@ class SignalEvaluation(Base):
     price_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     price_version: Mapped[int | None] = mapped_column(Integer)
     quote_cycle_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    quote_scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     hysteresis_applied: Mapped[bool] = mapped_column(Boolean, nullable=False)
     used_stale_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
@@ -252,6 +258,9 @@ class SignalEvent(Base):
     position_status: Mapped[str] = mapped_column(String(16), nullable=False)
     position_version: Mapped[int] = mapped_column(Integer, nullable=False)
     quote_cycle_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    quote_scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     used_stale_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
     state_version: Mapped[int] = mapped_column(Integer, nullable=False)

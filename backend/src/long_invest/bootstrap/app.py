@@ -29,6 +29,8 @@ from long_invest.modules.providers.api import (
 from long_invest.modules.qfq.api import router as qfq_router
 from long_invest.modules.quotes.api import router as quotes_router
 from long_invest.modules.securities.api import router as securities_router
+from long_invest.modules.signals.api import router as signals_router
+from long_invest.modules.targets.api import router as targets_router
 from long_invest.modules.watchlists.api import router as watchlists_router
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.http.exception_handlers import register_exception_handlers
@@ -73,5 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(monitor_schedules_router)
     app.include_router(positions_router)
     app.include_router(monitoring_router)
+    app.include_router(targets_router)
+    app.include_router(signals_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

@@ -30,6 +30,19 @@ class QuoteItemStatus(StrEnum):
     NOT_EXPECTED_TO_TRADE = "NOT_EXPECTED_TO_TRADE"
 
 
+@dataclass(frozen=True, slots=True)
+class SignalQuoteSnapshot:
+    cycle_id: UUID
+    item_id: UUID
+    symbol: str
+    status: QuoteItemStatus
+    price: Decimal | None
+    quote_time: datetime | None
+    scheduled_at: datetime
+    eligible_for_evaluation: bool
+    expected_subscription_version: int | None
+
+
 def require_aware(value: datetime) -> None:
     if value.tzinfo is None or value.utcoffset() is None:
         raise ValueError("datetime must include timezone")

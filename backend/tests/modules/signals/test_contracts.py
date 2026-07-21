@@ -14,6 +14,7 @@ from long_invest.modules.signals.contracts import (
     SignalEvaluationView,
     SignalEventView,
     SignalInput,
+    SignalNotificationRequest,
     SignalStateView,
     SignalZone,
 )
@@ -25,9 +26,11 @@ def _signal_input(**overrides: object) -> SignalInput:
         "subscription_id": uuid4(),
         "security_id": uuid4(),
         "symbol": "600000.SH",
+        "security_name": "浦发银行",
         "subscription_version": 1,
         "price": "10.01",
         "price_at": datetime(2026, 7, 17, 9, 30, tzinfo=UTC),
+        "quote_scheduled_at": datetime(2026, 7, 17, 9, 30, tzinfo=UTC),
         "price_version": 1,
         "target_revision_id": uuid4(),
         "target_version": 1,
@@ -42,6 +45,7 @@ def _signal_input(**overrides: object) -> SignalInput:
         "hysteresis_min": "0.02",
         "reason": EvaluationReason.SCHEDULED_QUOTE,
         "idempotency_key": " signal-1 ",
+        "request_id": "request-1",
     }
     values.update(overrides)
     return SignalInput(**values)
@@ -152,6 +156,59 @@ def test_signal_input_accepts_valid_values_and_is_frozen() -> None:
         SignalInput.model_validate(value.model_dump() | {"extra": True})
 
 
+def test_signal_input_records_quote_eligibility() -> None:
+    assert _signal_input().quote_eligible is True
+    assert (
+        _signal_input(
+            quote_eligible=False,
+            quote_ineligibility_code="QUOTE_CONFLICT",
+        ).quote_ineligibility_code
+        == "QUOTE_CONFLICT"
+    )
+    with pytest.raises(ValidationError):
+        _signal_input(quote_eligible=False)
+
+
+def test_signal_owns_its_notification_request_contract() -> None:
+    targets = TargetValues(
+        low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+    )
+    request = SignalNotificationRequest(
+        event_id=uuid4(),
+        subscription_id=uuid4(),
+        security_id=uuid4(),
+        symbol="600000.SH",
+        security_name="浦发银行",
+        notification_class=NotificationClass.LOW,
+        before_zone=SignalZone.NORMAL,
+        after_zone=SignalZone.LOW,
+        price="9.00",
+        price_at=datetime(2026, 7, 17, 9, 30, tzinfo=UTC),
+        targets=targets,
+        target_revision_id=uuid4(),
+        target_version=1,
+        target_date=date(2026, 7, 17),
+        target_stale=False,
+        position_status="NOT_HOLDING",
+        position_version=0,
+        reason=EvaluationReason.SCHEDULED_QUOTE,
+        notification_mode="DEFAULT",
+        eligible=True,
+        idempotency_key="signal-event:1",
+        request_id="request-1",
+    )
+    assert request.price == Decimal("9.000000")
+    assert request.targets == targets
+    assert request.security_name == "浦发银行"
+
+
+def test_quote_cycle_and_schedule_time_must_be_present_together() -> None:
+    with pytest.raises(ValidationError):
+        _signal_input(quote_scheduled_at=None)
+    with pytest.raises(ValidationError):
+        _signal_input(quote_cycle_id=None)
+
+
 @pytest.mark.parametrize("price", ["0", "-1", "NaN", "Infinity", "-Infinity"])
 def test_signal_input_rejects_invalid_price(price: str) -> None:
     with pytest.raises(ValidationError):
@@ -190,8 +247,7 @@ def test_signal_public_contracts_share_six_decimal_half_up_quantization() -> Non
     expected = Decimal("1.000001")
     assert _signal_input(price="1.0000009").price == expected
     assert (
-        _evaluation_view(EvaluationResult.APPLIED, price="1.0000009").price
-        == expected
+        _evaluation_view(EvaluationResult.APPLIED, price="1.0000009").price == expected
     )
     assert _event_view("1.0000009").price == expected
 
@@ -302,7 +358,6 @@ def test_skipped_evaluation_view_allows_missing_market_and_target_inputs() -> No
     [
         EvaluationResult.APPLIED,
         EvaluationResult.UNCHANGED,
-        EvaluationResult.SUPERSEDED,
     ],
 )
 def test_non_skipped_evaluation_view_accepts_complete_snapshot(
@@ -331,7 +386,6 @@ def test_non_skipped_evaluation_view_accepts_complete_snapshot(
     [
         EvaluationResult.APPLIED,
         EvaluationResult.UNCHANGED,
-        EvaluationResult.SUPERSEDED,
     ],
 )
 def test_non_skipped_evaluation_view_rejects_any_incomplete_input(
@@ -341,17 +395,21 @@ def test_non_skipped_evaluation_view_rejects_any_incomplete_input(
         _evaluation_view(result, **{field: None})
 
 
-def test_signal_output_views_match_numeric_price_capacity() -> None:
-    assert (
-        _evaluation_view(
-            EvaluationResult.APPLIED, price="99999999999999.999999"
-        ).price
-        == Decimal("99999999999999.999999")
+def test_superseded_evaluation_allows_position_status_not_read_yet() -> None:
+    view = _evaluation_view(
+        EvaluationResult.SUPERSEDED,
+        position_status=None,
     )
+    assert view.position_status is None
+    assert view.price == Decimal("9.000000")
+
+
+def test_signal_output_views_match_numeric_price_capacity() -> None:
+    assert _evaluation_view(
+        EvaluationResult.APPLIED, price="99999999999999.999999"
+    ).price == Decimal("99999999999999.999999")
     with pytest.raises(ValidationError):
-        _evaluation_view(
-            EvaluationResult.APPLIED, price="100000000000000.000000"
-        )
+        _evaluation_view(EvaluationResult.APPLIED, price="100000000000000.000000")
 
     event_values = {
         "id": uuid4(),
@@ -376,9 +434,7 @@ def test_signal_output_views_match_numeric_price_capacity() -> None:
         "notification_eligible": True,
         "created_at": datetime(2026, 7, 17, 9, 31, tzinfo=UTC),
     }
-    assert SignalEventView(**event_values).price == Decimal(
-        "99999999999999.999999"
-    )
+    assert SignalEventView(**event_values).price == Decimal("99999999999999.999999")
     event_values["price"] = "100000000000000.000000"
     with pytest.raises(ValidationError):
         SignalEventView(**event_values)
@@ -428,7 +484,5 @@ def test_signal_evaluation_and_event_views_reject_naive_created_at() -> None:
 
 
 def test_position_snapshot_port_is_keyed_by_security_id() -> None:
-    parameters = tuple(
-        signature(PositionSnapshotPort.get_position_snapshot).parameters
-    )
+    parameters = tuple(signature(PositionSnapshotPort.get_position_snapshot).parameters)
     assert parameters == ("self", "security_id")

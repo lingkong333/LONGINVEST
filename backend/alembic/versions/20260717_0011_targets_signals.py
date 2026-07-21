@@ -247,6 +247,9 @@ def upgrade() -> None:
         sa.Column("last_subscription_version", sa.Integer(), nullable=True),
         sa.Column("last_price_version", sa.Integer(), nullable=True),
         sa.Column("last_quote_cycle_id", sa.UUID(), nullable=True),
+        sa.Column(
+            "last_quote_scheduled_at", sa.DateTime(timezone=True), nullable=True
+        ),
         sa.Column("last_quote_item_id", sa.UUID(), nullable=True),
         sa.Column("last_target_revision_id", sa.UUID(), nullable=True),
         sa.Column("last_target_version", sa.Integer(), nullable=True),
@@ -321,6 +324,7 @@ def upgrade() -> None:
         sa.Column("price_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("price_version", sa.Integer(), nullable=True),
         sa.Column("quote_cycle_id", sa.UUID(), nullable=True),
+        sa.Column("quote_scheduled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("quote_item_id", sa.UUID(), nullable=True),
         sa.Column("hysteresis_applied", sa.Boolean(), nullable=False),
         sa.Column("used_stale_target", sa.Boolean(), nullable=False),
@@ -357,7 +361,7 @@ def upgrade() -> None:
             name=op.f("ck_signal_evaluation_versions_positive"),
         ),
         sa.CheckConstraint(
-            "result = 'SKIPPED' OR (subscription_version IS NOT NULL "
+            "result IN ('SKIPPED','SUPERSEDED') OR (subscription_version IS NOT NULL "
             "AND target_revision_id IS NOT NULL AND target_version IS NOT NULL "
             "AND target_date IS NOT NULL AND low_strong IS NOT NULL "
             "AND low_watch IS NOT NULL AND high_watch IS NOT NULL "
@@ -442,6 +446,7 @@ def upgrade() -> None:
         sa.Column("position_status", sa.String(16), nullable=False),
         sa.Column("position_version", sa.Integer(), nullable=False),
         sa.Column("quote_cycle_id", sa.UUID(), nullable=True),
+        sa.Column("quote_scheduled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("quote_item_id", sa.UUID(), nullable=True),
         sa.Column("used_stale_target", sa.Boolean(), nullable=False),
         sa.Column("state_version", sa.Integer(), nullable=False),

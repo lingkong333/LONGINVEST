@@ -1,6 +1,8 @@
 # ruff: noqa: E501
+import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import MappingProxyType
 from uuid import uuid4
 
 import pytest
@@ -10,8 +12,11 @@ from long_invest.modules.strategies.contracts import (
     StrategyForecastErrorCode,
     StrategyForecastRequest,
     StrategyForecastResult,
+    StrategyLifecycleErrorCode,
+    StrategyLifecycleStatus,
     StrategyReadiness,
     StrategyReadinessStatus,
+    StrategyVersionView,
     TrainingDataSnapshot,
 )
 from long_invest.modules.targets.contracts import TargetValues
@@ -122,3 +127,99 @@ def test_strategy_readiness_uses_stable_status_and_error_codes() -> None:
     assert StrategyForecastErrorCode.STRATEGY_FORECAST_TIMEOUT.value == (
         "STRATEGY_FORECAST_TIMEOUT"
     )
+
+
+def test_strategy_lifecycle_statuses_and_error_codes_are_complete() -> None:
+    assert {status.value for status in StrategyLifecycleStatus} == {
+        "DRAFT",
+        "VALIDATING",
+        "VALIDATED",
+        "PUBLISHING",
+        "PUBLISHED",
+        "PUBLISH_FAILED",
+        "ARCHIVED",
+    }
+    assert {code.value for code in StrategyLifecycleErrorCode} == {
+        "STRATEGY_VERSION_CONFLICT",
+        "STRATEGY_NOT_READY",
+        "STRATEGY_VALIDATION_REQUIRED",
+        "STRATEGY_VALIDATION_STALE",
+        "STRATEGY_PUBLISH_IN_PROGRESS",
+        "STRATEGY_PUBLISH_FAILED",
+        "STRATEGY_VERSION_IMMUTABLE",
+        "STRATEGY_ARCHIVED",
+    }
+
+
+def test_strategy_nested_frozen_values_dump_as_json() -> None:
+    request = StrategyForecastRequest(
+        strategy_version_id=uuid4(),
+        source_code_hash="a" * 64,
+        parameter_snapshot=MappingProxyType(
+            {"nested": MappingProxyType({"values": (1, frozenset({2, 3}))})}
+        ),
+        parameter_hash="b" * 64,
+        training_data=TrainingDataSnapshot(
+            security_id=uuid4(),
+            symbol="600000.SH",
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 1),
+            data_version=1,
+            content_hash="c" * 64,
+            rows=(
+                {
+                    "trade_date": date(2025, 1, 1),
+                    "open": "1",
+                    "high": "1",
+                    "low": "1",
+                    "close": "1",
+                    "labels": ("training",),
+                },
+            ),
+        ),
+        requested_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    result = StrategyForecastResult(
+        values=TargetValues(
+            low_strong="1", low_watch="2", high_watch="3", high_strong="4"
+        ),
+        diagnostics={"nested": {"values": (1, frozenset({2, 3}))}},
+    )
+
+    request_dump = request.model_dump(mode="json")
+    result_dump = result.model_dump(mode="json")
+    json.dumps(request_dump)
+    json.dumps(result_dump)
+    assert request_dump["parameter_snapshot"]["nested"]["values"][0] == 1
+    assert set(request_dump["parameter_snapshot"]["nested"]["values"][1]) == {2, 3}
+    assert request_dump["training_data"]["rows"][0]["labels"] == ["training"]
+    assert set(result_dump["diagnostics"]["nested"]["values"][1]) == {2, 3}
+
+
+def test_strategy_version_view_is_a_complete_immutable_release_snapshot() -> None:
+    validation_run_id = uuid4()
+    published_at = datetime(2026, 7, 21, 9, tzinfo=UTC)
+    version = StrategyVersionView(
+        id=uuid4(),
+        strategy_id=uuid4(),
+        version_no=1,
+        source_code="def calculate_targets(history, params, context): ...",
+        metadata={"name": "value strategy", "tags": ("long", "hold")},
+        parameter_schema={"type": "object", "properties": {}},
+        environment_version="python-3.12-pandas-2",
+        runner_image_digest="sha256:" + "d" * 64,
+        source_code_hash="a" * 64,
+        git_commit="b" * 40,
+        validation_run_id=validation_run_id,
+        status=StrategyLifecycleStatus.PUBLISHED,
+        published_at=published_at,
+        created_at=published_at,
+    )
+
+    dumped = version.model_dump(mode="json")
+    json.dumps(dumped)
+    assert dumped["metadata"]["tags"] == ["long", "hold"]
+    assert dumped["parameter_schema"] == {"type": "object", "properties": {}}
+    assert version.validation_run_id == validation_run_id
+    with pytest.raises(ValidationError):
+        version.source_code = "changed"

@@ -27,20 +27,44 @@ class StrategyVersion(Base):
         CheckConstraint(
             "length(source_code_hash) = 64", name="source_code_hash_sha256"
         ),
+        CheckConstraint(
+            "runner_image_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="runner_image_digest_sha256",
+        ),
+        CheckConstraint(
+            "status IN ('PUBLISHING','PUBLISHED','PUBLISH_FAILED','ARCHIVED')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(status IN ('PUBLISHED','ARCHIVED') AND published_at IS NOT NULL "
+            "AND git_commit IS NOT NULL AND validation_run_id IS NOT NULL) OR "
+            "(status IN ('PUBLISHING','PUBLISH_FAILED') AND published_at IS NULL)",
+            name="publication_consistent",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    strategy_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    strategy_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     version_no: Mapped[int] = mapped_column(Integer, nullable=False)
     source_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     source_code: Mapped[str] = mapped_column(String, nullable=False)
+    strategy_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata", JSONB, nullable=False
+    )
     parameter_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     environment_version: Mapped[str] = mapped_column(String(64), nullable=False)
-    image_digest: Mapped[str] = mapped_column(String(128), nullable=False)
-    git_commit: Mapped[str] = mapped_column(String(64), nullable=False)
-    validation_run_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    runner_image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    git_commit: Mapped[str | None] = mapped_column(String(64))
+    validation_run_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_validation_run.id", ondelete="RESTRICT"),
+    )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -50,6 +74,13 @@ class StrategyVersion(Base):
 
 class Strategy(Base):
     __tablename__ = "strategy"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('DRAFT','VALIDATING','VALIDATED','PUBLISHING',"
+            "'PUBLISHED','PUBLISH_FAILED','ARCHIVED')",
+            name="status_valid",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
@@ -59,7 +90,10 @@ class Strategy(Base):
 
 class StrategyDraft(Base):
     __tablename__ = "strategy_draft"
-    __table_args__ = (UniqueConstraint("strategy_id", name="strategy"),)
+    __table_args__ = (
+        UniqueConstraint("strategy_id", name="strategy"),
+        CheckConstraint("draft_version > 0", name="version_positive"),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
@@ -67,13 +101,14 @@ class StrategyDraft(Base):
         PG_UUID(as_uuid=True), ForeignKey("strategy.id"), nullable=False
     )
     source_code: Mapped[str] = mapped_column(String, nullable=False)
-    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class StrategyDraftRevision(Base):
     __tablename__ = "strategy_draft_revision"
     __table_args__ = (
         UniqueConstraint("draft_id", "revision_no", name="draft_revision"),
+        CheckConstraint("revision_no > 0", name="revision_positive"),
     )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
@@ -87,20 +122,37 @@ class StrategyDraftRevision(Base):
 
 class StrategyValidationRun(Base):
     __tablename__ = "strategy_validation_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED')",
+            name="status_valid",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    strategy_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    strategy_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_version.id", ondelete="RESTRICT"),
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(100))
 
 
 class StrategyRun(Base):
     __tablename__ = "strategy_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELED')",
+            name="status_valid",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     strategy_version_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_version.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)

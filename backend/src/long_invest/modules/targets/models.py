@@ -155,13 +155,36 @@ class SubscriptionTargetBinding(Base):
 
 class TargetCalculationRun(Base):
     __tablename__ = "target_calculation_run"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(training_start_date IS NULL AND training_end_date IS NULL) OR "
+            "(training_start_date IS NOT NULL AND training_end_date IS NOT NULL "
+            "AND training_start_date <= training_end_date)",
+            name="training_range_valid",
+        ),
+        CheckConstraint(
+            "(qfq_data_version IS NULL OR qfq_data_version > 0) AND "
+            "(current_target_version IS NULL OR current_target_version > 0)",
+            name="versions_positive",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    subscription_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    subscription_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("monitor_subscription.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     strategy_version_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_version.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
@@ -174,7 +197,7 @@ class TargetCalculationRun(Base):
     current_target_version: Mapped[int | None] = mapped_column(Integer)
     reason: Mapped[str | None] = mapped_column(String(500))
     resource_usage: Mapped[dict[str, Any]] = mapped_column(
-        JSONB, nullable=False, default=dict
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
     error_summary: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(
@@ -184,14 +207,39 @@ class TargetCalculationRun(Base):
 
 class TargetReview(Base):
     __tablename__ = "target_review"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('PENDING','APPROVED','REJECTED','SUPERSEDED')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "((status IN ('APPROVED','REJECTED')) "
+            "AND reviewer_user_id IS NOT NULL AND length(trim(reviewer_user_id)) > 0 "
+            "AND review_comment IS NOT NULL AND length(trim(review_comment)) > 0 "
+            "AND reviewed_at IS NOT NULL) OR "
+            "((status IN ('PENDING','SUPERSEDED')) "
+            "AND reviewer_user_id IS NULL AND review_comment IS NULL "
+            "AND reviewed_at IS NULL)",
+            name="decision_consistent",
+        ),
+        CheckConstraint(
+            "baseline_revision_id IS NULL OR "
+            "baseline_revision_id <> candidate_revision_id",
+            name="distinct_revisions",
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     candidate_revision_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False
+        PG_UUID(as_uuid=True),
+        ForeignKey("target_revision.id", ondelete="RESTRICT"),
+        nullable=False,
     )
-    baseline_revision_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    baseline_revision_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("target_revision.id", ondelete="RESTRICT")
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     low_strong_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))

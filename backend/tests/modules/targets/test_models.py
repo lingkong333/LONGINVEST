@@ -1,4 +1,10 @@
-from sqlalchemy import CheckConstraint, Date, Index, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Date,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 
 from long_invest.modules.targets.models import (
@@ -18,6 +24,15 @@ def _unique_columns(model: type) -> set[tuple[str, ...]]:
         tuple(column.name for column in item.columns)
         for item in model.__table__.constraints
         if isinstance(item, UniqueConstraint)
+    }
+
+
+def _foreign_key_targets(model: type) -> set[str]:
+    return {
+        element.target_fullname
+        for constraint in model.__table__.constraints
+        if isinstance(constraint, ForeignKeyConstraint)
+        for element in constraint.elements
     }
 
 
@@ -107,3 +122,23 @@ def test_target_calculation_and_review_records_are_owned_by_targets() -> None:
         "status",
         "reason",
     } <= set(TargetReview.__table__.c.keys())
+
+
+def test_target_calculation_and_review_enforce_status_and_references() -> None:
+    assert {
+        "ck_target_calculation_run_status_valid",
+        "ck_target_calculation_run_training_range_valid",
+        "ck_target_calculation_run_versions_positive",
+    } <= _constraint_names(TargetCalculationRun)
+    assert {
+        "ck_target_review_status_valid",
+        "ck_target_review_decision_consistent",
+        "ck_target_review_distinct_revisions",
+    } <= _constraint_names(TargetReview)
+    assert {
+        "monitor_subscription.id",
+        "strategy_version.id",
+    } <= _foreign_key_targets(TargetCalculationRun)
+    assert {
+        "target_revision.id",
+    } <= _foreign_key_targets(TargetReview)

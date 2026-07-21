@@ -77,6 +77,70 @@ def test_strategy_target_calculation_and_review_views_are_frozen() -> None:
         review.reason = "changed"
 
 
+def test_target_calculation_resource_usage_is_deeply_frozen_and_json_safe() -> None:
+    run = TargetCalculationRunView(
+        id=uuid4(),
+        subscription_id=uuid4(),
+        strategy_version_id=uuid4(),
+        status=TargetCalculationStatus.SUCCEEDED,
+        parameter_snapshot={"window": 20},
+        resource_usage={"limits": {"cpu": (1, 2), "pids": frozenset({8, 16})}},
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+
+    with pytest.raises(TypeError):
+        run.resource_usage["limits"]["cpu"] = (3,)  # type: ignore[index]
+    dumped = run.model_dump(mode="json")["resource_usage"]
+    assert dumped["limits"]["cpu"] == [1, 2]
+    assert set(dumped["limits"]["pids"]) == {8, 16}
+
+
+@pytest.mark.parametrize(
+    "status", [TargetReviewStatus.APPROVED, TargetReviewStatus.REJECTED]
+)
+def test_decided_target_review_requires_reviewer_comment_and_time(
+    status: TargetReviewStatus,
+) -> None:
+    base = {
+        "id": uuid4(),
+        "candidate_revision_id": uuid4(),
+        "baseline_revision_id": None,
+        "status": status,
+        "reason": "large change",
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC),
+    }
+    for missing in ("reviewer_user_id", "review_comment", "reviewed_at"):
+        values = {
+            **base,
+            "reviewer_user_id": "reviewer-1",
+            "review_comment": "checked",
+            "reviewed_at": datetime(2026, 7, 21, 1, tzinfo=UTC),
+        }
+        values[missing] = None
+        with pytest.raises(ValidationError):
+            TargetReviewView(**values)
+
+
+@pytest.mark.parametrize(
+    "status", [TargetReviewStatus.PENDING, TargetReviewStatus.SUPERSEDED]
+)
+def test_undecided_target_review_rejects_decision_metadata(
+    status: TargetReviewStatus,
+) -> None:
+    with pytest.raises(ValidationError):
+        TargetReviewView(
+            id=uuid4(),
+            candidate_revision_id=uuid4(),
+            baseline_revision_id=None,
+            status=status,
+            reason="large change",
+            reviewer_user_id="reviewer-1",
+            review_comment="checked",
+            reviewed_at=datetime(2026, 7, 21, 1, tzinfo=UTC),
+            created_at=datetime(2026, 7, 21, tzinfo=UTC),
+        )
+
+
 def test_target_values_quantize_half_up_and_are_frozen() -> None:
     values = TargetValues(
         low_strong="1.005",

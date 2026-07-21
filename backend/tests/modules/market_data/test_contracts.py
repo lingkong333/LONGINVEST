@@ -9,6 +9,7 @@ import pytest
 
 from long_invest.modules.market_data.contracts import (
     AdjustmentTimelineEntry,
+    AdjustmentTimelineSnapshot,
     OpenQualityIssue,
     QualityIssuePage,
     QualityIssueStatus,
@@ -33,6 +34,38 @@ def test_adjustment_timeline_entry_freezes_effective_and_publication_dates() -> 
     assert entry.effective_date == date(2026, 1, 2)
     with pytest.raises(FrozenInstanceError):
         entry.source = "changed"  # type: ignore[misc]
+
+
+def test_adjustment_timeline_rejects_naive_publication_and_as_of_times() -> None:
+    with pytest.raises(ValueError, match="timezone"):
+        AdjustmentTimelineEntry(
+            event_date=date(2026, 1, 2),
+            effective_date=date(2026, 1, 2),
+            published_at=datetime(2026, 1, 1),
+            source="provider",
+            adjustment_factor=Decimal("0.5"),
+            data_hash="a" * 64,
+        )
+
+    with pytest.raises(ValueError, match="timezone"):
+        AdjustmentTimelineSnapshot(as_of=datetime(2026, 1, 2), entries=())
+
+
+def test_adjustment_timeline_only_contains_information_known_as_of_snapshot() -> None:
+    entry = AdjustmentTimelineEntry(
+        event_date=date(2026, 1, 2),
+        effective_date=date(2026, 1, 2),
+        published_at=datetime(2026, 1, 3, tzinfo=UTC),
+        source="provider",
+        adjustment_factor=Decimal("0.5"),
+        data_hash="a" * 64,
+    )
+
+    with pytest.raises(ValueError, match="as_of"):
+        AdjustmentTimelineSnapshot(
+            as_of=datetime(2026, 1, 2, tzinfo=UTC),
+            entries=(entry,),
+        )
 
 
 def _open_command(**overrides: object) -> OpenQualityIssue:

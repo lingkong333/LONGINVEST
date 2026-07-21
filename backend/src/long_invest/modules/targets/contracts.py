@@ -192,6 +192,15 @@ class TargetCalculationRunView(FrozenParametersContract):
     error_summary: str | None = None
     created_at: AwareDatetime
 
+    @field_validator("resource_usage")
+    @classmethod
+    def freeze_resource_usage(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _deep_freeze(value)
+
+    @field_serializer("resource_usage")
+    def serialize_resource_usage(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return _deep_thaw(value)
+
 
 class TargetReviewView(StrictContract):
     id: UUID
@@ -207,6 +216,27 @@ class TargetReviewView(StrictContract):
     review_comment: str | None = None
     reviewed_at: AwareDatetime | None = None
     created_at: AwareDatetime
+
+    @model_validator(mode="after")
+    def validate_decision_metadata(self) -> TargetReviewView:
+        decision_values = (
+            self.reviewer_user_id,
+            self.review_comment,
+            self.reviewed_at,
+        )
+        is_decided = self.status in {
+            TargetReviewStatus.APPROVED,
+            TargetReviewStatus.REJECTED,
+        }
+        if is_decided and any(value is None for value in decision_values):
+            raise ValueError("decided review requires reviewer, comment, and time")
+        if not is_decided and any(value is not None for value in decision_values):
+            raise ValueError("undecided review cannot include decision metadata")
+        if self.reviewer_user_id is not None and not self.reviewer_user_id.strip():
+            raise ValueError("reviewer must not be blank")
+        if self.review_comment is not None and not self.review_comment.strip():
+            raise ValueError("review comment must not be blank")
+        return self
 
 
 class TargetSnapshot(FrozenParametersContract):

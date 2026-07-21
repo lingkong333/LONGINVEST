@@ -10,6 +10,8 @@ from enum import StrEnum
 from typing import NoReturn, Protocol
 from uuid import UUID
 
+from pydantic import AwareDatetime, BaseModel, ConfigDict, model_validator
+
 from long_invest.modules.providers.contracts import validate_symbol
 
 
@@ -38,17 +40,31 @@ class QualityResolutionAction(StrEnum):
 class AdjustmentTimelineEntry:
     event_date: date
     effective_date: date
-    published_at: datetime
+    published_at: AwareDatetime
     source: str
     adjustment_factor: Decimal
     data_hash: str
 
     def __post_init__(self) -> None:
+        _require_aware_datetime(self.published_at, "published_at")
         _require_text(self.source, "调整来源")
         if not self.adjustment_factor.is_finite() or self.adjustment_factor <= 0:
             raise ValueError("adjustment factor must be finite and positive")
         if len(self.data_hash) != 64:
             raise ValueError("adjustment data hash must be sha256")
+
+
+class AdjustmentTimelineSnapshot(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    as_of: AwareDatetime
+    entries: tuple[AdjustmentTimelineEntry, ...]
+
+    @model_validator(mode="after")
+    def reject_future_publications(self) -> AdjustmentTimelineSnapshot:
+        if any(entry.published_at > self.as_of for entry in self.entries):
+            raise ValueError("adjustment publication must not be later than as_of")
+        return self
 
 
 class AdjustmentTimelinePort(Protocol):
@@ -58,13 +74,18 @@ class AdjustmentTimelinePort(Protocol):
         security_id: UUID,
         start_date: date,
         end_date: date,
-        as_of: datetime,
+        as_of: AwareDatetime,
     ) -> tuple[AdjustmentTimelineEntry, ...]: ...
 
 
 def _require_text(value: str, field: str) -> None:
     if not value.strip():
         raise ValueError(f"{field} 不能为空")
+
+
+def _require_aware_datetime(value: datetime, field: str) -> None:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError(f"{field} must include timezone information")
 
 
 def _copy_json_value(value: object, active: set[int]) -> object:

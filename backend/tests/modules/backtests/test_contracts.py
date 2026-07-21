@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
@@ -9,9 +9,20 @@ from long_invest.modules.backtests.contracts import (
     BacktestDailyResultView,
     BacktestDateRange,
     BacktestErrorCode,
+    BacktestForecastSnapshotView,
     BacktestItemStatus,
+    BacktestMetricView,
+    BacktestMode,
+    BacktestOrderDirection,
+    BacktestOrderStatus,
+    BacktestOrderView,
+    BacktestPositionStatus,
     BacktestSignalInput,
+    BacktestTargetAdjustmentView,
     BacktestTaskSnapshot,
+    BacktestTaskStatus,
+    BacktestTradeView,
+    BacktestUniverseEntry,
 )
 from long_invest.modules.signals.contracts import SignalZone
 from long_invest.modules.targets.contracts import TargetValues
@@ -53,25 +64,232 @@ def test_backtest_status_and_error_codes_are_stable() -> None:
     assert BacktestErrorCode.ADJUSTMENT_DATA_UNAVAILABLE.value == (
         "ADJUSTMENT_DATA_UNAVAILABLE"
     )
+    assert {status.value for status in BacktestTaskStatus} == {
+        "PENDING",
+        "RUNNING",
+        "PAUSING",
+        "PAUSED",
+        "SUCCEEDED",
+        "PARTIAL",
+        "FAILED",
+        "CANCELING",
+        "CANCELED",
+    }
 
 
 def test_backtest_contracts_expose_frozen_replay_snapshots() -> None:
     snapshot = BacktestTaskSnapshot(
         id=uuid4(),
+        mode=BacktestMode.SINGLE,
+        universe_snapshot=(
+            BacktestUniverseEntry(security_id=uuid4(), symbol="600000.SH"),
+        ),
+        universe_hash="f" * 64,
         date_range=BacktestDateRange(
             training_start_date=date(2024, 1, 1),
             training_end_date=date(2024, 12, 31),
             test_start_date=date(2025, 1, 1),
             test_end_date=date(2025, 12, 31),
         ),
+        strategy_version_id=uuid4(),
+        draft_source_code=None,
         source_code_hash="a" * 64,
+        parameter_snapshot={"window": 20, "nested": {"values": (1, 2)}},
         parameter_hash="b" * 64,
         environment_version="runner-1",
+        runner_image_digest="sha256:" + "d" * 64,
+        strategy_api_version="1.0",
         rule_version="rules-1",
+        hysteresis_ratio=Decimal("0.01"),
+        minimum_hysteresis=Decimal("0.02"),
         initial_capital=Decimal("100000"),
         price_basis="UNADJUSTED",
         data_source="provider",
     )
     assert snapshot.price_basis == "UNADJUSTED"
+    assert snapshot.model_dump(mode="json")["parameter_snapshot"]["nested"] == {
+        "values": [1, 2]
+    }
     assert BacktestDailyResultView.__name__ == "BacktestDailyResultView"
     assert SignalZone.UNKNOWN.value == "UNKNOWN"
+
+
+def test_backtest_modes_are_exact_and_single_scope_contains_one_security() -> None:
+    assert {mode.value for mode in BacktestMode} == {"SINGLE", "WATCHLIST", "MARKET"}
+    values = {
+        "id": uuid4(),
+        "mode": BacktestMode.SINGLE,
+        "universe_snapshot": (
+            BacktestUniverseEntry(security_id=uuid4(), symbol="600000.SH"),
+            BacktestUniverseEntry(security_id=uuid4(), symbol="000001.SZ"),
+        ),
+        "universe_hash": "f" * 64,
+        "date_range": BacktestDateRange(
+            training_start_date=date(2024, 1, 1),
+            training_end_date=date(2024, 12, 31),
+            test_start_date=date(2025, 1, 1),
+            test_end_date=date(2025, 12, 31),
+        ),
+        "strategy_version_id": uuid4(),
+        "draft_source_code": None,
+        "source_code_hash": "a" * 64,
+        "parameter_snapshot": {},
+        "parameter_hash": "b" * 64,
+        "environment_version": "runner-1",
+        "runner_image_digest": "sha256:" + "d" * 64,
+        "strategy_api_version": "1.0",
+        "rule_version": "rules-1",
+        "hysteresis_ratio": Decimal("0.01"),
+        "minimum_hysteresis": Decimal("0.01"),
+        "initial_capital": Decimal("100000"),
+        "price_basis": "QFQ_AS_OF",
+        "data_source": "EASTMONEY",
+    }
+    with pytest.raises(ValidationError):
+        BacktestTaskSnapshot(**values)
+
+
+def test_backtest_task_requires_published_version_or_frozen_draft_source() -> None:
+    fields = BacktestTaskSnapshot.model_fields
+    assert fields["strategy_version_id"].is_required()
+    assert fields["draft_source_code"].is_required()
+    assert fields["parameter_snapshot"].is_required()
+
+
+def test_forecast_snapshot_freezes_training_provenance_and_diagnostics() -> None:
+    frozen_at = datetime(2026, 7, 21, 10, tzinfo=UTC)
+    snapshot = BacktestForecastSnapshotView(
+        item_id=uuid4(),
+        training_start_date=date(2024, 1, 1),
+        training_end_date=date(2024, 12, 31),
+        training_row_count=240,
+        training_fetched_at=frozen_at,
+        training_data_hash="a" * 64,
+        source_code_hash="b" * 64,
+        parameter_hash="c" * 64,
+        values=TargetValues(
+            low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+        ),
+        diagnostics={"sample": {"windows": (20, 60)}},
+        environment_version="runner-1",
+        runner_image_digest="sha256:" + "d" * 64,
+        price_basis="QFQ_AS_OF",
+        frozen_at=frozen_at,
+    )
+    assert snapshot.model_dump(mode="json")["diagnostics"] == {
+        "sample": {"windows": [20, 60]}
+    }
+    with pytest.raises(ValidationError):
+        BacktestForecastSnapshotView.model_validate(
+            snapshot.model_dump() | {"training_fetched_at": datetime(2026, 7, 21)}
+        )
+
+
+def test_target_adjustment_rejects_publication_after_effective_time() -> None:
+    with pytest.raises(ValidationError):
+        BacktestTargetAdjustmentView(
+            item_id=uuid4(),
+            event_date=date(2025, 6, 1),
+            before_values=TargetValues(
+                low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+            ),
+            after_values=TargetValues(
+                low_strong="4", low_watch="4.5", high_watch="5.5", high_strong="6"
+            ),
+            adjustment_factor=Decimal("0.5"),
+            source="EASTMONEY",
+            data_hash="a" * 64,
+            published_at=datetime(2025, 6, 2, tzinfo=UTC),
+            effective_at=datetime(2025, 6, 1, tzinfo=UTC),
+        )
+
+
+def test_unfilled_order_allows_no_date_and_filled_order_requires_d_plus_one() -> None:
+    targets = TargetValues(
+        low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+    )
+    order = BacktestOrderView(
+        id=uuid4(),
+        item_id=uuid4(),
+        signal_date=date(2025, 1, 2),
+        execute_date=None,
+        status=BacktestOrderStatus.UNFILLED_AT_END,
+        direction=BacktestOrderDirection.BUY,
+        execution_price=None,
+        quantity=Decimal("100"),
+        cash_before=Decimal("1000"),
+        position_before=Decimal("0"),
+        target_values=targets,
+        target_zone=SignalZone.LOW,
+    )
+    assert order.execute_date is None
+    with pytest.raises(ValidationError):
+        BacktestOrderView.model_validate(
+            order.model_dump()
+            | {
+                "status": BacktestOrderStatus.FILLED,
+                "execute_date": order.signal_date,
+                "execution_price": Decimal("10"),
+            }
+        )
+
+
+def test_trade_metric_and_daily_result_expose_complete_replay_values() -> None:
+    targets = TargetValues(
+        low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+    )
+    trade = BacktestTradeView(
+        id=uuid4(),
+        item_id=uuid4(),
+        order_id=uuid4(),
+        execute_date=date(2025, 1, 3),
+        direction=BacktestOrderDirection.SELL,
+        price=Decimal("12"),
+        quantity=Decimal("100"),
+        cash_after=Decimal("1200"),
+        position_after=Decimal("0"),
+        target_values=targets,
+        target_zone=SignalZone.HIGH,
+        round_trip_no=1,
+        holding_trade_days=5,
+        realized_return_amount=Decimal("200"),
+        realized_return_rate=Decimal("0.2"),
+    )
+    metric = BacktestMetricView(
+        item_id=trade.item_id,
+        ending_equity=Decimal("1200"),
+        total_return=Decimal("0.2"),
+        realized_return=Decimal("0.2"),
+        annualized_return=Decimal("0.25"),
+        max_drawdown=Decimal("0.1"),
+        volatility=Decimal("0.15"),
+        sharpe_ratio=Decimal("1.5"),
+        completed_round_trips=1,
+        winning_trades=1,
+        losing_trades=0,
+        win_rate=Decimal("1"),
+        average_trade_return=Decimal("0.2"),
+        maximum_trade_gain=Decimal("0.2"),
+        maximum_trade_loss=Decimal("0"),
+        average_holding_trade_days=Decimal("5"),
+        longest_holding_trade_days=5,
+        capital_exposure_ratio=Decimal("0.5"),
+        open_position_at_end=False,
+        unfilled_order_count=0,
+    )
+    daily = BacktestDailyResultView(
+        item_id=trade.item_id,
+        trade_date=date(2025, 1, 3),
+        cash=Decimal("1200"),
+        position_quantity=Decimal("0"),
+        close_price=Decimal("12"),
+        position_market_value=Decimal("0"),
+        equity=Decimal("1200"),
+        drawdown=Decimal("0"),
+        target_values=targets,
+        zone=SignalZone.HIGH,
+        position_status=BacktestPositionStatus.FLAT,
+    )
+    assert metric.winning_trades == 1
+    assert trade.holding_trade_days == 5
+    assert daily.cash + daily.position_market_value == daily.equity

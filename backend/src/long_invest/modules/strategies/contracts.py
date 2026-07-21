@@ -38,6 +38,14 @@ def _deep_freeze(value: Any) -> Any:
     return value
 
 
+def _deep_thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {str(key): _deep_thaw(item) for key, item in value.items()}
+    if isinstance(value, (tuple, list, set, frozenset)):
+        return [_deep_thaw(item) for item in value]
+    return value
+
+
 class StrategyForecastErrorCode(StrEnum):
     INSUFFICIENT_HISTORY = "INSUFFICIENT_HISTORY"
     TRAINING_DATA_INVALID = "TRAINING_DATA_INVALID"
@@ -55,14 +63,22 @@ class StrategyReadinessStatus(StrEnum):
 class StrategyLifecycleStatus(StrEnum):
     DRAFT = "DRAFT"
     VALIDATING = "VALIDATING"
+    VALIDATED = "VALIDATED"
+    PUBLISHING = "PUBLISHING"
     PUBLISHED = "PUBLISHED"
+    PUBLISH_FAILED = "PUBLISH_FAILED"
     ARCHIVED = "ARCHIVED"
 
 
 class StrategyLifecycleErrorCode(StrEnum):
     STRATEGY_VERSION_CONFLICT = "STRATEGY_VERSION_CONFLICT"
     STRATEGY_NOT_READY = "STRATEGY_NOT_READY"
+    STRATEGY_VALIDATION_REQUIRED = "STRATEGY_VALIDATION_REQUIRED"
+    STRATEGY_VALIDATION_STALE = "STRATEGY_VALIDATION_STALE"
+    STRATEGY_PUBLISH_IN_PROGRESS = "STRATEGY_PUBLISH_IN_PROGRESS"
     STRATEGY_PUBLISH_FAILED = "STRATEGY_PUBLISH_FAILED"
+    STRATEGY_VERSION_IMMUTABLE = "STRATEGY_VERSION_IMMUTABLE"
+    STRATEGY_ARCHIVED = "STRATEGY_ARCHIVED"
 
 
 class FrozenMappingContract(StrictContract):
@@ -75,7 +91,7 @@ class FrozenMappingContract(StrictContract):
 
     @field_serializer("parameter_snapshot")
     def serialize_parameter_snapshot(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return dict(value)
+        return _deep_thaw(value)
 
 
 class TrainingDataSnapshot(StrictContract):
@@ -93,6 +109,10 @@ class TrainingDataSnapshot(StrictContract):
         cls, value: tuple[Mapping[str, Any], ...]
     ) -> tuple[Mapping[str, Any], ...]:
         return tuple(_deep_freeze(row) for row in value)
+
+    @field_serializer("rows")
+    def serialize_rows(self, value: tuple[Mapping[str, Any], ...]) -> list[Any]:
+        return _deep_thaw(value)
 
     @model_validator(mode="after")
     def validate_rows(self) -> TrainingDataSnapshot:
@@ -141,6 +161,10 @@ class StrategyForecastResult(StrictContract):
     def freeze_diagnostics(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
         return _deep_freeze(value)
 
+    @field_serializer("diagnostics")
+    def serialize_diagnostics(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return _deep_thaw(value)
+
 
 class StrategyReadiness(StrictContract):
     strategy_version_id: UUID
@@ -170,9 +194,26 @@ class StrategyVersionView(StrictContract):
     id: UUID
     strategy_id: UUID
     version_no: int = Field(ge=1)
+    source_code: str = Field(min_length=1)
+    metadata: Mapping[str, Any]
+    parameter_schema: Mapping[str, Any]
+    environment_version: str = Field(min_length=1)
+    runner_image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     source_code_hash: str = Field(min_length=64, max_length=64)
+    git_commit: str = Field(min_length=7, max_length=64)
+    validation_run_id: UUID
     status: StrategyLifecycleStatus
-    published_at: AwareDatetime | None = None
+    published_at: AwareDatetime
+    created_at: AwareDatetime
+
+    @field_validator("metadata", "parameter_schema")
+    @classmethod
+    def freeze_release_mapping(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _deep_freeze(value)
+
+    @field_serializer("metadata", "parameter_schema")
+    def serialize_release_mapping(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return _deep_thaw(value)
 
 
 class StrategyValidationRunView(StrictContract):

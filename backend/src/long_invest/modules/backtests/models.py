@@ -5,6 +5,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
     DateTime,
@@ -32,49 +33,90 @@ class BacktestTask(Base):
             "AND test_start_date <= test_end_date",
             name="date_range_valid",
         ),
+        CheckConstraint(
+            "mode IN ('SINGLE','WATCHLIST','MARKET')", name="mode_valid"
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','RUNNING','PAUSING','PAUSED','SUCCEEDED',"
+            "'PARTIAL','FAILED','CANCELING','CANCELED')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(strategy_version_id IS NOT NULL AND draft_source_code IS NULL) OR "
+            "(strategy_version_id IS NULL AND draft_source_code IS NOT NULL "
+            "AND length(trim(draft_source_code)) > 0)",
+            name="strategy_source_valid",
+        ),
+        CheckConstraint(
+            "length(universe_hash) = 64 AND length(source_code_hash) = 64 "
+            "AND length(parameter_hash) = 64",
+            name="hashes_sha256",
+        ),
+        CheckConstraint(
+            "runner_image_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="runner_image_digest_sha256",
+        ),
+        CheckConstraint(
+            "initial_capital > 0 AND initial_capital <> 'NaN'::numeric "
+            "AND initial_capital < 'Infinity'::numeric",
+            name="initial_capital_positive",
+        ),
+        CheckConstraint(
+            "hysteresis_ratio >= 0 AND minimum_hysteresis >= 0",
+            name="hysteresis_nonnegative",
+        ),
+        CheckConstraint(
+            "length(trim(environment_version)) > 0 "
+            "AND length(trim(strategy_api_version)) > 0 "
+            "AND length(trim(rule_version)) > 0 "
+            "AND length(trim(price_basis)) > 0 "
+            "AND length(trim(data_source)) > 0",
+            name="required_text_nonblank",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    universe_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     training_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     training_end_date: Mapped[date] = mapped_column(Date, nullable=False)
     test_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     test_end_date: Mapped[date] = mapped_column(Date, nullable=False)
-    strategy_version_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), nullable=False
+    strategy_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_version.id", ondelete="RESTRICT"),
     )
-    mode: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="SINGLE_SECURITY"
-    )
-    universe_hash: Mapped[str | None] = mapped_column(String(64))
-    source_code_hash: Mapped[str] = mapped_column(
-        String(64), nullable=False, default=""
-    )
-    parameter_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    environment_version: Mapped[str] = mapped_column(
-        String(64), nullable=False, default=""
-    )
-    rule_version: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    hysteresis_ratio: Mapped[Decimal] = mapped_column(
-        Numeric(10, 6), nullable=False, default=0
-    )
-    price_basis: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="UNADJUSTED"
-    )
-    data_source: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    draft_source_code: Mapped[str | None] = mapped_column(String)
+    source_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    parameter_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    runner_image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    strategy_api_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    rule_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    hysteresis_ratio: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
+    minimum_hysteresis: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False
+    )
+    price_basis: Mapped[str] = mapped_column(String(32), nullable=False)
+    data_source: Mapped[str] = mapped_column(String(64), nullable=False)
     initial_capital: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 
-class BacktestItem(Base):
-    __tablename__ = "backtest_item"
-    __table_args__ = (UniqueConstraint("task_id", "security_id", name="task_security"),)
+class BacktestUniverseSnapshot(Base):
+    __tablename__ = "backtest_universe_snapshot"
+    __table_args__ = (
+        UniqueConstraint("task_id", name="task"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+    )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
@@ -84,9 +126,82 @@ class BacktestItem(Base):
         ForeignKey("backtest_task.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    security_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    scope_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class BacktestItem(Base):
+    __tablename__ = "backtest_item"
+    __table_args__ = (
+        UniqueConstraint("task_id", "security_id", name="task_security"),
+        CheckConstraint(
+            "status IN ('PENDING','FETCHING_DATA','VALIDATING_DATA','FORECASTING',"
+            "'FROZEN','SIMULATING','SAVING','SUCCEEDED','FAILED','SKIPPED','CANCELED')",
+            name="status_valid",
+        ),
+        CheckConstraint(
+            "(status = 'FAILED' AND failure_code IS NOT NULL) OR "
+            "(status <> 'FAILED' AND failure_code IS NULL)",
+            name="failure_consistent",
+        ),
+        CheckConstraint(
+            "(training_data_fetched_at IS NULL AND training_data_start_date IS NULL "
+            "AND training_data_end_date IS NULL AND training_data_row_count IS NULL "
+            "AND training_data_hash IS NULL AND training_price_basis IS NULL) OR "
+            "(training_data_fetched_at IS NOT NULL "
+            "AND training_data_start_date IS NOT NULL "
+            "AND training_data_end_date IS NOT NULL "
+            "AND training_data_start_date <= training_data_end_date "
+            "AND training_data_row_count > 0 AND length(training_data_hash) = 64 "
+            "AND length(trim(training_price_basis)) > 0)",
+            name="training_snapshot_consistent",
+        ),
+        CheckConstraint(
+            "(test_data_fetched_at IS NULL AND test_data_start_date IS NULL "
+            "AND test_data_end_date IS NULL AND test_data_row_count IS NULL "
+            "AND test_data_hash IS NULL AND test_price_basis IS NULL) OR "
+            "(test_data_fetched_at IS NOT NULL AND test_data_start_date IS NOT NULL "
+            "AND test_data_end_date IS NOT NULL "
+            "AND test_data_start_date <= test_data_end_date "
+            "AND test_data_row_count > 0 AND length(test_data_hash) = 64 "
+            "AND length(trim(test_price_basis)) > 0)",
+            name="test_snapshot_consistent",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_task.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    security_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("security.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String(100))
+    training_data_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    training_data_start_date: Mapped[date | None] = mapped_column(Date)
+    training_data_end_date: Mapped[date | None] = mapped_column(Date)
+    training_data_row_count: Mapped[int | None] = mapped_column(Integer)
+    training_data_hash: Mapped[str | None] = mapped_column(String(64))
+    training_price_basis: Mapped[str | None] = mapped_column(String(32))
+    test_data_fetched_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
+    test_data_start_date: Mapped[date | None] = mapped_column(Date)
+    test_data_end_date: Mapped[date | None] = mapped_column(Date)
+    test_data_row_count: Mapped[int | None] = mapped_column(Integer)
+    test_data_hash: Mapped[str | None] = mapped_column(String(64))
+    test_price_basis: Mapped[str | None] = mapped_column(String(32))
 
 
 class BacktestForecastSnapshot(Base):
@@ -94,12 +209,27 @@ class BacktestForecastSnapshot(Base):
     __table_args__ = (
         UniqueConstraint("item_id", name="item"),
         CheckConstraint(
-            "length(training_data_hash) = 64", name="training_data_hash_sha256"
+            "training_start_date <= training_end_date AND training_row_count > 0",
+            name="training_range_valid",
         ),
         CheckConstraint(
-            "length(source_code_hash) = 64", name="source_code_hash_sha256"
+            "length(training_data_hash) = 64 AND length(source_code_hash) = 64 "
+            "AND length(parameter_hash) = 64",
+            name="hashes_sha256",
         ),
-        CheckConstraint("length(parameter_hash) = 64", name="parameter_hash_sha256"),
+        CheckConstraint(
+            "runner_image_digest ~ '^sha256:[0-9a-f]{64}$'",
+            name="runner_image_digest_sha256",
+        ),
+        CheckConstraint(
+            "training_fetched_at <= frozen_at", name="fetch_before_freeze"
+        ),
+        CheckConstraint(
+            "low_strong > 0 AND low_watch > 0 AND high_watch > 0 "
+            "AND high_strong > 0 AND low_strong < low_watch "
+            "AND low_watch < high_watch AND high_watch < high_strong",
+            name="targets_ordered",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -109,6 +239,12 @@ class BacktestForecastSnapshot(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("backtest_item.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    training_start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    training_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    training_row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    training_fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
     )
     training_data_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     source_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -120,6 +256,9 @@ class BacktestForecastSnapshot(Base):
     diagnostics: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    environment_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    runner_image_digest: Mapped[str] = mapped_column(String(71), nullable=False)
+    price_basis: Mapped[str] = mapped_column(String(32), nullable=False)
     frozen_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -129,6 +268,24 @@ class BacktestTargetAdjustment(Base):
     __tablename__ = "backtest_target_adjustment"
     __table_args__ = (
         UniqueConstraint("item_id", "event_date", name="item_event_date"),
+        CheckConstraint(
+            "adjustment_factor > 0 AND adjustment_factor <> 'NaN'::numeric "
+            "AND adjustment_factor < 'Infinity'::numeric",
+            name="factor_positive",
+        ),
+        CheckConstraint(
+            "before_low_strong > 0 AND before_low_strong < before_low_watch "
+            "AND before_low_watch < before_high_watch "
+            "AND before_high_watch < before_high_strong "
+            "AND after_low_strong > 0 AND after_low_strong < after_low_watch "
+            "AND after_low_watch < after_high_watch "
+            "AND after_high_watch < after_high_strong",
+            name="targets_ordered",
+        ),
+        CheckConstraint("length(data_hash) = 64", name="data_hash_sha256"),
+        CheckConstraint(
+            "published_at <= effective_at", name="publication_before_effective"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -142,91 +299,245 @@ class BacktestTargetAdjustment(Base):
     event_date: Mapped[date] = mapped_column(Date, nullable=False)
     adjustment_factor: Mapped[Decimal] = mapped_column(Numeric(20, 10), nullable=False)
     before_low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
-    before_low_watch: Mapped[Decimal] = mapped_column(
-        Numeric(20, 2), nullable=False, default=0
-    )
-    before_high_watch: Mapped[Decimal] = mapped_column(
-        Numeric(20, 2), nullable=False, default=0
-    )
-    before_high_strong: Mapped[Decimal] = mapped_column(
-        Numeric(20, 2), nullable=False, default=0
-    )
-    after_low_strong: Mapped[Decimal] = mapped_column(
-        Numeric(20, 2), nullable=False, default=0
-    )
-    after_low_watch: Mapped[Decimal] = mapped_column(
-        Numeric(20, 2), nullable=False, default=0
-    )
-    after_high_watch: Mapped[Decimal] = mapped_column(
-        Numeric(20, 2), nullable=False, default=0
-    )
+    before_low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    before_high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    before_high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    after_low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    after_low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    after_high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     after_high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
-    source: Mapped[str] = mapped_column(String(64), nullable=False, default="")
-    data_hash: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    data_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     published_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False
     )
     effective_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now()
+        DateTime(timezone=True), nullable=False
     )
-
-
-class BacktestUniverseSnapshot(Base):
-    __tablename__ = "backtest_universe_snapshot"
-    id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
-    )
-    task_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
-    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
 class BacktestOrder(Base):
     __tablename__ = "backtest_order"
+    __table_args__ = (
+        UniqueConstraint(
+            "item_id", "signal_date", "direction", name="item_signal_direction"
+        ),
+        CheckConstraint(
+            "status IN ('PENDING','FILLED','UNFILLED_AT_END')",
+            name="status_valid",
+        ),
+        CheckConstraint("direction IN ('BUY','SELL')", name="direction_valid"),
+        CheckConstraint(
+            "(status = 'FILLED' AND execute_date IS NOT NULL "
+            "AND execute_date > signal_date AND execution_price > 0) OR "
+            "(status IN ('PENDING','UNFILLED_AT_END') "
+            "AND execute_date IS NULL AND execution_price IS NULL)",
+            name="execution_consistent",
+        ),
+        CheckConstraint(
+            "quantity > 0 AND cash_before >= 0 AND position_before >= 0",
+            name="quantity_positive",
+        ),
+        CheckConstraint(
+            "target_low_strong > 0 AND target_low_strong < target_low_watch "
+            "AND target_low_watch < target_high_watch "
+            "AND target_high_watch < target_high_strong",
+            name="targets_ordered",
+        ),
+        CheckConstraint(
+            "target_zone IN ('UNKNOWN','STRONG_LOW','LOW','NORMAL','HIGH',"
+            "'STRONG_HIGH')",
+            name="target_zone_valid",
+        ),
+    )
+
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    item_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     signal_date: Mapped[date] = mapped_column(Date, nullable=False)
     execute_date: Mapped[date | None] = mapped_column(Date)
     direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    execution_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    cash_before: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    position_before: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    target_low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     target_zone: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
 class BacktestTrade(Base):
     __tablename__ = "backtest_trade"
+    __table_args__ = (
+        UniqueConstraint("order_id", name="order"),
+        CheckConstraint("direction IN ('BUY','SELL')", name="direction_valid"),
+        CheckConstraint(
+            "price > 0 AND quantity > 0 AND cash_after >= 0 "
+            "AND position_after >= 0 AND round_trip_no > 0 "
+            "AND (holding_trade_days IS NULL OR holding_trade_days >= 0) "
+            "AND ((direction = 'SELL' AND holding_trade_days IS NOT NULL "
+            "AND realized_return_amount IS NOT NULL "
+            "AND realized_return_rate IS NOT NULL) OR "
+            "(direction = 'BUY' AND holding_trade_days IS NULL "
+            "AND realized_return_amount IS NULL AND realized_return_rate IS NULL))",
+            name="values_valid",
+        ),
+        CheckConstraint(
+            "target_low_strong > 0 AND target_low_strong < target_low_watch "
+            "AND target_low_watch < target_high_watch "
+            "AND target_high_watch < target_high_strong",
+            name="targets_ordered",
+        ),
+        CheckConstraint(
+            "target_zone IN ('UNKNOWN','STRONG_LOW','LOW','NORMAL','HIGH',"
+            "'STRONG_HIGH')",
+            name="target_zone_valid",
+        ),
+    )
+
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    order_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    order_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_order.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    execute_date: Mapped[date] = mapped_column(Date, nullable=False)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
-    executed_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False
-    )
     cash_after: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     position_after: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    target_low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_zone: Mapped[str] = mapped_column(String(16), nullable=False)
+    round_trip_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    holding_trade_days: Mapped[int | None] = mapped_column(Integer)
+    realized_return_amount: Mapped[Decimal | None] = mapped_column(Numeric(20, 2))
+    realized_return_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
 
 
 class BacktestMetric(Base):
     __tablename__ = "backtest_metric"
+    __table_args__ = (
+        UniqueConstraint("item_id", name="item"),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+        CheckConstraint(
+            "completed_round_trips >= 0 AND winning_trades >= 0 "
+            "AND losing_trades >= 0 "
+            "AND winning_trades + losing_trades = completed_round_trips "
+            "AND longest_holding_trade_days >= 0 AND unfilled_order_count >= 0",
+            name="counts_nonnegative",
+        ),
+        CheckConstraint(
+            "ending_equity >= 0 AND max_drawdown >= 0 AND max_drawdown <= 1 "
+            "AND volatility >= 0 AND capital_exposure_ratio >= 0 "
+            "AND capital_exposure_ratio <= 1",
+            name="values_valid",
+        ),
+        CheckConstraint(
+            "(completed_round_trips = 0 AND win_rate IS NULL) OR "
+            "(completed_round_trips > 0 AND win_rate >= 0 AND win_rate <= 1)",
+            name="win_rate_consistent",
+        ),
+    )
+
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    item_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    ending_equity: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     total_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    realized_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    annualized_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     max_drawdown: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    volatility: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    sharpe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     completed_round_trips: Mapped[int] = mapped_column(Integer, nullable=False)
+    winning_trades: Mapped[int] = mapped_column(Integer, nullable=False)
+    losing_trades: Mapped[int] = mapped_column(Integer, nullable=False)
+    win_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    average_trade_return: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    maximum_trade_gain: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    maximum_trade_loss: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+    average_holding_trade_days: Mapped[Decimal | None] = mapped_column(
+        Numeric(20, 8)
+    )
+    longest_holding_trade_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    capital_exposure_ratio: Mapped[Decimal] = mapped_column(
+        Numeric(20, 8), nullable=False
+    )
+    open_position_at_end: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    unfilled_order_count: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class BacktestDailyResult(Base):
     __tablename__ = "backtest_daily_result"
+    __table_args__ = (
+        UniqueConstraint("item_id", "trade_date", name="item_trade_date"),
+        CheckConstraint(
+            "cash >= 0 AND position_quantity >= 0 AND close_price > 0 "
+            "AND position_market_value >= 0 AND equity >= 0 "
+            "AND equity = cash + position_market_value "
+            "AND drawdown >= 0 AND drawdown <= 1",
+            name="values_valid",
+        ),
+        CheckConstraint(
+            "target_low_strong > 0 AND target_low_strong < target_low_watch "
+            "AND target_low_watch < target_high_watch "
+            "AND target_high_watch < target_high_strong",
+            name="targets_ordered",
+        ),
+        CheckConstraint(
+            "position_status IN ('FLAT','HOLDING')", name="position_status_valid"
+        ),
+        CheckConstraint(
+            "zone IN ('UNKNOWN','STRONG_LOW','LOW','NORMAL','HIGH','STRONG_HIGH')",
+            name="zone_valid",
+        ),
+    )
+
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
-    item_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cash: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    position_quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    close_price: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    position_market_value: Mapped[Decimal] = mapped_column(
+        Numeric(20, 2), nullable=False
+    )
     equity: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     drawdown: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    target_low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    target_high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    zone: Mapped[str] = mapped_column(String(16), nullable=False)
+    position_status: Mapped[str] = mapped_column(String(16), nullable=False)

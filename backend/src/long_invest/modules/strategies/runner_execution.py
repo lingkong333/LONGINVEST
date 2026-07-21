@@ -15,6 +15,7 @@ from long_invest.modules.strategies.forecast import HISTORY_COLUMNS
 from long_invest.modules.strategies.static_analysis import (
     ALLOWED_IMPORTS,
     analyze_strategy_source,
+    is_dangerous_library_segment,
 )
 
 PAYLOAD_FIELDS = frozenset({"source_code", "parameters", "context", "history"})
@@ -151,9 +152,20 @@ def _safe_import(
     name: str,
     globals_: Mapping[str, object] | None = None,
     locals_: Mapping[str, object] | None = None,
-    fromlist: tuple[str, ...] = (),
+    fromlist: tuple[str, ...] | None = (),
     level: int = 0,
 ) -> object:
-    if level != 0 or name.split(".", maxsplit=1)[0] not in ALLOWED_IMPORTS:
+    module_segments = name.split(".")
+    if (
+        level != 0
+        or module_segments[0] not in ALLOWED_IMPORTS
+        or any(
+            is_dangerous_library_segment(segment) for segment in module_segments
+        )
+        or any(
+            item == "*" or is_dangerous_library_segment(item)
+            for item in (fromlist or ())
+        )
+    ):
         raise ImportError("strategy import is not allowed")
-    return builtins.__import__(name, globals_, locals_, fromlist, level)
+    return builtins.__import__(name, globals_, locals_, fromlist or (), level)

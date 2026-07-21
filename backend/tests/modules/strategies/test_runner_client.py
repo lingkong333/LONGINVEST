@@ -3,10 +3,12 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+import long_invest.modules.strategies.runner_client as runner_client_module
 from long_invest.modules.strategies.runner_client import (
     DockerStrategyRunnerClient,
     StrategyRunnerFailure,
@@ -17,6 +19,14 @@ SUCCESS_OUTPUT = (
     b'{"low_strong":"1","low_watch":"2",'
     b'"high_watch":"3","high_strong":"4"}'
 )
+SECCOMP_FIXTURE = Path(__file__).parent / "fixtures" / "seccomp.json"
+
+
+@pytest.fixture(autouse=True)
+def use_trusted_seccomp_fixture(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        runner_client_module, "TRUSTED_SECCOMP_PROFILE_PATH", SECCOMP_FIXTURE
+    )
 
 
 class FakeContainer:
@@ -39,6 +49,7 @@ class FakeContainer:
         self.remove_error = remove_error
         self.attrs = {"State": {"OOMKilled": oom_killed}}
         self.id = "container-1"
+        self.managed = False
         self.events: list[str] = []
         self.archive: bytes | None = None
         self.started = False
@@ -82,20 +93,34 @@ class FakeContainer:
             self.remove_error = None
             raise error
         self.removed = True
+        self.managed = False
 
 
 class FakeContainers:
     def __init__(self, container: FakeContainer) -> None:
         self.container = container
         self.create_kwargs: dict[str, Any] | None = None
+        self.list_calls = 0
 
     def create(self, **kwargs: Any) -> FakeContainer:
         self.create_kwargs = kwargs
+        self.container.managed = True
         return self.container
 
     def get(self, container_id: str) -> FakeContainer:
         assert container_id == self.container.id
         return self.container
+
+    def list(self, *, all: bool, filters: dict[str, object]) -> list[FakeContainer]:
+        self.list_calls += 1
+        assert all is True
+        assert filters == {
+            "label": [
+                "long-invest.strategy-runner=true",
+                "long-invest.strategy-worker=strategy-worker-1",
+            ]
+        }
+        return [self.container] if self.container.managed else []
 
 
 class FakeDockerClient:
@@ -138,7 +163,7 @@ def _client(
     client = DockerStrategyRunnerClient(
         docker_client=docker_client,
         image=IMAGE,
-        seccomp_profile="/etc/long-invest/seccomp.json",
+        worker_id="strategy-worker-1",
         **kwargs,
     )
     return client, docker_client
@@ -154,7 +179,8 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
     assert container.started is True
     assert container.removed is True
     assert container.events[:3] == ["start", "put_archive", "wait"]
-    assert docker_client.api.timeout <= 10
+    assert docker_client.api.timeout <= 1
+    assert docker_client.containers.list_calls >= 2
     options = docker_client.containers.create_kwargs
     assert options is not None
     assert options["image"] == IMAGE
@@ -164,7 +190,18 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
     assert options["user"] == "65532:65532"
     assert options["cap_drop"] == ["ALL"]
     assert "no-new-privileges:true" in options["security_opt"]
-    assert "seccomp=/etc/long-invest/seccomp.json" in options["security_opt"]
+    seccomp_option = next(
+        value for value in options["security_opt"] if value.startswith("seccomp=")
+    )
+    assert json.loads(seccomp_option.removeprefix("seccomp=")) == {
+        "defaultAction": "SCMP_ACT_ERRNO",
+        "syscalls": [],
+    }
+    assert " " not in seccomp_option
+    assert options["labels"] == {
+        "long-invest.strategy-runner": "true",
+        "long-invest.strategy-worker": "strategy-worker-1",
+    }
     assert options["nano_cpus"] == 1_000_000_000
     assert options["mem_limit"] == "512m"
     assert options["memswap_limit"] == "512m"
@@ -259,7 +296,7 @@ def test_runner_requires_digest_pinned_image() -> None:
         DockerStrategyRunnerClient(
             docker_client=FakeDockerClient(FakeContainer()),
             image="long-invest-strategy-runner:latest",
-            seccomp_profile="/etc/long-invest/seccomp.json",
+            worker_id="strategy-worker-1",
         )
 
 
@@ -273,3 +310,77 @@ def test_runner_records_failed_cleanup_and_can_recover_it() -> None:
     assert client.recover_pending_cleanup() == ()
     assert client.pending_cleanup_container_ids == ()
     assert container.removed is True
+
+
+def test_new_client_recovers_labeled_container_after_process_restart() -> None:
+    container = FakeContainer(remove_error=TimeoutError("docker unavailable"))
+    docker_client = FakeDockerClient(container)
+    first = DockerStrategyRunnerClient(
+        docker_client=docker_client,
+        image=IMAGE,
+        worker_id="strategy-worker-1",
+    )
+    first.run(_payload())
+    assert container.managed is True
+
+    second = DockerStrategyRunnerClient(
+        docker_client=docker_client,
+        image=IMAGE,
+        worker_id="strategy-worker-1",
+    )
+
+    assert second.pending_cleanup_container_ids == ()
+    assert container.removed is True
+
+
+@pytest.mark.parametrize("content", [b"[]", b"not-json", b"{\"x\": NaN}"])
+def test_runner_rejects_invalid_trusted_seccomp_profile(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    content: bytes,
+) -> None:
+    profile = tmp_path / "seccomp.json"
+    profile.write_bytes(content)
+    monkeypatch.setattr(runner_client_module, "TRUSTED_SECCOMP_PROFILE_PATH", profile)
+
+    with pytest.raises(ValueError, match="seccomp"):
+        DockerStrategyRunnerClient(
+            docker_client=FakeDockerClient(FakeContainer()),
+            image=IMAGE,
+            worker_id="strategy-worker-1",
+        )
+
+
+def test_runner_rejects_oversized_trusted_seccomp_profile(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / "seccomp.json"
+    profile.write_bytes(b"{" + b" " * (64 * 1024) + b"}")
+    monkeypatch.setattr(runner_client_module, "TRUSTED_SECCOMP_PROFILE_PATH", profile)
+
+    with pytest.raises(ValueError, match="seccomp"):
+        DockerStrategyRunnerClient(
+            docker_client=FakeDockerClient(FakeContainer()),
+            image=IMAGE,
+            worker_id="strategy-worker-1",
+        )
+
+
+def test_runner_does_not_accept_a_caller_supplied_seccomp_path() -> None:
+    with pytest.raises(TypeError, match="seccomp_profile"):
+        DockerStrategyRunnerClient(
+            docker_client=FakeDockerClient(FakeContainer()),
+            image=IMAGE,
+            worker_id="strategy-worker-1",
+            seccomp_profile="/tmp/user-profile.json",
+        )
+
+
+@pytest.mark.parametrize("worker_id", ["", "worker/other", "worker\nother"])
+def test_runner_rejects_invalid_worker_label_values(worker_id: str) -> None:
+    with pytest.raises(ValueError, match="worker id"):
+        DockerStrategyRunnerClient(
+            docker_client=FakeDockerClient(FakeContainer()),
+            image=IMAGE,
+            worker_id=worker_id,
+        )

@@ -189,3 +189,60 @@ def test_static_analysis_deeply_freezes_metadata_and_schema() -> None:
         result.metadata["data_requirements"]["min_bars"] = 1
     with pytest.raises(TypeError):
         result.parameter_schema["properties"]["window"] = {"type": "string"}
+
+
+@pytest.mark.parametrize(
+    "dangerous_source",
+    [
+        "np.load('/tmp/value.npy')",
+        "np.save('/tmp/value.npy', [])",
+        "np.fromfile('/tmp/value')",
+        "np.loadtxt('/tmp/value')",
+        "np.savetxt('/tmp/value', [])",
+        "np.lib.npyio.DataSource().open('/tmp/value')",
+        "np.lib.format.open_memmap('/tmp/value')",
+        "history['close'].tofile('/tmp/value')",
+        "np.memmap('/tmp/value')",
+        "np.ctypeslib.load_library('value', '/tmp')",
+        "pd.read_secret('/tmp/value')",
+        "pd.ExcelFile('/tmp/value')",
+        "pd.HDFStore('/tmp/value')",
+        "pd.io.common.os.system('id')",
+        "np.lib.npyio.os.listdir('/tmp')",
+        "from numpy import load as loader\nloader('/tmp/value')",
+        "from pandas import io as pandas_io\npandas_io.common.urlopen('https://x')",
+        "import numpy.ctypeslib as native\nnative.load_library('x', '/tmp')",
+        "import operator\noperator.attrgetter('io.common.os.system')(pd)('id')",
+    ],
+)
+def test_static_analysis_rejects_dangerous_library_capability_chains(
+    dangerous_source: str,
+) -> None:
+    source = VALID_SOURCE.replace(
+        "def calculate_targets(history, params, context):",
+        f"{dangerous_source}\ndef calculate_targets(history, params, context):",
+    )
+
+    with pytest.raises(StrategyStaticAnalysisError) as error:
+        analyze_strategy_source(source)
+
+    assert error.value.code == "DANGEROUS_CAPABILITY"
+
+
+@pytest.mark.parametrize(
+    "rebind",
+    [
+        "match object():\n    case calculate_targets:\n        pass",
+        "match []:\n    case [*calculate_targets]:\n        pass",
+        "def other(calculate_targets):\n    return calculate_targets",
+        "alias = lambda calculate_targets: calculate_targets",
+        "def other[calculate_targets]():\n    return None",
+    ],
+)
+def test_static_analysis_rejects_all_scope_entrypoint_bindings(rebind: str) -> None:
+    source = VALID_SOURCE + f"\n{rebind}\n"
+
+    with pytest.raises(StrategyStaticAnalysisError) as error:
+        analyze_strategy_source(source)
+
+    assert error.value.code == "ENTRYPOINT_REBOUND"

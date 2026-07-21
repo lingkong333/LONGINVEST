@@ -76,6 +76,33 @@ FORBIDDEN_ATTRIBUTES = frozenset(
         "urlopen",
     }
 )
+DANGEROUS_LIBRARY_SEGMENTS = frozenset(
+    {
+        *FORBIDDEN_ATTRIBUTES,
+        "ExcelFile",
+        "HDFStore",
+        "DataSource",
+        "attrgetter",
+        "ctypes",
+        "ctypeslib",
+        "fromfile",
+        "io",
+        "load",
+        "load_library",
+        "loadtxt",
+        "memmap",
+        "methodcaller",
+        "os",
+        "pathlib",
+        "save",
+        "savetxt",
+        "socket",
+        "subprocess",
+        "tofile",
+        "open_memmap",
+        "urllib",
+    }
+)
 MAX_CONSTANT_BYTES = 64 * 1024
 MAX_SOURCE_BYTES = 256 * 1024
 SCHEMA_REFERENCE_FORBIDDEN = "PARAMETER_SCHEMA_REFERENCE_FORBIDDEN"
@@ -149,7 +176,11 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
         elif isinstance(node, ast.ImportFrom):
             imported = (node.module or "",)
             for alias in node.names:
-                if alias.name in FORBIDDEN_ATTRIBUTES or alias.name.startswith("_"):
+                if (
+                    alias.name == "*"
+                    or alias.name.startswith("_")
+                    or is_dangerous_library_segment(alias.name)
+                ):
                     raise StrategyStaticAnalysisError(
                         DANGEROUS_CAPABILITY,
                         f"dangerous import is not allowed: {alias.name}",
@@ -164,9 +195,20 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
                     f"import is not allowed: {module_name}",
                     line=getattr(node, "lineno", None),
                 )
+            if any(
+                is_dangerous_library_segment(segment)
+                for segment in module_name.split(".")
+            ):
+                raise StrategyStaticAnalysisError(
+                    DANGEROUS_CAPABILITY,
+                    f"dangerous module path is not allowed: {module_name}",
+                    line=getattr(node, "lineno", None),
+                )
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in FORBIDDEN_CALLS or name in FORBIDDEN_ATTRIBUTES:
+            if name in FORBIDDEN_CALLS or (
+                name is not None and is_dangerous_library_segment(name)
+            ):
                 raise StrategyStaticAnalysisError(
                     DANGEROUS_CAPABILITY,
                     f"dangerous call is not allowed: {name}",
@@ -175,7 +217,10 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
         if (
             isinstance(node, ast.Name)
             and isinstance(node.ctx, ast.Load)
-            and node.id in FORBIDDEN_CALLS
+            and (
+                node.id in FORBIDDEN_CALLS
+                or is_dangerous_library_segment(node.id)
+            )
         ):
             raise StrategyStaticAnalysisError(
                 DANGEROUS_CAPABILITY,
@@ -183,7 +228,11 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
                 line=getattr(node, "lineno", None),
             )
         if isinstance(node, ast.Attribute) and (
-            node.attr.startswith("__") or node.attr in FORBIDDEN_ATTRIBUTES
+            node.attr.startswith("__")
+            or any(
+                is_dangerous_library_segment(item)
+                for item in _attribute_chain(node)
+            )
         ):
             raise StrategyStaticAnalysisError(
                 DANGEROUS_CAPABILITY,
@@ -198,6 +247,21 @@ def _call_name(node: ast.expr) -> str | None:
     if isinstance(node, ast.Attribute):
         return node.attr
     return None
+
+
+def _attribute_chain(node: ast.Attribute) -> tuple[str, ...]:
+    segments: list[str] = []
+    current: ast.expr = node
+    while isinstance(current, ast.Attribute):
+        segments.append(current.attr)
+        current = current.value
+    if isinstance(current, ast.Name):
+        segments.append(current.id)
+    return tuple(reversed(segments))
+
+
+def is_dangerous_library_segment(value: str) -> bool:
+    return value in DANGEROUS_LIBRARY_SEGMENTS or value.startswith("read_")
 
 
 def _validate_constants(tree: ast.AST) -> None:
@@ -271,6 +335,42 @@ def _validate_entrypoint(tree: ast.Module) -> None:
                 ENTRYPOINT_REBOUND,
                 "calculate_targets cannot be rebound",
                 line=node.lineno,
+            )
+        if isinstance(node, ast.arg) and node.arg == "calculate_targets":
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
+            )
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and (
+            node.name == "calculate_targets"
+        ):
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
+            )
+        if isinstance(node, ast.MatchMapping) and node.rest == "calculate_targets":
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
+            )
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and (
+            "calculate_targets" in node.names
+        ):
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
+            )
+        if isinstance(node, (ast.TypeVar, ast.ParamSpec, ast.TypeVarTuple)) and (
+            node.name == "calculate_targets"
+        ):
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
             )
     args = function.args
     positional = [*args.posonlyargs, *args.args]

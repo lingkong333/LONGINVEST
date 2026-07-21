@@ -6,6 +6,7 @@ import re
 import tarfile
 import time
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from requests.exceptions import ReadTimeout
@@ -15,12 +16,18 @@ from long_invest.modules.strategies.runner_execution import PAYLOAD_FIELDS
 
 MAX_TIMEOUT_SECONDS = 10.0
 MAX_OUTPUT_BYTES = 128 * 1024
+MAX_SECCOMP_PROFILE_BYTES = 64 * 1024
+TRUSTED_SECCOMP_PROFILE_PATH = Path("/etc/long-invest/seccomp.json")
 _DIGEST_PINNED_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_WORKER_ID = re.compile(r"^[A-Za-z0-9_.-]{1,63}$")
 FORECAST_TIMEOUT = "STRATEGY_FORECAST_TIMEOUT"
 RUNNER_FAILED = "STRATEGY_RUNNER_FAILED"
 OUTPUT_INVALID = "STRATEGY_RUNNER_OUTPUT_INVALID"
 TEST_DATA_EXPOSED = "TEST_DATA_EXPOSED_TO_STRATEGY"
 _CLEANUP_RESERVE_SECONDS = 0.25
+_CLEANUP_TIMEOUT_SECONDS = 1.0
+_MANAGED_LABEL = "long-invest.strategy-runner"
+_WORKER_LABEL = "long-invest.strategy-worker"
 
 
 class StrategyRunnerFailure(RuntimeError):
@@ -35,21 +42,22 @@ class DockerStrategyRunnerClient:
         *,
         docker_client: Any,
         image: str,
-        seccomp_profile: str,
+        worker_id: str,
         timeout_seconds: float = MAX_TIMEOUT_SECONDS,
         max_output_bytes: int = MAX_OUTPUT_BYTES,
     ) -> None:
         if not _DIGEST_PINNED_IMAGE.fullmatch(image):
             raise ValueError("runner image must be pinned by digest")
-        if not seccomp_profile:
-            raise ValueError("runner seccomp profile is required")
+        if not _WORKER_ID.fullmatch(worker_id):
+            raise ValueError("runner worker id is invalid")
         if timeout_seconds <= 0:
             raise ValueError("runner timeout must be positive")
         if max_output_bytes <= 0 or max_output_bytes > MAX_OUTPUT_BYTES:
             raise ValueError("runner output limit is invalid")
         self._docker_client = docker_client
         self._image = image
-        self._seccomp_profile = seccomp_profile
+        self._worker_id = worker_id
+        self._seccomp_profile_json = _load_trusted_seccomp_profile()
         self._timeout_seconds = min(float(timeout_seconds), MAX_TIMEOUT_SECONDS)
         self._max_output_bytes = max_output_bytes
         self._pending_cleanup_ids: set[str] = set()
@@ -57,30 +65,45 @@ class DockerStrategyRunnerClient:
         if self._api is None or not hasattr(self._api, "timeout"):
             raise ValueError("docker client must expose a bounded request timeout")
         self._api.timeout = min(float(self._api.timeout), self._timeout_seconds)
+        self.recover_pending_cleanup()
 
     @property
     def pending_cleanup_container_ids(self) -> tuple[str, ...]:
         return tuple(sorted(self._pending_cleanup_ids))
 
     def recover_pending_cleanup(self) -> tuple[str, ...]:
-        deadline = time.monotonic() + self._timeout_seconds
-        for container_id in tuple(self._pending_cleanup_ids):
+        deadline = self._new_cleanup_deadline()
+        try:
+            containers = self._call(
+                lambda: self._docker_client.containers.list(
+                    all=True,
+                    filters={
+                        "label": [
+                            f"{_MANAGED_LABEL}=true",
+                            f"{_WORKER_LABEL}={self._worker_id}",
+                        ]
+                    },
+                ),
+                deadline,
+            )
+        except Exception:
+            return self.pending_cleanup_container_ids
+        for container in containers:
+            container_id = getattr(container, "id", None)
+            if isinstance(container_id, str) and container_id:
+                self._pending_cleanup_ids.add(container_id)
             try:
-                container = self._call(
-                    lambda value=container_id: (
-                        self._docker_client.containers.get(value)
-                    ),
-                    deadline,
-                )
                 self._call(
                     lambda value=container: value.remove(force=True), deadline
                 )
             except Exception:
                 continue
-            self._pending_cleanup_ids.discard(container_id)
+            if isinstance(container_id, str):
+                self._pending_cleanup_ids.discard(container_id)
         return self.pending_cleanup_container_ids
 
     def run(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        self.recover_pending_cleanup()
         _validate_payload(payload)
         archive = _build_input_archive(payload)
         container = None
@@ -97,8 +120,12 @@ class DockerStrategyRunnerClient:
                     cap_drop=["ALL"],
                     security_opt=[
                         "no-new-privileges:true",
-                        f"seccomp={self._seccomp_profile}",
+                        f"seccomp={self._seccomp_profile_json}",
                     ],
+                    labels={
+                        _MANAGED_LABEL: "true",
+                        _WORKER_LABEL: self._worker_id,
+                    },
                     nano_cpus=1_000_000_000,
                     mem_limit="512m",
                     memswap_limit="512m",
@@ -125,7 +152,7 @@ class DockerStrategyRunnerClient:
                     lambda: container.wait(timeout=wait_timeout), deadline
                 )
             except (TimeoutError, ReadTimeout) as exc:
-                self._best_effort_kill(container, deadline)
+                self._best_effort_kill(container, self._new_cleanup_deadline())
                 raise StrategyRunnerFailure(
                     FORECAST_TIMEOUT, "strategy execution timed out"
                 ) from exc
@@ -168,7 +195,7 @@ class DockerStrategyRunnerClient:
             raise
         except (TimeoutError, ReadTimeout) as exc:
             if container is not None:
-                self._best_effort_kill(container, deadline)
+                self._best_effort_kill(container, self._new_cleanup_deadline())
             raise StrategyRunnerFailure(
                 FORECAST_TIMEOUT, "strategy runner exceeded its deadline"
             ) from exc
@@ -178,7 +205,7 @@ class DockerStrategyRunnerClient:
             ) from exc
         finally:
             if container is not None:
-                self._best_effort_remove(container, deadline)
+                self._best_effort_remove(container, self._new_cleanup_deadline())
 
     def _call(self, operation: Any, deadline: float) -> Any:
         remaining = self._remaining(deadline)
@@ -212,6 +239,10 @@ class DockerStrategyRunnerClient:
         container_id = getattr(container, "id", None)
         if isinstance(container_id, str) and container_id:
             self._pending_cleanup_ids.add(container_id)
+
+    @staticmethod
+    def _new_cleanup_deadline() -> float:
+        return time.monotonic() + _CLEANUP_TIMEOUT_SECONDS
 
 
 def _validate_payload(payload: Mapping[str, object]) -> None:
@@ -257,3 +288,35 @@ def _build_input_archive(payload: Mapping[str, object]) -> bytes:
         info.mtime = 0
         archive.addfile(info, io.BytesIO(encoded))
     return stream.getvalue()
+
+
+def _load_trusted_seccomp_profile() -> str:
+    try:
+        raw_profile = TRUSTED_SECCOMP_PROFILE_PATH.read_bytes()
+    except OSError as exc:
+        raise ValueError("trusted seccomp profile cannot be read") from exc
+    if not raw_profile or len(raw_profile) > MAX_SECCOMP_PROFILE_BYTES:
+        raise ValueError("trusted seccomp profile size is invalid")
+    try:
+        profile = json.loads(
+            raw_profile,
+            parse_constant=_raise_invalid_seccomp_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("trusted seccomp profile is invalid JSON") from exc
+    if not isinstance(profile, dict):
+        raise ValueError("trusted seccomp profile must be a JSON object")
+    try:
+        return json.dumps(
+            profile,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("trusted seccomp profile is invalid") from exc
+
+
+def _raise_invalid_seccomp_constant(value: str) -> None:
+    raise ValueError(f"invalid JSON constant: {value}")

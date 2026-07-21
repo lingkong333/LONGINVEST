@@ -84,7 +84,7 @@ async def test_read_uses_session_and_maps_timeout(method) -> None:
 
     with pytest.raises(AppError) as caught:
         if method == "list":
-            await application.list()
+            await application.list(page=1, page_size=50)
         else:
             await getattr(application, method)("subscription-id")
 

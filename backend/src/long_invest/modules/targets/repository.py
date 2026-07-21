@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.targets.models import (
@@ -31,14 +31,35 @@ class TargetRepository:
             )
         )
 
-    async def list_bindings(self) -> tuple[SubscriptionTargetBinding, ...]:
+    async def list_bindings(
+        self, *, page: int = 1, page_size: int = 50
+    ) -> tuple[SubscriptionTargetBinding, ...]:
+        _validate_page(page, page_size)
         rows = await self._session.scalars(
-            select(SubscriptionTargetBinding).order_by(
-                SubscriptionTargetBinding.created_at,
-                SubscriptionTargetBinding.id,
+            select(SubscriptionTargetBinding)
+            .where(
+                SubscriptionTargetBinding.current_revision_id.is_not(None),
+                SubscriptionTargetBinding.activated_at.is_not(None),
             )
+            .order_by(
+                SubscriptionTargetBinding.created_at.desc(),
+                SubscriptionTargetBinding.id.desc(),
+            )
+            .limit(page_size)
+            .offset((page - 1) * page_size)
         )
         return tuple(rows.all())
+
+    async def count_bindings(self) -> int:
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(SubscriptionTargetBinding)
+            .where(
+                SubscriptionTargetBinding.current_revision_id.is_not(None),
+                SubscriptionTargetBinding.activated_at.is_not(None),
+            )
+        )
+        return int(total or 0)
 
     async def create_binding(
         self, subscription_id: UUID
@@ -84,3 +105,8 @@ class TargetRepository:
 
     async def flush(self) -> None:
         await self._session.flush()
+
+
+def _validate_page(page: int, page_size: int) -> None:
+    if page < 1 or page_size < 1 or page_size > 200:
+        raise ValueError("pagination is outside the supported range")

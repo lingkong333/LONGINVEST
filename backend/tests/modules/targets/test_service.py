@@ -34,8 +34,13 @@ class Repository:
     async def get_binding(self, _subscription_id):
         return self.binding
 
-    async def list_bindings(self):
-        return () if self.binding is None else (self.binding,)
+    async def list_bindings(self, *, page=1, page_size=50):
+        items = () if self.binding is None else (self.binding,)
+        start = (page - 1) * page_size
+        return items[start : start + page_size]
+
+    async def count_bindings(self):
+        return 0 if self.binding is None else 1
 
     async def create_binding(self, subscription_id):
         if self.binding is None:
@@ -239,6 +244,40 @@ async def test_replay_uses_audit_fact_for_exact_non_fixed_activation_time() -> N
 
 
 @pytest.mark.anyio
+async def test_transport_context_change_still_replays_exact_result() -> None:
+    target, *_ = service()
+    command = manual()
+    first = await target.set_manual(command)
+    retry = command.model_copy(
+        update={
+            "request_id": "req-retry",
+            "session_id": "session-retry",
+            "trusted_ip": "10.0.0.2",
+        }
+    )
+
+    replay = await target.set_manual(retry)
+
+    assert replay.replayed is True
+    assert replay.binding == first.binding
+    assert replay.revision == first.revision
+
+
+@pytest.mark.anyio
+async def test_actor_change_conflicts_with_replay() -> None:
+    target, *_ = service()
+    command = manual()
+    await target.set_manual(command)
+
+    with pytest.raises(AppError) as caught:
+        await target.set_manual(
+            command.model_copy(update={"actor_user_id": "different-user"})
+        )
+
+    assert caught.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize(
     "update",
     [
@@ -407,7 +446,7 @@ async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
     target, repository, *_ = service()
     repository.binding = None
 
-    assert await target.list() == ()
+    assert await target.list() == ((), 0)
     assert await target.get(SUBSCRIPTION_ID) is None
     assert await target.history(SUBSCRIPTION_ID) == ()
 
@@ -421,8 +460,18 @@ async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
     )
     created = await target.set_manual(manual())
 
-    assert await target.list() == (await target.get(SUBSCRIPTION_ID),)
+    assert await target.list() == ((await target.get(SUBSCRIPTION_ID),), 1)
+    assert await target.list(page=2, page_size=1) == ((), 1)
     assert (await target.get(SUBSCRIPTION_ID)).revision_id == created.revision.id
+
+
+@pytest.mark.anyio
+async def test_target_list_rejects_invalid_pagination() -> None:
+    target, *_ = service()
+
+    for page, page_size in ((0, 50), (1, 0), (1, 201)):
+        with pytest.raises(ValueError):
+            await target.list(page=page, page_size=page_size)
 
 
 @pytest.mark.anyio

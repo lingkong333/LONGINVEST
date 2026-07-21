@@ -117,13 +117,18 @@ class TargetService:
             request_digest=request_digest,
         )
 
-    async def list(self) -> tuple[TargetSnapshot, ...]:
+    async def list(
+        self, *, page: int = 1, page_size: int = 50
+    ) -> tuple[tuple[TargetSnapshot, ...], int]:
+        _validate_page(page, page_size)
         snapshots = []
-        for binding in await self._repository.list_bindings():
+        for binding in await self._repository.list_bindings(
+            page=page, page_size=page_size
+        ):
             snapshot = await self._snapshot(binding)
             if snapshot is not None:
                 snapshots.append(snapshot)
-        return tuple(snapshots)
+        return tuple(snapshots), await self._repository.count_bindings()
 
     async def get(self, subscription_id: UUID) -> TargetSnapshot | None:
         binding = await self._repository.get_binding(subscription_id)
@@ -424,7 +429,30 @@ def _revision_view(row) -> TargetRevisionView:
 
 
 def _request_digest(command) -> str:
-    return _hash(command.model_dump(mode="json"))
+    common = {
+        "subscription_id": str(command.subscription_id),
+        "reason": command.reason,
+        "expected_version": command.expected_version,
+        "actor_user_id": command.actor_user_id,
+        "switch_to_manual_confirmed": command.switch_to_manual_confirmed,
+    }
+    if isinstance(command, ManualTargetCommand):
+        payload = {
+            **common,
+            "action": "manual",
+            "target_date": command.target_date.isoformat(),
+            "values": command.values.model_dump(mode="json"),
+            "large_change_confirmed": command.large_change_confirmed,
+        }
+    elif isinstance(command, RestoreTargetCommand):
+        payload = {
+            **common,
+            "action": "restore",
+            "source_revision_id": str(command.source_revision_id),
+        }
+    else:
+        raise TypeError("unsupported target command")
+    return _hash(payload)
 
 
 def _content_hash(
@@ -458,3 +486,8 @@ def _audit_key(subscription_id, key) -> str:
 
 def _error(code, message, status_code):
     return AppError(code=code, message=message, status_code=status_code)
+
+
+def _validate_page(page: int, page_size: int) -> None:
+    if page < 1 or page_size < 1 or page_size > 200:
+        raise ValueError("pagination is outside the supported range")

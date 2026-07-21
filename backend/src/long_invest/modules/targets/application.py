@@ -35,8 +35,8 @@ class TargetApplication:
     async def restore(self, command):
         return await self._write("restore", command)
 
-    async def list(self):
-        return await self._read("list")
+    async def list(self, *, page: int = 1, page_size: int = 50):
+        return await self._read("list", page=page, page_size=page_size)
 
     async def get(self, subscription_id):
         return await self._read("get", subscription_id)
@@ -44,7 +44,7 @@ class TargetApplication:
     async def history(self, subscription_id):
         return await self._read("history", subscription_id)
 
-    async def _read(self, method, *args):
+    async def _read(self, method, *args, **kwargs):
         try:
             async with self._database.session() as session:
                 service = self._service_factory(
@@ -53,7 +53,7 @@ class TargetApplication:
                     audit=self._audit_factory(session),
                     events=self._event_factory(session),
                 )
-                return await getattr(service, method)(*args)
+                return await getattr(service, method)(*args, **kwargs)
         except AppError:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:

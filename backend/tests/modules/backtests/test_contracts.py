@@ -84,7 +84,9 @@ def test_backtest_contracts_expose_frozen_replay_snapshots() -> None:
         id=uuid4(),
         mode=BacktestMode.SINGLE,
         universe_snapshot=(
-            BacktestUniverseEntry(security_id=uuid4(), symbol="600000.SH"),
+            BacktestUniverseEntry(
+                security_id=uuid4(), symbol="600000.SH", name="浦发银行"
+            ),
         ),
         universe_hash="f" * 64,
         date_range=BacktestDateRange(
@@ -126,8 +128,12 @@ def test_backtest_modes_are_exact_and_single_scope_contains_one_security() -> No
         "id": uuid4(),
         "mode": BacktestMode.SINGLE,
         "universe_snapshot": (
-            BacktestUniverseEntry(security_id=uuid4(), symbol="600000.SH"),
-            BacktestUniverseEntry(security_id=uuid4(), symbol="000001.SZ"),
+            BacktestUniverseEntry(
+                security_id=uuid4(), symbol="600000.SH", name="浦发银行"
+            ),
+            BacktestUniverseEntry(
+                security_id=uuid4(), symbol="000001.SZ", name="平安银行"
+            ),
         ),
         "universe_hash": "f" * 64,
         "date_range": BacktestDateRange(
@@ -202,7 +208,9 @@ def test_task_detail_aggregates_matching_training_and_test_snapshots() -> None:
         id=uuid4(),
         mode=BacktestMode.SINGLE,
         universe_snapshot=(
-            BacktestUniverseEntry(security_id=uuid4(), symbol="600000.SH"),
+            BacktestUniverseEntry(
+                security_id=uuid4(), symbol="600000.SH", name="浦发银行"
+            ),
         ),
         universe_hash="f" * 64,
         date_range=BacktestDateRange(

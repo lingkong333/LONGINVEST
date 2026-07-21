@@ -132,6 +132,64 @@ class BacktestSignalRulePort(Protocol):
 class BacktestUniverseEntry(StrictContract):
     security_id: UUID
     symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    name: str = Field(min_length=1, max_length=100)
+
+
+class BacktestCreateRequest(StrictContract):
+    symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    date_range: BacktestDateRange
+    strategy_version_id: UUID | None = None
+    draft_id: UUID | None = None
+    draft_version: int | None = Field(default=None, ge=1)
+    strategy_metadata: Mapping[str, Any] | None = None
+    parameter_schema: Mapping[str, Any] | None = None
+    parameter_snapshot: Mapping[str, Any]
+    initial_capital: Decimal = Field(gt=0)
+
+    @field_validator(
+        "parameter_snapshot", "strategy_metadata", "parameter_schema"
+    )
+    @classmethod
+    def freeze_creation_mapping(
+        cls, value: Mapping[str, Any] | None
+    ) -> Mapping[str, Any] | None:
+        return freeze_json_mapping(value) if value is not None else None
+
+    @model_validator(mode="after")
+    def validate_strategy_choice(self) -> BacktestCreateRequest:
+        has_version = self.strategy_version_id is not None
+        has_draft = self.draft_id is not None or self.draft_version is not None
+        if has_version == has_draft:
+            raise ValueError("choose one strategy version or draft")
+        if has_draft and (
+            self.draft_id is None
+            or self.draft_version is None
+            or self.strategy_metadata is None
+            or self.parameter_schema is None
+        ):
+            raise ValueError("draft backtest requires frozen metadata and schema")
+        if has_version and (
+            self.strategy_metadata is not None or self.parameter_schema is not None
+        ):
+            raise ValueError("published strategy facts are resolved by the server")
+        return self
+
+
+class BacktestCreationSnapshotPort(Protocol):
+    async def resolve_creation_snapshot(
+        self, *, task_id: UUID, request: BacktestCreateRequest
+    ) -> BacktestTaskSnapshot: ...
+
+
+class BacktestStrategyExecution(StrictContract):
+    strategy_id: UUID
+    source_code: str = Field(min_length=1)
+
+
+class BacktestStrategyExecutionPort(Protocol):
+    async def resolve_execution(
+        self, task: BacktestTaskSnapshot
+    ) -> BacktestStrategyExecution: ...
 
 
 class BacktestTaskSnapshot(StrictContract):

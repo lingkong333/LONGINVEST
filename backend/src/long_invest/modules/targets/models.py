@@ -237,15 +237,19 @@ class TargetReview(Base):
         ForeignKey("target_revision.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    baseline_revision_id: Mapped[UUID | None] = mapped_column(
-        PG_UUID(as_uuid=True), ForeignKey("target_revision.id", ondelete="RESTRICT")
+    baseline_revision_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("target_revision.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
-    low_strong_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
-    low_watch_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
-    high_watch_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
-    high_strong_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    low_strong_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    low_watch_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    high_watch_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    high_strong_change: Mapped[Decimal] = mapped_column(
+        Numeric(20, 6), nullable=False
+    )
     reviewer_user_id: Mapped[str | None] = mapped_column(String(64))
     review_comment: Mapped[str | None] = mapped_column(String(500))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

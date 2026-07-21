@@ -19,8 +19,10 @@ from long_invest.modules.backtests.contracts import (
     BacktestPositionStatus,
     BacktestSignalInput,
     BacktestTargetAdjustmentView,
+    BacktestTaskDetailView,
     BacktestTaskSnapshot,
     BacktestTaskStatus,
+    BacktestTestDataSnapshotView,
     BacktestTradeView,
     BacktestUniverseEntry,
 )
@@ -183,6 +185,107 @@ def test_forecast_snapshot_freezes_training_provenance_and_diagnostics() -> None
         BacktestForecastSnapshotView.model_validate(
             snapshot.model_dump() | {"training_fetched_at": datetime(2026, 7, 21)}
         )
+
+
+def test_task_detail_aggregates_matching_training_and_test_snapshots() -> None:
+    item_id = uuid4()
+    fetched_at = datetime(2026, 7, 21, 9, tzinfo=UTC)
+    task = BacktestTaskSnapshot(
+        id=uuid4(),
+        mode=BacktestMode.SINGLE,
+        universe_snapshot=(
+            BacktestUniverseEntry(security_id=uuid4(), symbol="600000.SH"),
+        ),
+        universe_hash="f" * 64,
+        date_range=BacktestDateRange(
+            training_start_date=date(2024, 1, 1),
+            training_end_date=date(2024, 12, 31),
+            test_start_date=date(2025, 1, 1),
+            test_end_date=date(2025, 12, 31),
+        ),
+        strategy_version_id=uuid4(),
+        draft_source_code=None,
+        source_code_hash="a" * 64,
+        parameter_snapshot={},
+        parameter_hash="b" * 64,
+        environment_version="runner-1",
+        runner_image_digest="sha256:" + "d" * 64,
+        strategy_api_version="1.0",
+        rule_version="rules-1",
+        hysteresis_ratio=Decimal("0.01"),
+        minimum_hysteresis=Decimal("0.01"),
+        initial_capital=Decimal("100000"),
+        price_basis="QFQ_AS_OF",
+        data_source="EASTMONEY",
+    )
+    training = BacktestForecastSnapshotView(
+        item_id=item_id,
+        training_start_date=date(2024, 1, 1),
+        training_end_date=date(2024, 12, 31),
+        training_row_count=240,
+        training_fetched_at=fetched_at,
+        training_data_hash="a" * 64,
+        source_code_hash="b" * 64,
+        parameter_hash="c" * 64,
+        values=TargetValues(
+            low_strong="8", low_watch="9", high_watch="11", high_strong="12"
+        ),
+        diagnostics={},
+        environment_version="runner-1",
+        runner_image_digest="sha256:" + "d" * 64,
+        price_basis="QFQ_AS_OF",
+        frozen_at=fetched_at,
+    )
+    test_data = BacktestTestDataSnapshotView(
+        item_id=item_id,
+        fetched_at=fetched_at,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31),
+        row_count=240,
+        data_hash="e" * 64,
+        price_basis="QFQ_AS_OF",
+    )
+    detail = BacktestTaskDetailView(
+        task_snapshot=task,
+        training_snapshots=(training,),
+        test_snapshots=(test_data,),
+    )
+
+    assert detail.training_snapshots[0].item_id == detail.test_snapshots[0].item_id
+    with pytest.raises(ValidationError):
+        BacktestTaskDetailView(
+            task_snapshot=task,
+            training_snapshots=(training,),
+            test_snapshots=(
+                BacktestTestDataSnapshotView(
+                    **(test_data.model_dump() | {"item_id": uuid4()})
+                ),
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"fetched_at": datetime(2026, 7, 21, 9)},
+        {"start_date": date(2025, 2, 1), "end_date": date(2025, 1, 1)},
+        {"row_count": 0},
+        {"data_hash": "not-a-hash"},
+        {"price_basis": ""},
+    ],
+)
+def test_test_data_snapshot_is_strict(overrides: dict[str, object]) -> None:
+    values = {
+        "item_id": uuid4(),
+        "fetched_at": datetime(2026, 7, 21, 9, tzinfo=UTC),
+        "start_date": date(2025, 1, 1),
+        "end_date": date(2025, 12, 31),
+        "row_count": 240,
+        "data_hash": "e" * 64,
+        "price_basis": "QFQ_AS_OF",
+    }
+    with pytest.raises(ValidationError):
+        BacktestTestDataSnapshotView(**(values | overrides))
 
 
 def test_target_adjustment_rejects_publication_after_effective_time() -> None:

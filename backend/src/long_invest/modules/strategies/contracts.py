@@ -70,6 +70,21 @@ class StrategyLifecycleStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class ValidationRunStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
+class StrategyRunStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
 class StrategyLifecycleErrorCode(StrEnum):
     STRATEGY_VERSION_CONFLICT = "STRATEGY_VERSION_CONFLICT"
     STRATEGY_NOT_READY = "STRATEGY_NOT_READY"
@@ -200,10 +215,10 @@ class StrategyVersionView(StrictContract):
     environment_version: str = Field(min_length=1)
     runner_image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     source_code_hash: str = Field(min_length=64, max_length=64)
-    git_commit: str = Field(min_length=7, max_length=64)
-    validation_run_id: UUID
+    git_commit: str | None = Field(default=None, min_length=7, max_length=64)
+    validation_run_id: UUID | None = None
     status: StrategyLifecycleStatus
-    published_at: AwareDatetime
+    published_at: AwareDatetime | None = None
     created_at: AwareDatetime
 
     @field_validator("metadata", "parameter_schema")
@@ -215,17 +230,44 @@ class StrategyVersionView(StrictContract):
     def serialize_release_mapping(self, value: Mapping[str, Any]) -> dict[str, Any]:
         return _deep_thaw(value)
 
+    @model_validator(mode="after")
+    def validate_publication_fields(self) -> StrategyVersionView:
+        version_statuses = {
+            StrategyLifecycleStatus.PUBLISHING,
+            StrategyLifecycleStatus.PUBLISHED,
+            StrategyLifecycleStatus.PUBLISH_FAILED,
+            StrategyLifecycleStatus.ARCHIVED,
+        }
+        if self.status not in version_statuses:
+            raise ValueError("strategy version has an invalid lifecycle status")
+        publication_fields = (
+            self.git_commit,
+            self.validation_run_id,
+            self.published_at,
+        )
+        if self.status in {
+            StrategyLifecycleStatus.PUBLISHED,
+            StrategyLifecycleStatus.ARCHIVED,
+        } and any(value is None for value in publication_fields):
+            raise ValueError("published strategy version requires publication fields")
+        if self.status in {
+            StrategyLifecycleStatus.PUBLISHING,
+            StrategyLifecycleStatus.PUBLISH_FAILED,
+        } and self.published_at is not None:
+            raise ValueError("unpublished strategy version cannot have published_at")
+        return self
+
 
 class StrategyValidationRunView(StrictContract):
     id: UUID
-    status: StrategyLifecycleStatus
+    status: ValidationRunStatus
     error_code: StrategyLifecycleErrorCode | None = None
 
 
 class StrategyRunView(StrictContract):
     id: UUID
     strategy_version_id: UUID
-    status: StrategyLifecycleStatus
+    status: StrategyRunStatus
 
 
 class StrategyForecastPort(Protocol):

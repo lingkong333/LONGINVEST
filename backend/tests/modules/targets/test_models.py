@@ -142,3 +142,11 @@ def test_target_calculation_and_review_enforce_status_and_references() -> None:
     assert {
         "target_revision.id",
     } <= _foreign_key_targets(TargetReview)
+    for field in (
+        "baseline_revision_id",
+        "low_strong_change",
+        "low_watch_change",
+        "high_watch_change",
+        "high_strong_change",
+    ):
+        assert TargetReview.__table__.c[field].nullable is False

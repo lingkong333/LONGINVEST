@@ -201,17 +201,31 @@ class TargetCalculationRunView(FrozenParametersContract):
     def serialize_resource_usage(self, value: Mapping[str, Any]) -> dict[str, Any]:
         return _deep_thaw(value)
 
+    @model_validator(mode="after")
+    def validate_training_range(self) -> TargetCalculationRunView:
+        has_start = self.training_start_date is not None
+        has_end = self.training_end_date is not None
+        if has_start != has_end:
+            raise ValueError("training start and end dates must be provided together")
+        if (
+            self.training_start_date is not None
+            and self.training_end_date is not None
+            and self.training_start_date > self.training_end_date
+        ):
+            raise ValueError("training start date must not be after end date")
+        return self
+
 
 class TargetReviewView(StrictContract):
     id: UUID
     candidate_revision_id: UUID
-    baseline_revision_id: UUID | None
+    baseline_revision_id: UUID
     status: TargetReviewStatus
     reason: str = Field(min_length=1, max_length=500)
-    low_strong_change: Decimal | None = None
-    low_watch_change: Decimal | None = None
-    high_watch_change: Decimal | None = None
-    high_strong_change: Decimal | None = None
+    low_strong_change: Decimal
+    low_watch_change: Decimal
+    high_watch_change: Decimal
+    high_strong_change: Decimal
     reviewer_user_id: str | None = None
     review_comment: str | None = None
     reviewed_at: AwareDatetime | None = None

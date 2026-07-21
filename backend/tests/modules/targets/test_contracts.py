@@ -66,9 +66,13 @@ def test_strategy_target_calculation_and_review_views_are_frozen() -> None:
     review = TargetReviewView(
         id=uuid4(),
         candidate_revision_id=uuid4(),
-        baseline_revision_id=None,
+        baseline_revision_id=uuid4(),
         status=TargetReviewStatus.PENDING,
         reason="large change",
+        low_strong_change=Decimal("0.1"),
+        low_watch_change=Decimal("0.1"),
+        high_watch_change=Decimal("0.1"),
+        high_strong_change=Decimal("0.1"),
         created_at=datetime(2026, 7, 21, tzinfo=UTC),
     )
     assert run.status is TargetCalculationStatus.SUCCEEDED
@@ -104,9 +108,13 @@ def test_decided_target_review_requires_reviewer_comment_and_time(
     base = {
         "id": uuid4(),
         "candidate_revision_id": uuid4(),
-        "baseline_revision_id": None,
+        "baseline_revision_id": uuid4(),
         "status": status,
         "reason": "large change",
+        "low_strong_change": Decimal("0.1"),
+        "low_watch_change": Decimal("0.1"),
+        "high_watch_change": Decimal("0.1"),
+        "high_strong_change": Decimal("0.1"),
         "created_at": datetime(2026, 7, 21, tzinfo=UTC),
     }
     for missing in ("reviewer_user_id", "review_comment", "reviewed_at"):
@@ -131,12 +139,68 @@ def test_undecided_target_review_rejects_decision_metadata(
         TargetReviewView(
             id=uuid4(),
             candidate_revision_id=uuid4(),
-            baseline_revision_id=None,
+            baseline_revision_id=uuid4(),
             status=status,
             reason="large change",
+            low_strong_change=Decimal("0.1"),
+            low_watch_change=Decimal("0.1"),
+            high_watch_change=Decimal("0.1"),
+            high_strong_change=Decimal("0.1"),
             reviewer_user_id="reviewer-1",
             review_comment="checked",
             reviewed_at=datetime(2026, 7, 21, 1, tzinfo=UTC),
+            created_at=datetime(2026, 7, 21, tzinfo=UTC),
+        )
+
+
+@pytest.mark.parametrize(
+    "missing",
+    [
+        "baseline_revision_id",
+        "low_strong_change",
+        "low_watch_change",
+        "high_watch_change",
+        "high_strong_change",
+    ],
+)
+def test_target_review_requires_complete_baseline_change_snapshot(missing: str) -> None:
+    values = {
+        "id": uuid4(),
+        "candidate_revision_id": uuid4(),
+        "baseline_revision_id": uuid4(),
+        "status": TargetReviewStatus.PENDING,
+        "reason": "large change",
+        "low_strong_change": Decimal("0.1"),
+        "low_watch_change": Decimal("0.1"),
+        "high_watch_change": Decimal("0.1"),
+        "high_strong_change": Decimal("0.1"),
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC),
+    }
+    values[missing] = None
+    with pytest.raises(ValidationError):
+        TargetReviewView(**values)
+
+
+@pytest.mark.parametrize(
+    ("start", "end"),
+    [
+        (date(2025, 1, 1), None),
+        (None, date(2025, 1, 31)),
+        (date(2025, 2, 1), date(2025, 1, 31)),
+    ],
+)
+def test_target_calculation_training_range_is_paired_and_ordered(
+    start: date | None, end: date | None
+) -> None:
+    with pytest.raises(ValidationError):
+        TargetCalculationRunView(
+            id=uuid4(),
+            subscription_id=uuid4(),
+            strategy_version_id=uuid4(),
+            status=TargetCalculationStatus.PENDING,
+            parameter_snapshot={},
+            training_start_date=start,
+            training_end_date=end,
             created_at=datetime(2026, 7, 21, tzinfo=UTC),
         )
 

@@ -238,6 +238,40 @@ class BacktestForecastSnapshotView(StrictContract):
         return self
 
 
+class BacktestTestDataSnapshotView(StrictContract):
+    item_id: UUID
+    fetched_at: AwareDatetime
+    start_date: date
+    end_date: date
+    row_count: int = Field(gt=0)
+    data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    price_basis: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_range(self) -> BacktestTestDataSnapshotView:
+        if self.start_date > self.end_date:
+            raise ValueError("test data range is invalid")
+        return self
+
+
+class BacktestTaskDetailView(StrictContract):
+    task_snapshot: BacktestTaskSnapshot
+    training_snapshots: tuple[BacktestForecastSnapshotView, ...]
+    test_snapshots: tuple[BacktestTestDataSnapshotView, ...]
+
+    @model_validator(mode="after")
+    def validate_data_snapshot_pairs(self) -> BacktestTaskDetailView:
+        training_ids = [snapshot.item_id for snapshot in self.training_snapshots]
+        test_ids = [snapshot.item_id for snapshot in self.test_snapshots]
+        if not training_ids or len(set(training_ids)) != len(training_ids):
+            raise ValueError("training snapshots must be nonempty and unique")
+        if not test_ids or len(set(test_ids)) != len(test_ids):
+            raise ValueError("test snapshots must be nonempty and unique")
+        if set(training_ids) != set(test_ids):
+            raise ValueError("training and test snapshots must describe the same items")
+        return self
+
+
 class BacktestTargetAdjustmentView(StrictContract):
     item_id: UUID
     event_date: date

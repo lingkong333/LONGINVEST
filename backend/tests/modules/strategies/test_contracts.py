@@ -16,8 +16,12 @@ from long_invest.modules.strategies.contracts import (
     StrategyLifecycleStatus,
     StrategyReadiness,
     StrategyReadinessStatus,
+    StrategyRunStatus,
+    StrategyRunView,
+    StrategyValidationRunView,
     StrategyVersionView,
     TrainingDataSnapshot,
+    ValidationRunStatus,
 )
 from long_invest.modules.targets.contracts import TargetValues
 
@@ -151,6 +155,34 @@ def test_strategy_lifecycle_statuses_and_error_codes_are_complete() -> None:
     }
 
 
+def test_validation_and_strategy_run_statuses_match_persistence_constraints() -> None:
+    assert {status.value for status in ValidationRunStatus} == {
+        "PENDING",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+    }
+    assert {status.value for status in StrategyRunStatus} == {
+        "PENDING",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELED",
+    }
+    validation = StrategyValidationRunView(
+        id=uuid4(), status=ValidationRunStatus.SUCCEEDED
+    )
+    run = StrategyRunView(
+        id=uuid4(),
+        strategy_version_id=uuid4(),
+        status=StrategyRunStatus.CANCELED,
+    )
+    assert validation.status is ValidationRunStatus.SUCCEEDED
+    assert run.status is StrategyRunStatus.CANCELED
+    with pytest.raises(ValidationError):
+        StrategyValidationRunView(id=uuid4(), status=StrategyLifecycleStatus.PUBLISHED)
+
+
 def test_strategy_nested_frozen_values_dump_as_json() -> None:
     request = StrategyForecastRequest(
         strategy_version_id=uuid4(),
@@ -223,3 +255,54 @@ def test_strategy_version_view_is_a_complete_immutable_release_snapshot() -> Non
     assert version.validation_run_id == validation_run_id
     with pytest.raises(ValidationError):
         version.source_code = "changed"
+
+
+@pytest.mark.parametrize(
+    "status",
+    [StrategyLifecycleStatus.PUBLISHING, StrategyLifecycleStatus.PUBLISH_FAILED],
+)
+def test_unpublished_strategy_version_allows_pending_publication_fields(
+    status: StrategyLifecycleStatus,
+) -> None:
+    version = StrategyVersionView(
+        id=uuid4(),
+        strategy_id=uuid4(),
+        version_no=1,
+        source_code="def calculate_targets(history, params, context): ...",
+        metadata={},
+        parameter_schema={"type": "object"},
+        environment_version="runner-1",
+        runner_image_digest="sha256:" + "d" * 64,
+        source_code_hash="a" * 64,
+        git_commit=None,
+        validation_run_id=None,
+        status=status,
+        published_at=None,
+        created_at=datetime(2026, 7, 21, 9, tzinfo=UTC),
+    )
+    assert version.published_at is None
+
+
+@pytest.mark.parametrize("missing", ["git_commit", "validation_run_id", "published_at"])
+def test_published_strategy_version_requires_complete_publication_fields(
+    missing: str,
+) -> None:
+    values = {
+        "id": uuid4(),
+        "strategy_id": uuid4(),
+        "version_no": 1,
+        "source_code": "def calculate_targets(history, params, context): ...",
+        "metadata": {},
+        "parameter_schema": {"type": "object"},
+        "environment_version": "runner-1",
+        "runner_image_digest": "sha256:" + "d" * 64,
+        "source_code_hash": "a" * 64,
+        "git_commit": "b" * 40,
+        "validation_run_id": uuid4(),
+        "status": StrategyLifecycleStatus.PUBLISHED,
+        "published_at": datetime(2026, 7, 21, 10, tzinfo=UTC),
+        "created_at": datetime(2026, 7, 21, 9, tzinfo=UTC),
+    }
+    values[missing] = None
+    with pytest.raises(ValidationError):
+        StrategyVersionView(**values)

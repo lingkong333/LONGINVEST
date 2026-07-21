@@ -31,6 +31,9 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
     assert settings.watchdog_scan_interval_seconds == 10.0
     assert settings.outbox_lease_timeout_seconds == 60
     assert settings.run_stale_timeout_seconds == 60
+    assert settings.strategy_git_path == "/var/lib/long-invest/strategies"
+    assert settings.strategy_environment_version == "python-3.12"
+    assert settings.strategy_runner_image_digest == ""
 
 
 def test_settings_accept_longinvest_environment_prefix(monkeypatch) -> None:

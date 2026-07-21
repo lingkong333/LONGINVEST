@@ -42,6 +42,9 @@ class AppSettings(BaseSettings):
     outbox_lease_timeout_seconds: int = Field(default=60, ge=15, le=600)
     run_stale_timeout_seconds: int = Field(default=60, ge=30, le=600)
     job_heartbeat_interval_seconds: float = Field(default=15, ge=5, le=30)
+    strategy_git_path: str = "/var/lib/long-invest/strategies"
+    strategy_environment_version: str = "python-3.12"
+    strategy_runner_image_digest: str = ""
 
 
 @lru_cache

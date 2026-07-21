@@ -30,6 +30,7 @@ from long_invest.modules.qfq.api import router as qfq_router
 from long_invest.modules.quotes.api import router as quotes_router
 from long_invest.modules.securities.api import router as securities_router
 from long_invest.modules.signals.api import router as signals_router
+from long_invest.modules.strategies.api import router as strategies_router
 from long_invest.modules.targets.api import router as targets_router
 from long_invest.modules.watchlists.api import router as watchlists_router
 from long_invest.platform.config.settings import get_settings
@@ -77,5 +78,6 @@ def create_app() -> FastAPI:
     app.include_router(monitoring_router)
     app.include_router(targets_router)
     app.include_router(signals_router)
+    app.include_router(strategies_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

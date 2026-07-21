@@ -3,6 +3,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 from long_invest.modules.targets.models import (
     SubscriptionTargetBinding,
+    TargetCalculationRun,
+    TargetReview,
     TargetRevision,
 )
 
@@ -88,3 +90,20 @@ def test_target_binding_is_unique_and_constrained() -> None:
         and "MISSING" in str(item.sqltext)
         for item in SubscriptionTargetBinding.__table__.constraints
     )
+
+
+def test_target_calculation_and_review_records_are_owned_by_targets() -> None:
+    assert TargetCalculationRun.__tablename__ == "target_calculation_run"
+    assert TargetReview.__tablename__ == "target_review"
+    assert {
+        "subscription_id",
+        "strategy_version_id",
+        "parameter_snapshot",
+        "status",
+    } <= set(TargetCalculationRun.__table__.c.keys())
+    assert {
+        "candidate_revision_id",
+        "baseline_revision_id",
+        "status",
+        "reason",
+    } <= set(TargetReview.__table__.c.keys())

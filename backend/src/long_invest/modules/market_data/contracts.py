@@ -4,9 +4,10 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
+from decimal import Decimal
 from enum import StrEnum
-from typing import NoReturn
+from typing import NoReturn, Protocol
 from uuid import UUID
 
 from long_invest.modules.providers.contracts import validate_symbol
@@ -31,6 +32,31 @@ class QualityResolutionAction(StrEnum):
     INVALIDATE = "INVALIDATE"
     SELECT_SOURCE = "SELECT_SOURCE"
     REFETCH = "REFETCH"
+
+
+@dataclass(frozen=True, slots=True)
+class AdjustmentTimelineEntry:
+    event_date: date
+    source: str
+    adjustment_factor: Decimal
+    data_hash: str
+
+    def __post_init__(self) -> None:
+        _require_text(self.source, "调整来源")
+        if not self.adjustment_factor.is_finite() or self.adjustment_factor <= 0:
+            raise ValueError("adjustment factor must be finite and positive")
+        if len(self.data_hash) != 64:
+            raise ValueError("adjustment data hash must be sha256")
+
+
+class AdjustmentTimelinePort(Protocol):
+    async def get_adjustment_timeline(
+        self,
+        *,
+        security_id: UUID,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[AdjustmentTimelineEntry, ...]: ...
 
 
 def _require_text(value: str, field: str) -> None:

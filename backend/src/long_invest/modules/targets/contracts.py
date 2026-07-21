@@ -28,7 +28,11 @@ MAX_TARGET_PRICE = Decimal("1000000000000000000")
 
 class TargetSource(StrEnum):
     MANUAL = "MANUAL"
+    STRATEGY = "STRATEGY"
     RESTORED = "RESTORED"
+    DATA_CORRECTION = "DATA_CORRECTION"
+    STRATEGY_CHANGE = "STRATEGY_CHANGE"
+    PARAMETER_CHANGE = "PARAMETER_CHANGE"
 
 
 class TargetStatus(StrEnum):
@@ -39,6 +43,20 @@ class TargetStatus(StrEnum):
     ACTIVATING = "ACTIVATING"
     FAILED = "FAILED"
     MISSING = "MISSING"
+
+
+class TargetCalculationStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+
+
+class TargetReviewStatus(StrEnum):
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    SUPERSEDED = "SUPERSEDED"
 
 
 class TargetValues(StrictContract):
@@ -66,12 +84,7 @@ class TargetValues(StrictContract):
 
     @model_validator(mode="after")
     def validate_order(self) -> TargetValues:
-        if not (
-            self.low_strong
-            < self.low_watch
-            < self.high_watch
-            < self.high_strong
-        ):
+        if not (self.low_strong < self.low_watch < self.high_watch < self.high_strong):
             raise ValueError("target prices must be strictly increasing")
         return self
 
@@ -156,6 +169,24 @@ class TargetBindingView(StrictContract):
     version: int = Field(ge=1)
     activated_at: AwareDatetime | None = None
     stale_reason: str | None = None
+
+
+class TargetCalculationRunView(FrozenParametersContract):
+    id: UUID
+    subscription_id: UUID
+    strategy_version_id: UUID
+    status: TargetCalculationStatus
+    failure_code: str | None = None
+    created_at: AwareDatetime
+
+
+class TargetReviewView(StrictContract):
+    id: UUID
+    candidate_revision_id: UUID
+    baseline_revision_id: UUID | None
+    status: TargetReviewStatus
+    reason: str = Field(min_length=1, max_length=500)
+    created_at: AwareDatetime
 
 
 class TargetSnapshot(FrozenParametersContract):

@@ -10,6 +10,10 @@ from long_invest.modules.targets.contracts import (
     ManualTargetCommand,
     RestoreTargetCommand,
     TargetBindingView,
+    TargetCalculationRunView,
+    TargetCalculationStatus,
+    TargetReviewStatus,
+    TargetReviewView,
     TargetRevisionView,
     TargetSnapshot,
     TargetSource,
@@ -31,7 +35,14 @@ def _audit_fields() -> dict[str, object]:
 
 
 def test_target_enums_are_exact() -> None:
-    assert {item.value for item in TargetSource} == {"MANUAL", "RESTORED"}
+    assert {item.value for item in TargetSource} == {
+        "MANUAL",
+        "STRATEGY",
+        "RESTORED",
+        "DATA_CORRECTION",
+        "STRATEGY_CHANGE",
+        "PARAMETER_CHANGE",
+    }
     assert {item.value for item in TargetStatus} == {
         "READY",
         "STALE",
@@ -41,6 +52,29 @@ def test_target_enums_are_exact() -> None:
         "FAILED",
         "MISSING",
     }
+
+
+def test_strategy_target_calculation_and_review_views_are_frozen() -> None:
+    run = TargetCalculationRunView(
+        id=uuid4(),
+        subscription_id=uuid4(),
+        strategy_version_id=uuid4(),
+        status=TargetCalculationStatus.SUCCEEDED,
+        parameter_snapshot={"window": 20},
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    review = TargetReviewView(
+        id=uuid4(),
+        candidate_revision_id=uuid4(),
+        baseline_revision_id=None,
+        status=TargetReviewStatus.PENDING,
+        reason="large change",
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    assert run.status is TargetCalculationStatus.SUCCEEDED
+    assert review.status is TargetReviewStatus.PENDING
+    with pytest.raises(ValidationError):
+        review.reason = "changed"
 
 
 def test_target_values_quantize_half_up_and_are_frozen() -> None:

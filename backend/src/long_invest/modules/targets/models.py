@@ -27,19 +27,17 @@ from long_invest.platform.database.base import Base
 class TargetRevision(Base):
     __tablename__ = "target_revision"
     __table_args__ = (
-        UniqueConstraint(
-            "subscription_id", "revision_no", name="revision_number"
-        ),
-        UniqueConstraint(
-            "subscription_id", "idempotency_key", name="idempotency"
-        ),
+        UniqueConstraint("subscription_id", "revision_no", name="revision_number"),
+        UniqueConstraint("subscription_id", "idempotency_key", name="idempotency"),
         CheckConstraint("revision_no > 0", name="revision_positive"),
         CheckConstraint(
-            "source IN ('MANUAL','RESTORED')", name="source_valid"
+            "source IN ('MANUAL','STRATEGY','RESTORED','DATA_CORRECTION',"
+            "'STRATEGY_CHANGE','PARAMETER_CHANGE')",
+            name="source_valid",
         ),
         CheckConstraint(
             "(source = 'RESTORED' AND source_revision_id IS NOT NULL) OR "
-            "(source = 'MANUAL' AND source_revision_id IS NULL)",
+            "(source <> 'RESTORED' AND source_revision_id IS NULL)",
             name="source_revision_consistent",
         ),
         CheckConstraint(
@@ -152,4 +150,41 @@ class SubscriptionTargetBinding(Base):
         nullable=False,
         server_default=func.now(),
         onupdate=func.now(),
+    )
+
+
+class TargetCalculationRun(Base):
+    __tablename__ = "target_calculation_run"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    subscription_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
+    strategy_version_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+    parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    failure_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class TargetReview(Base):
+    __tablename__ = "target_review"
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    candidate_revision_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+    baseline_revision_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

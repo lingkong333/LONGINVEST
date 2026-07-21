@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -21,6 +21,15 @@ from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 
 
+class ValidationEvidenceVerifier(Protocol):
+    async def verify(self, evidence_snapshot: dict[str, Any]) -> bool: ...
+
+
+class FailClosedEvidenceVerifier:
+    async def verify(self, evidence_snapshot: dict[str, Any]) -> bool:
+        return False
+
+
 class StrategyApplication:
     def __init__(
         self,
@@ -32,7 +41,8 @@ class StrategyApplication:
         event_factory: Callable[..., Any] = StrategyOutboxAdapter,
         service_factory: Callable[..., Any] = StrategyService,
         environment_version: str = "python-3.12",
-        runner_image_digest: str = "sha256:" + "a" * 64,
+        runner_image_digest: str = "",
+        evidence_verifier: ValidationEvidenceVerifier | None = None,
     ) -> None:
         self._database = database
         self._git = git_store
@@ -42,6 +52,7 @@ class StrategyApplication:
         self._service_factory = service_factory
         self._environment_version = environment_version
         self._runner_image_digest = runner_image_digest
+        self._evidence_verifier = evidence_verifier or FailClosedEvidenceVerifier()
 
     async def list(self, **kwargs: Any):
         return await self._read("list", **kwargs)
@@ -140,7 +151,7 @@ class StrategyApplication:
             conflict_code="STRATEGY_VALIDATION_CONFLICT",
         )
 
-    async def complete_validation(
+    async def record_validation_result_from_worker(
         self,
         validation_run_id: UUID,
         *,
@@ -170,6 +181,17 @@ class StrategyApplication:
             conflict_code="STRATEGY_VERSION_CONFLICT",
         )
 
+    async def restore(
+        self, strategy_id: UUID, *, expected_version: int, **context: str
+    ):
+        return await self._write(
+            "restore",
+            strategy_id,
+            expected_version=expected_version,
+            context=self._context(context),
+            conflict_code="STRATEGY_VERSION_CONFLICT",
+        )
+
     async def publish(
         self,
         *,
@@ -179,21 +201,44 @@ class StrategyApplication:
         **context: str,
     ):
         command_context = self._context(context)
+        validation = await self._read(
+            "get_validation_evidence", validation_run_id
+        )
+        if not await self._evidence_verifier.verify(validation.evidence_snapshot):
+            raise AppError(
+                code="STRATEGY_VALIDATION_STALE",
+                message="发布前无法核实回测和验证事实",
+                status_code=409,
+            )
+        evidence_hash = StrategyService.hash_snapshot(
+            validation.evidence_snapshot
+        )
         evidence = PublishEvidence(
             validation_run_id=validation_run_id,
             expected_draft_version=expected_draft_version,
+            evidence_hash=evidence_hash,
         )
-        frozen = await self._write(
+        return await self._write(
             "begin_publish",
             strategy_id,
             evidence,
             command_context,
             conflict_code="STRATEGY_PUBLISH_FAILED",
         )
+
+    async def execute_publish(self, run_id: UUID):
+        frozen = await self._write(
+            "claim_publish_run",
+            run_id,
+            conflict_code="STRATEGY_PUBLISH_FAILED",
+        )
         version = frozen.version
+        if frozen.replayed and version.status == "PUBLISHED":
+            return version
+        command_context = self._worker_context(run_id)
         try:
             git_commit = self._git.publish(
-                strategy_id=str(strategy_id),
+                strategy_id=str(version.strategy_id),
                 version_no=version.version_no,
                 source_code=version.source_code,
                 source_code_hash=version.source_code_hash,
@@ -205,27 +250,31 @@ class StrategyApplication:
                     "validation_run_id": str(version.validation_run_id),
                 },
             )
+            if not self._git.verify_source(
+                strategy_id=str(version.strategy_id),
+                version_no=version.version_no,
+                commit=git_commit,
+                source_code_hash=version.source_code_hash,
+            ):
+                raise RuntimeError("published Git content does not match snapshot")
         except Exception as exc:
-            await self._mark_publish_failed(
-                strategy_id,
-                version.id,
+            await self._mark_publish_failed_run(
+                run_id,
                 "STRATEGY_GIT_FAILED",
                 context=command_context,
             )
             raise _publish_failed() from exc
         try:
             return await self._write(
-                "complete_publish",
-                strategy_id,
-                version.id,
+                "complete_publish_run",
+                run_id,
                 git_commit=git_commit,
                 context=command_context,
                 conflict_code="STRATEGY_PUBLISH_FAILED",
             )
         except Exception as exc:
-            await self._mark_publish_failed(
-                strategy_id,
-                version.id,
+            await self._mark_publish_failed_run(
+                run_id,
                 "STRATEGY_DATABASE_FAILED",
                 context=command_context,
             )
@@ -233,19 +282,40 @@ class StrategyApplication:
                 raise
             raise _publish_failed() from exc
 
-    async def _mark_publish_failed(
+    async def recover_publish_runs(self) -> list[dict[str, Any]]:
+        runs = await self._read("list_recoverable_publish_runs")
+        results: list[dict[str, Any]] = []
+        for run in runs:
+            try:
+                version = await self.execute_publish(run.id)
+                results.append(
+                    {
+                        "run_id": str(run.id),
+                        "status": "SUCCEEDED",
+                        "version_id": str(version.id),
+                    }
+                )
+            except AppError as exc:
+                results.append(
+                    {
+                        "run_id": str(run.id),
+                        "status": "FAILED",
+                        "error_code": exc.code,
+                    }
+                )
+        return results
+
+    async def _mark_publish_failed_run(
         self,
-        strategy_id: UUID,
-        version_id: UUID,
+        run_id: UUID,
         error_code: str,
         *,
         context: StrategyCommandContext,
     ) -> None:
         try:
             await self._write(
-                "fail_publish",
-                strategy_id,
-                version_id,
+                "fail_publish_run",
+                run_id,
                 error_code,
                 context=context,
                 conflict_code="STRATEGY_PUBLISH_FAILED",
@@ -305,6 +375,17 @@ class StrategyApplication:
             reason=values.get("reason", ""),
         )
 
+    @staticmethod
+    def _worker_context(run_id: UUID) -> StrategyCommandContext:
+        return StrategyCommandContext(
+            request_id=f"strategy-publish:{run_id}",
+            idempotency_key=f"strategy-publish:{run_id}",
+            actor_user_id="system:strategy-worker",
+            session_id="system:strategy-worker",
+            trusted_ip="127.0.0.1",
+            reason="执行已确认的策略发布任务",
+        )
+
 
 def get_strategy_application() -> StrategyApplication:
     settings = get_settings()
@@ -320,7 +401,7 @@ def get_strategy_application() -> StrategyApplication:
         runner_image_digest=getattr(
             settings,
             "strategy_runner_image_digest",
-            "sha256:" + "a" * 64,
+            "",
         ),
     )
 

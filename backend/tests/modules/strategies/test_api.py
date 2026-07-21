@@ -30,6 +30,17 @@ class Application:
             ),
         )
 
+    async def publish(self, **kwargs):
+        self.calls.append(kwargs)
+        return SimpleNamespace(
+            run=SimpleNamespace(id=uuid4(), status="PENDING"),
+            version=SimpleNamespace(id=uuid4()),
+        )
+
+    async def restore(self, strategy_id, **kwargs):
+        self.calls.append({"strategy_id": strategy_id, **kwargs})
+        return SimpleNamespace(id=strategy_id, name="策略", status="PUBLISHED")
+
 
 def client(application):
     app = FastAPI()
@@ -106,3 +117,37 @@ def test_publish_request_cannot_replace_validated_metadata_or_schema():
     )
 
     assert response.status_code == 422
+
+
+def test_publish_returns_accepted_run_without_executing_work_inline():
+    application = Application()
+    strategy_id = uuid4()
+
+    response = client(application).post(
+        f"/api/v1/strategies/{strategy_id}/publish",
+        headers={"Idempotency-Key": "publish-1"},
+        json={
+            "validation_run_id": str(uuid4()),
+            "expected_draft_version": 1,
+            "confirm": True,
+            "reason": "发布",
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["code"] == "STRATEGY_PUBLISH_REQUESTED"
+    assert response.json()["data"]["status"] == "PENDING"
+
+
+def test_archived_strategy_has_explicit_restore_api():
+    application = Application()
+    strategy_id = uuid4()
+
+    response = client(application).post(
+        f"/api/v1/strategies/{strategy_id}/restore",
+        headers={"Idempotency-Key": "restore-1"},
+        json={"expected_version": 3, "confirm": True, "reason": "恢复"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "PUBLISHED"

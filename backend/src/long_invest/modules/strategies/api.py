@@ -163,6 +163,23 @@ async def archive_strategy(
     return success_response(data=_strategy(row), code="STRATEGY_ARCHIVED")
 
 
+@router.post("/{strategy_id}/restore")
+async def restore_strategy(
+    strategy_id: UUID,
+    body: ArchiveStrategyRequest,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    _confirm(body)
+    row = await application.restore(
+        strategy_id,
+        expected_version=body.expected_version,
+        **_context(identity, key, body.reason),
+    )
+    return success_response(data=_strategy(row), code="STRATEGY_RESTORED")
+
+
 @router.get("/{strategy_id}/draft")
 async def get_draft(
     strategy_id: UUID, application: Application, _identity: ReadIdentity
@@ -259,7 +276,7 @@ async def get_draft_diff(
     return success_response(data={"diff": value})
 
 
-@router.post("/{strategy_id}/publish")
+@router.post("/{strategy_id}/publish", status_code=202)
 async def publish_strategy(
     strategy_id: UUID,
     body: PublishStrategyRequest,
@@ -268,13 +285,27 @@ async def publish_strategy(
     key: IdempotencyKey,
 ) -> dict[str, Any]:
     _confirm(body)
-    row = await application.publish(
+    publication = await application.publish(
         strategy_id=strategy_id,
         validation_run_id=body.validation_run_id,
         expected_draft_version=body.expected_draft_version,
         **_context(identity, key, body.reason),
     )
-    return success_response(data=_version(row), code="STRATEGY_PUBLISHED")
+    if publication.run is None:
+        raise AppError(
+            code="STRATEGY_PUBLISH_STATE_UNCERTAIN",
+            message="发布任务记录缺失",
+            status_code=503,
+        )
+    return success_response(
+        data={
+            "run_id": str(publication.run.id),
+            "version_id": str(publication.version.id),
+            "status": str(publication.run.status),
+        },
+        code="STRATEGY_PUBLISH_REQUESTED",
+        message="策略发布任务已提交",
+    )
 
 
 @router.post("/{strategy_id}/validate", status_code=202)

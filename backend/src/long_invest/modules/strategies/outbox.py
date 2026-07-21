@@ -25,7 +25,11 @@ class StrategyOutboxAdapter:
             topic=event.topic,
             aggregate_type="strategy",
             aggregate_id=str(event.strategy_id),
-            queue="domain-events",
+            queue=(
+                "strategy-publish"
+                if event.topic == "strategy.publish_requested"
+                else "domain-events"
+            ),
             payload={"event_type": event.topic, **event.payload},
             dedupe_key=event.dedupe_key,
         )

@@ -1,7 +1,9 @@
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
+from pathlib import Path
 
 import pytest
+from git.index.base import IndexFile
 
 from long_invest.modules.strategies.git_store import StrategyGitStore
 
@@ -20,7 +22,12 @@ def test_publish_commits_only_controlled_strategy_files(tmp_path):
 
     assert len(commit) == 40
     assert store.read_source("2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc", 1) == source
-    assert store.verify_source(commit, sha256(source.encode()).hexdigest())
+    assert store.verify_source(
+        strategy_id="2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc",
+        version_no=1,
+        commit=commit,
+        source_code_hash=sha256(source.encode()).hexdigest(),
+    )
 
     replay = store.publish(
         strategy_id="2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc",
@@ -43,6 +50,153 @@ def test_publish_rejects_hash_mismatch(tmp_path):
             source_code_hash="0" * 64,
             manifest={},
         )
+
+
+def test_retry_continues_after_git_commit_failed_with_files_already_written(
+    tmp_path, monkeypatch
+):
+    store = StrategyGitStore(tmp_path / "strategies")
+    source = "source"
+    original_commit = IndexFile.commit
+    calls = 0
+
+    def fail_once(index, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("interrupted before commit")
+        return original_commit(index, *args, **kwargs)
+
+    monkeypatch.setattr(IndexFile, "commit", fail_once)
+    values = {
+        "strategy_id": "2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc",
+        "version_no": 1,
+        "source_code": source,
+        "source_code_hash": sha256(source.encode()).hexdigest(),
+        "manifest": {},
+    }
+
+    with pytest.raises(OSError, match="interrupted"):
+        store.publish(**values)
+    commit = store.publish(**values)
+
+    assert len(commit) == 40
+
+
+def test_retry_rebuilds_controlled_file_after_interrupted_write(
+    tmp_path, monkeypatch
+):
+    store = StrategyGitStore(tmp_path / "strategies")
+    original_write = Path.write_text
+    calls = 0
+
+    def fail_once(path, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("interrupted write")
+        return original_write(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", fail_once)
+    values = {
+        "strategy_id": "2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc",
+        "version_no": 1,
+        "source_code": "source",
+        "source_code_hash": sha256(b"source").hexdigest(),
+        "manifest": {},
+    }
+
+    with pytest.raises(OSError, match="interrupted"):
+        store.publish(**values)
+    commit = store.publish(**values)
+
+    assert len(commit) == 40
+
+
+def test_retry_restages_after_index_add_failure(tmp_path, monkeypatch):
+    store = StrategyGitStore(tmp_path / "strategies")
+    original_add = IndexFile.add
+    calls = 0
+
+    def fail_once(index, *args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("interrupted add")
+        return original_add(index, *args, **kwargs)
+
+    monkeypatch.setattr(IndexFile, "add", fail_once)
+    values = {
+        "strategy_id": "2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc",
+        "version_no": 1,
+        "source_code": "source",
+        "source_code_hash": sha256(b"source").hexdigest(),
+        "manifest": {},
+    }
+
+    with pytest.raises(OSError, match="interrupted"):
+        store.publish(**values)
+    commit = store.publish(**values)
+
+    assert len(commit) == 40
+
+
+def test_same_version_with_different_content_is_never_rewritten(tmp_path):
+    store = StrategyGitStore(tmp_path / "strategies")
+    strategy_id = "2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc"
+    store.publish(
+        strategy_id=strategy_id,
+        version_no=1,
+        source_code="first",
+        source_code_hash=sha256(b"first").hexdigest(),
+        manifest={},
+    )
+
+    with pytest.raises(ValueError, match="different content"):
+        store.publish(
+            strategy_id=strategy_id,
+            version_no=1,
+            source_code="second",
+            source_code_hash=sha256(b"second").hexdigest(),
+            manifest={},
+        )
+
+
+def test_unrelated_staged_file_is_never_included_in_publication(tmp_path):
+    store = StrategyGitStore(tmp_path / "strategies")
+    unrelated = store._root / "unrelated.txt"
+    unrelated.write_text("do not commit", encoding="utf-8")
+    store._repo.index.add(["unrelated.txt"])
+
+    with pytest.raises(RuntimeError, match="unrelated staged"):
+        store.publish(
+            strategy_id="2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc",
+            version_no=1,
+            source_code="source",
+            source_code_hash=sha256(b"source").hexdigest(),
+            manifest={},
+        )
+
+
+def test_commit_verification_is_bound_to_exact_strategy_version_path(tmp_path):
+    store = StrategyGitStore(tmp_path / "strategies")
+    source_hash = sha256(b"same").hexdigest()
+    first = "2f26c42f-c1f6-47af-9ee8-1dd6e23f63cc"
+    second = "dc647b11-d72e-49f9-a1db-3742a2c43572"
+    commit = store.publish(
+        strategy_id=first,
+        version_no=1,
+        source_code="same",
+        source_code_hash=source_hash,
+        manifest={},
+    )
+
+    assert not store.verify_source(
+        strategy_id=second,
+        version_no=1,
+        commit=commit,
+        source_code_hash=source_hash,
+    )
 
 
 def test_concurrent_publications_each_commit_their_own_source(tmp_path):

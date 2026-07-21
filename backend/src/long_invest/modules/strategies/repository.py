@@ -9,6 +9,7 @@ from long_invest.modules.strategies.models import (
     Strategy,
     StrategyDraft,
     StrategyDraftRevision,
+    StrategyRun,
     StrategyValidationRun,
     StrategyVersion,
 )
@@ -159,6 +160,23 @@ class StrategyRepository:
             update(Strategy).where(Strategy.id == strategy_id).values(name=name)
         )
 
+    async def rename_strategy(
+        self, strategy_id: UUID, *, name: str, expected_version: int
+    ) -> StrategyDraft | None:
+        draft = await self.session.scalar(
+            update(StrategyDraft)
+            .where(
+                StrategyDraft.strategy_id == strategy_id,
+                StrategyDraft.draft_version == expected_version,
+            )
+            .values(draft_version=StrategyDraft.draft_version + 1)
+            .returning(StrategyDraft)
+        )
+        if draft is None:
+            return None
+        await self.set_strategy_name(strategy_id, name)
+        return draft
+
     async def get_validation_run(
         self, validation_run_id: UUID, *, for_update: bool = False
     ) -> StrategyValidationRun | None:
@@ -233,6 +251,61 @@ class StrategyRepository:
         self.session.add(version)
         await self.session.flush()
 
+    async def add_strategy_run(self, run: StrategyRun) -> None:
+        self.session.add(run)
+        await self.session.flush()
+
+    async def get_strategy_run(
+        self, run_id: UUID, *, for_update: bool = False
+    ) -> StrategyRun | None:
+        statement = select(StrategyRun).where(StrategyRun.id == run_id)
+        if for_update:
+            statement = statement.with_for_update()
+        return await self.session.scalar(statement)
+
+    async def get_publish_run_for_version(
+        self, version_id: UUID, *, for_update: bool = False
+    ) -> StrategyRun | None:
+        statement = select(StrategyRun).where(
+            StrategyRun.strategy_version_id == version_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return await self.session.scalar(statement)
+
+    async def set_strategy_run_status(self, run_id: UUID, status: str) -> None:
+        await self.session.execute(
+            update(StrategyRun).where(StrategyRun.id == run_id).values(status=status)
+        )
+
+    async def list_recoverable_publish_runs(self) -> list[StrategyRun]:
+        rows = await self.session.scalars(
+            select(StrategyRun)
+            .join(
+                StrategyVersion,
+                StrategyVersion.id == StrategyRun.strategy_version_id,
+            )
+            .where(
+                StrategyRun.status.in_(("PENDING", "RUNNING", "FAILED")),
+                StrategyVersion.status.in_(("PUBLISHING", "PUBLISH_FAILED")),
+            )
+            .order_by(StrategyRun.id)
+        )
+        return list(rows.all())
+
+    async def latest_published_version(
+        self, strategy_id: UUID
+    ) -> StrategyVersion | None:
+        return await self.session.scalar(
+            select(StrategyVersion)
+            .where(
+                StrategyVersion.strategy_id == strategy_id,
+                StrategyVersion.status.in_(("PUBLISHED", "ARCHIVED")),
+            )
+            .order_by(StrategyVersion.version_no.desc())
+            .limit(1)
+        )
+
     async def get_version(
         self, strategy_id: UUID, version_id: UUID, *, for_update: bool = False
     ) -> StrategyVersion | None:
@@ -240,6 +313,14 @@ class StrategyRepository:
             StrategyVersion.strategy_id == strategy_id,
             StrategyVersion.id == version_id,
         )
+        if for_update:
+            statement = statement.with_for_update()
+        return await self.session.scalar(statement)
+
+    async def get_version_by_id(
+        self, version_id: UUID, *, for_update: bool = False
+    ) -> StrategyVersion | None:
+        statement = select(StrategyVersion).where(StrategyVersion.id == version_id)
         if for_update:
             statement = statement.with_for_update()
         return await self.session.scalar(statement)

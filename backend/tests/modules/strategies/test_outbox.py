@@ -45,3 +45,21 @@ def test_outbox_uses_transaction_session_and_stable_dedupe_key():
             "dedupe_key": "strategy:dedupe",
         }
     ]
+
+
+def test_publish_request_is_dispatched_to_publish_worker_queue():
+    writer = Writer()
+    adapter = StrategyOutboxAdapter(SimpleNamespace(), writer=writer)
+
+    asyncio.run(
+        adapter.emit(
+            StrategyEvent(
+                topic="strategy.publish_requested",
+                strategy_id=uuid4(),
+                dedupe_key="strategy:publish",
+                payload={"run_id": str(uuid4())},
+            )
+        )
+    )
+
+    assert writer.calls[0]["queue"] == "strategy-publish"

@@ -33,6 +33,7 @@ class FakeRepository:
         self.revisions = {}
         self.versions = {}
         self.validation_runs = {}
+        self.runs = {}
 
     async def list_strategies(self, **_kwargs):
         rows = list(self.strategies.values())
@@ -90,6 +91,14 @@ class FakeRepository:
     async def set_strategy_name(self, strategy_id, name):
         self.strategies[strategy_id].name = name
 
+    async def rename_strategy(self, strategy_id, *, name, expected_version):
+        draft = self.drafts[strategy_id]
+        if draft.draft_version != expected_version:
+            return None
+        draft.draft_version += 1
+        self.strategies[strategy_id].name = name
+        return draft
+
     async def get_validation_run(self, validation_run_id, *, for_update=False):
         return self.validation_runs.get(validation_run_id)
 
@@ -138,9 +147,38 @@ class FakeRepository:
     async def add_version(self, version):
         self.versions[version.id] = version
 
+    async def add_strategy_run(self, run):
+        self.runs[run.id] = run
+
+    async def get_strategy_run(self, run_id, *, for_update=False):
+        return self.runs.get(run_id)
+
+    async def get_publish_run_for_version(self, version_id, *, for_update=False):
+        return next(
+            (r for r in self.runs.values() if r.strategy_version_id == version_id),
+            None,
+        )
+
+    async def set_strategy_run_status(self, run_id, status):
+        self.runs[run_id].status = status
+
+    async def list_recoverable_publish_runs(self):
+        return [
+            r
+            for r in self.runs.values()
+            if r.status in {"PENDING", "RUNNING", "FAILED"}
+        ]
+
     async def get_version(self, strategy_id, version_id, *, for_update=False):
         version = self.versions.get(version_id)
         return version if version and version.strategy_id == strategy_id else None
+
+    async def get_version_by_id(self, version_id, *, for_update=False):
+        return self.versions.get(version_id)
+
+    async def latest_published_version(self, strategy_id):
+        rows = [v for v in self.versions.values() if v.strategy_id == strategy_id]
+        return max(rows, key=lambda row: row.version_no, default=None)
 
     async def latest_failed_version(self, strategy_id, source_code_hash):
         return next(
@@ -208,26 +246,94 @@ def succeeded_validation(
     metadata = metadata or {"name": "策略"}
     parameter_schema = parameter_schema or {"type": "object"}
     params = params or {}
+    source_facts = {
+        "source_code_hash": source_code_hash,
+        "metadata_hash": json_hash(metadata),
+        "parameter_schema_hash": json_hash(parameter_schema),
+        "parameter_hash": json_hash(params),
+        "environment_hash": hashlib.sha256(b"python-3.12").hexdigest(),
+        "runner_image_digest": "sha256:" + "a" * 64,
+    }
+    snapshot = {
+        "schema_version": 1,
+        "source_code_hash": source_code_hash,
+        "metadata": metadata,
+        "metadata_hash": source_facts["metadata_hash"],
+        "parameter_schema": parameter_schema,
+        "parameter_schema_hash": source_facts["parameter_schema_hash"],
+        "params": params,
+        "parameter_hash": source_facts["parameter_hash"],
+        "environment_version": "python-3.12",
+        "environment_hash": source_facts["environment_hash"],
+        "runner_image_digest": source_facts["runner_image_digest"],
+        "checks": validation_checks(source_facts),
+    }
     return validation_id, SimpleNamespace(
         id=validation_id,
         strategy_id=strategy_id,
         strategy_version_id=None,
         draft_version=draft_version,
         source_code_hash=source_code_hash,
-        evidence_snapshot={
-            "metadata": metadata,
-            "metadata_hash": json_hash(metadata),
-            "parameter_schema": parameter_schema,
-            "parameter_schema_hash": json_hash(parameter_schema),
-            "params": params,
-            "parameter_hash": json_hash(params),
-            "environment_version": "python-3.12",
-            "runner_image_digest": "sha256:" + "a" * 64,
-            "checks": {"all_required_checks_passed": True},
-        },
+        evidence_snapshot=snapshot,
         status="SUCCEEDED",
         error_code=None,
         completed_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+
+
+def validation_checks(source_facts):
+    common = {
+        "run_id": str(uuid4()),
+        "task_id": str(uuid4()),
+        "snapshot_id": str(uuid4()),
+        "status": "SUCCEEDED",
+        **source_facts,
+    }
+    training = {
+        "training_start": "2010-01-01",
+        "training_end": "2020-12-31",
+        "training_data_hash": "b" * 64,
+    }
+    return {
+        "static_analysis": dict(common),
+        "fixed_sample": {**common, **training},
+        "specified_stock": {
+            **common,
+            **training,
+            "security_id": str(uuid4()),
+        },
+        "holdout_backtest": {
+            **common,
+            **training,
+            "security_id": str(uuid4()),
+            "test_start": "2021-01-01",
+            "test_end": "2022-12-31",
+            "test_data_hash": "c" * 64,
+        },
+    }
+
+
+def checks_for_run(run):
+    snapshot = run.evidence_snapshot
+    facts = {
+        key: snapshot[key]
+        for key in (
+            "source_code_hash",
+            "metadata_hash",
+            "parameter_schema_hash",
+            "parameter_hash",
+            "environment_hash",
+            "runner_image_digest",
+        )
+    }
+    return validation_checks(facts)
+
+
+def publish_evidence(validation, expected_draft_version):
+    return PublishEvidence(
+        validation_run_id=validation.id,
+        expected_draft_version=expected_draft_version,
+        evidence_hash=json_hash(validation.evidence_snapshot),
     )
 
 
@@ -341,6 +447,7 @@ async def test_rename_uses_draft_version_as_expected_version():
     )
 
     assert renamed.name == "新名称"
+    assert subject._repository.drafts[created.strategy.id].draft_version == 2
 
     replay = await subject.rename(
         created.strategy.id,
@@ -350,6 +457,15 @@ async def test_rename_uses_draft_version_as_expected_version():
     )
     assert replay.name == "新名称"
     assert [item.action_code for item in audit.items].count("strategy.updated") == 1
+
+    with pytest.raises(AppError) as raised:
+        await subject.rename(
+            created.strategy.id,
+            name="并发旧请求",
+            expected_version=1,
+            context=context("rename-2"),
+        )
+    assert raised.value.code == "STRATEGY_VERSION_CONFLICT"
 
 
 @async_test
@@ -452,7 +568,7 @@ async def test_validation_lifecycle_binds_current_draft_and_marks_validated():
         run.id,
         succeeded=True,
         error_code=None,
-        evidence_snapshot={"checks": ["static", "sample", "stock", "backtest"]},
+        evidence_snapshot=checks_for_run(run),
         context=context("validate-complete-1"),
     )
 
@@ -462,6 +578,67 @@ async def test_validation_lifecycle_binds_current_draft_and_marks_validated():
     assert repository.strategies[created.strategy.id].status == "VALIDATED"
     assert audit.items[-1].action_code == "strategy.validation_completed"
     assert events.items[-1].topic == "strategy.validation_completed"
+
+
+@async_test
+async def test_successful_validation_rejects_boolean_or_missing_level_evidence():
+    subject, *_ = service()
+    created = await subject.create("策略", context())
+    run = await subject.request_validation(
+        created.strategy.id,
+        metadata={"name": "策略"},
+        parameter_schema={"type": "object"},
+        params={},
+        environment_version="python-3.12",
+        runner_image_digest="sha256:" + "a" * 64,
+        context=context("validate-1"),
+    )
+
+    with pytest.raises(AppError) as raised:
+        await subject.complete_validation(
+            run.id,
+            succeeded=True,
+            error_code=None,
+            evidence_snapshot={"all_required_checks_passed": True},
+            context=context("complete-1"),
+        )
+
+    assert raised.value.code == "STRATEGY_VALIDATION_STALE"
+
+
+@async_test
+async def test_completed_validation_replay_requires_identical_result_and_evidence():
+    subject, *_ = service()
+    created = await subject.create("策略", context())
+    run = await subject.request_validation(
+        created.strategy.id,
+        metadata={"name": "策略"},
+        parameter_schema={"type": "object"},
+        params={},
+        environment_version="python-3.12",
+        runner_image_digest="sha256:" + "a" * 64,
+        context=context("validate-1"),
+    )
+    checks = checks_for_run(run)
+    await subject.complete_validation(
+        run.id,
+        succeeded=True,
+        error_code=None,
+        evidence_snapshot=checks,
+        context=context("complete-1"),
+    )
+
+    changed = checks_for_run(run)
+    with pytest.raises(AppError) as raised:
+        await subject.complete_validation(
+            run.id,
+            succeeded=True,
+            error_code=None,
+            evidence_snapshot=changed,
+            context=context("complete-1"),
+        )
+
+    assert raised.value.code == "STRATEGY_IDEMPOTENCY_CONFLICT"
 
 
 @async_test
@@ -509,7 +686,7 @@ async def test_late_validation_for_old_draft_does_not_validate_new_draft():
         run.id,
         succeeded=True,
         error_code=None,
-        evidence_snapshot={"checks": ["static"]},
+        evidence_snapshot=checks_for_run(run),
         context=context("validate-complete-1"),
     )
 
@@ -545,7 +722,7 @@ async def test_old_validation_completion_does_not_clobber_new_validation_state()
         old.id,
         succeeded=True,
         error_code=None,
-        evidence_snapshot={"all_required_checks_passed": True},
+        evidence_snapshot=checks_for_run(old),
         context=context("validate-complete-1"),
     )
 
@@ -567,10 +744,8 @@ async def test_publish_freezes_current_source_and_reuses_failed_snapshot():
         created.strategy.id, draft.draft_version, subject.hash_source(draft.source_code)
     )
     repository.validation_runs[validation_id] = validation
-    evidence = PublishEvidence(
-        validation_run_id=validation_id,
-        expected_draft_version=draft.draft_version,
-    )
+    repository.strategies[created.strategy.id].status = "VALIDATED"
+    evidence = publish_evidence(validation, draft.draft_version)
 
     frozen = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")
@@ -603,10 +778,8 @@ async def test_publish_failure_is_audited_and_emitted():
         created.strategy.id, 1, subject.hash_source("")
     )
     repository.validation_runs[validation_id] = validation
-    evidence = PublishEvidence(
-        validation_run_id=validation_id,
-        expected_draft_version=1,
-    )
+    repository.strategies[created.strategy.id].status = "VALIDATED"
+    evidence = publish_evidence(validation, 1)
     frozen = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")
     )
@@ -638,10 +811,8 @@ async def test_publish_rejects_stale_validation_evidence():
         create_revision=False,
         context=context("save-1"),
     )
-    evidence = PublishEvidence(
-        validation_run_id=validation_id,
-        expected_draft_version=2,
-    )
+    repository.strategies[created.strategy.id].status = "VALIDATED"
+    evidence = publish_evidence(validation, 2)
 
     with pytest.raises(AppError) as raised:
         await subject.begin_publish(created.strategy.id, evidence, context("pub-1"))
@@ -656,10 +827,8 @@ async def test_publish_rejects_validation_from_another_strategy_or_draft():
     current_hash = subject.hash_source("")
     validation_id, validation = succeeded_validation(uuid4(), 99, current_hash)
     repository.validation_runs[validation_id] = validation
-    evidence = PublishEvidence(
-        validation_run_id=validation_id,
-        expected_draft_version=1,
-    )
+    repository.strategies[created.strategy.id].status = "VALIDATED"
+    evidence = publish_evidence(validation, 1)
 
     with pytest.raises(AppError) as raised:
         await subject.begin_publish(created.strategy.id, evidence, context("pub-1"))
@@ -701,10 +870,8 @@ async def test_complete_publish_makes_version_bindable_and_archive_blocks_edits(
         created.strategy.id, draft.draft_version, subject.hash_source(draft.source_code)
     )
     repository.validation_runs[validation_id] = validation
-    evidence = PublishEvidence(
-        validation_run_id=validation_id,
-        expected_draft_version=draft.draft_version,
-    )
+    repository.strategies[created.strategy.id].status = "VALIDATED"
+    evidence = publish_evidence(validation, draft.draft_version)
     frozen = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")
     )
@@ -712,14 +879,14 @@ async def test_complete_publish_makes_version_bindable_and_archive_blocks_edits(
     published = await subject.complete_publish(
         created.strategy.id,
         frozen.version.id,
-        git_commit="abcdef1234567",
+        git_commit="a" * 40,
         context=context("pub-1"),
     )
     await subject.archive(
         created.strategy.id, expected_version=2, context=context("archive-1")
     )
 
-    assert published.status == "PUBLISHED"
+    assert published.status == "ARCHIVED"
     assert published.published_at == datetime(2026, 7, 21, tzinfo=UTC)
     with pytest.raises(AppError) as raised:
         await subject.save_draft(
@@ -735,6 +902,13 @@ async def test_complete_publish_makes_version_bindable_and_archive_blocks_edits(
         created.strategy.id, expected_version=2, context=context("archive-1")
     )
     assert replay.status == "ARCHIVED"
+
+    restored = await subject.restore(
+        created.strategy.id,
+        expected_version=2,
+        context=context("restore-1"),
+    )
+    assert restored.status == "PUBLISHED"
 
 
 @async_test

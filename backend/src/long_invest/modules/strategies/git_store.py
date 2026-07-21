@@ -45,29 +45,31 @@ class StrategyGitStore:
         with _repository_lock(Path(self._repo.git_dir) / "longinvest-publish"):
             directory = self._controlled_directory(strategy_id, version_no)
             serialized_manifest = _serialize_manifest(manifest, source_code_hash)
-            if directory.exists():
-                return self._replay(
-                    directory,
-                    source_code=source_code,
-                    serialized_manifest=serialized_manifest,
-                )
-            directory.mkdir(parents=True, exist_ok=False)
+            directory.mkdir(parents=True, exist_ok=True)
             source_path = directory / "strategy.py"
             manifest_path = directory / "manifest.json"
-            source_path.write_text(source_code, encoding="utf-8", newline="\n")
-            manifest_path.write_text(
-                serialized_manifest,
-                encoding="utf-8",
-                newline="\n",
-            )
+            self._ensure_file(source_path, source_code)
+            self._ensure_file(manifest_path, serialized_manifest)
             relative = directory.relative_to(self._root)
             relative_source = (relative / "strategy.py").as_posix()
+            relative_manifest = (relative / "manifest.json").as_posix()
+            existing = self._matching_commit(
+                relative_source,
+                relative_manifest,
+                source_code_hash,
+                serialized_manifest,
+            )
+            if existing is not None:
+                return existing
+            allowed_paths = {relative_source, relative_manifest}
+            self._assert_only_controlled_paths_staged(allowed_paths)
             self._repo.index.add(
                 [
                     relative_source,
-                    (relative / "manifest.json").as_posix(),
+                    relative_manifest,
                 ]
             )
+            self._assert_only_controlled_paths_staged(allowed_paths)
             actor = Actor("LongInvest", "longinvest@localhost")
             commit = self._repo.index.commit(
                 f"Publish strategy {strategy_id} version {version_no}",
@@ -76,62 +78,113 @@ class StrategyGitStore:
             )
             if not self._path_has_hash(
                 commit.hexsha, relative_source, source_code_hash
+            ) or not self._path_has_text(
+                commit.hexsha, relative_manifest, serialized_manifest
             ):
                 raise RuntimeError("committed strategy hash mismatch")
             return commit.hexsha
 
-    def _replay(
+    @staticmethod
+    def _ensure_file(path: Path, expected: str) -> None:
+        if path.exists():
+            if not path.is_file() or path.read_text(encoding="utf-8") != expected:
+                raise ValueError(
+                    "strategy version already exists with different content"
+                )
+            return
+        temporary = path.with_name(f".{path.name}.longinvest.tmp")
+        temporary.unlink(missing_ok=True)
+        try:
+            temporary.write_text(expected, encoding="utf-8", newline="\n")
+            os.replace(temporary, path)
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+
+    def _matching_commit(
         self,
-        directory: Path,
-        *,
-        source_code: str,
+        relative_source: str,
+        relative_manifest: str,
+        source_code_hash: str,
         serialized_manifest: str,
-    ) -> str:
-        source_path = directory / "strategy.py"
-        manifest_path = directory / "manifest.json"
-        if (
-            not source_path.is_file()
-            or not manifest_path.is_file()
-            or source_path.read_text(encoding="utf-8") != source_code
-            or manifest_path.read_text(encoding="utf-8") != serialized_manifest
-        ):
-            raise ValueError("strategy version already exists with different content")
-        relative = source_path.relative_to(self._root).as_posix()
-        commits = list(self._repo.iter_commits(paths=relative, max_count=1))
+    ) -> str | None:
+        if self._repo.head.is_valid() is False:
+            return None
+        commits = list(
+            self._repo.iter_commits(paths=relative_source, max_count=1)
+        )
         if not commits:
-            raise RuntimeError("strategy version exists without a Git commit")
-        return commits[0].hexsha
+            return None
+        commit = commits[0].hexsha
+        if self._path_has_hash(
+            commit, relative_source, source_code_hash
+        ) and self._path_has_text(
+            commit, relative_manifest, serialized_manifest
+        ):
+            return commit
+        raise ValueError(
+            "strategy version was already committed with different content"
+        )
+
+    def _assert_only_controlled_paths_staged(
+        self, allowed_paths: set[str]
+    ) -> None:
+        if self._repo.head.is_valid():
+            staged = {
+                item.a_path or item.b_path
+                for item in self._repo.index.diff("HEAD")
+            }
+        else:
+            staged = {path for path, _stage in self._repo.index.entries}
+        unexpected = staged - allowed_paths
+        if unexpected:
+            raise RuntimeError("strategy Git index contains unrelated staged paths")
 
     def read_source(self, strategy_id: str, version_no: int) -> str:
         return (
             self._controlled_directory(strategy_id, version_no) / "strategy.py"
         ).read_text(encoding="utf-8")
 
-    def verify_source(self, commit: str, source_code_hash: str) -> bool:
-        tree = self._repo.commit(commit).tree
-        candidates = [
-            item for item in tree.traverse() if item.path.endswith("/strategy.py")
-        ]
-        if not candidates:
+    def verify_source(
+        self,
+        *,
+        strategy_id: str,
+        version_no: int,
+        commit: str,
+        source_code_hash: str,
+    ) -> bool:
+        if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None:
             return False
-        return any(
-            hashlib.sha256(item.data_stream.read()).hexdigest() == source_code_hash
-            for item in candidates
+        directory = self._controlled_directory(strategy_id, version_no)
+        relative = directory.relative_to(self._root)
+        return self._path_has_hash(
+            commit,
+            (relative / "strategy.py").as_posix(),
+            source_code_hash,
+        ) and self.commit_contains(
+            commit, (relative / "manifest.json").as_posix()
         )
 
     def commit_contains(self, commit: str, path: str) -> bool:
         try:
             self._repo.commit(commit).tree / path
-        except KeyError:
+        except (KeyError, ValueError):
             return False
         return True
 
     def _path_has_hash(self, commit: str, path: str, expected_hash: str) -> bool:
         try:
             item = self._repo.commit(commit).tree / path
-        except KeyError:
+        except (KeyError, ValueError):
             return False
         return hashlib.sha256(item.data_stream.read()).hexdigest() == expected_hash
+
+    def _path_has_text(self, commit: str, path: str, expected: str) -> bool:
+        try:
+            item = self._repo.commit(commit).tree / path
+        except (KeyError, ValueError):
+            return False
+        return item.data_stream.read().decode("utf-8") == expected
 
     def _controlled_directory(self, strategy_id: str, version_no: int) -> Path:
         _validate_identity(strategy_id, version_no)
@@ -179,8 +232,14 @@ def _acquire_file_lock(handle: BinaryIO, timeout_seconds: float) -> None:
     if os.name != "nt":
         import fcntl
 
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-        return
+        while True:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    raise TimeoutError("strategy Git repository is busy") from None
+                time.sleep(0.01)
     import msvcrt
 
     handle.seek(0)

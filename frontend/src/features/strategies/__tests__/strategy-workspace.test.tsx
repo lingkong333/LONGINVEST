@@ -3,16 +3,17 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { StrategyBacktestWorkspace, StrategyWorkspace } from "@/features/strategies"
-import type { HoldoutBacktestResult, StrategyApi, StrategyDraft } from "@/features/strategies"
+import { StrategyBacktestWorkspace, StrategyWorkspace as StrategyWorkspaceBase } from "@/features/strategies"
+import type { HoldoutBacktestResult, StrategyApi, StrategyDraft, StrategyEditorComponents } from "@/features/strategies"
 
-vi.mock("@monaco-editor/react", () => ({
-  default: ({ value, onChange, options }: {
-    value: string
-    onChange: (next: string | undefined) => void
-    options: { ariaLabel: string }
-  }) => <textarea aria-label={options.ariaLabel} value={value} onChange={(event) => onChange(event.target.value)} />,
-}))
+const editorComponents: StrategyEditorComponents = {
+  CodeEditor: ({ value, onChange, ariaLabel }) => <textarea aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)} />,
+  DiffViewer: ({ original, modified, originalLabel, modifiedLabel }) => <div data-testid="真实差异视图"><del aria-label={originalLabel}>{original}</del><ins aria-label={modifiedLabel}>{modified}</ins></div>,
+}
+
+function StrategyWorkspace(props: { strategyId: string; api: StrategyApi }) {
+  return <StrategyWorkspaceBase {...props} editorComponents={editorComponents} />
+}
 
 const draft: StrategyDraft = {
   id: "draft-1",
@@ -53,7 +54,7 @@ function renderWorkspace(ui: React.ReactElement) {
 describe("策略工作台", () => {
   afterEach(() => vi.useRealTimers())
 
-  it("把真实中文无障碍名称传给 Monaco", async () => {
+  it("通过 CodeMirror 6 适配口传递中文无障碍名称", async () => {
     renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi()} />)
     expect(await screen.findByRole("textbox", { name: "Python 策略源码" })).toBeInTheDocument()
   })
@@ -77,7 +78,21 @@ describe("策略工作台", () => {
     const schema = await screen.findByRole("textbox", { name: "参数 JSON Schema" })
     fireEvent.change(schema, { target: { value: '{"type":"unknown","properties":[]}' } })
     await user.click(screen.getByRole("button", { name: "保存" }))
-    expect(await screen.findByText("请输入合法的 JSON Schema")).toBeInTheDocument()
+    expect(await screen.findByText("未通过 JSON Schema 基础结构预检")).toBeInTheDocument()
+    expect(api.saveDraft).not.toHaveBeenCalled()
+  })
+
+  it("基础结构预检要求根对象并拒绝错误的 ref 类型", async () => {
+    const api = createApi()
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={api} />)
+    const schema = await screen.findByRole("textbox", { name: "参数 JSON Schema" })
+    expect(screen.getByText("这里只做基础结构预检，完整 JSON Schema 校验由服务端完成。")).toBeInTheDocument()
+    fireEvent.change(schema, { target: { value: "true" } })
+    await user.click(screen.getByRole("button", { name: "保存" }))
+    expect(await screen.findByText("未通过 JSON Schema 基础结构预检")).toBeInTheDocument()
+    fireEvent.change(schema, { target: { value: '{"type":"object","$ref":123}' } })
+    await user.click(screen.getByRole("button", { name: "保存" }))
     expect(api.saveDraft).not.toHaveBeenCalled()
   })
 
@@ -181,7 +196,7 @@ describe("策略工作台", () => {
     await user.clear(editor)
     await user.type(editor, "本地源码")
     await user.click(screen.getByRole("button", { name: "保存" }))
-    expect(await screen.findByText("编辑起点")).toBeInTheDocument()
+    expect((await screen.findAllByText("编辑起点")).length).toBeGreaterThanOrEqual(2)
     for (const field of ["策略名称", "策略说明", "参数 JSON Schema", "Python 策略源码"]) {
       expect(screen.getByRole("radio", { name: `${field}采用服务器版本` })).toBeChecked()
     }
@@ -293,8 +308,9 @@ describe("策略工作台", () => {
     const api = createApi({ listVersions: vi.fn().mockResolvedValue([{ id: "v1", versionNo: 1, status: "PUBLISHED", sourceCodeHash: "a".repeat(64), sourceCode: "旧版源码", publishedAt: "2026-01-01" }]) })
     renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={api} />)
     await user.click(await screen.findByRole("button", { name: "查看差异" }))
-    expect(screen.getByText("当前草稿")).toBeInTheDocument()
-    expect(screen.getByText("旧版源码")).toBeInTheDocument()
+    expect(screen.getByTestId("真实差异视图")).toBeInTheDocument()
+    expect(screen.getByLabelText("所选发布版本")).toHaveTextContent("旧版源码")
+    expect(screen.getByLabelText("当前草稿")).toHaveTextContent("def calculate_targets")
   })
 
   it("列表失败不会显示为空，并能确认回滚且防止重复提交", async () => {
@@ -411,6 +427,16 @@ describe("样本外回测", () => {
     fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
     expect(await screen.findByText("未知任务状态：NEW_SERVER_STATE")).toBeInTheDocument()
     expect(screen.getByText("未知单股状态：NEW_ITEM_STATE")).toBeInTheDocument()
+  })
+
+  it.each(["constructor", "toString", "__proto__"])("原型链状态 %s 会安全降级", async (unsafeStatus) => {
+    const current = { ...result(unsafeStatus), item: { status: unsafeStatus } }
+    const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(current), getHoldoutBacktest: vi.fn().mockResolvedValue(current) })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
+    expect(await screen.findByText(`未知任务状态：${unsafeStatus}`)).toBeInTheDocument()
+    expect(screen.getByText(`未知单股状态：${unsafeStatus}`)).toBeInTheDocument()
   })
 
   it("成功但无交易和指标时明确说明", async () => {

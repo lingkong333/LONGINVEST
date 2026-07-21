@@ -1,4 +1,3 @@
-import Editor from "@monaco-editor/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Archive, CheckCircle2, Clipboard, FlaskConical, History, RotateCcw, Rocket, Save } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -19,6 +18,7 @@ import {
   type StrategyAction,
   type StrategyApi,
   type StrategyDraft,
+  type StrategyEditorComponents,
   type StrategyRunResult,
 } from "./types"
 
@@ -37,16 +37,30 @@ function isSchemaNode(value: unknown): boolean {
     if (Object.values(schema.properties).some((child) => !isSchemaNode(child))) return false
   }
   if ("required" in schema && (!Array.isArray(schema.required) || schema.required.some((item) => typeof item !== "string"))) return false
+  if ("$ref" in schema && typeof schema.$ref !== "string") return false
   if ("items" in schema && !isSchemaNode(schema.items)) return false
   if ("additionalProperties" in schema && typeof schema.additionalProperties !== "boolean" && !isSchemaNode(schema.additionalProperties)) return false
   if ("enum" in schema && (!Array.isArray(schema.enum) || schema.enum.length === 0)) return false
+  for (const keyword of ["pattern", "format", "title", "description"] as const) {
+    if (keyword in schema && typeof schema[keyword] !== "string") return false
+  }
+  for (const keyword of ["minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf"] as const) {
+    if (keyword in schema && typeof schema[keyword] !== "number") return false
+  }
+  for (const keyword of ["minLength", "maxLength", "minItems", "maxItems", "minProperties", "maxProperties"] as const) {
+    if (keyword in schema && (!Number.isInteger(schema[keyword]) || Number(schema[keyword]) < 0)) return false
+  }
+  for (const keyword of ["allOf", "anyOf", "oneOf"] as const) {
+    if (keyword in schema && (!Array.isArray(schema[keyword]) || schema[keyword].length === 0 || schema[keyword].some((child) => !isSchemaNode(child)))) return false
+  }
+  if ("not" in schema && !isSchemaNode(schema.not)) return false
   return true
 }
 
 function isJsonSchema(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value)
-    return isSchemaNode(parsed)
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) && isSchemaNode(parsed)
   } catch {
     return false
   }
@@ -61,7 +75,7 @@ const draftSchema = z.object({
       context.addIssue({ code: "custom", message: "请输入合法的 JSON" })
       return
     }
-    if (!isJsonSchema(value)) context.addIssue({ code: "custom", message: "请输入合法的 JSON Schema" })
+    if (!isJsonSchema(value)) context.addIssue({ code: "custom", message: "未通过 JSON Schema 基础结构预检" })
   }),
 })
 
@@ -135,7 +149,8 @@ const versionStatusLabels = {
   ARCHIVED: "已归档",
 } as const
 
-export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api: StrategyApi }) {
+export function StrategyWorkspace({ strategyId, api, editorComponents }: { strategyId: string; api: StrategyApi; editorComponents: StrategyEditorComponents }) {
+  const { CodeEditor, DiffViewer } = editorComponents
   const queryClient = useQueryClient()
   const [expectedVersion, setExpectedVersion] = useState<number | null>(null)
   const baseDraftRef = useRef<StrategyDraft | null>(null)
@@ -328,8 +343,8 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
           <FormField control={form.control} name="name" label="策略名称">{({ field }) => <Input {...field} />}</FormField>
           <FormField control={form.control} name="description" label="策略说明">{({ field }) => <Input {...field} />}</FormField>
         </div>
-        <Controller control={form.control} name="sourceCode" render={({ field }) => <div className="overflow-hidden border border-border bg-card"><label className="block border-b border-border px-3 py-2 text-sm font-medium">Python 策略源码</label><Editor height="34rem" language="python" value={field.value} onChange={field.onChange} options={{ ariaLabel: "Python 策略源码", automaticLayout: true, minimap: { enabled: false }, lineNumbers: "on", find: { addExtraSpaceOnTop: true }, bracketPairColorization: { enabled: true } }} /></div>} />
-        <FormField control={form.control} name="parameterSchema" label="参数 JSON Schema">{({ field }) => <textarea className="min-h-32 w-full border border-input bg-card p-3 font-mono text-sm" {...field} />}</FormField>
+        <Controller control={form.control} name="sourceCode" render={({ field }) => <div className="overflow-hidden border border-border bg-card"><label className="block border-b border-border px-3 py-2 text-sm font-medium">Python 策略源码</label><CodeEditor height="34rem" language="python" ariaLabel="Python 策略源码" value={field.value} onChange={field.onChange} /></div>} />
+        <FormField control={form.control} name="parameterSchema" label="参数 JSON Schema" description="这里只做基础结构预检，完整 JSON Schema 校验由服务端完成。">{({ field }) => <textarea className="min-h-32 w-full border border-input bg-card p-3 font-mono text-sm" {...field} />}</FormField>
         {saveMutation.isError && !conflict ? <p role="alert" className="text-sm text-destructive">保存失败，请检查网络后重试。</p> : null}
         {actionMessage ? <p role="status" className="text-sm text-primary">{actionMessage}</p> : null}
         {lastActionResult ? <section aria-label="最近操作结果" className="border border-border p-3"><h2 className="text-sm font-semibold">最近操作结果</h2><p role={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "alert" : "status"} className={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "text-destructive" : ""}>{lastActionResult.result.summary ?? `状态：${lastActionResult.result.status}`}</p>{lastActionResult.result.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
@@ -344,7 +359,7 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
         <section>
           <h2 className="text-sm font-semibold">发布版本</h2>
           {versionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载版本……</p> : versionsQuery.isError ? <p role="alert" className="text-sm text-destructive">版本列表加载失败，请重试。</p> : versionsQuery.data?.length ? <ul className="space-y-2">{versionsQuery.data.map((version) => <li key={version.id} className="border border-border p-2 text-sm"><span>版本 {version.versionNo} · {versionStatusLabels[version.status]}</span><Button type="button" variant="ghost" onClick={() => setSelectedVersionId(version.id)}>查看差异</Button></li>)}</ul> : <p className="text-sm text-muted-foreground">暂无发布版本。</p>}
-          {versionDiff ? <div className="mt-3 grid gap-2"><strong>当前草稿</strong><pre className="max-h-32 overflow-auto bg-muted p-2">{versionDiff.current}</pre><strong>所选版本</strong><pre className="max-h-32 overflow-auto bg-muted p-2">{versionDiff.published}</pre></div> : null}
+          {versionDiff ? <div className="mt-3"><DiffViewer original={versionDiff.published} modified={versionDiff.current} language="python" originalLabel="所选发布版本" modifiedLabel="当前草稿" /></div> : null}
         </section>
       </aside>
       <Dialog open={conflict !== null} onOpenChange={() => undefined}>
@@ -358,7 +373,7 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
               const server = draftDefaults(conflict.current)[field]
               const resolution = conflict.resolutions[field]
               const customLabel = field === "sourceCode" ? "人工合并结果" : `${label}人工合并结果`
-              return <fieldset key={field} className="grid gap-2 border border-border p-3"><legend className="font-semibold">{label}</legend><div className="grid gap-2 sm:grid-cols-3"><div><strong>基础版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{base}</pre></div><div><strong>本地版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{local}</pre></div><div><strong>服务器版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{server}</pre></div></div><div className="flex flex-wrap gap-3"><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "server"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "server" } } })} />{label}采用服务器版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "local"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "local" } } })} />{label}采用本地版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "custom"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "custom" } } })} />人工编辑</label></div><textarea aria-label={customLabel} className="min-h-20 border border-input p-2 font-mono" value={resolution.custom} onChange={(event) => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { choice: "custom", custom: event.target.value } } })} /></fieldset>
+              return <fieldset key={field} className="grid gap-2 border border-border p-3"><legend className="font-semibold">{label}</legend>{field === "sourceCode" ? <div className="grid gap-3"><DiffViewer original={base} modified={local} language="python" originalLabel="基础版本" modifiedLabel="本地版本" /><DiffViewer original={base} modified={server} language="python" originalLabel="基础版本" modifiedLabel="服务器版本" /></div> : <div className="grid gap-2 sm:grid-cols-3"><div><strong>基础版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{base}</pre></div><div><strong>本地版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{local}</pre></div><div><strong>服务器版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{server}</pre></div></div>}<div className="flex flex-wrap gap-3"><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "server"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "server" } } })} />{label}采用服务器版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "local"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "local" } } })} />{label}采用本地版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "custom"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "custom" } } })} />人工编辑</label></div><textarea aria-label={customLabel} className="min-h-20 border border-input p-2 font-mono" value={resolution.custom} onChange={(event) => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { choice: "custom", custom: event.target.value } } })} /></fieldset>
             })}
             {containsConflictMarker(conflict.resolutions.sourceCode.choice === "local" ? conflict.local.sourceCode : conflict.resolutions.sourceCode.choice === "server" ? conflict.current.sourceCode : conflict.resolutions.sourceCode.custom) ? <p role="alert" className="text-destructive">仍有未解决的冲突标记，不能提交。</p> : null}
             <label className="flex gap-2"><input type="checkbox" checked={mergeConfirmed} onChange={(event) => setMergeConfirmed(event.target.checked)} />我已核对三方内容</label>

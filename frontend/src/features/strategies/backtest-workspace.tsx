@@ -53,11 +53,11 @@ const itemStatusLabels: Record<BacktestItemStatus, string> = {
 }
 
 function isTaskStatus(value: string): value is BacktestTaskStatus {
-  return value in taskCopy
+  return Object.hasOwn(taskCopy, value)
 }
 
 function isItemStatus(value: string): value is BacktestItemStatus {
-  return value in itemStatusLabels
+  return Object.hasOwn(itemStatusLabels, value)
 }
 
 function isActiveStatus(value: string): boolean {

@@ -1,3 +1,26 @@
+import type { ComponentType } from "react"
+
+export interface CodeEditorProps {
+  value: string
+  onChange: (value: string) => void
+  language: "python"
+  ariaLabel: string
+  height: string
+}
+
+export interface DiffViewerProps {
+  original: string
+  modified: string
+  language: "python"
+  originalLabel: string
+  modifiedLabel: string
+}
+
+export interface StrategyEditorComponents {
+  CodeEditor: ComponentType<CodeEditorProps>
+  DiffViewer: ComponentType<DiffViewerProps>
+}
+
 export type StrategyAction = "validate" | "test" | "publish" | "archive"
 
 export interface StrategyRunResult {

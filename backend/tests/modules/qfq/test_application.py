@@ -604,6 +604,70 @@ async def test_get_data_returns_frozen_views_and_pagination() -> None:
 
 
 @pytest.mark.anyio
+async def test_get_window_returns_complete_window_by_security_id() -> None:
+    database = FakeDatabase()
+    security = identity()
+    dataset_id = uuid4()
+    FakeRepository.current = SimpleNamespace(
+        id=dataset_id,
+        security_id=security.security_id,
+        symbol=security.symbol,
+        version=3,
+        requested_start=date(2026, 7, 1),
+        requested_end=TODAY,
+        actual_start=date(2026, 7, 2),
+        actual_end=TODAY,
+        as_of_date=TODAY,
+        provider="eastmoney",
+        provider_contract_version="v1",
+        anchor_date=TODAY,
+        anchor_close=Decimal("10.25"),
+        row_count=1,
+        checksum="a" * 64,
+        lifecycle="CURRENT",
+        freshness="FRESH",
+        stale_reason=None,
+        created_at=NOW,
+        activated_at=NOW,
+        superseded_at=None,
+    )
+    FakeRepository.bars = [
+        SimpleNamespace(
+            trade_date=TODAY,
+            open=Decimal("10.10"),
+            high=Decimal("10.50"),
+            low=Decimal("10.00"),
+            close=Decimal("10.25"),
+            volume=100,
+            amount=Decimal("1025.0000"),
+        )
+    ]
+    FakeRepository.total = 1
+
+    window = await application(database).get_window(
+        security.security_id,
+        start=date(2026, 7, 1),
+        end=TODAY,
+    )
+
+    assert window.dataset.id == dataset_id
+    assert window.bars[0].trade_date == TODAY
+    assert FakeRepository.calls == [
+        ("current", database.read_session, security.security_id),
+        ("count", database.read_session, dataset_id, date(2026, 7, 1), TODAY),
+        (
+            "list",
+            database.read_session,
+            dataset_id,
+            date(2026, 7, 1),
+            TODAY,
+            1,
+            1,
+        ),
+    ]
+
+
+@pytest.mark.anyio
 async def test_get_data_rejects_invalid_window_and_missing_dataset() -> None:
     database = FakeDatabase()
     with pytest.raises(AppError) as invalid:

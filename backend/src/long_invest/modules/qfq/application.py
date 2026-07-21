@@ -23,6 +23,7 @@ from long_invest.modules.qfq.contracts import (
     QfqBarView,
     QfqDatasetLifecycle,
     QfqDatasetView,
+    QfqDataWindow,
     QfqFreshness,
     QfqRefreshStatus,
     QfqRefreshView,
@@ -114,6 +115,51 @@ class QfqApplication:
             total=total,
             page=page,
             page_size=page_size,
+        )
+
+    async def get_window(
+        self,
+        security_id: UUID,
+        *,
+        start: date,
+        end: date,
+    ) -> QfqDataWindow:
+        """Return one immutable, unpaginated current-data window by security id."""
+        if start > end:
+            raise _window_invalid("requested window is invalid")
+        try:
+            async with self._database.session() as session:
+                repository = self._repository_factory(session)
+                dataset = await repository.current_dataset(security_id)
+                if dataset is None:
+                    raise AppError(
+                        code="QFQ_DATA_NOT_FOUND",
+                        message="current adjusted data is unavailable",
+                        status_code=404,
+                    )
+                total = await repository.count_current_bars(
+                    dataset.id, start=start, end=end
+                )
+                if total == 0:
+                    raise AppError(
+                        code="QFQ_DATA_NOT_FOUND",
+                        message="adjusted data is unavailable for the requested window",
+                        status_code=404,
+                    )
+                bars = await repository.list_current_bars(
+                    dataset.id,
+                    start=start,
+                    end=end,
+                    page=1,
+                    page_size=total,
+                )
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return QfqDataWindow(
+            dataset=_dataset_view(dataset),
+            bars=tuple(_bar_view(item) for item in bars),
         )
 
     async def submit_refresh(

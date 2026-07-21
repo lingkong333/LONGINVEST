@@ -252,6 +252,17 @@ class QfqDatasetView:
 
 
 @dataclass(frozen=True, slots=True)
+class QfqDataWindow:
+    """Immutable public snapshot used by other modules through an adapter."""
+
+    dataset: QfqDatasetView
+    bars: tuple[QfqBarView, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "bars", tuple(self.bars))
+
+
+@dataclass(frozen=True, slots=True)
 class QfqRefreshView:
     id: UUID
     job_id: UUID

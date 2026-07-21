@@ -6,8 +6,9 @@ from enum import StrEnum
 from typing import Protocol
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
+from long_invest.modules.signals.contracts import SignalZone
 from long_invest.modules.targets.contracts import TargetValues
 
 
@@ -72,24 +73,80 @@ class BacktestPositionStatus(StrEnum):
     HOLDING = "HOLDING"
 
 
-class BacktestSignalZone(StrEnum):
-    STRONG_LOW = "STRONG_LOW"
-    LOW = "LOW"
-    NORMAL = "NORMAL"
-    HIGH = "HIGH"
-    STRONG_HIGH = "STRONG_HIGH"
-
-
 class BacktestSignalRuleInput(BacktestSignalInput):
-    previous_zone: BacktestSignalZone
+    previous_zone: SignalZone
     position_status: BacktestPositionStatus
     hysteresis_ratio: Decimal = Field(ge=0)
     minimum_hysteresis: Decimal = Field(ge=0)
 
 
 class BacktestSignalRuleResult(StrictContract):
-    zone: BacktestSignalZone
+    zone: SignalZone
 
 
 class BacktestSignalRulePort(Protocol):
     def evaluate(self, signal: BacktestSignalRuleInput) -> BacktestSignalRuleResult: ...
+
+
+class BacktestTaskSnapshot(StrictContract):
+    id: UUID
+    date_range: BacktestDateRange
+    source_code_hash: str = Field(min_length=64, max_length=64)
+    parameter_hash: str = Field(min_length=64, max_length=64)
+    environment_version: str = Field(min_length=1)
+    rule_version: str = Field(min_length=1)
+    initial_capital: Decimal = Field(gt=0)
+    price_basis: str = Field(min_length=1)
+    data_source: str = Field(min_length=1)
+
+
+class BacktestForecastSnapshotView(StrictContract):
+    item_id: UUID
+    values: TargetValues
+    training_data_hash: str = Field(min_length=64, max_length=64)
+    frozen_at: AwareDatetime
+
+
+class BacktestTargetAdjustmentView(StrictContract):
+    item_id: UUID
+    event_date: date
+    before_values: TargetValues
+    after_values: TargetValues
+    adjustment_factor: Decimal = Field(gt=0)
+    source: str = Field(min_length=1)
+    data_hash: str = Field(min_length=64, max_length=64)
+    published_at: AwareDatetime
+    effective_at: AwareDatetime
+
+
+class BacktestOrderView(StrictContract):
+    id: UUID
+    item_id: UUID
+    signal_date: date
+    execute_date: date
+    status: str = Field(min_length=1)
+    direction: str = Field(min_length=1)
+    quantity: Decimal = Field(gt=0)
+
+
+class BacktestTradeView(StrictContract):
+    id: UUID
+    order_id: UUID
+    price: Decimal = Field(gt=0)
+    quantity: Decimal = Field(gt=0)
+    cash_after: Decimal
+    position_after: Decimal = Field(ge=0)
+
+
+class BacktestMetricView(StrictContract):
+    item_id: UUID
+    total_return: Decimal
+    max_drawdown: Decimal
+    completed_round_trips: int = Field(ge=0)
+
+
+class BacktestDailyResultView(StrictContract):
+    item_id: UUID
+    trade_date: date
+    equity: Decimal = Field(ge=0)
+    drawdown: Decimal

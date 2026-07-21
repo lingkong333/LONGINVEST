@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Integer,
     Numeric,
     String,
     UniqueConstraint,
@@ -186,6 +187,11 @@ class BacktestOrder(Base):
     )
     item_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
+    signal_date: Mapped[date] = mapped_column(Date, nullable=False)
+    execute_date: Mapped[date | None] = mapped_column(Date)
+    direction: Mapped[str] = mapped_column(String(8), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    target_zone: Mapped[str] = mapped_column(String(16), nullable=False)
 
 
 class BacktestTrade(Base):
@@ -195,6 +201,12 @@ class BacktestTrade(Base):
     )
     order_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     price: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    cash_after: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    position_after: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
 
 
 class BacktestMetric(Base):
@@ -204,6 +216,9 @@ class BacktestMetric(Base):
     )
     item_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    total_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    max_drawdown: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    completed_round_trips: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class BacktestDailyResult(Base):
@@ -213,3 +228,5 @@ class BacktestDailyResult(Base):
     )
     item_id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), nullable=False)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    equity: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    drawdown: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)

@@ -183,6 +183,13 @@ class TargetCalculationRunView(FrozenParametersContract):
     strategy_version_id: UUID
     status: TargetCalculationStatus
     failure_code: TargetCalculationErrorCode | None = None
+    training_start_date: date | None = None
+    training_end_date: date | None = None
+    qfq_data_version: int | None = Field(default=None, ge=1)
+    current_target_version: int | None = Field(default=None, ge=1)
+    reason: str | None = None
+    resource_usage: Mapping[str, Any] = Field(default_factory=dict)
+    error_summary: str | None = None
     created_at: AwareDatetime
 
 
@@ -192,6 +199,13 @@ class TargetReviewView(StrictContract):
     baseline_revision_id: UUID | None
     status: TargetReviewStatus
     reason: str = Field(min_length=1, max_length=500)
+    low_strong_change: Decimal | None = None
+    low_watch_change: Decimal | None = None
+    high_watch_change: Decimal | None = None
+    high_strong_change: Decimal | None = None
+    reviewer_user_id: str | None = None
+    review_comment: str | None = None
+    reviewed_at: AwareDatetime | None = None
     created_at: AwareDatetime
 
 

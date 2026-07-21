@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -52,6 +52,19 @@ class StrategyReadinessStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class StrategyLifecycleStatus(StrEnum):
+    DRAFT = "DRAFT"
+    VALIDATING = "VALIDATING"
+    PUBLISHED = "PUBLISHED"
+    ARCHIVED = "ARCHIVED"
+
+
+class StrategyLifecycleErrorCode(StrEnum):
+    STRATEGY_VERSION_CONFLICT = "STRATEGY_VERSION_CONFLICT"
+    STRATEGY_NOT_READY = "STRATEGY_NOT_READY"
+    STRATEGY_PUBLISH_FAILED = "STRATEGY_PUBLISH_FAILED"
+
+
 class FrozenMappingContract(StrictContract):
     parameter_snapshot: Mapping[str, Any]
 
@@ -97,9 +110,16 @@ class TrainingDataSnapshot(StrictContract):
                 low, open_, close, high = (
                     Decimal(str(row[key])) for key in ("low", "open", "close", "high")
                 )
-            except (KeyError, ValueError) as exc:
+            except (KeyError, ValueError, DecimalException) as exc:
                 raise ValueError("training rows require OHLC") from exc
-            if low > min(open_, close) or high < max(open_, close):
+            if (
+                any(
+                    not value.is_finite() or value <= 0
+                    for value in (low, open_, close, high)
+                )
+                or low > min(open_, close)
+                or high < max(open_, close, low)
+            ):
                 raise ValueError("training row OHLC is inconsistent")
         return self
 
@@ -127,6 +147,44 @@ class StrategyReadiness(StrictContract):
     status: StrategyReadinessStatus
     checked_at: AwareDatetime
     failure_code: StrategyForecastErrorCode | None = None
+
+
+class StrategyView(StrictContract):
+    id: UUID
+    name: str = Field(min_length=1)
+    status: StrategyLifecycleStatus
+
+
+class StrategyDraftView(StrictContract):
+    id: UUID
+    strategy_id: UUID
+    draft_version: int = Field(ge=1)
+    source_code: str
+
+
+class StrategyDraftRevisionView(StrategyDraftView):
+    revision_no: int = Field(ge=1)
+
+
+class StrategyVersionView(StrictContract):
+    id: UUID
+    strategy_id: UUID
+    version_no: int = Field(ge=1)
+    source_code_hash: str = Field(min_length=64, max_length=64)
+    status: StrategyLifecycleStatus
+    published_at: AwareDatetime | None = None
+
+
+class StrategyValidationRunView(StrictContract):
+    id: UUID
+    status: StrategyLifecycleStatus
+    error_code: StrategyLifecycleErrorCode | None = None
+
+
+class StrategyRunView(StrictContract):
+    id: UUID
+    strategy_version_id: UUID
+    status: StrategyLifecycleStatus
 
 
 class StrategyForecastPort(Protocol):

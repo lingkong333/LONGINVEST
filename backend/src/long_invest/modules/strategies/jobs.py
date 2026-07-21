@@ -46,41 +46,64 @@ async def strategy_validate(context: JobExecutionContext) -> JobResult:
             message="策略验证任务缺少有效的验证编号",
             retryable=False,
         )
+    application = get_strategy_application()
+    try:
+        run = await application.get_validation_run(validation_run_id)
+    except AppError as exc:
+        return _app_error_result(exc)
+    terminal = _terminal_validation_result(run)
+    if terminal is not None:
+        return terminal
+    if str(run.status) != "PENDING":
+        return await _settle_validation_failure(
+            application,
+            validation_run_id,
+            context,
+            code="STRATEGY_VALIDATION_STATE_INVALID",
+            reason="结束不可执行的策略验证状态",
+        )
     if _validation_executor_factory is None:
-        try:
-            await get_strategy_application().record_validation_result_from_worker(
-                validation_run_id,
-                succeeded=False,
-                error_code="STRATEGY_VALIDATION_EXECUTOR_UNAVAILABLE",
-                evidence_snapshot={},
-                **_worker_context(context, "记录策略验证执行器未接入"),
-            )
-        except AppError as exc:
-            return _app_error_result(exc)
-        return JobResult.failure(
+        return await _settle_validation_failure(
+            application,
+            validation_run_id,
+            context,
             code="STRATEGY_VALIDATION_EXECUTOR_UNAVAILABLE",
-            message="策略验证执行器尚未接入",
-            retryable=False,
-            data={"validation_run_id": str(validation_run_id)},
+            reason="记录策略验证执行器未接入",
         )
     try:
         outcome = await _validation_executor_factory().execute(validation_run_id)
-        await get_strategy_application().record_validation_result_from_worker(
+    except Exception:
+        return await _settle_validation_failure(
+            application,
+            validation_run_id,
+            context,
+            code="STRATEGY_VALIDATION_EXECUTION_FAILED",
+            reason="记录策略验证执行异常",
+        )
+    try:
+        completed = await application.record_validation_result_from_worker(
             validation_run_id,
             succeeded=outcome.succeeded,
             error_code=outcome.error_code,
             evidence_snapshot=outcome.evidence_snapshot,
             **_worker_context(context, "记录策略验证结果"),
         )
-    except AppError as exc:
-        return _app_error_result(exc)
-    return JobResult(
-        success=outcome.succeeded,
-        code="OK" if outcome.succeeded else str(outcome.error_code),
-        message="策略验证完成" if outcome.succeeded else "策略验证失败",
-        retryable=False,
-        data={"validation_run_id": str(validation_run_id)},
-    )
+    except Exception:
+        return await _recover_validation_confirmation(
+            application,
+            validation_run_id,
+            context,
+        )
+    result = _terminal_validation_result(completed)
+    if result is None:
+        return await _settle_validation_failure(
+            application,
+            validation_run_id,
+            context,
+            code="STRATEGY_VALIDATION_STATE_INVALID",
+            reason="结束未完成的策略验证结果",
+        )
+    return result
 
 
 async def strategy_publish(context: JobExecutionContext) -> JobResult:
@@ -96,6 +119,12 @@ async def strategy_publish(context: JobExecutionContext) -> JobResult:
         version = await get_strategy_application().execute_publish(strategy_run_id)
     except AppError as exc:
         return _app_error_result(exc)
+    except Exception:
+        return JobResult.failure(
+            code="STRATEGY_PUBLISH_EXECUTION_FAILED",
+            message="策略发布执行失败，请使用新的请求编号重试",
+            retryable=False,
+        )
     return JobResult.success_result(
         message="策略发布完成",
         data={
@@ -124,5 +153,90 @@ def _app_error_result(exc: AppError) -> JobResult:
     return JobResult.failure(
         code=exc.code,
         message=exc.message,
-        retryable=exc.status_code >= 500,
+        retryable=False,
+    )
+
+
+def _terminal_validation_result(run: Any) -> JobResult | None:
+    run_id = str(run.id)
+    status = str(run.status)
+    if status == "SUCCEEDED":
+        return JobResult.success_result(
+            message="策略验证完成",
+            data={"validation_run_id": run_id, "replayed": True},
+        )
+    if status == "FAILED":
+        return JobResult.failure(
+            code=str(run.error_code or "STRATEGY_VALIDATION_FAILED"),
+            message="策略验证失败",
+            retryable=False,
+            data={"validation_run_id": run_id, "replayed": True},
+        )
+    return None
+
+
+async def _settle_validation_failure(
+    application: Any,
+    validation_run_id: UUID,
+    context: JobExecutionContext,
+    *,
+    code: str,
+    reason: str,
+) -> JobResult:
+    try:
+        completed = await application.record_validation_result_from_worker(
+            validation_run_id,
+            succeeded=False,
+            error_code=code,
+            evidence_snapshot={},
+            **_worker_context(context, reason),
+        )
+    except Exception:
+        return await _recover_validation_confirmation(
+            application,
+            validation_run_id,
+            context,
+        )
+    result = _terminal_validation_result(completed)
+    return result or JobResult.failure(
+        code="STRATEGY_VALIDATION_STATE_UNCERTAIN",
+        message="策略验证状态暂时无法确认",
+        retryable=False,
+    )
+
+
+async def _recover_validation_confirmation(
+    application: Any,
+    validation_run_id: UUID,
+    context: JobExecutionContext,
+) -> JobResult:
+    try:
+        current = await application.get_validation_run(validation_run_id)
+    except Exception:
+        return JobResult.failure(
+            code="STRATEGY_VALIDATION_STATE_UNCERTAIN",
+            message="策略验证状态暂时无法确认",
+            retryable=False,
+        )
+    terminal = _terminal_validation_result(current)
+    if terminal is not None:
+        return terminal
+    try:
+        failed = await application.record_validation_result_from_worker(
+            validation_run_id,
+            succeeded=False,
+            error_code="STRATEGY_VALIDATION_CONFIRMATION_FAILED",
+            evidence_snapshot={},
+            **_worker_context(context, "收敛无法确认的策略验证结果"),
+        )
+    except Exception:
+        return JobResult.failure(
+            code="STRATEGY_VALIDATION_STATE_UNCERTAIN",
+            message="策略验证状态暂时无法确认",
+            retryable=False,
+        )
+    return _terminal_validation_result(failed) or JobResult.failure(
+        code="STRATEGY_VALIDATION_STATE_UNCERTAIN",
+        message="策略验证状态暂时无法确认",
+        retryable=False,
     )

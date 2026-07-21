@@ -2,13 +2,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from long_invest.modules.strategies.contracts import (
+    ValidationEvidenceClaim,
+    ValidationEvidenceVerifier,
+)
 from long_invest.modules.strategies.git_store import StrategyGitStore
-from long_invest.modules.strategies.models import StrategyValidationRun
 from long_invest.modules.strategies.outbox import StrategyOutboxAdapter
 from long_invest.modules.strategies.repository import StrategyRepository
 from long_invest.modules.strategies.service import (
@@ -22,40 +25,27 @@ from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 
 
-class ValidationEvidenceVerifier(Protocol):
-    async def verify(
-        self,
-        validation_run_id: UUID,
-        *,
-        expected_evidence_hash: str,
-    ) -> bool: ...
+class UnconfiguredValidationEvidenceVerifier:
+    async def verify(self, claim: ValidationEvidenceClaim) -> bool:
+        return False
 
 
-class PersistedValidationEvidenceVerifier:
-    """Re-read immutable validation evidence before freezing a publication."""
+_validation_evidence_verifier_factory: (
+    Callable[[], ValidationEvidenceVerifier] | None
+) = None
 
-    def __init__(self, database: Database) -> None:
-        self._database = database
 
-    async def verify(
-        self,
-        validation_run_id: UUID,
-        *,
-        expected_evidence_hash: str,
-    ) -> bool:
-        try:
-            async with self._database.session() as session:
-                run = await session.get(StrategyValidationRun, validation_run_id)
-            if (
-                run is None
-                or str(run.status) != "SUCCEEDED"
-                or run.completed_at is None
-            ):
-                return False
-            actual_hash = StrategyService.hash_snapshot(run.evidence_snapshot)
-        except (AppError, SQLAlchemyError, TimeoutError, TypeError, ValueError):
-            return False
-        return actual_hash == expected_evidence_hash
+def configure_strategy_validation_evidence_verifier(
+    factory: Callable[[], ValidationEvidenceVerifier],
+) -> None:
+    global _validation_evidence_verifier_factory
+    _validation_evidence_verifier_factory = factory
+
+
+def get_configured_validation_evidence_verifier() -> ValidationEvidenceVerifier:
+    if _validation_evidence_verifier_factory is None:
+        return UnconfiguredValidationEvidenceVerifier()
+    return _validation_evidence_verifier_factory()
 
 
 class StrategyApplication:
@@ -90,6 +80,9 @@ class StrategyApplication:
 
     async def get_draft(self, strategy_id: UUID):
         return await self._read("get_draft", strategy_id)
+
+    async def get_validation_run(self, validation_run_id: UUID):
+        return await self._read("get_validation_run", validation_run_id)
 
     async def list_revisions(self, strategy_id: UUID, **kwargs: Any):
         return await self._read("list_revisions", strategy_id, **kwargs)
@@ -232,13 +225,23 @@ class StrategyApplication:
         validation = await self._read(
             "get_validation_evidence", validation_run_id
         )
+        snapshot = validation.evidence_snapshot
         evidence_hash = StrategyService.hash_snapshot(
-            validation.evidence_snapshot
+            snapshot
         )
-        if not await self._evidence_verifier.verify(
-            validation_run_id,
-            expected_evidence_hash=evidence_hash,
-        ):
+        claim = ValidationEvidenceClaim(
+            validation_run_id=validation.id,
+            strategy_id=validation.strategy_id,
+            draft_version=validation.draft_version,
+            source_code_hash=validation.source_code_hash,
+            metadata_hash=str(snapshot["metadata_hash"]),
+            parameter_schema_hash=str(snapshot["parameter_schema_hash"]),
+            parameter_hash=str(snapshot["parameter_hash"]),
+            environment_hash=str(snapshot["environment_hash"]),
+            runner_image_digest=str(snapshot["runner_image_digest"]),
+            checks=dict(snapshot["checks"]),
+        )
+        if not await self._evidence_verifier.verify(claim):
             raise AppError(
                 code="STRATEGY_VALIDATION_STALE",
                 message="发布前无法核实回测和验证事实",
@@ -435,7 +438,7 @@ def get_strategy_application() -> StrategyApplication:
             "strategy_runner_image_digest",
             "",
         ),
-        evidence_verifier=PersistedValidationEvidenceVerifier(database),
+        evidence_verifier=get_configured_validation_evidence_verifier(),
     )
 
 

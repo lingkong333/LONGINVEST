@@ -1,17 +1,18 @@
 import asyncio
 import hashlib
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
+import long_invest.modules.strategies.application as strategy_application_module
 from long_invest.modules.strategies.application import (
-    PersistedValidationEvidenceVerifier,
     StrategyApplication,
+    UnconfiguredValidationEvidenceVerifier,
+    get_configured_validation_evidence_verifier,
 )
-from long_invest.modules.strategies.service import FrozenPublication, StrategyService
+from long_invest.modules.strategies.service import FrozenPublication
 from long_invest.platform.errors import AppError
 
 
@@ -39,24 +40,34 @@ class Verifier:
         self.result = result
         self.calls = []
 
-    async def verify(self, validation_run_id, *, expected_evidence_hash):
-        self.calls.append((validation_run_id, expected_evidence_hash))
+    async def verify(self, claim):
+        self.calls.append(claim)
         return self.result
 
 
-class EvidenceDatabase:
-    def __init__(self, row):
-        self.row = row
+class ReferenceVerifier:
+    def __init__(self, persisted):
+        self.persisted = persisted
 
-    @asynccontextmanager
-    async def session(self):
-        row = self.row
-
-        class Session:
-            async def get(self, _model, _run_id):
-                return row
-
-        yield Session()
+    async def verify(self, claim):
+        for name, check in claim.checks.items():
+            key = (
+                name,
+                check["run_id"],
+                check["task_id"],
+                check["snapshot_id"],
+            )
+            fact = self.persisted.get(key)
+            if fact is None or fact != {
+                "status": "SUCCEEDED",
+                "strategy_id": str(claim.strategy_id),
+                "draft_version": claim.draft_version,
+                "source_code_hash": claim.source_code_hash,
+                "training_data_hash": check.get("training_data_hash"),
+                "test_data_hash": check.get("test_data_hash"),
+            }:
+                return False
+        return True
 
 
 class Service:
@@ -69,7 +80,13 @@ class Service:
         self.fail_complete_once = False
 
     async def get_validation_evidence(self, _validation_id):
-        return SimpleNamespace(evidence_snapshot=self.evidence)
+        return SimpleNamespace(
+            id=self.version.validation_run_id,
+            strategy_id=self.version.strategy_id,
+            draft_version=1,
+            source_code_hash=self.version.source_code_hash,
+            evidence_snapshot=self.evidence,
+        )
 
     async def begin_publish(self, *_args, **_kwargs):
         return FrozenPublication(self.version, self.run)
@@ -231,12 +248,33 @@ def publish_kwargs(version):
     }
 
 
+def persisted_references(version, snapshot):
+    return {
+        (
+            name,
+            check["run_id"],
+            check["task_id"],
+            check["snapshot_id"],
+        ): {
+            "status": "SUCCEEDED",
+            "strategy_id": str(version.strategy_id),
+            "draft_version": 1,
+            "source_code_hash": version.source_code_hash,
+            "training_data_hash": check.get("training_data_hash"),
+            "test_data_hash": check.get("test_data_hash"),
+        }
+        for name, check in snapshot["checks"].items()
+    }
+
+
 def test_publish_only_freezes_and_returns_persistent_run():
     database = Database()
     version, run = release_and_run()
-    service = Service(version, run, evidence(version))
+    snapshot = evidence(version)
+    service = Service(version, run, snapshot)
     git_store = GitStore(database)
-    subject = application(database, service, git_store, Verifier())
+    verifier = ReferenceVerifier(persisted_references(version, snapshot))
+    subject = application(database, service, git_store, verifier)
 
     result = asyncio.run(subject.publish(**publish_kwargs(version)))
 
@@ -245,33 +283,46 @@ def test_publish_only_freezes_and_returns_persistent_run():
     assert database.transactions == 1
 
 
-def test_persisted_evidence_verifier_accepts_exact_completed_record():
-    version, _run = release_and_run()
-    snapshot = evidence(version)
-    validation_run_id = version.validation_run_id
-    verifier = PersistedValidationEvidenceVerifier(
-        EvidenceDatabase(
-            SimpleNamespace(
-                id=validation_run_id,
-                status="SUCCEEDED",
-                completed_at=datetime.now(UTC),
-                evidence_snapshot=snapshot,
-            )
-        )
+def test_unconfigured_production_verifier_fails_closed(monkeypatch):
+    monkeypatch.setattr(
+        strategy_application_module,
+        "_validation_evidence_verifier_factory",
+        None,
+    )
+    verifier = get_configured_validation_evidence_verifier()
+    assert isinstance(verifier, UnconfiguredValidationEvidenceVerifier)
+    database = Database()
+    version, run = release_and_run()
+    service = Service(version, run, evidence(version))
+    subject = application(
+        database,
+        service,
+        GitStore(database),
+        verifier,
     )
 
-    accepted = asyncio.run(
-        verifier.verify(
-            validation_run_id,
-            expected_evidence_hash=StrategyService.hash_snapshot(snapshot),
-        )
-    )
-    rejected = asyncio.run(
-        verifier.verify(validation_run_id, expected_evidence_hash="0" * 64)
+    with pytest.raises(AppError) as raised:
+        asyncio.run(subject.publish(**publish_kwargs(version)))
+
+    assert raised.value.code == "STRATEGY_VALIDATION_STALE"
+    assert database.transactions == 0
+
+
+def test_cross_module_verifier_rejects_fabricated_references():
+    database = Database()
+    version, run = release_and_run()
+    service = Service(version, run, evidence(version))
+    subject = application(
+        database,
+        service,
+        GitStore(database),
+        ReferenceVerifier({}),
     )
 
-    assert accepted is True
-    assert rejected is False
+    with pytest.raises(AppError) as raised:
+        asyncio.run(subject.publish(**publish_kwargs(version)))
+
+    assert raised.value.code == "STRATEGY_VALIDATION_STALE"
 
 
 def test_worker_executes_git_outside_transaction_then_completes():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, DecimalException
 from enum import StrEnum
@@ -20,6 +21,26 @@ from pydantic import (
 from long_invest.modules.targets.contracts import TargetValues
 from long_invest.platform.json_snapshot import freeze_json_mapping, thaw_json_value
 from long_invest.platform.validation import Sha256Hex
+
+
+@dataclass(frozen=True, slots=True)
+class ValidationEvidenceClaim:
+    validation_run_id: UUID
+    strategy_id: UUID
+    draft_version: int
+    source_code_hash: str
+    metadata_hash: str
+    parameter_schema_hash: str
+    parameter_hash: str
+    environment_hash: str
+    runner_image_digest: str
+    checks: Mapping[str, Mapping[str, Any]]
+
+
+class ValidationEvidenceVerifier(Protocol):
+    """Re-query owner modules for every referenced run, task, and snapshot."""
+
+    async def verify(self, claim: ValidationEvidenceClaim) -> bool: ...
 
 
 class StrictContract(BaseModel):

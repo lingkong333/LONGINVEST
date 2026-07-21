@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
+from long_invest.modules.strategies.application import StrategyApplication
 from long_invest.modules.strategies.models import (
     Strategy,
     StrategyDraftRevision,
@@ -17,7 +18,6 @@ from long_invest.modules.strategies.models import (
 from long_invest.modules.strategies.outbox import StrategyOutboxAdapter
 from long_invest.modules.strategies.repository import StrategyRepository
 from long_invest.modules.strategies.service import (
-    PublishEvidence,
     StrategyCommandContext,
     StrategyService,
 )
@@ -111,6 +111,34 @@ class FailingAudit:
         raise RuntimeError("audit failed")
 
 
+class ApprovedCrossModuleEvidenceVerifier:
+    def __init__(self, *, strategy_id, draft_version, source_code_hash, checks):
+        self.strategy_id = strategy_id
+        self.draft_version = draft_version
+        self.source_code_hash = source_code_hash
+        self.references = {
+            (name, value["run_id"], value["task_id"], value["snapshot_id"])
+            for name, value in checks.items()
+        }
+
+    async def verify(self, claim) -> bool:
+        references = {
+            (name, value["run_id"], value["task_id"], value["snapshot_id"])
+            for name, value in claim.checks.items()
+        }
+        return (
+            claim.strategy_id == self.strategy_id
+            and claim.draft_version == self.draft_version
+            and claim.source_code_hash == self.source_code_hash
+            and references == self.references
+        )
+
+
+class UnusedGitStore:
+    def publish(self, **_kwargs):
+        raise AssertionError("HTTP publish request must not run Git synchronously")
+
+
 @pytest.mark.anyio
 async def test_strategy_revision_validation_and_publish_binding_are_atomic() -> None:
     database = Database(AppSettings(_env_file=None).database_url)
@@ -139,28 +167,39 @@ async def test_strategy_revision_validation_and_publish_binding_are_atomic() -> 
                 runner_image_digest="sha256:" + "a" * 64,
                 context=command_context(f"validate-{key}"),
             )
+        checks = validation_checks(validation)
         async with database.transaction() as session:
             await transaction_service(session).complete_validation(
                 validation.id,
                 succeeded=True,
                 error_code=None,
-                evidence_snapshot=validation_checks(validation),
+                evidence_snapshot=checks,
                 context=command_context(f"complete-{key}"),
             )
-        async with database.transaction() as session:
-            service = transaction_service(session)
-            completed_validation = await service.get_validation_evidence(validation.id)
-            frozen = await service.begin_publish(
-                created.strategy.id,
-                PublishEvidence(
-                    validation_run_id=validation.id,
-                    expected_draft_version=draft.draft_version,
-                    evidence_hash=service.hash_snapshot(
-                        completed_validation.evidence_snapshot
-                    ),
-                ),
-                command_context(f"publish-{key}"),
-            )
+        application = StrategyApplication(
+            database,
+            git_store=UnusedGitStore(),
+            evidence_verifier=ApprovedCrossModuleEvidenceVerifier(
+                strategy_id=created.strategy.id,
+                draft_version=draft.draft_version,
+                source_code_hash=validation.source_code_hash,
+                checks=checks,
+            ),
+            environment_version="python-3.12",
+            runner_image_digest="sha256:" + "a" * 64,
+        )
+        publish_context = command_context(f"publish-{key}")
+        frozen = await application.publish(
+            strategy_id=created.strategy.id,
+            validation_run_id=validation.id,
+            expected_draft_version=draft.draft_version,
+            request_id=publish_context.request_id,
+            idempotency_key=publish_context.idempotency_key,
+            actor_user_id=publish_context.actor_user_id,
+            session_id=publish_context.session_id,
+            trusted_ip=publish_context.trusted_ip,
+            reason=publish_context.reason,
+        )
         async with database.transaction() as session:
             service = transaction_service(session)
             await service.claim_publish_run(frozen.run.id)

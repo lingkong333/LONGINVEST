@@ -119,13 +119,7 @@ class StrategyService:
     async def get_validation_evidence(
         self, validation_run_id: UUID
     ) -> StrategyValidationRun:
-        run = await self._repository.get_validation_run(validation_run_id)
-        if run is None:
-            raise AppError(
-                code="STRATEGY_VALIDATION_NOT_FOUND",
-                message="策略验证记录不存在",
-                status_code=404,
-            )
+        run = await self.get_validation_run(validation_run_id)
         if str(run.status) != "SUCCEEDED":
             raise AppError(
                 code="STRATEGY_VALIDATION_REQUIRED",
@@ -133,6 +127,18 @@ class StrategyService:
                 status_code=409,
             )
         _validated_release_snapshot(run.evidence_snapshot)
+        return run
+
+    async def get_validation_run(
+        self, validation_run_id: UUID
+    ) -> StrategyValidationRun:
+        run = await self._repository.get_validation_run(validation_run_id)
+        if run is None:
+            raise AppError(
+                code="STRATEGY_VALIDATION_NOT_FOUND",
+                message="策略验证记录不存在",
+                status_code=404,
+            )
         return run
 
     async def list_recoverable_publish_runs(self) -> list[StrategyRun]:

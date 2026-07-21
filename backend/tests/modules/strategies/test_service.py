@@ -564,6 +564,8 @@ async def test_validation_lifecycle_binds_current_draft_and_marks_validated():
         runner_image_digest="sha256:" + "a" * 64,
         context=context("validate-1"),
     )
+    pending = await subject.get_validation_run(run.id)
+    assert pending.status == "PENDING"
     completed = await subject.complete_validation(
         run.id,
         succeeded=True,

@@ -7,6 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy
 
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes git \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --system longinvest \
     && useradd --system --gid longinvest --home-dir /app longinvest \
     && mkdir -p /var/log/longinvest \

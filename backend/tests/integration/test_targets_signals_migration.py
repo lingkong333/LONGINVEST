@@ -337,13 +337,16 @@ class _FakeMaintenanceConnection:
 
 
 class _FakeMaintenanceConnectionContext:
-    def __init__(self, maintenance) -> None:
+    def __init__(self, maintenance, exit_error: Exception | None = None) -> None:
         self.connection = _FakeMaintenanceConnection(maintenance)
+        self.exit_error = exit_error
 
     async def __aenter__(self):
         return self.connection
 
     async def __aexit__(self, exc_type, exc, traceback) -> None:
+        if self.exit_error:
+            raise self.exit_error
         return None
 
 
@@ -354,15 +357,20 @@ class _FakeMaintenance:
         terminate_error: Exception | None = None,
         drop_error: Exception | None = None,
         dispose_error: Exception | None = None,
+        connection_exit_errors: list[Exception | None] | None = None,
     ) -> None:
         self.terminate_error = terminate_error
         self.drop_error = drop_error
         self.dispose_error = dispose_error
+        self.connection_exit_errors = list(connection_exit_errors or [])
         self.calls: list[str] = []
         self.dispose_calls = 0
 
     def connect(self) -> _FakeMaintenanceConnectionContext:
-        return _FakeMaintenanceConnectionContext(self)
+        exit_error = (
+            self.connection_exit_errors.pop(0) if self.connection_exit_errors else None
+        )
+        return _FakeMaintenanceConnectionContext(self, exit_error)
 
     async def dispose(self) -> None:
         self.dispose_calls += 1
@@ -408,6 +416,27 @@ async def test_temporary_database_raises_cleanup_error_after_successful_body() -
         async with _temporary_database_lifecycle(maintenance, "temporary_database"):
             pass
 
+    assert maintenance.dispose_calls == 1
+
+
+@pytest.mark.anyio
+async def test_temporary_database_cleans_up_after_create_connection_exit_fails() -> (
+    None
+):
+    maintenance = _FakeMaintenance(
+        connection_exit_errors=[RuntimeError("connection exit failed")],
+        drop_error=RuntimeError("drop failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="connection exit failed") as captured:
+        async with _temporary_database_lifecycle(maintenance, "temporary_database"):
+            pytest.fail("body must not run when the create connection fails to exit")
+
+    assert any("pg_terminate_backend" in call for call in maintenance.calls)
+    assert any(
+        'DROP DATABASE "temporary_database"' in call for call in maintenance.calls
+    )
+    assert any("drop failed" in note for note in captured.value.__notes__)
     assert maintenance.dispose_calls == 1
 
 
@@ -1221,7 +1250,7 @@ async def _temporary_database_lifecycle(maintenance, database_name: str):
     try:
         async with maintenance.connect() as connection:
             await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
-        created = True
+            created = True
         try:
             yield
         except BaseException as error:

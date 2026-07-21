@@ -5,6 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.targets.models import (
     SubscriptionTargetBinding,
+    TargetCalculationRun,
+    TargetReview,
     TargetRevision,
 )
 
@@ -131,6 +133,76 @@ class TargetRepository:
 
     async def persist_revision(self, revision: TargetRevision) -> None:
         self._session.add(revision)
+
+    async def get_calculation_by_idempotency(
+        self, subscription_id: UUID, key: str
+    ) -> TargetCalculationRun | None:
+        return await self._session.scalar(
+            select(TargetCalculationRun).where(
+                TargetCalculationRun.subscription_id == subscription_id,
+                TargetCalculationRun.idempotency_key == key,
+            )
+        )
+
+    async def get_calculation(
+        self, run_id: UUID, *, for_update: bool = False
+    ) -> TargetCalculationRun | None:
+        query = select(TargetCalculationRun).where(TargetCalculationRun.id == run_id)
+        if for_update:
+            query = query.with_for_update()
+        return await self._session.scalar(query)
+
+    async def persist_calculation(self, run: TargetCalculationRun) -> None:
+        self._session.add(run)
+
+    async def list_calculations(
+        self, *, page: int = 1, page_size: int = 50
+    ) -> tuple[TargetCalculationRun, ...]:
+        _validate_page(page, page_size)
+        rows = await self._session.scalars(
+            select(TargetCalculationRun)
+            .order_by(
+                TargetCalculationRun.created_at.desc(), TargetCalculationRun.id.desc()
+            )
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+        return tuple(rows.all())
+
+    async def count_calculations(self) -> int:
+        total = await self._session.scalar(
+            select(func.count()).select_from(TargetCalculationRun)
+        )
+        return int(total or 0)
+
+    async def get_review(
+        self, review_id: UUID, *, for_update: bool = False
+    ) -> TargetReview | None:
+        query = select(TargetReview).where(TargetReview.id == review_id)
+        if for_update:
+            query = query.with_for_update()
+        return await self._session.scalar(query)
+
+    async def persist_review(self, review: TargetReview) -> None:
+        self._session.add(review)
+
+    async def list_reviews(
+        self, *, page: int = 1, page_size: int = 50
+    ) -> tuple[TargetReview, ...]:
+        _validate_page(page, page_size)
+        rows = await self._session.scalars(
+            select(TargetReview)
+            .order_by(TargetReview.created_at.desc(), TargetReview.id.desc())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
+        )
+        return tuple(rows.all())
+
+    async def count_reviews(self) -> int:
+        total = await self._session.scalar(
+            select(func.count()).select_from(TargetReview)
+        )
+        return int(total or 0)
 
     async def flush(self) -> None:
         await self._session.flush()

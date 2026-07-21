@@ -160,13 +160,66 @@ class StrategyRepository:
         )
 
     async def get_validation_run(
-        self, validation_run_id: UUID
+        self, validation_run_id: UUID, *, for_update: bool = False
+    ) -> StrategyValidationRun | None:
+        statement = select(StrategyValidationRun).where(
+            StrategyValidationRun.id == validation_run_id
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return await self.session.scalar(statement)
+
+    async def add_validation_run(self, run: StrategyValidationRun) -> None:
+        self.session.add(run)
+        await self.session.flush()
+
+    async def complete_validation_run(
+        self,
+        validation_run_id: UUID,
+        *,
+        status: str,
+        error_code: str | None,
+        evidence_snapshot: dict,
+        completed_at,
     ) -> StrategyValidationRun | None:
         return await self.session.scalar(
-            select(StrategyValidationRun).where(
-                StrategyValidationRun.id == validation_run_id
+            update(StrategyValidationRun)
+            .where(
+                StrategyValidationRun.id == validation_run_id,
+                StrategyValidationRun.status.in_(("PENDING", "RUNNING")),
             )
+            .values(
+                status=status,
+                error_code=error_code,
+                evidence_snapshot=evidence_snapshot,
+                completed_at=completed_at,
+            )
+            .returning(StrategyValidationRun)
         )
+
+    async def bind_validation_run(
+        self,
+        validation_run_id: UUID,
+        version_id: UUID,
+        *,
+        strategy_id: UUID,
+        draft_version: int,
+        source_code_hash: str,
+    ) -> bool:
+        changed = await self.session.scalar(
+            update(StrategyValidationRun)
+            .where(
+                StrategyValidationRun.id == validation_run_id,
+                StrategyValidationRun.strategy_id == strategy_id,
+                StrategyValidationRun.draft_version == draft_version,
+                StrategyValidationRun.source_code_hash == source_code_hash,
+                StrategyValidationRun.status == "SUCCEEDED",
+                StrategyValidationRun.strategy_version_id.is_(None),
+            )
+            .values(strategy_version_id=version_id)
+            .returning(StrategyValidationRun.id)
+        )
+        return changed is not None
 
     async def next_version_no(self, strategy_id: UUID) -> int:
         current = await self.session.scalar(

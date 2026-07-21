@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 from datetime import UTC, datetime
 from functools import wraps
 from types import SimpleNamespace
@@ -59,6 +61,9 @@ class FakeRepository:
     async def add_revision(self, revision):
         self.revisions[revision.id] = revision
 
+    async def add_validation_run(self, validation):
+        self.validation_runs[validation.id] = validation
+
     async def next_revision_no(self, draft_id):
         return 1 + max(
             (r.revision_no for r in self.revisions.values() if r.draft_id == draft_id),
@@ -85,8 +90,40 @@ class FakeRepository:
     async def set_strategy_name(self, strategy_id, name):
         self.strategies[strategy_id].name = name
 
-    async def get_validation_run(self, validation_run_id):
+    async def get_validation_run(self, validation_run_id, *, for_update=False):
         return self.validation_runs.get(validation_run_id)
+
+    async def bind_validation_run(
+        self,
+        validation_run_id,
+        version_id,
+        *,
+        strategy_id,
+        draft_version,
+        source_code_hash,
+    ):
+        validation = self.validation_runs.get(validation_run_id)
+        if (
+            validation is None
+            or validation.strategy_id != strategy_id
+            or validation.draft_version != draft_version
+            or validation.source_code_hash != source_code_hash
+            or validation.status != "SUCCEEDED"
+            or validation.strategy_version_id is not None
+        ):
+            return False
+        validation.strategy_version_id = version_id
+        return True
+
+    async def complete_validation_run(
+        self, validation_run_id, *, status, error_code, evidence_snapshot, completed_at
+    ):
+        validation = self.validation_runs[validation_run_id]
+        validation.status = status
+        validation.error_code = error_code
+        validation.evidence_snapshot = evidence_snapshot
+        validation.completed_at = completed_at
+        return validation
 
     async def next_version_no(self, strategy_id):
         return 1 + max(
@@ -156,6 +193,53 @@ def service(repository=None):
         audit,
         events,
     )
+
+
+def succeeded_validation(
+    strategy_id,
+    draft_version,
+    source_code_hash,
+    *,
+    metadata=None,
+    parameter_schema=None,
+    params=None,
+):
+    validation_id = uuid4()
+    metadata = metadata or {"name": "策略"}
+    parameter_schema = parameter_schema or {"type": "object"}
+    params = params or {}
+    return validation_id, SimpleNamespace(
+        id=validation_id,
+        strategy_id=strategy_id,
+        strategy_version_id=None,
+        draft_version=draft_version,
+        source_code_hash=source_code_hash,
+        evidence_snapshot={
+            "metadata": metadata,
+            "metadata_hash": json_hash(metadata),
+            "parameter_schema": parameter_schema,
+            "parameter_schema_hash": json_hash(parameter_schema),
+            "params": params,
+            "parameter_hash": json_hash(params),
+            "environment_version": "python-3.12",
+            "runner_image_digest": "sha256:" + "a" * 64,
+            "checks": {"all_required_checks_passed": True},
+        },
+        status="SUCCEEDED",
+        error_code=None,
+        completed_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+
+
+def json_hash(value):
+    content = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 @async_test
@@ -351,6 +435,124 @@ async def test_diff_compares_revision_with_current_server_draft():
 
 
 @async_test
+async def test_validation_lifecycle_binds_current_draft_and_marks_validated():
+    subject, repository, audit, events = service()
+    created = await subject.create("策略", context())
+
+    run = await subject.request_validation(
+        created.strategy.id,
+        metadata={"name": "策略"},
+        parameter_schema={"type": "object"},
+        params={},
+        environment_version="python-3.12",
+        runner_image_digest="sha256:" + "a" * 64,
+        context=context("validate-1"),
+    )
+    completed = await subject.complete_validation(
+        run.id,
+        succeeded=True,
+        error_code=None,
+        evidence_snapshot={"checks": ["static", "sample", "stock", "backtest"]},
+        context=context("validate-complete-1"),
+    )
+
+    assert run.strategy_id == created.strategy.id
+    assert run.draft_version == 1
+    assert completed.status == "SUCCEEDED"
+    assert repository.strategies[created.strategy.id].status == "VALIDATED"
+    assert audit.items[-1].action_code == "strategy.validation_completed"
+    assert events.items[-1].topic == "strategy.validation_completed"
+
+
+@async_test
+async def test_repeated_validation_request_reuses_same_frozen_run():
+    subject, repository, *_ = service()
+    created = await subject.create("策略", context())
+    values = {
+        "metadata": {"name": "策略"},
+        "parameter_schema": {"type": "object"},
+        "params": {},
+        "environment_version": "python-3.12",
+        "runner_image_digest": "sha256:" + "a" * 64,
+        "context": context("validate-1"),
+    }
+
+    first = await subject.request_validation(created.strategy.id, **values)
+    replay = await subject.request_validation(created.strategy.id, **values)
+
+    assert replay.id == first.id
+    assert len(repository.validation_runs) == 1
+
+
+@async_test
+async def test_late_validation_for_old_draft_does_not_validate_new_draft():
+    subject, repository, *_ = service()
+    created = await subject.create("策略", context())
+    run = await subject.request_validation(
+        created.strategy.id,
+        metadata={"name": "策略"},
+        parameter_schema={"type": "object"},
+        params={},
+        environment_version="python-3.12",
+        runner_image_digest="sha256:" + "a" * 64,
+        context=context("validate-1"),
+    )
+    await subject.save_draft(
+        created.strategy.id,
+        source_code="changed",
+        expected_version=1,
+        create_revision=False,
+        context=context("save-1"),
+    )
+
+    await subject.complete_validation(
+        run.id,
+        succeeded=True,
+        error_code=None,
+        evidence_snapshot={"checks": ["static"]},
+        context=context("validate-complete-1"),
+    )
+
+    assert repository.strategies[created.strategy.id].status == "DRAFT"
+
+
+@async_test
+async def test_old_validation_completion_does_not_clobber_new_validation_state():
+    subject, repository, *_ = service()
+    created = await subject.create("策略", context())
+    values = {
+        "metadata": {"name": "策略"},
+        "parameter_schema": {"type": "object"},
+        "params": {},
+        "environment_version": "python-3.12",
+        "runner_image_digest": "sha256:" + "a" * 64,
+    }
+    old = await subject.request_validation(
+        created.strategy.id, **values, context=context("validate-1")
+    )
+    await subject.save_draft(
+        created.strategy.id,
+        source_code="changed",
+        expected_version=1,
+        create_revision=False,
+        context=context("save-1"),
+    )
+    await subject.request_validation(
+        created.strategy.id, **values, context=context("validate-2")
+    )
+
+    await subject.complete_validation(
+        old.id,
+        succeeded=True,
+        error_code=None,
+        evidence_snapshot={"all_required_checks_passed": True},
+        context=context("validate-complete-1"),
+    )
+
+    assert repository.strategies[created.strategy.id].status == "VALIDATING"
+
+
+@async_test
 async def test_publish_freezes_current_source_and_reuses_failed_snapshot():
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
@@ -361,22 +563,22 @@ async def test_publish_freezes_current_source_and_reuses_failed_snapshot():
         create_revision=True,
         context=context("save-1"),
     )
-    validation_id = uuid4()
-    repository.validation_runs[validation_id] = SimpleNamespace(
-        id=validation_id, status="SUCCEEDED", error_code=None
+    validation_id, validation = succeeded_validation(
+        created.strategy.id, draft.draft_version, subject.hash_source(draft.source_code)
     )
+    repository.validation_runs[validation_id] = validation
     evidence = PublishEvidence(
         validation_run_id=validation_id,
-        source_code_hash=subject.hash_source(draft.source_code),
-        metadata={"name": "策略"},
-        parameter_schema={"type": "object"},
-        environment_version="python-3.12",
-        runner_image_digest="sha256:" + "a" * 64,
+        expected_draft_version=draft.draft_version,
     )
 
     frozen = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")
     )
+    in_progress_replay = await subject.begin_publish(
+        created.strategy.id, evidence, context("pub-1")
+    )
+    assert in_progress_replay.version.id == frozen.version.id
     await subject.fail_publish(
         created.strategy.id,
         frozen.version.id,
@@ -389,6 +591,7 @@ async def test_publish_freezes_current_source_and_reuses_failed_snapshot():
 
     assert retried.version.id == frozen.version.id
     assert retried.version.source_code == draft.source_code
+    assert retried.version.strategy_metadata == validation.evidence_snapshot["metadata"]
     assert retried.version.status == "PUBLISHING"
 
 
@@ -396,17 +599,13 @@ async def test_publish_freezes_current_source_and_reuses_failed_snapshot():
 async def test_publish_failure_is_audited_and_emitted():
     subject, repository, audit, events = service()
     created = await subject.create("策略", context())
-    validation_id = uuid4()
-    repository.validation_runs[validation_id] = SimpleNamespace(
-        id=validation_id, status="SUCCEEDED", error_code=None
+    validation_id, validation = succeeded_validation(
+        created.strategy.id, 1, subject.hash_source("")
     )
+    repository.validation_runs[validation_id] = validation
     evidence = PublishEvidence(
         validation_run_id=validation_id,
-        source_code_hash=subject.hash_source(""),
-        metadata={},
-        parameter_schema={"type": "object"},
-        environment_version="python-3.12",
-        runner_image_digest="sha256:" + "a" * 64,
+        expected_draft_version=1,
     )
     frozen = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")
@@ -428,17 +627,20 @@ async def test_publish_failure_is_audited_and_emitted():
 async def test_publish_rejects_stale_validation_evidence():
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
-    validation_id = uuid4()
-    repository.validation_runs[validation_id] = SimpleNamespace(
-        id=validation_id, status="SUCCEEDED", error_code=None
+    validation_id, validation = succeeded_validation(
+        created.strategy.id, 1, subject.hash_source("")
+    )
+    repository.validation_runs[validation_id] = validation
+    await subject.save_draft(
+        created.strategy.id,
+        source_code="changed",
+        expected_version=1,
+        create_revision=False,
+        context=context("save-1"),
     )
     evidence = PublishEvidence(
         validation_run_id=validation_id,
-        source_code_hash="0" * 64,
-        metadata={},
-        parameter_schema={"type": "object"},
-        environment_version="python-3.12",
-        runner_image_digest="sha256:" + "a" * 64,
+        expected_draft_version=2,
     )
 
     with pytest.raises(AppError) as raised:
@@ -448,24 +650,38 @@ async def test_publish_rejects_stale_validation_evidence():
 
 
 @async_test
-async def test_publish_rejects_non_json_or_non_finite_snapshots():
+async def test_publish_rejects_validation_from_another_strategy_or_draft():
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
-    validation_id = uuid4()
-    repository.validation_runs[validation_id] = SimpleNamespace(
-        id=validation_id, status="SUCCEEDED", error_code=None
-    )
+    current_hash = subject.hash_source("")
+    validation_id, validation = succeeded_validation(uuid4(), 99, current_hash)
+    repository.validation_runs[validation_id] = validation
     evidence = PublishEvidence(
         validation_run_id=validation_id,
-        source_code_hash=subject.hash_source(""),
-        metadata={"bad": float("nan")},
-        parameter_schema={"type": "object"},
-        environment_version="python-3.12",
-        runner_image_digest="sha256:" + "a" * 64,
+        expected_draft_version=1,
     )
 
     with pytest.raises(AppError) as raised:
         await subject.begin_publish(created.strategy.id, evidence, context("pub-1"))
+
+    assert raised.value.code == "STRATEGY_VALIDATION_STALE"
+    assert repository.versions == {}
+
+
+@async_test
+async def test_publish_rejects_non_json_or_non_finite_snapshots():
+    subject, *_ = service()
+    created = await subject.create("策略", context())
+    with pytest.raises(AppError) as raised:
+        await subject.request_validation(
+            created.strategy.id,
+            metadata={"bad": float("nan")},
+            parameter_schema={"type": "object"},
+            params={},
+            environment_version="python-3.12",
+            runner_image_digest="sha256:" + "a" * 64,
+            context=context("validate-1"),
+        )
 
     assert raised.value.code == "STRATEGY_INPUT_INVALID"
 
@@ -481,17 +697,13 @@ async def test_complete_publish_makes_version_bindable_and_archive_blocks_edits(
         create_revision=True,
         context=context("save-1"),
     )
-    validation_id = uuid4()
-    repository.validation_runs[validation_id] = SimpleNamespace(
-        id=validation_id, status="SUCCEEDED", error_code=None
+    validation_id, validation = succeeded_validation(
+        created.strategy.id, draft.draft_version, subject.hash_source(draft.source_code)
     )
+    repository.validation_runs[validation_id] = validation
     evidence = PublishEvidence(
         validation_run_id=validation_id,
-        source_code_hash=subject.hash_source(draft.source_code),
-        metadata={},
-        parameter_schema={"type": "object"},
-        environment_version="python-3.12",
-        runner_image_digest="sha256:" + "b" * 64,
+        expected_draft_version=draft.draft_version,
     )
     frozen = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")

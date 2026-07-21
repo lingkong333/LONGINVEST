@@ -31,6 +31,8 @@ class StrategyApplication:
         audit_factory: Callable[..., Any] = AuditService,
         event_factory: Callable[..., Any] = StrategyOutboxAdapter,
         service_factory: Callable[..., Any] = StrategyService,
+        environment_version: str = "python-3.12",
+        runner_image_digest: str = "sha256:" + "a" * 64,
     ) -> None:
         self._database = database
         self._git = git_store
@@ -38,6 +40,8 @@ class StrategyApplication:
         self._audit_factory = audit_factory
         self._event_factory = event_factory
         self._service_factory = service_factory
+        self._environment_version = environment_version
+        self._runner_image_digest = runner_image_digest
 
     async def list(self, **kwargs: Any):
         return await self._read("list", **kwargs)
@@ -115,6 +119,46 @@ class StrategyApplication:
             conflict_code="STRATEGY_VERSION_CONFLICT",
         )
 
+    async def request_validation(
+        self,
+        strategy_id: UUID,
+        *,
+        metadata: dict[str, Any],
+        parameter_schema: dict[str, Any],
+        params: dict[str, Any],
+        **context: str,
+    ):
+        return await self._write(
+            "request_validation",
+            strategy_id,
+            metadata=metadata,
+            parameter_schema=parameter_schema,
+            params=params,
+            environment_version=self._environment_version,
+            runner_image_digest=self._runner_image_digest,
+            context=self._context(context),
+            conflict_code="STRATEGY_VALIDATION_CONFLICT",
+        )
+
+    async def complete_validation(
+        self,
+        validation_run_id: UUID,
+        *,
+        succeeded: bool,
+        error_code: str | None,
+        evidence_snapshot: dict[str, Any],
+        **context: str,
+    ):
+        return await self._write(
+            "complete_validation",
+            validation_run_id,
+            succeeded=succeeded,
+            error_code=error_code,
+            evidence_snapshot=evidence_snapshot,
+            context=self._context(context),
+            conflict_code="STRATEGY_VALIDATION_CONFLICT",
+        )
+
     async def archive(
         self, strategy_id: UUID, *, expected_version: int, **context: str
     ):
@@ -131,21 +175,13 @@ class StrategyApplication:
         *,
         strategy_id: UUID,
         validation_run_id: UUID,
-        source_code_hash: str,
-        metadata: dict[str, Any],
-        parameter_schema: dict[str, Any],
-        environment_version: str,
-        runner_image_digest: str,
+        expected_draft_version: int,
         **context: str,
     ):
         command_context = self._context(context)
         evidence = PublishEvidence(
             validation_run_id=validation_run_id,
-            source_code_hash=source_code_hash,
-            metadata=metadata,
-            parameter_schema=parameter_schema,
-            environment_version=environment_version,
-            runner_image_digest=runner_image_digest,
+            expected_draft_version=expected_draft_version,
         )
         frozen = await self._write(
             "begin_publish",
@@ -275,7 +311,18 @@ def get_strategy_application() -> StrategyApplication:
     root = Path(
         getattr(settings, "strategy_git_path", "/var/lib/long-invest/strategies")
     )
-    return StrategyApplication(get_database(), git_store=StrategyGitStore(root))
+    return StrategyApplication(
+        get_database(),
+        git_store=StrategyGitStore(root),
+        environment_version=getattr(
+            settings, "strategy_environment_version", "python-3.12"
+        ),
+        runner_image_digest=getattr(
+            settings,
+            "strategy_runner_image_digest",
+            "sha256:" + "a" * 64,
+        ),
+    )
 
 
 def _publish_failed() -> AppError:

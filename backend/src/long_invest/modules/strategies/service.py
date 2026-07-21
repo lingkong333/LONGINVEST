@@ -13,6 +13,7 @@ from long_invest.modules.strategies.models import (
     Strategy,
     StrategyDraft,
     StrategyDraftRevision,
+    StrategyValidationRun,
     StrategyVersion,
 )
 from long_invest.platform.audit.contracts import AuditWrite
@@ -34,11 +35,7 @@ class StrategyCommandContext:
 @dataclass(frozen=True, slots=True)
 class PublishEvidence:
     validation_run_id: UUID
-    source_code_hash: str
-    metadata: dict[str, Any]
-    parameter_schema: dict[str, Any]
-    environment_version: str
-    runner_image_digest: str
+    expected_draft_version: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,7 +194,7 @@ class StrategyService:
         )
         if changed is None:
             raise _version_conflict(current)
-        if strategy.status in {"VALIDATED", "PUBLISH_FAILED"}:
+        if strategy.status in {"VALIDATING", "VALIDATED", "PUBLISH_FAILED"}:
             await self._repository.set_strategy_status(strategy_id, "DRAFT")
             strategy.status = "DRAFT"
         if create_revision:
@@ -304,6 +301,175 @@ class StrategyService:
             )
         )
 
+    async def request_validation(
+        self,
+        strategy_id: UUID,
+        *,
+        metadata: dict[str, Any],
+        parameter_schema: dict[str, Any],
+        params: dict[str, Any],
+        environment_version: str,
+        runner_image_digest: str,
+        context: StrategyCommandContext,
+    ) -> StrategyValidationRun:
+        _require_context(context)
+        metadata = _json_snapshot(metadata)
+        parameter_schema = _json_snapshot(parameter_schema)
+        params = _json_snapshot(params)
+        _validate_environment(environment_version, runner_image_digest)
+        strategy = await self._locked_strategy(strategy_id)
+        self._ensure_editable(strategy)
+        if strategy.status == "PUBLISHING":
+            raise AppError(
+                code="STRATEGY_PUBLISH_IN_PROGRESS",
+                message="发布中的策略不能重新验证",
+                status_code=409,
+            )
+        before_status = str(strategy.status)
+        draft = await self._repository.get_draft(strategy_id, for_update=True)
+        if draft is None:
+            raise _not_found()
+        source_code_hash = self.hash_source(draft.source_code)
+        frozen_facts = {
+            "draft_version": draft.draft_version,
+            "source_code_hash": source_code_hash,
+            "metadata_hash": _json_hash(metadata),
+            "parameter_schema_hash": _json_hash(parameter_schema),
+            "parameter_hash": _json_hash(params),
+            "environment_version": environment_version,
+            "runner_image_digest": runner_image_digest,
+        }
+        replay = await self._audit.find_by_idempotency(
+            _audit_key(
+                "strategy.validation_requested",
+                strategy.id,
+                context.idempotency_key,
+            )
+        )
+        if replay is not None:
+            after = replay.after_summary or {}
+            if any(after.get(key) != value for key, value in frozen_facts.items()):
+                raise _idempotency_conflict()
+            try:
+                validation_run_id = UUID(str(after["validation_run_id"]))
+            except (KeyError, ValueError) as exc:
+                raise _idempotency_conflict() from exc
+            existing = await self._repository.get_validation_run(validation_run_id)
+            if existing is None:
+                raise _idempotency_conflict()
+            return existing
+        run = StrategyValidationRun(
+            id=uuid4(),
+            strategy_id=strategy_id,
+            draft_version=draft.draft_version,
+            source_code_hash=source_code_hash,
+            evidence_snapshot={
+                "metadata": metadata,
+                "metadata_hash": frozen_facts["metadata_hash"],
+                "parameter_schema": parameter_schema,
+                "parameter_schema_hash": frozen_facts["parameter_schema_hash"],
+                "params": params,
+                "parameter_hash": frozen_facts["parameter_hash"],
+                "environment_version": environment_version,
+                "runner_image_digest": runner_image_digest,
+                "checks": {},
+            },
+            status="PENDING",
+        )
+        await self._repository.add_validation_run(run)
+        await self._repository.set_strategy_status(strategy_id, "VALIDATING")
+        strategy.status = "VALIDATING"
+        await self._record(
+            "strategy.validation_requested",
+            strategy,
+            context,
+            before={
+                "status": before_status,
+                "draft_version": draft.draft_version,
+            },
+            after={
+                "status": "VALIDATING",
+                "validation_run_id": str(run.id),
+                **frozen_facts,
+            },
+        )
+        return run
+
+    async def complete_validation(
+        self,
+        validation_run_id: UUID,
+        *,
+        succeeded: bool,
+        error_code: str | None,
+        evidence_snapshot: dict[str, Any],
+        context: StrategyCommandContext,
+    ) -> StrategyValidationRun:
+        _require_context(context)
+        checks = _json_snapshot(evidence_snapshot)
+        run = await self._repository.get_validation_run(
+            validation_run_id, for_update=True
+        )
+        if run is None:
+            raise AppError(
+                code="STRATEGY_VALIDATION_NOT_FOUND",
+                message="策略验证记录不存在",
+                status_code=404,
+            )
+        if str(run.status) in {"SUCCEEDED", "FAILED"}:
+            return run
+        if succeeded and error_code is not None:
+            raise _invalid("成功验证不能包含错误码")
+        if not succeeded and not (error_code or "").strip():
+            raise _invalid("失败验证必须包含错误码")
+        strategy = await self._locked_strategy(run.strategy_id)
+        draft = await self._repository.get_draft(run.strategy_id, for_update=True)
+        if draft is None:
+            raise _not_found()
+        status = "SUCCEEDED" if succeeded else "FAILED"
+        completed = await self._repository.complete_validation_run(
+            validation_run_id,
+            status=status,
+            error_code=error_code,
+            evidence_snapshot={**run.evidence_snapshot, "checks": checks},
+            completed_at=_utc_now(),
+        )
+        if completed is None:
+            raise AppError(
+                code="STRATEGY_VALIDATION_CONFLICT",
+                message="策略验证状态已被其他执行更新",
+                status_code=409,
+            )
+        is_current = (
+            draft.draft_version == run.draft_version
+            and self.hash_source(draft.source_code) == run.source_code_hash
+        )
+        strategy_status = str(strategy.status)
+        if is_current:
+            strategy_status = "VALIDATED" if succeeded else "DRAFT"
+            await self._repository.set_strategy_status(
+                run.strategy_id, strategy_status
+            )
+            strategy.status = strategy_status
+        topic = (
+            "strategy.validation_completed"
+            if succeeded
+            else "strategy.validation_failed"
+        )
+        await self._record(
+            topic,
+            strategy,
+            context,
+            before={"status": "VALIDATING", "validation_run_id": str(run.id)},
+            after={
+                "status": strategy_status,
+                "validation_status": status,
+                "validation_run_id": str(run.id),
+                "evidence_is_current": is_current,
+                "error_code": error_code,
+            },
+        )
+        return completed
+
     async def begin_publish(
         self,
         strategy_id: UUID,
@@ -311,30 +477,14 @@ class StrategyService:
         context: StrategyCommandContext,
     ) -> FrozenPublication:
         _require_context(context)
-        metadata = _json_snapshot(evidence.metadata)
-        parameter_schema = _json_snapshot(evidence.parameter_schema)
-        if re.fullmatch(r"[0-9a-f]{64}", evidence.source_code_hash) is None:
-            raise _invalid("源码哈希无效")
-        if (
-            not evidence.environment_version.strip()
-            or re.fullmatch(
-                r"sha256:[0-9a-f]{64}", evidence.runner_image_digest
-            )
-            is None
-        ):
-            raise _invalid("策略运行环境或镜像摘要无效")
         strategy = await self._locked_strategy(strategy_id)
         self._ensure_editable(strategy)
         draft = await self._repository.get_draft(strategy_id, for_update=True)
         if draft is None:
             raise _not_found()
+        if draft.draft_version != evidence.expected_draft_version:
+            raise _version_conflict(draft)
         actual_hash = self.hash_source(draft.source_code)
-        if evidence.source_code_hash != actual_hash:
-            raise AppError(
-                code="STRATEGY_VALIDATION_STALE",
-                message="草稿已变化，请重新验证后再发布",
-                status_code=409,
-            )
         validation = await self._repository.get_validation_run(
             evidence.validation_run_id
         )
@@ -344,18 +494,42 @@ class StrategyService:
                 message="当前源码缺少成功的完整验证",
                 status_code=409,
             )
-        failed = await self._repository.latest_failed_version(strategy_id, actual_hash)
-        if failed is not None:
-            if not _same_release(failed, evidence):
+        if (
+            validation.strategy_id != strategy_id
+            or validation.draft_version != draft.draft_version
+            or validation.source_code_hash != actual_hash
+        ):
+            raise AppError(
+                code="STRATEGY_VALIDATION_STALE",
+                message="验证证据不属于当前策略的当前草稿",
+                status_code=409,
+            )
+        release = _validated_release_snapshot(validation.evidence_snapshot)
+        if validation.strategy_version_id is not None:
+            existing = await self._repository.get_version(
+                strategy_id,
+                validation.strategy_version_id,
+                for_update=True,
+            )
+            if existing is None or not _same_release(existing, release):
                 raise AppError(
                     code="STRATEGY_VALIDATION_STALE",
-                    message="失败版本的冻结证据与当前发布请求不一致",
+                    message="验证证据绑定的发布版本不一致",
                     status_code=409,
                 )
-            failed.status = "PUBLISHING"
-            await self._repository.set_strategy_status(strategy_id, "PUBLISHING")
-            strategy.status = "PUBLISHING"
-            return FrozenPublication(version=failed, replayed=True)
+            if existing.status == "PUBLISH_FAILED":
+                existing.status = "PUBLISHING"
+                await self._repository.set_strategy_status(
+                    strategy_id, "PUBLISHING"
+                )
+                strategy.status = "PUBLISHING"
+            if existing.status in {"PUBLISHING", "PUBLISHED"}:
+                return FrozenPublication(version=existing, replayed=True)
+            raise AppError(
+                code="STRATEGY_VERSION_IMMUTABLE",
+                message="验证证据已绑定不可重用的发布版本",
+                status_code=409,
+            )
         if strategy.status == "PUBLISHING":
             raise AppError(
                 code="STRATEGY_PUBLISH_IN_PROGRESS",
@@ -368,14 +542,27 @@ class StrategyService:
             version_no=await self._repository.next_version_no(strategy_id),
             source_code_hash=actual_hash,
             source_code=draft.source_code,
-            strategy_metadata=metadata,
-            parameter_schema=parameter_schema,
-            environment_version=evidence.environment_version,
-            runner_image_digest=evidence.runner_image_digest,
+            strategy_metadata=release["metadata"],
+            parameter_schema=release["parameter_schema"],
+            environment_version=release["environment_version"],
+            runner_image_digest=release["runner_image_digest"],
             validation_run_id=evidence.validation_run_id,
             status="PUBLISHING",
         )
         await self._repository.add_version(version)
+        bound = await self._repository.bind_validation_run(
+            evidence.validation_run_id,
+            version.id,
+            strategy_id=strategy_id,
+            draft_version=draft.draft_version,
+            source_code_hash=actual_hash,
+        )
+        if not bound:
+            raise AppError(
+                code="STRATEGY_VALIDATION_STALE",
+                message="验证证据已变化或已绑定其他发布版本",
+                status_code=409,
+            )
         await self._repository.set_strategy_status(strategy_id, "PUBLISHING")
         strategy.status = "PUBLISHING"
         await self._record(
@@ -562,13 +749,12 @@ class StrategyService:
         return hashlib.sha256(source_code.encode()).hexdigest()
 
 
-def _same_release(version: StrategyVersion, evidence: PublishEvidence) -> bool:
+def _same_release(version: StrategyVersion, release: dict[str, Any]) -> bool:
     return (
-        version.validation_run_id == evidence.validation_run_id
-        and version.strategy_metadata == evidence.metadata
-        and version.parameter_schema == evidence.parameter_schema
-        and version.environment_version == evidence.environment_version
-        and version.runner_image_digest == evidence.runner_image_digest
+        version.strategy_metadata == release["metadata"]
+        and version.parameter_schema == release["parameter_schema"]
+        and version.environment_version == release["environment_version"]
+        and version.runner_image_digest == release["runner_image_digest"]
     )
 
 
@@ -592,6 +778,58 @@ def _json_snapshot(value: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise _invalid("发布快照必须是 JSON 对象")
     return result
+
+
+def _json_hash(value: dict[str, Any]) -> str:
+    serialized = json.dumps(
+        value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(serialized.encode()).hexdigest()
+
+
+def _validate_environment(environment_version: str, runner_image_digest: str) -> None:
+    if (
+        not environment_version.strip()
+        or re.fullmatch(r"sha256:[0-9a-f]{64}", runner_image_digest) is None
+    ):
+        raise _invalid("策略运行环境或镜像摘要无效")
+
+
+def _validated_release_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
+    value = _json_snapshot(snapshot)
+    required = {
+        "metadata",
+        "metadata_hash",
+        "parameter_schema",
+        "parameter_schema_hash",
+        "params",
+        "parameter_hash",
+        "environment_version",
+        "runner_image_digest",
+        "checks",
+    }
+    if set(value) != required:
+        raise _invalid("验证证据缺少发布所需的冻结事实")
+    if (
+        value["metadata_hash"] != _json_hash(value["metadata"])
+        or value["parameter_schema_hash"]
+        != _json_hash(value["parameter_schema"])
+        or value["parameter_hash"] != _json_hash(value["params"])
+        or value["checks"].get("all_required_checks_passed") is not True
+    ):
+        raise AppError(
+            code="STRATEGY_VALIDATION_STALE",
+            message="验证证据不完整或内容哈希不一致",
+            status_code=409,
+        )
+    _validate_environment(
+        value["environment_version"], value["runner_image_digest"]
+    )
+    return value
 
 
 def _require_context(context: StrategyCommandContext) -> None:

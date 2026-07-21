@@ -58,11 +58,13 @@ class ArchiveStrategyRequest(ConfirmedRequest):
 
 class PublishStrategyRequest(ConfirmedRequest):
     validation_run_id: UUID
-    source_code_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    expected_draft_version: int = Field(ge=1)
+
+
+class ValidateStrategyRequest(ConfirmedRequest):
     metadata: dict[str, Any]
     parameter_schema: dict[str, Any]
-    environment_version: str = Field(min_length=1, max_length=64)
-    runner_image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+    params: dict[str, Any]
 
 
 def idempotency_key(request: Request) -> str:
@@ -269,14 +271,33 @@ async def publish_strategy(
     row = await application.publish(
         strategy_id=strategy_id,
         validation_run_id=body.validation_run_id,
-        source_code_hash=body.source_code_hash,
-        metadata=body.metadata,
-        parameter_schema=body.parameter_schema,
-        environment_version=body.environment_version,
-        runner_image_digest=body.runner_image_digest,
+        expected_draft_version=body.expected_draft_version,
         **_context(identity, key, body.reason),
     )
     return success_response(data=_version(row), code="STRATEGY_PUBLISHED")
+
+
+@router.post("/{strategy_id}/validate", status_code=202)
+async def validate_strategy(
+    strategy_id: UUID,
+    body: ValidateStrategyRequest,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    _confirm(body)
+    row = await application.request_validation(
+        strategy_id,
+        metadata=body.metadata,
+        parameter_schema=body.parameter_schema,
+        params=body.params,
+        **_context(identity, key, body.reason),
+    )
+    return success_response(
+        data=_validation_run(row),
+        code="STRATEGY_VALIDATION_REQUESTED",
+        message="策略验证已提交",
+    )
 
 
 @router.get("/{strategy_id}/versions")
@@ -362,5 +383,27 @@ def _version(row: Any) -> dict[str, Any]:
         "status": str(row.status),
         "published_at": (
             row.published_at.isoformat() if row.published_at is not None else None
+        ),
+    }
+
+
+def _validation_run(row: Any) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "strategy_id": str(row.strategy_id),
+        "strategy_version_id": (
+            str(row.strategy_version_id)
+            if row.strategy_version_id is not None
+            else None
+        ),
+        "draft_version": row.draft_version,
+        "source_code_hash": row.source_code_hash,
+        "status": str(row.status),
+        "error_code": row.error_code,
+        "created_at": (
+            row.created_at.isoformat() if row.created_at is not None else None
+        ),
+        "completed_at": (
+            row.completed_at.isoformat() if row.completed_at is not None else None
         ),
     }

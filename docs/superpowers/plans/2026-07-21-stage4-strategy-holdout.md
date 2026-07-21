@@ -6,7 +6,7 @@
 
 **Architecture:** `strategies` 管理用户策略和不可变版本，并通过受控预测端口调用一次性 Docker 沙箱；`backtests` 保存独立预测快照并在可信引擎中使用隐藏测试数据模拟交易；`targets` 复用同一预测端口生成正式候选目标。公共契约、依赖、迁移、路由、任务注册、Compose 和生成类型由主流程串行维护。
 
-**Tech Stack:** Python 3.12、FastAPI、SQLAlchemy 2、PostgreSQL 16、Redis/RQ、pandas、NumPy、jsonschema、GitPython、Docker SDK for Python、React 19、TypeScript、TanStack Query、React Hook Form、Zod、Monaco Editor、Docker Compose。
+**Tech Stack:** Python 3.12、FastAPI、SQLAlchemy 2、PostgreSQL 16、Redis/RQ、pandas、NumPy、jsonschema、GitPython、Docker SDK for Python、React 19、TypeScript、TanStack Query、React Hook Form、Zod、CodeMirror 6、Docker Compose。
 
 ---
 
@@ -39,7 +39,7 @@
 - `backend/src/long_invest/platform/config/settings.py`：策略 Git、沙箱镜像和资源限制。
 - `deploy/compose.yaml`、`deploy/docker/strategy-runner.Dockerfile`：独立策略 Worker 和一次性 Runner。
 - `backend/openapi.json`、`frontend/src/shared/api/generated/schema.d.ts`：生成契约。
-- `frontend/src/app/router.tsx`、`frontend/package.json`、`frontend/package-lock.json`：主路由和 Monaco 依赖。
+- `frontend/src/app/router.tsx`、`frontend/package.json`、`frontend/package-lock.json`：主路由和 CodeMirror 6 依赖。
 
 ### `strategies` 拥有
 
@@ -68,7 +68,7 @@
 - [ ] 定义策略生命周期、预测输入输出、四个回测日期、预测快照、目标调整、订单/交易/指标、目标计算和复核的严格类型。
 - [ ] 定义 `StrategyForecastPort`、`TrainingDataPort`、`AdjustmentTimelinePort`、`BacktestSignalRulePort` 和策略就绪查询端口；载荷只使用冻结值对象。
 - [ ] 稳定错误码：日期非法、历史不足、训练/测试数据非法、预测超时、目标非法、测试数据泄漏、禁止重预测、调整数据不可用、价格口径不一致、保存失败及策略生命周期冲突。
-- [ ] 增加 pandas、NumPy、jsonschema、GitPython 和 Docker SDK；前端增加 Monaco React 包并锁定版本。
+- [ ] 增加 pandas、NumPy、jsonschema、GitPython 和 Docker SDK；前端增加 CodeMirror 6 React 封装、Python 扩展和差异视图并锁定版本。
 - [ ] 建立一条 `20260721_0012` 迁移，包含唯一约束、版本约束、精确价格、不可变快照和稳定索引；验证升级、降级、重升级以及单一 head。
 - [ ] 最小验证：`pytest -q tests/modules/strategies/test_contracts.py tests/modules/backtests/test_contracts.py tests/modules/targets/test_contracts.py tests/integration/test_strategy_backtest_migration.py`；`ruff check` 仅覆盖本任务文件。
 - [ ] 提交：`feat: freeze stage4 strategy backtest contracts`。
@@ -101,7 +101,7 @@
 
 **Files:** `frontend/src/features/strategies/`、`frontend/src/pages/strategy-*.tsx`、对应组件和 MSW 测试；不得修改主路由和生成类型。
 
-- [ ] 使用 Monaco 提供 Python 高亮、行号、搜索替换和括号能力；源码只保存在组件内存和服务端，不写浏览器持久存储。
+- [ ] 使用 CodeMirror 6 提供 Python 高亮、行号、搜索替换、括号和版本差异能力；源码只保存在组件内存和服务端，不写浏览器持久存储。
 - [ ] React Hook Form 与 Zod 管理元数据、参数 Schema、确认和原因；TanStack Query 管理服务端状态。
 - [ ] 自动保存携带预期版本；409 时停止自动保存并显示本地与服务器差异，允许复制、放弃或合并后重试。
 - [ ] 提供草稿历史、恢复、验证、测试、发布、归档和版本页面；所有异步操作覆盖加载、空数据、成功、失败和重复提交。

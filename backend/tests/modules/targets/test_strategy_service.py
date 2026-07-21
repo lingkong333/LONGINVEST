@@ -8,6 +8,7 @@ import pytest
 
 from long_invest.modules.targets.contracts import TargetValues
 from long_invest.modules.targets.strategy_service import (
+    ApplyStrategyTargetCommand,
     CalculateTargetCommand,
     ReviewCommand,
     StrategyTargetService,
@@ -55,6 +56,16 @@ class Repository:
     async def get_revision(self, revision_id):
         return self.revisions.get(revision_id)
 
+    async def find_revision_by_idempotency(self, subscription_id, key):
+        return next(
+            (
+                row
+                for row in self.revisions.values()
+                if row.subscription_id == subscription_id and row.idempotency_key == key
+            ),
+            None,
+        )
+
     async def persist_revision(self, revision):
         self.revisions[revision.id] = revision
 
@@ -67,6 +78,25 @@ class Repository:
     async def get_review(self, review_id, *, for_update=False):
         return self.reviews.get(review_id)
 
+    async def get_review_by_candidate(self, revision_id):
+        return next(
+            (
+                row
+                for row in self.reviews.values()
+                if row.candidate_revision_id == revision_id
+            ),
+            None,
+        )
+
+    async def list_pending_reviews_for_subscription(self, subscription_id):
+        return tuple(
+            review
+            for review in self.reviews.values()
+            if review.status == "PENDING"
+            and self.revisions[review.candidate_revision_id].subscription_id
+            == subscription_id
+        )
+
     async def flush(self):
         return None
 
@@ -78,8 +108,8 @@ class Collector:
     async def append(self, item):
         self.items.append(item)
 
-    async def find_by_idempotency(self, _key):
-        return None
+    async def find_by_idempotency(self, key):
+        return next((item for item in self.items if item.idempotency_key == key), None)
 
 
 class Subscriptions:
@@ -88,6 +118,13 @@ class Subscriptions:
 
     async def lock(self, _subscription_id):
         return self.snapshot
+
+    async def switch_to_strategy(self, **kwargs):
+        self.snapshot.strategy_version_id = kwargs["strategy_version_id"]
+        self.snapshot.parameter_snapshot = dict(kwargs["parameters"])
+        self.snapshot.version += 1
+        self.snapshot.revision_id = uuid4()
+        return SimpleNamespace(code="MONITOR_SUBSCRIPTION_UPDATED")
 
 
 @pytest.fixture
@@ -163,6 +200,11 @@ async def test_first_calculation_activates_and_requests_signal_reevaluation(setu
     ]
     assert len(audit.items) == 1
 
+    replay = await service.result(reserved.run_id, replayed=True)
+    assert replay.revision_id == result.revision_id
+    assert replay.code == result.code
+    assert replay.replayed is True
+
 
 @pytest.mark.anyio
 async def test_large_change_keeps_baseline_and_creates_review(setup):
@@ -176,7 +218,7 @@ async def test_large_change_keeps_baseline_and_creates_review(setup):
         source_code_hash="a" * 64,
         current_data_version=7,
     )
-    command2 = replace(command, expected_version=2, idempotency_key="calc-2")
+    command2 = replace(command, expected_version=3, idempotency_key="calc-2")
     second = await service.reserve(command2)
     await service.mark_running(second.run_id, data_version=8)
     result = await service.complete(
@@ -190,6 +232,36 @@ async def test_large_change_keeps_baseline_and_creates_review(setup):
     assert result.code == "TARGET_REVIEW_REQUIRED"
     assert repository.binding.current_revision_id == baseline.revision_id
     assert repository.binding.status == "REVIEW_REQUIRED"
+
+    stale = await service.decide(
+        ReviewCommand(
+            review_id=result.review_id,
+            comment="数据已变化",
+            expected_version=4,
+            idempotency_key="review-stale-data",
+            request_id="req-stale",
+            actor_user_id="reviewer",
+            session_id="session",
+            trusted_ip="127.0.0.1",
+            current_data_version=9,
+        ),
+        approve=True,
+    )
+    assert stale.code == "TARGET_REVIEW_STALE"
+    assert repository.reviews[result.review_id].status == "SUPERSEDED"
+
+    recovered_command = replace(command, expected_version=4, idempotency_key="calc-3")
+    recovered = await service.reserve(recovered_command)
+    await service.mark_running(recovered.run_id, data_version=9)
+    unchanged = await service.complete(
+        recovered.run_id,
+        values=values("10"),
+        target_date=command.target_date,
+        source_code_hash="a" * 64,
+        current_data_version=9,
+    )
+    assert unchanged.code == "TARGET_CALCULATION_UNCHANGED"
+    assert repository.binding.status == "READY"
 
 
 @pytest.mark.anyio
@@ -207,8 +279,63 @@ async def test_late_result_is_failed_instead_of_overwriting(setup):
     )
 
     assert result.code == "TARGET_CALCULATION_FAILED"
-    assert repository.runs[reserved.run_id].failure_code == "TARGET_CALCULATION_STALE"
+    assert repository.runs[reserved.run_id].failure_code == "TARGET_CALCULATION_FAILED"
+    assert repository.runs[reserved.run_id].error_summary.startswith(
+        "TARGET_CALCULATION_STALE"
+    )
     assert repository.binding.current_revision_id is None
+
+
+@pytest.mark.anyio
+async def test_newer_calculation_invalidates_older_in_flight_result(setup):
+    service, repository, _, _, _, command = setup
+    older = await service.reserve(command)
+    newer_command = replace(command, expected_version=2, idempotency_key="calc-2")
+    newer = await service.reserve(newer_command)
+    await service.mark_running(older.run_id, data_version=7)
+    await service.mark_running(newer.run_id, data_version=7)
+
+    old_result = await service.complete(
+        older.run_id,
+        values=values("10"),
+        target_date=command.target_date,
+        source_code_hash="a" * 64,
+        current_data_version=7,
+    )
+    new_result = await service.complete(
+        newer.run_id,
+        values=values("10"),
+        target_date=command.target_date,
+        source_code_hash="a" * 64,
+        current_data_version=7,
+    )
+
+    assert old_result.code == "TARGET_CALCULATION_FAILED"
+    assert new_result.code == "TARGET_CALCULATION_SUCCEEDED"
+    assert repository.binding.current_revision_id == new_result.revision_id
+
+
+@pytest.mark.anyio
+async def test_late_failure_cannot_mark_newer_target_stale(setup):
+    service, repository, _, _, _, command = setup
+    older = await service.reserve(command)
+    newer = await service.reserve(
+        replace(command, expected_version=2, idempotency_key="calc-2")
+    )
+    await service.mark_running(older.run_id, data_version=7)
+    await service.mark_running(newer.run_id, data_version=7)
+    activated = await service.complete(
+        newer.run_id,
+        values=values("10"),
+        target_date=command.target_date,
+        source_code_hash="a" * 64,
+        current_data_version=7,
+    )
+
+    await service.fail(older.run_id, code="TIMEOUT", summary="late timeout")
+
+    assert repository.binding.current_revision_id == activated.revision_id
+    assert repository.binding.status == "READY"
 
 
 @pytest.mark.anyio
@@ -226,6 +353,26 @@ async def test_same_idempotency_key_replays_and_changed_request_conflicts(setup)
 
 
 @pytest.mark.anyio
+async def test_apply_strategy_switches_subscription_and_freezes_new_revision(setup):
+    service, repository, _, _, snapshot, command = setup
+    new_strategy = uuid4()
+    applied = await service.apply_and_reserve(
+        ApplyStrategyTargetCommand(
+            calculation=command,
+            strategy_version_id=new_strategy,
+            parameter_snapshot={"window": 60},
+            expected_subscription_version=3,
+        )
+    )
+
+    run = repository.runs[applied.run_id]
+    assert run.strategy_version_id == new_strategy
+    assert run.subscription_revision_id == snapshot.revision_id
+    assert run.subscription_version == 4
+    assert run.parameter_snapshot == {"window": 60}
+
+
+@pytest.mark.anyio
 async def test_approve_review_activates_candidate(setup):
     service, repository, _, events, _, command = setup
     first = await service.reserve(command)
@@ -237,7 +384,7 @@ async def test_approve_review_activates_candidate(setup):
         source_code_hash="a" * 64,
         current_data_version=7,
     )
-    command2 = replace(command, expected_version=2, idempotency_key="calc-2")
+    command2 = replace(command, expected_version=3, idempotency_key="calc-2")
     second = await service.reserve(command2)
     await service.mark_running(second.run_id, data_version=8)
     pending = await service.complete(
@@ -251,11 +398,13 @@ async def test_approve_review_activates_candidate(setup):
         ReviewCommand(
             review_id=pending.review_id,
             comment="同意调整",
-            expected_version=2,
+            expected_version=4,
+            idempotency_key="review-1",
             request_id="req-review",
             actor_user_id="reviewer",
             session_id="session",
             trusted_ip="127.0.0.1",
+            current_data_version=8,
         ),
         approve=True,
     )
@@ -264,3 +413,57 @@ async def test_approve_review_activates_candidate(setup):
     assert repository.binding.current_revision_id == pending.revision_id
     assert repository.reviews[pending.review_id].status == "APPROVED"
     assert events.items[-1].event_type == "signal.reevaluation_requested"
+
+    replay = await service.decide(
+        ReviewCommand(
+            review_id=pending.review_id,
+            comment="同意调整",
+            expected_version=4,
+            idempotency_key="review-1",
+            request_id="req-review-replay",
+            actor_user_id="reviewer",
+            session_id="session",
+            trusted_ip="127.0.0.1",
+            current_data_version=8,
+        ),
+        approve=True,
+    )
+    assert replay.replayed is True
+    assert replay.revision_id == pending.revision_id
+
+    with pytest.raises(AppError) as changed_comment:
+        await service.decide(
+            replace(
+                ReviewCommand(
+                    review_id=pending.review_id,
+                    comment="同意调整",
+                    expected_version=4,
+                    idempotency_key="review-1",
+                    request_id="req-review",
+                    actor_user_id="reviewer",
+                    session_id="session",
+                    trusted_ip="127.0.0.1",
+                    current_data_version=8,
+                ),
+                comment="同意，但备注不同",
+            ),
+            approve=True,
+        )
+    assert changed_comment.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
+
+    with pytest.raises(AppError) as conflict:
+        await service.decide(
+            ReviewCommand(
+                review_id=pending.review_id,
+                comment="改为拒绝",
+                expected_version=4,
+                idempotency_key="review-1",
+                request_id="req-review-conflict",
+                actor_user_id="reviewer",
+                session_id="session",
+                trusted_ip="127.0.0.1",
+                current_data_version=8,
+            ),
+            approve=False,
+        )
+    assert conflict.value.code == "TARGET_IDEMPOTENCY_CONFLICT"

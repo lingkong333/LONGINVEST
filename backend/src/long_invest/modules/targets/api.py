@@ -15,14 +15,21 @@ from long_invest.modules.auth.dependencies import (
 from long_invest.modules.monitoring.application import (
     transactional_monitor_subscription_port,
 )
+from long_invest.modules.strategies.application import get_strategy_application
 from long_invest.modules.targets.application import TargetApplication
 from long_invest.modules.targets.contracts import (
     ManualTargetCommand,
     RestoreTargetCommand,
+    TargetCalculationRunView,
     TargetMutationResult,
+    TargetReviewView,
     TargetRevisionView,
     TargetSnapshot,
     TargetValues,
+)
+from long_invest.modules.targets.strategy_service import (
+    CalculateTargetCommand,
+    ReviewCommand,
 )
 from long_invest.platform.database.engine import get_database
 from long_invest.platform.errors import AppError
@@ -33,9 +40,15 @@ router = APIRouter(tags=["targets"])
 
 
 def get_target_application() -> TargetApplication:
+    strategies = get_strategy_application()
     return TargetApplication(
         get_database(),
-        subscription_factory=transactional_monitor_subscription_port,
+        subscription_factory=lambda session: transactional_monitor_subscription_port(
+            session,
+            strategy_readiness=strategies,
+            strategy_snapshots=strategies,
+        ),
+        strategy_application=strategies,
     )
 
 
@@ -91,6 +104,21 @@ class CapabilityWriteRequest(StrictRequest):
         return value.strip() if isinstance(value, str) else value
 
 
+class CalculateTargetRequest(CapabilityWriteRequest):
+    target_date: date
+    training_start_date: date
+    training_end_date: date
+
+
+class ReviewTargetRequest(CapabilityWriteRequest):
+    comment: str = Field(min_length=1, max_length=500)
+
+    @field_validator("comment", mode="before")
+    @classmethod
+    def strip_comment(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+
 class TargetPageData(BaseModel):
     items: list[TargetSnapshot]
     pagination: Pagination
@@ -130,6 +158,24 @@ class CapabilityPageData(BaseModel):
 
 class CapabilityPageResponse(SuccessEnvelope):
     data: CapabilityPageData
+
+
+class CalculationRunPageData(BaseModel):
+    items: list[TargetCalculationRunView]
+    pagination: Pagination
+
+
+class CalculationRunPageResponse(SuccessEnvelope):
+    data: CalculationRunPageData
+
+
+class ReviewPageData(BaseModel):
+    items: list[TargetReviewView]
+    pagination: Pagination
+
+
+class ReviewPageResponse(SuccessEnvelope):
+    data: ReviewPageData
 
 
 class CapabilityResult(BaseModel):
@@ -263,11 +309,27 @@ async def restore_target(
 )
 async def calculate_target(
     subscription_id: UUID,
-    body: CapabilityWriteRequest,
-    _identity_value: WriteIdentity,
+    body: CalculateTargetRequest,
+    identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body, idempotency_key)
+    _require_confirmation(body.confirm)
+    result = await application.calculate(
+        CalculateTargetCommand(
+            subscription_id=subscription_id,
+            target_date=body.target_date,
+            training_start_date=body.training_start_date,
+            training_end_date=body.training_end_date,
+            reason=body.reason,
+            expected_version=body.expected_version,
+            idempotency_key=_validated_idempotency_key(idempotency_key),
+            **_identity(identity),
+        )
+    )
+    return success_response(
+        data={"code": result.code, "accepted": True}, code=result.code
+    )
 
 
 @router.post(
@@ -297,26 +359,42 @@ async def calculate_targets_batch(
 
 @router.get(
     "/api/v1/target-calculation-runs",
-    response_model=CapabilityPageResponse,
+    response_model=CalculationRunPageResponse,
 )
 async def list_target_calculation_runs(
     _identity: ReadIdentity,
+    application: Application,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    raise _capability_not_ready()
+    items, total = await application.list_calculation_runs(
+        page=page, page_size=page_size
+    )
+    return success_response(
+        data={
+            "items": [item.model_dump(mode="json") for item in items],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
+    )
 
 
 @router.get(
     "/api/v1/target-reviews",
-    response_model=CapabilityPageResponse,
+    response_model=ReviewPageResponse,
 )
 async def list_target_reviews(
     _identity: ReadIdentity,
+    application: Application,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    raise _capability_not_ready()
+    items, total = await application.list_reviews(page=page, page_size=page_size)
+    return success_response(
+        data={
+            "items": [item.model_dump(mode="json") for item in items],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
+    )
 
 
 @router.post(
@@ -325,11 +403,14 @@ async def list_target_reviews(
 )
 async def approve_target_review(
     review_id: UUID,
-    body: CapabilityWriteRequest,
-    _identity_value: WriteIdentity,
+    body: ReviewTargetRequest,
+    identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body, idempotency_key)
+    return await _decide_review(
+        review_id, body, identity, application, idempotency_key, approve=True
+    )
 
 
 @router.post(
@@ -338,11 +419,14 @@ async def approve_target_review(
 )
 async def reject_target_review(
     review_id: UUID,
-    body: CapabilityWriteRequest,
-    _identity_value: WriteIdentity,
+    body: ReviewTargetRequest,
+    identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body, idempotency_key)
+    return await _decide_review(
+        review_id, body, identity, application, idempotency_key, approve=False
+    )
 
 
 @router.post(
@@ -362,8 +446,34 @@ def _unavailable_write(
     body: CapabilityWriteRequest, idempotency_key: str
 ) -> dict[str, Any]:
     _require_confirmation(body.confirm)
-    _validated_idempotency_key(idempotency_key)
+    idempotency_key = _validated_idempotency_key(idempotency_key)
     raise _capability_not_ready()
+
+
+async def _decide_review(
+    review_id,
+    body,
+    identity,
+    application,
+    idempotency_key,
+    *,
+    approve,
+):
+    _require_confirmation(body.confirm)
+    _validated_idempotency_key(idempotency_key)
+    result = await application.decide_review(
+        ReviewCommand(
+            review_id=review_id,
+            comment=body.comment,
+            expected_version=body.expected_version,
+            idempotency_key=idempotency_key,
+            **_identity(identity),
+        ),
+        approve=approve,
+    )
+    return success_response(
+        data={"code": result.code, "accepted": True}, code=result.code
+    )
 
 
 def _require_confirmation(confirm: bool) -> None:

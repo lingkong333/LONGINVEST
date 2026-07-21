@@ -16,6 +16,7 @@ from long_invest.modules.auth.dependencies import (
     require_verified_write_request,
 )
 from long_invest.modules.targets.api import (
+    CalculateTargetRequest,
     CapabilityWriteRequest,
     ManualTargetRequest,
     RestoreTargetRequest,
@@ -32,6 +33,7 @@ from long_invest.modules.targets.contracts import (
     TargetStatus,
     TargetValues,
 )
+from long_invest.modules.targets.strategy_service import CalculationResult
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.exception_handlers import (
     app_error_handler,
@@ -108,6 +110,14 @@ def _application():
         history=AsyncMock(return_value=((_revision(),), 1)),
         set_manual=AsyncMock(return_value=_mutation()),
         restore=AsyncMock(return_value=_mutation()),
+        calculate=AsyncMock(
+            return_value=CalculationResult(
+                "TARGET_CALCULATION_SUCCEEDED", uuid4(), REVISION_ID
+            )
+        ),
+        list_calculation_runs=AsyncMock(return_value=((), 0)),
+        list_reviews=AsyncMock(return_value=((), 0)),
+        decide_review=AsyncMock(),
     )
     return application
 
@@ -309,23 +319,39 @@ def test_write_requires_header_and_explicit_true_confirmation(path, body) -> Non
     assert response.json()["code"] == "TARGET_CONFIRMATION_REQUIRED"
 
 
-def test_unavailable_capabilities_are_authenticated_concrete_409() -> None:
+def _calculate_body():
+    return {
+        "confirm": True,
+        "reason": "calculate",
+        "expected_version": 1,
+        "target_date": "2026-07-17",
+        "training_start_date": "2020-01-01",
+        "training_end_date": "2025-12-31",
+    }
+
+
+def test_calculation_capability_is_formally_available() -> None:
     client = TestClient(_app())
     response = client.post(
         f"/api/v1/targets/{SUBSCRIPTION_ID}/calculate",
-        json={"confirm": True, "reason": "calculate", "expected_version": 1},
+        json=_calculate_body(),
         headers={"Idempotency-Key": "calculate"},
     )
     read = client.get("/api/v1/target-calculation-runs")
 
-    assert response.status_code == read.status_code == 409
-    assert response.json()["code"] == "TARGET_CAPABILITY_NOT_READY"
-    assert read.json()["code"] == "TARGET_CAPABILITY_NOT_READY"
+    assert response.status_code == read.status_code == 200
+    assert response.json()["code"] == "TARGET_CALCULATION_SUCCEEDED"
+    assert read.json()["data"]["items"] == []
 
 
 def test_capability_write_requires_expected_version() -> None:
     with pytest.raises(ValidationError):
         CapabilityWriteRequest.model_validate({"confirm": True, "reason": "calculate"})
+
+    with pytest.raises(ValidationError):
+        CalculateTargetRequest.model_validate(
+            {"confirm": True, "reason": "calculate", "expected_version": 1}
+        )
 
 
 @pytest.mark.parametrize(
@@ -335,7 +361,7 @@ def test_capability_write_requires_expected_version() -> None:
         (f"/api/v1/targets/{SUBSCRIPTION_ID}/restore", _restore_body()),
         (
             f"/api/v1/targets/{SUBSCRIPTION_ID}/calculate",
-            {"confirm": True, "reason": "calculate", "expected_version": 1},
+            _calculate_body(),
         ),
     ],
 )

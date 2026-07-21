@@ -1,5 +1,8 @@
 from contextlib import asynccontextmanager
+from datetime import date
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
@@ -8,6 +11,7 @@ from long_invest.modules.targets.application import (
     TargetApplication,
     transactional_target_snapshot_port,
 )
+from long_invest.modules.targets.strategy_service import CalculationResult
 from long_invest.platform.errors import AppError
 
 
@@ -107,3 +111,60 @@ async def test_transactional_snapshot_port_uses_caller_session() -> None:
 
     port = transactional_target_snapshot_port(session, repository_factory=Repository)
     assert await port.get_target_snapshot("subscription-id") is None
+
+
+@pytest.mark.anyio
+async def test_strategy_snapshot_failure_is_persisted_as_failed_run() -> None:
+    application = object.__new__(TargetApplication)
+    application._strategy_application = SimpleNamespace(
+        get_execution_snapshot=AsyncMock(side_effect=RuntimeError("snapshot down"))
+    )
+    application._training_data = object()
+    application._forecast = object()
+    failed = CalculationResult("TARGET_CALCULATION_FAILED", uuid4())
+    application._strategy_write = AsyncMock(return_value=failed)
+    reservation = SimpleNamespace(
+        replayed=False,
+        status="PENDING",
+        run_id=failed.run_id,
+        strategy_version_id=uuid4(),
+        security_id=uuid4(),
+        symbol="600000.SH",
+        parameter_snapshot={},
+    )
+    command = SimpleNamespace(
+        target_date=date(2026, 7, 21),
+        training_start_date=date(2020, 1, 1),
+        training_end_date=date(2025, 12, 31),
+    )
+
+    result = await application._execute_reservation(command, reservation)
+
+    assert result is failed
+    application._strategy_write.assert_awaited_once()
+    assert application._strategy_write.await_args.args[:2] == (
+        "fail",
+        failed.run_id,
+    )
+
+
+@pytest.mark.anyio
+async def test_strategy_batch_isolates_one_subscription_failure() -> None:
+    application = object.__new__(TargetApplication)
+    succeeded = CalculationResult("TARGET_CALCULATION_SUCCEEDED", uuid4())
+    application.apply_strategy = AsyncMock(
+        side_effect=[
+            AppError(code="ONE_FAILED", message="failed", status_code=409),
+            succeeded,
+        ]
+    )
+    first_id, second_id = uuid4(), uuid4()
+    commands = (
+        SimpleNamespace(calculation=SimpleNamespace(subscription_id=first_id)),
+        SimpleNamespace(calculation=SimpleNamespace(subscription_id=second_id)),
+    )
+
+    results = await application.apply_strategy_batch(commands)
+
+    assert results[0] == (first_id, "ONE_FAILED", None)
+    assert results[1] == (second_id, succeeded.code, succeeded)

@@ -1,6 +1,7 @@
 import hashlib
 import json
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,7 +12,6 @@ from long_invest.modules.targets.outbox import TargetOutbox
 from long_invest.modules.targets.repository import TargetRepository
 from long_invest.modules.targets.service import TargetService
 from long_invest.modules.targets.strategy_service import (
-    CalculationResult,
     StrategyTargetService,
 )
 from long_invest.platform.audit.service import AuditService
@@ -54,36 +54,55 @@ class TargetApplication:
     async def calculate(self, command):
         self._require_calculation_dependencies()
         reservation = await self._strategy_write("reserve", command)
+        return await self._execute_reservation(command, reservation)
+
+    async def apply_strategy(self, command):
+        self._require_calculation_dependencies()
+        reservation = await self._strategy_write("apply_and_reserve", command)
+        return await self._execute_reservation(command.calculation, reservation)
+
+    async def apply_strategy_batch(self, commands):
+        results = []
+        for command in commands:
+            try:
+                result = await self.apply_strategy(command)
+            except AppError as exc:
+                results.append((command.calculation.subscription_id, exc.code, None))
+            else:
+                results.append(
+                    (command.calculation.subscription_id, result.code, result)
+                )
+        return tuple(results)
+
+    async def _execute_reservation(self, command, reservation):
         if reservation.replayed and reservation.status in {"SUCCEEDED", "FAILED"}:
-            return CalculationResult(
-                "TARGET_CALCULATION_REPLAYED", reservation.run_id, replayed=True
-            )
-        strategy = await self._strategy_application.get_execution_snapshot(
-            reservation.strategy_version_id
-        )
-        if strategy is None:
             return await self._strategy_write(
-                "fail",
-                reservation.run_id,
-                code="TARGET_STRATEGY_NOT_PUBLISHED",
-                summary="策略版本未发布或已失效",
+                "result", reservation.run_id, replayed=True
             )
-        training = await self._training_data.get_training_data(
-            security_id=reservation.security_id,
-            start_date=command.training_start_date,
-            end_date=command.training_end_date,
-        )
-        if training is None:
-            return await self._strategy_write(
-                "fail",
-                reservation.run_id,
-                code="TARGET_TRAINING_DATA_NOT_READY",
-                summary="训练日线数据尚未就绪",
-            )
-        await self._strategy_write(
-            "mark_running", reservation.run_id, data_version=training.data_version
-        )
         try:
+            strategy = await self._strategy_application.get_execution_snapshot(
+                reservation.strategy_version_id
+            )
+            if strategy is None:
+                raise AppError(
+                    code="TARGET_STRATEGY_NOT_PUBLISHED",
+                    message="策略版本未发布或已失效",
+                    status_code=409,
+                )
+            training = await self._training_data.get_training_data(
+                security_id=reservation.security_id,
+                start_date=command.training_start_date,
+                end_date=command.training_end_date,
+            )
+            if training is None:
+                raise AppError(
+                    code="TARGET_TRAINING_DATA_NOT_READY",
+                    message="训练日线数据尚未就绪",
+                    status_code=409,
+                )
+            await self._strategy_write(
+                "mark_running", reservation.run_id, data_version=training.data_version
+            )
             forecast = await self._forecast.forecast(
                 StrategyForecastRequest(
                     strategy_id=strategy.strategy_id,
@@ -101,30 +120,46 @@ class TargetApplication:
                     requested_at=datetime.now(UTC),
                 )
             )
-        except (AppError, TimeoutError) as exc:
+            current_training = await self._training_data.get_training_data(
+                security_id=reservation.security_id,
+                start_date=command.training_start_date,
+                end_date=command.training_end_date,
+            )
+            current_version = current_training.data_version if current_training else -1
+            return await self._strategy_write(
+                "complete",
+                reservation.run_id,
+                values=forecast.values,
+                target_date=command.target_date,
+                source_code_hash=strategy.source_code_hash,
+                current_data_version=current_version,
+                resource_usage=forecast.diagnostics,
+            )
+        except (AppError, TimeoutError, RuntimeError, ValueError) as exc:
             return await self._strategy_write(
                 "fail",
                 reservation.run_id,
-                code=getattr(exc, "code", "STRATEGY_FORECAST_TIMEOUT"),
+                code=getattr(exc, "code", "TARGET_CALCULATION_FAILED"),
                 summary=str(exc),
             )
-        current_training = await self._training_data.get_training_data(
-            security_id=reservation.security_id,
-            start_date=command.training_start_date,
-            end_date=command.training_end_date,
-        )
-        current_version = current_training.data_version if current_training else -1
-        return await self._strategy_write(
-            "complete",
-            reservation.run_id,
-            values=forecast.values,
-            target_date=command.target_date,
-            source_code_hash=strategy.source_code_hash,
-            current_data_version=current_version,
-            resource_usage=forecast.diagnostics,
-        )
 
     async def decide_review(self, command, *, approve: bool):
+        self._require_calculation_dependencies()
+        security_id, start_date, end_date = await self._strategy_read(
+            "review_freshness", command.review_id
+        )
+        try:
+            training = await self._training_data.get_training_data(
+                security_id=security_id,
+                start_date=start_date,
+                end_date=end_date,
+            )
+        except (AppError, TimeoutError, RuntimeError) as exc:
+            raise _backend_unavailable() from exc
+        command = replace(
+            command,
+            current_data_version=training.data_version if training else -1,
+        )
         result = await self._strategy_write("decide", command, approve=approve)
         if result.code == "TARGET_REVIEW_STALE":
             raise AppError(
@@ -133,6 +168,14 @@ class TargetApplication:
                 status_code=409,
             )
         return result
+
+    async def list_calculation_runs(self, *, page: int = 1, page_size: int = 50):
+        return await self._strategy_read(
+            "list_calculations", page=page, page_size=page_size
+        )
+
+    async def list_reviews(self, *, page: int = 1, page_size: int = 50):
+        return await self._strategy_read("list_reviews", page=page, page_size=page_size)
 
     async def list(self, *, page: int = 1, page_size: int = 50):
         return await self._read("list", page=page, page_size=page_size)
@@ -178,6 +221,21 @@ class TargetApplication:
     async def _strategy_write(self, method, *args, **kwargs):
         try:
             async with self._database.transaction() as session:
+                service = self._strategy_service_factory(
+                    self._repository_factory(session),
+                    subscriptions=self._subscription_factory(session),
+                    audit=self._audit_factory(session),
+                    events=self._event_factory(session),
+                )
+                return await getattr(service, method)(*args, **kwargs)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
+    async def _strategy_read(self, method, *args, **kwargs):
+        try:
+            async with self._database.session() as session:
                 service = self._strategy_service_factory(
                     self._repository_factory(session),
                     subscriptions=self._subscription_factory(session),

@@ -183,6 +183,30 @@ class TargetRepository:
             query = query.with_for_update()
         return await self._session.scalar(query)
 
+    async def get_review_by_candidate(self, revision_id: UUID) -> TargetReview | None:
+        return await self._session.scalar(
+            select(TargetReview).where(
+                TargetReview.candidate_revision_id == revision_id
+            )
+        )
+
+    async def list_pending_reviews_for_subscription(
+        self, subscription_id: UUID
+    ) -> tuple[TargetReview, ...]:
+        rows = await self._session.scalars(
+            select(TargetReview)
+            .join(
+                TargetRevision,
+                TargetRevision.id == TargetReview.candidate_revision_id,
+            )
+            .where(
+                TargetRevision.subscription_id == subscription_id,
+                TargetReview.status == "PENDING",
+            )
+            .with_for_update()
+        )
+        return tuple(rows.all())
+
     async def persist_review(self, review: TargetReview) -> None:
         self._session.add(review)
 

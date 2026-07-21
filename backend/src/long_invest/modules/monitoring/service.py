@@ -199,6 +199,17 @@ class MonitorSubscriptionService:
         if replay is not None:
             _verify(replay, digest)
             return await self._current(owner, True)
+        if config.target_mode == "STRATEGY" and (
+            config.strategy_version_id is None
+            or not await self.strategies.published_version(
+                config.strategy_version_id
+            )
+        ):
+            raise _error(
+                "MONITOR_SUBSCRIPTION_NOT_READY",
+                "订阅策略尚未发布或已失效",
+                409,
+            )
         if owner.version != config.expected_version:
             raise _version_conflict()
         self._active(owner)

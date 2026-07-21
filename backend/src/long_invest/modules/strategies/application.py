@@ -8,11 +8,13 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.strategies.contracts import (
+    StrategyForecastRequest,
     StrategyLifecycleStatus,
     StrategyVersionView,
     ValidationEvidenceClaim,
     ValidationEvidenceVerifier,
 )
+from long_invest.modules.strategies.forecast import hash_source_code
 from long_invest.modules.strategies.git_store import StrategyGitStore
 from long_invest.modules.strategies.outbox import StrategyOutboxAdapter
 from long_invest.modules.strategies.repository import StrategyRepository
@@ -21,10 +23,12 @@ from long_invest.modules.strategies.service import (
     StrategyCommandContext,
     StrategyService,
 )
+from long_invest.modules.strategies.static_analysis import analyze_strategy_source
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
+from long_invest.platform.json_snapshot import thaw_json_value
 
 
 class UnconfiguredValidationEvidenceVerifier:
@@ -116,7 +120,46 @@ class StrategyApplication:
         )
 
     async def published_version(self, strategy_version_id: UUID) -> bool:
-        return await self.get_execution_snapshot(strategy_version_id) is not None
+        snapshot = await self.get_execution_snapshot(strategy_version_id)
+        return (
+            snapshot is not None
+            and snapshot.status is StrategyLifecycleStatus.PUBLISHED
+        )
+
+    async def verify_forecast_request(self, request: StrategyForecastRequest) -> bool:
+        if request.strategy_version_id is not None:
+            snapshot = await self.get_execution_snapshot(request.strategy_version_id)
+            return snapshot is not None and all(
+                (
+                    request.strategy_id == snapshot.strategy_id,
+                    request.source_code == snapshot.source_code,
+                    request.source_code_hash == snapshot.source_code_hash,
+                    thaw_json_value(request.metadata)
+                    == thaw_json_value(snapshot.metadata),
+                    thaw_json_value(request.parameter_schema)
+                    == thaw_json_value(snapshot.parameter_schema),
+                    request.environment_version == snapshot.environment_version,
+                    request.runner_image_digest == snapshot.runner_image_digest,
+                )
+            )
+        if request.draft_id is None or request.draft_version is None:
+            return False
+        draft = await self.get_draft(request.strategy_id)
+        if (
+            draft.id != request.draft_id
+            or draft.draft_version != request.draft_version
+            or draft.source_code != request.source_code
+            or hash_source_code(draft.source_code) != request.source_code_hash
+            or request.environment_version != self._environment_version
+            or request.runner_image_digest != self._runner_image_digest
+        ):
+            return False
+        analysis = analyze_strategy_source(draft.source_code)
+        return (
+            thaw_json_value(request.metadata) == thaw_json_value(analysis.metadata)
+            and thaw_json_value(request.parameter_schema)
+            == thaw_json_value(analysis.parameter_schema)
+        )
 
     async def diff(self, strategy_id: UUID, *, revision_id: UUID):
         return await self._read("diff", strategy_id, revision_id=revision_id)

@@ -89,6 +89,11 @@ class MonitorSubscriptionRevision(ImmutableMonitoringFact, Base):
             "idempotency_key",
             name="uq_monitor_subscription_revision_idempotency",
         ),
+        UniqueConstraint(
+            "id",
+            "subscription_id",
+            name="uq_monitor_subscription_revision_identity",
+        ),
         CheckConstraint("revision_no > 0", name="revision_positive"),
         CheckConstraint(
             "target_mode IN ('MANUAL','STRATEGY')", name="target_mode_valid"

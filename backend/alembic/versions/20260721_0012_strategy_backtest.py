@@ -1148,6 +1148,11 @@ def _create_backtest_result_tables() -> None:
 
 
 def _create_target_workflow_tables() -> None:
+    op.create_unique_constraint(
+        op.f("uq_monitor_subscription_revision_identity"),
+        "monitor_subscription_revision",
+        ["id", "subscription_id"],
+    )
     op.create_table(
         "target_calculation_run",
         sa.Column("id", sa.UUID(), nullable=False),
@@ -1210,12 +1215,12 @@ def _create_target_workflow_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["subscription_revision_id"],
-            ["monitor_subscription_revision.id"],
-            name=op.f(
-                "fk_target_calculation_run_subscription_revision_id_"
-                "monitor_subscription_revision"
-            ),
+            ["subscription_revision_id", "subscription_id"],
+            [
+                "monitor_subscription_revision.id",
+                "monitor_subscription_revision.subscription_id",
+            ],
+            name=op.f("fk_target_calculation_run_subscription_revision_owner"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -1457,3 +1462,8 @@ def downgrade() -> None:
     )
     for table_name in reversed(TABLES):
         op.drop_table(table_name)
+    op.drop_constraint(
+        op.f("uq_monitor_subscription_revision_identity"),
+        "monitor_subscription_revision",
+        type_="unique",
+    )

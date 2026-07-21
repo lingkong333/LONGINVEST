@@ -135,7 +135,6 @@ def hash_training_data_snapshot(training_data: object) -> str:
         "start_date",
         "end_date",
         "data_version",
-        "fetched_at",
         "source",
         "price_basis",
         "rows",

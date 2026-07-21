@@ -372,3 +372,8 @@ class StrategyExecutionSnapshotPort(Protocol):
     async def get_execution_snapshot(
         self, strategy_version_id: UUID
     ) -> StrategyVersionView | None: ...
+
+
+class StrategyForecastRequestVerifier(Protocol):
+    async def verify_forecast_request(self, request: StrategyForecastRequest) -> bool:
+        ...

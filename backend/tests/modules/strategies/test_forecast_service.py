@@ -42,6 +42,11 @@ class Runner:
         }
 
 
+class Verifier:
+    async def verify_forecast_request(self, request) -> bool:
+        return True
+
+
 @pytest.mark.anyio
 async def test_forecast_uses_only_frozen_training_request() -> None:
     training = TrainingDataSnapshot(
@@ -88,7 +93,9 @@ async def test_forecast_uses_only_frozen_training_request() -> None:
     )
     runner = Runner()
 
-    result = await SandboxedStrategyForecastService(runner).forecast(request)
+    result = await SandboxedStrategyForecastService(
+        runner, request_verifier=Verifier()
+    ).forecast(request)
 
     assert str(result.values.low_watch) == "9.00"
     assert runner.payload is not None

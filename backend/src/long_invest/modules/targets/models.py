@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     Numeric,
@@ -189,6 +190,15 @@ class TargetCalculationRun(Base):
             "idempotency_key",
             name="uq_target_calculation_run_subscription_id_idempotency_key",
         ),
+        ForeignKeyConstraint(
+            ["subscription_revision_id", "subscription_id"],
+            [
+                "monitor_subscription_revision.id",
+                "monitor_subscription_revision.subscription_id",
+            ],
+            name="fk_target_calculation_run_subscription_revision_owner",
+            ondelete="RESTRICT",
+        ),
         Index(
             "ix_target_calculation_run_subscription_created",
             "subscription_id",
@@ -207,9 +217,7 @@ class TargetCalculationRun(Base):
     )
     subscription_version: Mapped[int] = mapped_column(Integer, nullable=False)
     subscription_revision_id: Mapped[UUID] = mapped_column(
-        PG_UUID(as_uuid=True),
-        ForeignKey("monitor_subscription_revision.id", ondelete="RESTRICT"),
-        nullable=False,
+        PG_UUID(as_uuid=True), nullable=False
     )
     strategy_version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),

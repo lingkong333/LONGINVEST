@@ -6,6 +6,7 @@ from anyio import to_thread
 
 from long_invest.modules.strategies.contracts import (
     StrategyForecastRequest,
+    StrategyForecastRequestVerifier,
     StrategyForecastResult,
 )
 from long_invest.modules.strategies.forecast import (
@@ -19,12 +20,28 @@ class StrategyRunnerPort(Protocol):
 
 
 class SandboxedStrategyForecastService:
-    def __init__(self, runner: StrategyRunnerPort) -> None:
+    def __init__(
+        self,
+        runner: StrategyRunnerPort,
+        *,
+        request_verifier: StrategyForecastRequestVerifier,
+    ) -> None:
         self._runner = runner
+        self._request_verifier = request_verifier
 
     async def forecast(
         self, request: StrategyForecastRequest
     ) -> StrategyForecastResult:
+        if not await self._request_verifier.verify_forecast_request(request):
+            from long_invest.modules.strategies.forecast import (
+                INPUT_HASH_MISMATCH,
+                StrategyForecastFailure,
+            )
+
+            raise StrategyForecastFailure(
+                INPUT_HASH_MISMATCH,
+                "strategy execution snapshot is not owned by its declared version",
+            )
         execution_id = request.strategy_version_id or request.draft_id
         payload = build_runner_payload(
             request=request,

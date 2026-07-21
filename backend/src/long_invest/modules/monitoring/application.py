@@ -4,6 +4,7 @@ from hashlib import sha256
 from types import SimpleNamespace
 from uuid import UUID
 
+from jsonschema import Draft202012Validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.monitor_schedules.application import (
@@ -268,6 +269,7 @@ class TransactionalMonitorSubscriptionPort:
         audit_factory=SubscriptionAudit,
         event_factory=MonitorSubscriptionOutbox,
         strategy_readiness=None,
+        strategy_snapshots=None,
     ) -> None:
         self._session = session
         self._repository = repository_factory(session)
@@ -275,6 +277,7 @@ class TransactionalMonitorSubscriptionPort:
         self._audit_factory = audit_factory
         self._event_factory = event_factory
         self._strategy_readiness = strategy_readiness or UnavailableStrategyReadiness()
+        self._strategy_snapshots = strategy_snapshots or self._strategy_readiness
 
     async def lock(self, subscription_id):
         owner = await self._repository.get(subscription_id, for_update=True)
@@ -374,6 +377,25 @@ class TransactionalMonitorSubscriptionPort:
         session_id,
         trusted_ip,
     ):
+        get_snapshot = getattr(self._strategy_snapshots, "get_execution_snapshot", None)
+        snapshot = await get_snapshot(strategy_version_id) if get_snapshot else None
+        if snapshot is None:
+            raise AppError(
+                code="MONITOR_SUBSCRIPTION_NOT_READY",
+                message="订阅策略版本不存在或尚未完成发布",
+                status_code=409,
+            )
+        parameter_errors = list(
+            Draft202012Validator(dict(snapshot.parameter_schema)).iter_errors(
+                dict(parameters)
+            )
+        )
+        if parameter_errors:
+            raise AppError(
+                code="MONITOR_STRATEGY_PARAMETERS_INVALID",
+                message="策略参数不符合所选版本的参数规范",
+                status_code=422,
+            )
         owner = await self._repository.get(subscription_id, for_update=True)
         if owner is None or owner.current_revision_id is None:
             return None
@@ -382,12 +404,6 @@ class TransactionalMonitorSubscriptionPort:
         )
         if revision is None:
             return None
-        if not await self._strategy_readiness.published_version(strategy_version_id):
-            raise AppError(
-                code="MONITOR_SUBSCRIPTION_NOT_READY",
-                message="订阅策略尚未发布或已失效",
-                status_code=409,
-            )
         service = self._service_factory(
             self._repository,
             audit=self._audit_factory(self._session),

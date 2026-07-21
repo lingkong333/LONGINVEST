@@ -39,8 +39,7 @@ class TargetRepository:
             select(SubscriptionTargetBinding, TargetRevision)
             .join(
                 TargetRevision,
-                TargetRevision.id
-                == SubscriptionTargetBinding.current_revision_id,
+                TargetRevision.id == SubscriptionTargetBinding.current_revision_id,
             )
             .where(
                 SubscriptionTargetBinding.current_revision_id.is_not(None),
@@ -61,8 +60,7 @@ class TargetRepository:
             .select_from(SubscriptionTargetBinding)
             .join(
                 TargetRevision,
-                TargetRevision.id
-                == SubscriptionTargetBinding.current_revision_id,
+                TargetRevision.id == SubscriptionTargetBinding.current_revision_id,
             )
             .where(
                 SubscriptionTargetBinding.current_revision_id.is_not(None),
@@ -71,9 +69,7 @@ class TargetRepository:
         )
         return int(total or 0)
 
-    async def create_binding(
-        self, subscription_id: UUID
-    ) -> SubscriptionTargetBinding:
+    async def create_binding(self, subscription_id: UUID) -> SubscriptionTargetBinding:
         binding = SubscriptionTargetBinding(
             id=uuid4(),
             subscription_id=subscription_id,

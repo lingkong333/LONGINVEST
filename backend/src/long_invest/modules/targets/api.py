@@ -40,12 +40,8 @@ def get_target_application() -> TargetApplication:
 
 
 Application = Annotated[TargetApplication, Depends(get_target_application)]
-ReadIdentity = Annotated[
-    AuthenticatedRequest, Depends(require_authenticated_request)
-]
-WriteIdentity = Annotated[
-    AuthenticatedRequest, Depends(require_verified_write_request)
-]
+ReadIdentity = Annotated[AuthenticatedRequest, Depends(require_authenticated_request)]
+WriteIdentity = Annotated[AuthenticatedRequest, Depends(require_verified_write_request)]
 IdempotencyKey = Annotated[
     str,
     Header(alias="Idempotency-Key", min_length=1, max_length=200),

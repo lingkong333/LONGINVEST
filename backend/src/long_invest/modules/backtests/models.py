@@ -1,4 +1,3 @@
-# ruff: noqa: E501
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
@@ -42,9 +41,7 @@ class BacktestTask(Base):
             "AND test_start_date <= test_end_date",
             name="date_range_valid",
         ),
-        CheckConstraint(
-            "mode IN ('SINGLE','WATCHLIST','MARKET')", name="mode_valid"
-        ),
+        CheckConstraint("mode IN ('SINGLE','WATCHLIST','MARKET')", name="mode_valid"),
         CheckConstraint(
             "status IN ('PENDING','RUNNING','PAUSING','PAUSED','SUCCEEDED',"
             "'PARTIAL','FAILED','CANCELING','CANCELED')",
@@ -57,8 +54,9 @@ class BacktestTask(Base):
             name="strategy_source_valid",
         ),
         CheckConstraint(
-            "length(universe_hash) = 64 AND length(source_code_hash) = 64 "
-            "AND length(parameter_hash) = 64",
+            "universe_hash ~ '^[0-9a-f]{64}$' "
+            "AND source_code_hash ~ '^[0-9a-f]{64}$' "
+            "AND parameter_hash ~ '^[0-9a-f]{64}$'",
             name="hashes_sha256",
         ),
         CheckConstraint(
@@ -115,9 +113,7 @@ class BacktestTask(Base):
     strategy_api_version: Mapped[str] = mapped_column(String(32), nullable=False)
     rule_version: Mapped[str] = mapped_column(String(64), nullable=False)
     hysteresis_ratio: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
-    minimum_hysteresis: Mapped[Decimal] = mapped_column(
-        Numeric(20, 6), nullable=False
-    )
+    minimum_hysteresis: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     price_basis: Mapped[str] = mapped_column(String(32), nullable=False)
     data_source: Mapped[str] = mapped_column(String(64), nullable=False)
     initial_capital: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
@@ -130,7 +126,7 @@ class BacktestUniverseSnapshot(Base):
     __tablename__ = "backtest_universe_snapshot"
     __table_args__ = (
         UniqueConstraint("task_id", name="task"),
-        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+        CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -141,9 +137,7 @@ class BacktestUniverseSnapshot(Base):
         ForeignKey("backtest_task.id", ondelete="RESTRICT"),
         nullable=False,
     )
-    scope_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(
-        JSONB, nullable=False
-    )
+    scope_snapshot: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
@@ -169,7 +163,8 @@ class BacktestItem(Base):
             "AND training_data_start_date IS NOT NULL "
             "AND training_data_end_date IS NOT NULL "
             "AND training_data_start_date <= training_data_end_date "
-            "AND training_data_row_count > 0 AND length(training_data_hash) = 64 "
+            "AND training_data_row_count > 0 "
+            "AND training_data_hash ~ '^[0-9a-f]{64}$' "
             "AND length(trim(training_price_basis)) > 0)",
             name="training_snapshot_consistent",
         ),
@@ -180,7 +175,8 @@ class BacktestItem(Base):
             "(test_data_fetched_at IS NOT NULL AND test_data_start_date IS NOT NULL "
             "AND test_data_end_date IS NOT NULL "
             "AND test_data_start_date <= test_data_end_date "
-            "AND test_data_row_count > 0 AND length(test_data_hash) = 64 "
+            "AND test_data_row_count > 0 "
+            "AND test_data_hash ~ '^[0-9a-f]{64}$' "
             "AND length(trim(test_price_basis)) > 0)",
             name="test_snapshot_consistent",
         ),
@@ -228,17 +224,16 @@ class BacktestForecastSnapshot(Base):
             name="training_range_valid",
         ),
         CheckConstraint(
-            "length(training_data_hash) = 64 AND length(source_code_hash) = 64 "
-            "AND length(parameter_hash) = 64",
+            "training_data_hash ~ '^[0-9a-f]{64}$' "
+            "AND source_code_hash ~ '^[0-9a-f]{64}$' "
+            "AND parameter_hash ~ '^[0-9a-f]{64}$'",
             name="hashes_sha256",
         ),
         CheckConstraint(
             "runner_image_digest ~ '^sha256:[0-9a-f]{64}$'",
             name="runner_image_digest_sha256",
         ),
-        CheckConstraint(
-            "training_fetched_at <= frozen_at", name="fetch_before_freeze"
-        ),
+        CheckConstraint("training_fetched_at <= frozen_at", name="fetch_before_freeze"),
         CheckConstraint(
             "low_strong > 0 AND low_watch > 0 AND high_watch > 0 "
             "AND high_strong > 0 AND low_strong < low_watch "
@@ -246,9 +241,7 @@ class BacktestForecastSnapshot(Base):
             name="targets_ordered",
         ),
         CheckConstraint(
-            _finite_numeric(
-                "low_strong", "low_watch", "high_watch", "high_strong"
-            ),
+            _finite_numeric("low_strong", "low_watch", "high_watch", "high_strong"),
             name="numeric_finite",
         ),
     )
@@ -303,7 +296,7 @@ class BacktestTargetAdjustment(Base):
             "AND after_high_watch < after_high_strong",
             name="targets_ordered",
         ),
-        CheckConstraint("length(data_hash) = 64", name="data_hash_sha256"),
+        CheckConstraint("data_hash ~ '^[0-9a-f]{64}$'", name="data_hash_sha256"),
         CheckConstraint(
             "published_at <= effective_at", name="publication_before_effective"
         ),
@@ -500,7 +493,7 @@ class BacktestMetric(Base):
     __tablename__ = "backtest_metric"
     __table_args__ = (
         UniqueConstraint("item_id", name="item"),
-        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+        CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"),
         CheckConstraint(
             "completed_round_trips >= 0 AND winning_trades >= 0 "
             "AND losing_trades >= 0 AND breakeven_trades >= 0 "
@@ -564,9 +557,7 @@ class BacktestMetric(Base):
     average_trade_return: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     maximum_trade_gain: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     maximum_trade_loss: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
-    average_holding_trade_days: Mapped[Decimal | None] = mapped_column(
-        Numeric(20, 8)
-    )
+    average_holding_trade_days: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     longest_holding_trade_days: Mapped[int] = mapped_column(Integer, nullable=False)
     capital_exposure_ratio: Mapped[Decimal] = mapped_column(
         Numeric(20, 8), nullable=False

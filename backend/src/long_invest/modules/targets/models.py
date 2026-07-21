@@ -55,10 +55,15 @@ class TargetRevision(Base):
             "AND high_watch < high_strong",
             name="values_ordered",
         ),
-        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+        CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"),
         CheckConstraint(
-            "source_code_hash IS NULL OR length(source_code_hash) = 64",
+            "source_code_hash IS NULL OR source_code_hash ~ '^[0-9a-f]{64}$'",
             name="source_code_hash_sha256",
+        ),
+        CheckConstraint(
+            "(source = 'STRATEGY' AND strategy_version_id IS NOT NULL) OR "
+            "(source <> 'STRATEGY' AND strategy_version_id IS NULL)",
+            name="strategy_version_consistent",
         ),
         CheckConstraint(
             "data_version IS NULL OR data_version > 0", name="data_version_positive"
@@ -89,7 +94,10 @@ class TargetRevision(Base):
         ForeignKey("target_revision.id", ondelete="RESTRICT"),
     )
     target_date: Mapped[date] = mapped_column(Date, nullable=False)
-    strategy_version_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    strategy_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_version.id", ondelete="RESTRICT"),
+    )
     parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB,
         nullable=False,
@@ -247,9 +255,7 @@ class TargetReview(Base):
     low_strong_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     low_watch_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     high_watch_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
-    high_strong_change: Mapped[Decimal] = mapped_column(
-        Numeric(20, 6), nullable=False
-    )
+    high_strong_change: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     reviewer_user_id: Mapped[str | None] = mapped_column(String(64))
     review_comment: Mapped[str | None] = mapped_column(String(500))
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

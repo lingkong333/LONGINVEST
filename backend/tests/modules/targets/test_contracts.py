@@ -88,7 +88,7 @@ def test_target_calculation_resource_usage_is_deeply_frozen_and_json_safe() -> N
         strategy_version_id=uuid4(),
         status=TargetCalculationStatus.SUCCEEDED,
         parameter_snapshot={"window": 20},
-        resource_usage={"limits": {"cpu": (1, 2), "pids": frozenset({8, 16})}},
+        resource_usage={"limits": {"cpu": (1, 2), "pids": (8, 16)}},
         created_at=datetime(2026, 7, 21, tzinfo=UTC),
     )
 
@@ -97,6 +97,20 @@ def test_target_calculation_resource_usage_is_deeply_frozen_and_json_safe() -> N
     dumped = run.model_dump(mode="json")["resource_usage"]
     assert dumped["limits"]["cpu"] == [1, 2]
     assert set(dumped["limits"]["pids"]) == {8, 16}
+
+
+@pytest.mark.parametrize("value", [{1, 2}, frozenset({1, 2}), object()])
+def test_target_json_snapshots_reject_unsupported_values(value: object) -> None:
+    with pytest.raises(ValidationError):
+        TargetCalculationRunView(
+            id=uuid4(),
+            subscription_id=uuid4(),
+            strategy_version_id=uuid4(),
+            status=TargetCalculationStatus.PENDING,
+            parameter_snapshot={},
+            resource_usage={"value": value},
+            created_at=datetime(2026, 7, 21, tzinfo=UTC),
+        )
 
 
 @pytest.mark.parametrize(
@@ -413,6 +427,41 @@ def test_target_revision_source_matches_source_revision(
     if valid:
         revision = TargetRevisionView(**values)
         assert revision.source_revision_id == source_revision_id
+    else:
+        with pytest.raises(ValidationError):
+            TargetRevisionView(**values)
+
+
+@pytest.mark.parametrize(
+    ("source", "strategy_version_id", "valid"),
+    [
+        (TargetSource.STRATEGY, uuid4(), True),
+        (TargetSource.STRATEGY, None, False),
+        (TargetSource.MANUAL, None, True),
+        (TargetSource.MANUAL, uuid4(), False),
+    ],
+)
+def test_target_revision_strategy_source_requires_strategy_version(
+    source: TargetSource, strategy_version_id: object, valid: bool
+) -> None:
+    values = {
+        "id": uuid4(),
+        "subscription_id": uuid4(),
+        "revision_no": 1,
+        "values": TargetValues(
+            low_strong="1", low_watch="2", high_watch="3", high_strong="4"
+        ),
+        "source": source,
+        "target_date": date(2026, 7, 21),
+        "strategy_version_id": strategy_version_id,
+        "parameter_snapshot": {},
+        "source_code_hash": "a" * 64 if strategy_version_id is not None else None,
+        "content_hash": "b" * 64,
+        "reason": "strategy consistency",
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC),
+    }
+    if valid:
+        assert TargetRevisionView(**values).strategy_version_id == strategy_version_id
     else:
         with pytest.raises(ValidationError):
             TargetRevisionView(**values)

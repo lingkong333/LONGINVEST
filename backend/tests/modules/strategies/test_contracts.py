@@ -1,4 +1,3 @@
-# ruff: noqa: E501
 import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -188,7 +187,7 @@ def test_strategy_nested_frozen_values_dump_as_json() -> None:
         strategy_version_id=uuid4(),
         source_code_hash="a" * 64,
         parameter_snapshot=MappingProxyType(
-            {"nested": MappingProxyType({"values": (1, frozenset({2, 3}))})}
+            {"nested": MappingProxyType({"values": (1, (2, 3))})}
         ),
         parameter_hash="b" * 64,
         training_data=TrainingDataSnapshot(
@@ -215,7 +214,7 @@ def test_strategy_nested_frozen_values_dump_as_json() -> None:
         values=TargetValues(
             low_strong="1", low_watch="2", high_watch="3", high_strong="4"
         ),
-        diagnostics={"nested": {"values": (1, frozenset({2, 3}))}},
+        diagnostics={"nested": {"values": (1, (2, 3))}},
     )
 
     request_dump = request.model_dump(mode="json")
@@ -226,6 +225,17 @@ def test_strategy_nested_frozen_values_dump_as_json() -> None:
     assert set(request_dump["parameter_snapshot"]["nested"]["values"][1]) == {2, 3}
     assert request_dump["training_data"]["rows"][0]["labels"] == ["training"]
     assert set(result_dump["diagnostics"]["nested"]["values"][1]) == {2, 3}
+
+
+@pytest.mark.parametrize("value", [{1, 2}, frozenset({1, 2}), object()])
+def test_strategy_json_snapshots_reject_unsupported_values(value: object) -> None:
+    with pytest.raises(ValidationError):
+        StrategyForecastResult(
+            values=TargetValues(
+                low_strong="1", low_watch="2", high_watch="3", high_strong="4"
+            ),
+            diagnostics={"value": value},
+        )
 
 
 def test_strategy_version_view_is_a_complete_immutable_release_snapshot() -> None:

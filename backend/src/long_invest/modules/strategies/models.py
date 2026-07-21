@@ -1,4 +1,3 @@
-# ruff: noqa: E501
 from datetime import datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -25,7 +24,8 @@ class StrategyVersion(Base):
         UniqueConstraint("strategy_id", "version_no", name="version_number"),
         CheckConstraint("version_no > 0", name="version_positive"),
         CheckConstraint(
-            "length(source_code_hash) = 64", name="source_code_hash_sha256"
+            "source_code_hash ~ '^[0-9a-f]{64}$'",
+            name="source_code_hash_sha256",
         ),
         CheckConstraint(
             "runner_image_digest ~ '^sha256:[0-9a-f]{64}$'",

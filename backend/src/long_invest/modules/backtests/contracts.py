@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -20,30 +19,12 @@ from pydantic import (
 
 from long_invest.modules.signals.contracts import SignalZone
 from long_invest.modules.targets.contracts import TargetValues
+from long_invest.platform.json_snapshot import freeze_json_mapping, thaw_json_value
+from long_invest.platform.validation import Sha256Hex
 
 
 class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-def _deep_freeze(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return MappingProxyType(
-            {str(key): _deep_freeze(item) for key, item in value.items()}
-        )
-    if isinstance(value, (list, tuple)):
-        return tuple(_deep_freeze(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return frozenset(_deep_freeze(item) for item in value)
-    return value
-
-
-def _deep_thaw(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _deep_thaw(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list, set, frozenset)):
-        return [_deep_thaw(item) for item in value]
-    return value
 
 
 class BacktestMode(StrEnum):
@@ -157,13 +138,13 @@ class BacktestTaskSnapshot(StrictContract):
     id: UUID
     mode: BacktestMode
     universe_snapshot: tuple[BacktestUniverseEntry, ...]
-    universe_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    universe_hash: Sha256Hex
     date_range: BacktestDateRange
     strategy_version_id: UUID | None
     draft_source_code: str | None
-    source_code_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_code_hash: Sha256Hex
     parameter_snapshot: Mapping[str, Any]
-    parameter_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    parameter_hash: Sha256Hex
     environment_version: str = Field(min_length=1)
     runner_image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     strategy_api_version: str = Field(min_length=1)
@@ -177,11 +158,11 @@ class BacktestTaskSnapshot(StrictContract):
     @field_validator("parameter_snapshot")
     @classmethod
     def freeze_parameters(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("parameter_snapshot")
     def serialize_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
     @model_validator(mode="after")
     def validate_frozen_scope_and_strategy(self) -> BacktestTaskSnapshot:
@@ -210,9 +191,9 @@ class BacktestForecastSnapshotView(StrictContract):
     training_end_date: date
     training_row_count: int = Field(gt=0)
     training_fetched_at: AwareDatetime
-    training_data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    source_code_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
-    parameter_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    training_data_hash: Sha256Hex
+    source_code_hash: Sha256Hex
+    parameter_hash: Sha256Hex
     values: TargetValues
     diagnostics: Mapping[str, Any]
     environment_version: str = Field(min_length=1)
@@ -223,11 +204,11 @@ class BacktestForecastSnapshotView(StrictContract):
     @field_validator("diagnostics")
     @classmethod
     def freeze_diagnostics(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("diagnostics")
     def serialize_diagnostics(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
     @model_validator(mode="after")
     def validate_training_snapshot(self) -> BacktestForecastSnapshotView:
@@ -244,7 +225,7 @@ class BacktestTestDataSnapshotView(StrictContract):
     start_date: date
     end_date: date
     row_count: int = Field(gt=0)
-    data_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    data_hash: Sha256Hex
     price_basis: str = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -279,7 +260,7 @@ class BacktestTargetAdjustmentView(StrictContract):
     after_values: TargetValues
     adjustment_factor: Decimal = Field(gt=0)
     source: str = Field(min_length=1)
-    data_hash: str = Field(min_length=64, max_length=64)
+    data_hash: Sha256Hex
     published_at: AwareDatetime
     effective_at: AwareDatetime
 

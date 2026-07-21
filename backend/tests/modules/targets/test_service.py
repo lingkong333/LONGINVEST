@@ -116,9 +116,7 @@ class Sink:
         self.items.append(item)
 
     async def find_by_idempotency(self, key):
-        return next(
-            (item for item in self.items if item.idempotency_key == key), None
-        )
+        return next((item for item in self.items if item.idempotency_key == key), None)
 
 
 SUBSCRIPTION_ID = uuid4()
@@ -297,9 +295,10 @@ async def test_replay_uses_audit_fact_for_exact_non_fixed_activation_time() -> N
 
     assert replay.binding == first.binding
     assert replay.revision == first.revision
-    assert repository.revisions[0].content_hash != audit.items[0].after_summary[
-        "_request_digest"
-    ]
+    assert (
+        repository.revisions[0].content_hash
+        != audit.items[0].after_summary["_request_digest"]
+    )
 
 
 @pytest.mark.anyio
@@ -391,9 +390,7 @@ async def test_archived_subscription_does_not_hide_idempotency_conflict() -> Non
     subscriptions.snapshot.status = "ARCHIVED"
 
     with pytest.raises(AppError) as caught:
-        await target.set_manual(
-            manual(target_values=values(("7", "9", "12", "13")))
-        )
+        await target.set_manual(manual(target_values=values(("7", "9", "12", "13"))))
 
     assert caught.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
 
@@ -556,9 +553,7 @@ async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
     assert repository.get_revision_calls == calls_before_list
     assert await target.list(page=2, page_size=1) == ((), 1)
     assert (await target.get(SUBSCRIPTION_ID)).revision_id == created.revision.id
-    history, total = await target.history(
-        SUBSCRIPTION_ID, page=2, page_size=1
-    )
+    history, total = await target.history(SUBSCRIPTION_ID, page=2, page_size=1)
     assert history == ()
     assert total == 1
 

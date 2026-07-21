@@ -84,3 +84,9 @@ def test_strategy_models_enforce_lifecycle_and_immutable_version_invariants() ->
     assert "strategy.id" in _foreign_key_targets(StrategyVersion)
     assert "strategy_validation_run.id" in _foreign_key_targets(StrategyVersion)
     assert "strategy_version.id" in _foreign_key_targets(StrategyRun)
+    source_hash_constraint = next(
+        item
+        for item in StrategyVersion.__table__.constraints
+        if item.name == "ck_strategy_version_source_code_hash_sha256"
+    )
+    assert "source_code_hash ~ '^[0-9a-f]{64}$'" in str(source_hash_constraint.sqltext)

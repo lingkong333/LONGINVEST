@@ -123,9 +123,7 @@ class TargetService:
         self, *, page: int = 1, page_size: int = 50
     ) -> tuple[tuple[TargetSnapshot, ...], int]:
         _validate_page(page, page_size)
-        rows = await self._repository.list_current_rows(
-            page=page, page_size=page_size
-        )
+        rows = await self._repository.list_current_rows(page=page, page_size=page_size)
         return (
             tuple(_snapshot(binding, revision) for binding, revision in rows),
             await self._repository.count_bindings(),
@@ -282,9 +280,7 @@ class TargetService:
         await self._repository.flush()
         return revision
 
-    async def _activate(
-        self, command, binding, revision, *, action, request_digest
-    ):
+    async def _activate(self, command, binding, revision, *, action, request_digest):
         before_revision_id = binding.current_revision_id
         binding.current_revision_id = revision.id
         binding.status = TargetStatus.READY.value
@@ -335,9 +331,7 @@ class TargetService:
         await self._events.append(
             TargetEvent(
                 event_type=(
-                    "target.restored"
-                    if suffix == "restored"
-                    else "target.activated"
+                    "target.restored" if suffix == "restored" else "target.activated"
                 ),
                 aggregate_id=str(command.subscription_id),
                 dedupe_key=f"target:{revision.id}:{suffix}",
@@ -483,9 +477,7 @@ def _content_hash(
     return _hash(
         {
             "subscription_id": str(subscription_id),
-            "values": {
-                key: str(value) for key, value in values.model_dump().items()
-            },
+            "values": {key: str(value) for key, value in values.model_dump().items()},
             "source": source.value,
             "source_revision_id": (
                 str(source_revision_id) if source_revision_id else None

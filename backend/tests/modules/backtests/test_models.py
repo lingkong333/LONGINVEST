@@ -232,6 +232,28 @@ def test_metric_trade_counts_include_breakeven_trades() -> None:
     sql = str(counts_constraint.sqltext)
     assert "breakeven_trades >= 0" in sql
     assert (
-        "winning_trades + losing_trades + breakeven_trades "
-        "= completed_round_trips"
+        "winning_trades + losing_trades + breakeven_trades = completed_round_trips"
     ) in sql
+
+
+def test_backtest_hash_checks_require_lowercase_sha256_hex() -> None:
+    model_fields = {
+        BacktestTask: ("universe_hash", "source_code_hash", "parameter_hash"),
+        BacktestUniverseSnapshot: ("content_hash",),
+        BacktestItem: ("training_data_hash", "test_data_hash"),
+        BacktestForecastSnapshot: (
+            "training_data_hash",
+            "source_code_hash",
+            "parameter_hash",
+        ),
+        BacktestTargetAdjustment: ("data_hash",),
+        BacktestMetric: ("content_hash",),
+    }
+    for model, fields in model_fields.items():
+        sql = " ".join(
+            str(item.sqltext)
+            for item in model.__table__.constraints
+            if isinstance(item, CheckConstraint)
+        )
+        for field in fields:
+            assert f"{field} ~ '^[0-9a-f]{{64}}$'" in sql

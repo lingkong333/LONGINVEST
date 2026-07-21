@@ -124,6 +124,7 @@ def _app(application=None, *, authenticated=True):
         value.dependency_overrides[require_authenticated_request] = lambda: identity
         value.dependency_overrides[require_verified_write_request] = lambda: identity
     else:
+
         async def reject():
             raise AppError(code="AUTH_REQUIRED", message="login", status_code=401)
 
@@ -258,9 +259,7 @@ def test_authenticated_reads_paginate_and_missing_current_is_404() -> None:
         "page_size": 20,
         "total": 1,
     }
-    application.history.assert_awaited_once_with(
-        SUBSCRIPTION_ID, page=2, page_size=20
-    )
+    application.history.assert_awaited_once_with(SUBSCRIPTION_ID, page=2, page_size=20)
     application.get.return_value = None
     missing = client.get(f"/api/v1/targets/{uuid4()}")
     assert missing.status_code == 404
@@ -294,10 +293,13 @@ def test_manual_and_restore_map_verified_identity_and_confirmation_fields() -> N
     assert restore_command.source_revision_id == REVISION_ID
 
 
-@pytest.mark.parametrize("path,body", [
-    (f"/api/v1/targets/{SUBSCRIPTION_ID}/manual", _manual_body(confirm=False)),
-    (f"/api/v1/targets/{SUBSCRIPTION_ID}/restore", _restore_body(confirm=False)),
-])
+@pytest.mark.parametrize(
+    "path,body",
+    [
+        (f"/api/v1/targets/{SUBSCRIPTION_ID}/manual", _manual_body(confirm=False)),
+        (f"/api/v1/targets/{SUBSCRIPTION_ID}/restore", _restore_body(confirm=False)),
+    ],
+)
 def test_write_requires_header_and_explicit_true_confirmation(path, body) -> None:
     client = TestClient(_app())
 
@@ -323,9 +325,7 @@ def test_unavailable_capabilities_are_authenticated_concrete_409() -> None:
 
 def test_capability_write_requires_expected_version() -> None:
     with pytest.raises(ValidationError):
-        CapabilityWriteRequest.model_validate(
-            {"confirm": True, "reason": "calculate"}
-        )
+        CapabilityWriteRequest.model_validate({"confirm": True, "reason": "calculate"})
 
 
 @pytest.mark.parametrize(
@@ -352,11 +352,14 @@ def test_unauthenticated_target_routes_are_rejected() -> None:
     client = TestClient(_app(authenticated=False))
 
     assert client.get("/api/v1/targets").status_code == 401
-    assert client.post(
-        f"/api/v1/targets/{SUBSCRIPTION_ID}/manual",
-        json=_manual_body(),
-        headers={"Idempotency-Key": "idem"},
-    ).status_code == 401
+    assert (
+        client.post(
+            f"/api/v1/targets/{SUBSCRIPTION_ID}/manual",
+            json=_manual_body(),
+            headers={"Idempotency-Key": "idem"},
+        ).status_code
+        == 401
+    )
 
 
 def test_manual_write_uses_origin_session_and_csrf_protection() -> None:
@@ -399,11 +402,7 @@ def test_manual_write_uses_origin_session_and_csrf_protection() -> None:
     no_csrf = client.post(
         url,
         json=_manual_body(),
-        headers={
-            key: value
-            for key, value in headers.items()
-            if key != "X-CSRF-Token"
-        },
+        headers={key: value for key, value in headers.items() if key != "X-CSRF-Token"},
     )
     accepted = client.post(url, json=_manual_body(), headers=headers)
 
@@ -428,12 +427,14 @@ def test_authentication_runs_before_default_application_placeholder() -> None:
     unauthenticated.dependency_overrides[require_verified_write_request] = reject
     client = TestClient(unauthenticated)
     assert client.get("/api/v1/targets").status_code == 401
-    assert client.post(
-        f"/api/v1/targets/{SUBSCRIPTION_ID}/manual",
-        json=_manual_body(),
-        headers={"Idempotency-Key": "auth-first"},
-    ).status_code == 401
-
+    assert (
+        client.post(
+            f"/api/v1/targets/{SUBSCRIPTION_ID}/manual",
+            json=_manual_body(),
+            headers={"Idempotency-Key": "auth-first"},
+        ).status_code
+        == 401
+    )
 
 
 def test_default_target_application_is_production_ready() -> None:

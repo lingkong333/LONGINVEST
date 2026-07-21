@@ -1,11 +1,9 @@
-# ruff: noqa: E501
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal, DecimalException
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -20,30 +18,12 @@ from pydantic import (
 )
 
 from long_invest.modules.targets.contracts import TargetValues
+from long_invest.platform.json_snapshot import freeze_json_mapping, thaw_json_value
+from long_invest.platform.validation import Sha256Hex
 
 
 class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-
-
-def _deep_freeze(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return MappingProxyType(
-            {str(key): _deep_freeze(item) for key, item in value.items()}
-        )
-    if isinstance(value, (list, tuple)):
-        return tuple(_deep_freeze(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return frozenset(_deep_freeze(item) for item in value)
-    return value
-
-
-def _deep_thaw(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _deep_thaw(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list, set, frozenset)):
-        return [_deep_thaw(item) for item in value]
-    return value
 
 
 class StrategyForecastErrorCode(StrEnum):
@@ -102,11 +82,11 @@ class FrozenMappingContract(StrictContract):
     @field_validator("parameter_snapshot")
     @classmethod
     def freeze_parameter_snapshot(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("parameter_snapshot")
     def serialize_parameter_snapshot(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
 
 class TrainingDataSnapshot(StrictContract):
@@ -115,7 +95,7 @@ class TrainingDataSnapshot(StrictContract):
     start_date: date
     end_date: date
     data_version: int = Field(ge=1)
-    content_hash: str = Field(min_length=64, max_length=64)
+    content_hash: Sha256Hex
     rows: tuple[Mapping[str, Any], ...]
 
     @field_validator("rows")
@@ -123,11 +103,11 @@ class TrainingDataSnapshot(StrictContract):
     def freeze_rows(
         cls, value: tuple[Mapping[str, Any], ...]
     ) -> tuple[Mapping[str, Any], ...]:
-        return tuple(_deep_freeze(row) for row in value)
+        return tuple(freeze_json_mapping(row) for row in value)
 
     @field_serializer("rows")
     def serialize_rows(self, value: tuple[Mapping[str, Any], ...]) -> list[Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
     @model_validator(mode="after")
     def validate_rows(self) -> TrainingDataSnapshot:
@@ -161,8 +141,8 @@ class TrainingDataSnapshot(StrictContract):
 
 class StrategyForecastRequest(FrozenMappingContract):
     strategy_version_id: UUID
-    source_code_hash: str = Field(min_length=64, max_length=64)
-    parameter_hash: str = Field(min_length=64, max_length=64)
+    source_code_hash: Sha256Hex
+    parameter_hash: Sha256Hex
     training_data: TrainingDataSnapshot
     requested_at: AwareDatetime
 
@@ -174,11 +154,11 @@ class StrategyForecastResult(StrictContract):
     @field_validator("diagnostics")
     @classmethod
     def freeze_diagnostics(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("diagnostics")
     def serialize_diagnostics(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
 
 class StrategyReadiness(StrictContract):
@@ -214,7 +194,7 @@ class StrategyVersionView(StrictContract):
     parameter_schema: Mapping[str, Any]
     environment_version: str = Field(min_length=1)
     runner_image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
-    source_code_hash: str = Field(min_length=64, max_length=64)
+    source_code_hash: Sha256Hex
     git_commit: str | None = Field(default=None, min_length=7, max_length=64)
     validation_run_id: UUID | None = None
     status: StrategyLifecycleStatus
@@ -224,11 +204,11 @@ class StrategyVersionView(StrictContract):
     @field_validator("metadata", "parameter_schema")
     @classmethod
     def freeze_release_mapping(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("metadata", "parameter_schema")
     def serialize_release_mapping(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
     @model_validator(mode="after")
     def validate_publication_fields(self) -> StrategyVersionView:
@@ -250,10 +230,14 @@ class StrategyVersionView(StrictContract):
             StrategyLifecycleStatus.ARCHIVED,
         } and any(value is None for value in publication_fields):
             raise ValueError("published strategy version requires publication fields")
-        if self.status in {
-            StrategyLifecycleStatus.PUBLISHING,
-            StrategyLifecycleStatus.PUBLISH_FAILED,
-        } and self.published_at is not None:
+        if (
+            self.status
+            in {
+                StrategyLifecycleStatus.PUBLISHING,
+                StrategyLifecycleStatus.PUBLISH_FAILED,
+            }
+            and self.published_at is not None
+        ):
             raise ValueError("unpublished strategy version cannot have published_at")
         return self
 

@@ -82,9 +82,7 @@ async def test_revision_history_is_paged_counted_and_time_descending() -> None:
     repository = TargetRepository(session)
     subscription_id = uuid4()
 
-    assert await repository.list_revisions(
-        subscription_id, page=2, page_size=3
-    ) == ()
+    assert await repository.list_revisions(subscription_id, page=2, page_size=3) == ()
     statement = session.scalars.await_args.args[0]
     sql = str(
         statement.compile(

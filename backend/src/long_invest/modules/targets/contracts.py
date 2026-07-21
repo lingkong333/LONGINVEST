@@ -4,7 +4,6 @@ from collections.abc import Mapping
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -17,6 +16,9 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+
+from long_invest.platform.json_snapshot import freeze_json_mapping, thaw_json_value
+from long_invest.platform.validation import Sha256Hex
 
 
 class StrictContract(BaseModel):
@@ -137,11 +139,11 @@ class FrozenParametersContract(StrictContract):
     @field_validator("parameter_snapshot", mode="after")
     @classmethod
     def freeze_parameters(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("parameter_snapshot")
     def serialize_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
 
 class TargetRevisionView(FrozenParametersContract):
@@ -154,8 +156,8 @@ class TargetRevisionView(FrozenParametersContract):
     target_date: date
     strategy_version_id: UUID | None = None
     data_version: int | None = Field(default=None, ge=1)
-    source_code_hash: str | None = Field(default=None, min_length=64, max_length=64)
-    content_hash: str = Field(min_length=64, max_length=64)
+    source_code_hash: Sha256Hex | None = None
+    content_hash: Sha256Hex
     reason: str
     created_at: AwareDatetime
 
@@ -165,6 +167,9 @@ class TargetRevisionView(FrozenParametersContract):
         has_source_revision = self.source_revision_id is not None
         if source_is_restored != has_source_revision:
             raise ValueError("source revision must match target source")
+        source_is_strategy = self.source is TargetSource.STRATEGY
+        if source_is_strategy != (self.strategy_version_id is not None):
+            raise ValueError("strategy version must match target source")
         return self
 
 
@@ -195,11 +200,11 @@ class TargetCalculationRunView(FrozenParametersContract):
     @field_validator("resource_usage")
     @classmethod
     def freeze_resource_usage(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return _deep_freeze(value)
+        return freeze_json_mapping(value)
 
     @field_serializer("resource_usage")
     def serialize_resource_usage(self, value: Mapping[str, Any]) -> dict[str, Any]:
-        return _deep_thaw(value)
+        return thaw_json_value(value)
 
     @model_validator(mode="after")
     def validate_training_range(self) -> TargetCalculationRunView:
@@ -264,8 +269,8 @@ class TargetSnapshot(FrozenParametersContract):
     target_date: date
     strategy_version_id: UUID | None = None
     data_version: int | None = Field(default=None, ge=1)
-    source_code_hash: str | None = Field(default=None, min_length=64, max_length=64)
-    content_hash: str = Field(min_length=64, max_length=64)
+    source_code_hash: Sha256Hex | None = None
+    content_hash: Sha256Hex
     activated_at: AwareDatetime
 
 
@@ -280,23 +285,3 @@ class TargetSnapshotPort(Protocol):
     async def get_target_snapshot(
         self, subscription_id: UUID
     ) -> TargetSnapshot | None: ...
-
-
-def _deep_freeze(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return MappingProxyType(
-            {str(key): _deep_freeze(item) for key, item in value.items()}
-        )
-    if isinstance(value, (list, tuple)):
-        return tuple(_deep_freeze(item) for item in value)
-    if isinstance(value, (set, frozenset)):
-        return frozenset(_deep_freeze(item) for item in value)
-    return value
-
-
-def _deep_thaw(value: Any) -> Any:
-    if isinstance(value, Mapping):
-        return {str(key): _deep_thaw(item) for key, item in value.items()}
-    if isinstance(value, (tuple, list, set, frozenset)):
-        return [_deep_thaw(item) for item in value]
-    return value

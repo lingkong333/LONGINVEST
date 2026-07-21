@@ -75,6 +75,7 @@ def test_target_revision_has_order_source_and_version_constraints() -> None:
         "ck_target_revision_revision_positive",
         "ck_target_revision_content_hash_sha256",
         "ck_target_revision_source_revision_consistent",
+        "ck_target_revision_strategy_version_consistent",
     } <= names
     assert ("subscription_id", "revision_no") in _unique_columns(TargetRevision)
     assert ("subscription_id", "idempotency_key") in _unique_columns(TargetRevision)
@@ -87,6 +88,17 @@ def test_target_revision_has_order_source_and_version_constraints() -> None:
     for field in ("low_strong", "low_watch", "high_watch", "high_strong"):
         assert f"{field} <> 'NaN'::numeric" in sql
         assert f"{field} < 'Infinity'::numeric" in sql
+    assert "strategy_version.id" in _foreign_key_targets(TargetRevision)
+
+
+def test_target_revision_hash_checks_require_lowercase_sha256_hex() -> None:
+    sql = " ".join(
+        str(item.sqltext)
+        for item in TargetRevision.__table__.constraints
+        if isinstance(item, CheckConstraint)
+    )
+    assert "content_hash ~ '^[0-9a-f]{64}$'" in sql
+    assert "source_code_hash ~ '^[0-9a-f]{64}$'" in sql
 
 
 def test_target_binding_is_unique_and_constrained() -> None:

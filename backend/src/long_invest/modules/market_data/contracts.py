@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -50,7 +51,7 @@ class AdjustmentTimelineEntry:
         _require_text(self.source, "调整来源")
         if not self.adjustment_factor.is_finite() or self.adjustment_factor <= 0:
             raise ValueError("adjustment factor must be finite and positive")
-        if len(self.data_hash) != 64:
+        if re.fullmatch(r"[0-9a-f]{64}", self.data_hash) is None:
             raise ValueError("adjustment data hash must be sha256")
 
 

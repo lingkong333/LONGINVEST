@@ -36,6 +36,19 @@ def test_adjustment_timeline_entry_freezes_effective_and_publication_dates() -> 
         entry.source = "changed"  # type: ignore[misc]
 
 
+@pytest.mark.parametrize("data_hash", ["!" * 64, "A" * 64])
+def test_adjustment_timeline_rejects_invalid_sha256(data_hash: str) -> None:
+    with pytest.raises(ValueError, match="sha256"):
+        AdjustmentTimelineEntry(
+            event_date=date(2026, 1, 2),
+            effective_date=date(2026, 1, 2),
+            published_at=datetime(2026, 1, 1, tzinfo=UTC),
+            source="provider",
+            adjustment_factor=Decimal("0.5"),
+            data_hash=data_hash,
+        )
+
+
 def test_adjustment_timeline_rejects_naive_publication_and_as_of_times() -> None:
     with pytest.raises(ValueError, match="timezone"):
         AdjustmentTimelineEntry(

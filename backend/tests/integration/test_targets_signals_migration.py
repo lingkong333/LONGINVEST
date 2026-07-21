@@ -245,7 +245,7 @@ def test_expression_signatures_ignore_postgres_equivalent_wrapping() -> None:
     assert _check_signature(
         "status IN ('READY','FAILED')", columns
     ) == _check_signature(
-        "((\"status\")::text = ANY ((ARRAY['READY'::character varying, "
+        "((\"status\") = ANY ((ARRAY['READY'::character varying, "
         "'FAILED'::text])::text[]))",
         columns,
     )
@@ -253,6 +253,53 @@ def test_expression_signatures_ignore_postgres_equivalent_wrapping() -> None:
     assert _server_default_signature("now()") != _server_default_signature(
         "clock_timestamp()"
     )
+
+
+def test_expression_signatures_preserve_semantic_column_casts() -> None:
+    columns = [{"name": "value"}]
+
+    assert _check_signature("value::integer > 0", columns) != _check_signature(
+        "value > 0", columns
+    )
+    assert _check_signature("value::custom_domain > 0", columns) != _check_signature(
+        "value > 0", columns
+    )
+
+
+def test_expression_signatures_preserve_cast_text_inside_string_literals() -> None:
+    columns = [{"name": "status"}]
+
+    assert _check_signature("status = 'READY::text'", columns) != _check_signature(
+        "status = 'READY'", columns
+    )
+
+
+def test_expression_signatures_ignore_postgres_literal_cast_decoration() -> None:
+    columns = [{"name": "status"}]
+
+    assert _check_signature("status = 'READY'::text", columns) == _check_signature(
+        "status = 'READY'", columns
+    )
+
+
+def test_server_default_signatures_only_ignore_literal_cast_decoration() -> None:
+    assert _server_default_signature("'READY'::text") == _server_default_signature(
+        "'READY'"
+    )
+    assert _server_default_signature("'READY::text'") != _server_default_signature(
+        "'READY'"
+    )
+    assert _server_default_signature("next_value()::integer") != (
+        _server_default_signature("next_value()")
+    )
+
+
+def test_expression_signatures_keep_postgres_array_any_equivalent_to_in() -> None:
+    columns = [{"name": "status"}]
+
+    assert _check_signature(
+        "status = ANY (ARRAY['A'::text, 'B'::text]::text[])", columns
+    ) == _check_signature("status IN ('A', 'B')", columns)
 
 
 @pytest.fixture
@@ -344,19 +391,21 @@ async def test_targets_signals_migration_lifecycle_in_temporary_database() -> No
         _run_alembic(migration_env, "upgrade", "head")
         await _assert_upgraded_database(owner_url, app_url)
     finally:
-        if created:
-            async with maintenance.connect() as connection:
-                await connection.execute(
-                    text(
-                        "SELECT pg_terminate_backend(pid) "
-                        "FROM pg_stat_activity "
-                        "WHERE datname = :database_name "
-                        "AND pid <> pg_backend_pid()"
-                    ),
-                    {"database_name": database_name},
-                )
-                await connection.execute(text(f'DROP DATABASE "{database_name}"'))
-        await maintenance.dispose()
+        try:
+            if created:
+                async with maintenance.connect() as connection:
+                    await connection.execute(
+                        text(
+                            "SELECT pg_terminate_backend(pid) "
+                            "FROM pg_stat_activity "
+                            "WHERE datname = :database_name "
+                            "AND pid <> pg_backend_pid()"
+                        ),
+                        {"database_name": database_name},
+                    )
+                    await connection.execute(text(f'DROP DATABASE "{database_name}"'))
+        finally:
+            await maintenance.dispose()
 
 
 @pytest.mark.skipif(
@@ -811,25 +860,37 @@ def _type_signature(column_type):
     raise AssertionError(f"unsupported schema type: {column_type!r}")
 
 
-_POSTGRES_CAST = re.compile(
-    r"::\s*(?:[a-z_][a-z0-9_]*\s*\.\s*)?"
-    r"(?:character\s+varying|timestamp\s+(?:with|without)\s+time\s+zone|"
-    r"double\s+precision|smallint|integer|bigint|numeric|decimal|real|"
-    r"boolean|date|text|varchar|bpchar|jsonb?|uuid)"
-    r"(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\s*\[\s*\])?",
-    re.IGNORECASE,
-)
 _SQL_TOKEN = re.compile(
     r"\s+|"
     r"'(?:''|[^'])*'|"
     r'"(?:""|[^"])*"|'
     r"\d+(?:\.\d+)?|"
-    r">=|<=|<>|!=|=|>|<|"
+    r"::|>=|<=|<>|!=|=|>|<|"
     r"[(),\[\]]|"
     r"[a-z_][a-z0-9_$.]*",
     re.IGNORECASE,
 )
 _SQL_KEYWORDS = {"AND", "OR", "NOT", "IS", "NULL", "IN", "ANY", "ARRAY"}
+_LITERAL_DECORATION_CASTS = {
+    "bigint",
+    "boolean",
+    "bpchar",
+    "character varying",
+    "date",
+    "decimal",
+    "double precision",
+    "integer",
+    "json",
+    "jsonb",
+    "numeric",
+    "real",
+    "smallint",
+    "text",
+    "timestamp with time zone",
+    "timestamp without time zone",
+    "uuid",
+    "varchar",
+}
 
 
 def _check_signature(sql: str, columns):
@@ -848,14 +909,13 @@ def _server_default_signature(expression: str | None):
 
 
 def _expression_signature(expression: str):
-    without_casts = _POSTGRES_CAST.sub("", expression)
     tokens = []
     position = 0
-    while position < len(without_casts):
-        match = _SQL_TOKEN.match(without_casts, position)
+    while position < len(expression):
+        match = _SQL_TOKEN.match(expression, position)
         if match is None:
             raise AssertionError(
-                f"unsupported SQL expression near {without_casts[position:]!r}"
+                f"unsupported SQL expression near {expression[position:]!r}"
             )
         token = match.group(0)
         position = match.end()
@@ -895,23 +955,74 @@ def _expression_signature(expression: str):
         take(closing)
         return tuple(items)
 
+    def parse_cast_type():
+        type_name = take()
+        if (type_name, peek()) in {
+            ("character", "varying"),
+            ("double", "precision"),
+        }:
+            type_name = f"{type_name} {take()}"
+        elif type_name == "timestamp" and peek() in {"with", "without"}:
+            type_name = f"{type_name} {take()}"
+            if peek() == "time" and peek(1) == "zone":
+                type_name = f"{type_name} {take()} {take()}"
+
+        modifiers = ()
+        if peek() == "(":
+            take("(")
+            parsed_modifiers = [take()]
+            while peek() == ",":
+                take(",")
+                parsed_modifiers.append(take())
+            take(")")
+            modifiers = tuple(parsed_modifiers)
+
+        dimensions = 0
+        while peek() == "[" and peek(1) == "]":
+            take("[")
+            take("]")
+            dimensions += 1
+        return (type_name, modifiers, dimensions)
+
+    def apply_cast(value, cast_type):
+        type_name, _modifiers, dimensions = cast_type
+        unqualified_type = type_name.rsplit(".", maxsplit=1)[-1]
+        if (
+            value[0] in {"string", "number"}
+            and dimensions == 0
+            and unqualified_type in _LITERAL_DECORATION_CASTS
+        ):
+            return value
+        if (
+            value[0] == "array"
+            and dimensions > 0
+            and unqualified_type in _LITERAL_DECORATION_CASTS
+        ):
+            return value
+        return ("cast", value, cast_type)
+
     def parse_primary():
         token = take()
         if token == "(":
             value = parse_or()
             take(")")
-            return value
-        if token == "ARRAY":
+        elif token == "ARRAY":
             take("[")
-            return ("array", parse_list("]"))
-        if token.startswith("'"):
-            return ("string", token[1:-1].replace("''", "'"))
-        if re.fullmatch(r"\d+(?:\.\d+)?", token):
-            return ("number", str(Decimal(token).normalize()))
-        if peek() == "(":
+            value = ("array", parse_list("]"))
+        elif token.startswith("'"):
+            value = ("string", token[1:-1].replace("''", "'"))
+        elif re.fullmatch(r"\d+(?:\.\d+)?", token):
+            value = ("number", str(Decimal(token).normalize()))
+        elif peek() == "(":
             take("(")
-            return ("call", token, parse_list(")"))
-        return ("identifier", token)
+            value = ("call", token, parse_list(")"))
+        else:
+            value = ("identifier", token)
+
+        while peek() == "::":
+            take("::")
+            value = apply_cast(value, parse_cast_type())
+        return value
 
     def parse_predicate():
         left = parse_primary()

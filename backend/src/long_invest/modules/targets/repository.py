@@ -22,6 +22,24 @@ class TargetRepository:
             .with_for_update()
         )
 
+    async def get_binding(
+        self, subscription_id: UUID
+    ) -> SubscriptionTargetBinding | None:
+        return await self._session.scalar(
+            select(SubscriptionTargetBinding).where(
+                SubscriptionTargetBinding.subscription_id == subscription_id
+            )
+        )
+
+    async def list_bindings(self) -> tuple[SubscriptionTargetBinding, ...]:
+        rows = await self._session.scalars(
+            select(SubscriptionTargetBinding).order_by(
+                SubscriptionTargetBinding.created_at,
+                SubscriptionTargetBinding.id,
+            )
+        )
+        return tuple(rows.all())
+
     async def create_binding(
         self, subscription_id: UUID
     ) -> SubscriptionTargetBinding:

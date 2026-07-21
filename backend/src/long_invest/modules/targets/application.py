@@ -35,6 +35,30 @@ class TargetApplication:
     async def restore(self, command):
         return await self._write("restore", command)
 
+    async def list(self):
+        return await self._read("list")
+
+    async def get(self, subscription_id):
+        return await self._read("get", subscription_id)
+
+    async def history(self, subscription_id):
+        return await self._read("history", subscription_id)
+
+    async def _read(self, method, *args):
+        try:
+            async with self._database.session() as session:
+                service = self._service_factory(
+                    self._repository_factory(session),
+                    subscriptions=self._subscription_factory(session),
+                    audit=self._audit_factory(session),
+                    events=self._event_factory(session),
+                )
+                return await getattr(service, method)(*args)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
     async def _write(self, method, command):
         try:
             async with self._database.transaction() as session:

@@ -31,7 +31,22 @@ class Repository:
     async def lock_binding(self, _subscription_id):
         return self.binding
 
+    async def get_binding(self, _subscription_id):
+        return self.binding
+
+    async def list_bindings(self):
+        return () if self.binding is None else (self.binding,)
+
     async def create_binding(self, subscription_id):
+        if self.binding is None:
+            self.binding = SimpleNamespace(
+                subscription_id=subscription_id,
+                current_revision_id=None,
+                status="MISSING",
+                version=1,
+                activated_at=None,
+                stale_reason=None,
+            )
         self.binding.subscription_id = subscription_id
         return self.binding
 
@@ -77,6 +92,11 @@ class Sink:
 
     async def append(self, item):
         self.items.append(item)
+
+    async def find_by_idempotency(self, key):
+        return next(
+            (item for item in self.items if item.idempotency_key == key), None
+        )
 
 
 SUBSCRIPTION_ID = uuid4()
@@ -191,6 +211,54 @@ async def test_old_idempotency_replay_returns_its_original_binding_snapshot() ->
 
 
 @pytest.mark.anyio
+async def test_replay_uses_audit_fact_for_exact_non_fixed_activation_time() -> None:
+    repository, audit, events = Repository(), Sink(), Sink()
+    times = iter(
+        (
+            datetime(2026, 7, 17, 9, 0, 1, tzinfo=UTC),
+            datetime(2026, 7, 17, 9, 0, 2, tzinfo=UTC),
+        )
+    )
+    target = TargetService(
+        repository,
+        subscriptions=Subscriptions(),
+        audit=audit,
+        events=events,
+        now=lambda: next(times),
+    )
+    command = manual()
+
+    first = await target.set_manual(command)
+    replay = await target.set_manual(command)
+
+    assert replay.binding == first.binding
+    assert replay.revision == first.revision
+    assert repository.revisions[0].content_hash != audit.items[0].after_summary[
+        "_request_digest"
+    ]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "update",
+    [
+        {"expected_version": 2},
+        {"large_change_confirmed": True},
+        {"switch_to_manual_confirmed": True},
+    ],
+)
+async def test_business_request_field_change_conflicts_with_replay(update) -> None:
+    target, *_ = service()
+    command = manual()
+    await target.set_manual(command)
+
+    with pytest.raises(AppError) as caught:
+        await target.set_manual(command.model_copy(update=update))
+
+    assert caught.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.anyio
 async def test_same_key_with_different_content_conflicts() -> None:
     target, *_ = service()
     await target.set_manual(manual())
@@ -222,6 +290,18 @@ async def test_archived_subscription_is_rejected() -> None:
 
 
 @pytest.mark.anyio
+async def test_missing_subscription_is_rejected() -> None:
+    subscriptions = Subscriptions()
+    subscriptions.snapshot = None
+    target, *_ = service(subscriptions=subscriptions)
+
+    with pytest.raises(AppError) as caught:
+        await target.set_manual(manual())
+
+    assert caught.value.code == "TARGET_SUBSCRIPTION_NOT_FOUND"
+
+
+@pytest.mark.anyio
 async def test_strategy_mode_requires_confirmation_then_switches() -> None:
     subscriptions = Subscriptions(target_mode="STRATEGY")
     target, *_ = service(subscriptions=subscriptions)
@@ -239,7 +319,7 @@ async def test_strategy_mode_requires_confirmation_then_switches() -> None:
 
 @pytest.mark.anyio
 async def test_restore_copies_historical_values_into_new_revision() -> None:
-    target, repository, *_ = service()
+    target, repository, audit, events = service()
     original = await target.set_manual(manual(key="original"))
     await target.set_manual(
         manual(
@@ -269,6 +349,80 @@ async def test_restore_copies_historical_values_into_new_revision() -> None:
     assert restored.revision.id != original.revision.id
     assert restored.revision.values == original.revision.values
     assert len(repository.revisions) == 3
+    assert audit.items[-1].action_code == "target.restored"
+    assert [item.event_type for item in events.items[-2:]] == [
+        "target.restored",
+        "signal.reevaluation_requested",
+    ]
+
+
+@pytest.mark.anyio
+async def test_restore_missing_source_is_rejected() -> None:
+    target, *_ = service()
+
+    with pytest.raises(AppError) as caught:
+        await target.restore(
+            RestoreTargetCommand(
+                subscription_id=SUBSCRIPTION_ID,
+                source_revision_id=uuid4(),
+                reason="missing",
+                expected_version=1,
+                idempotency_key="restore-missing",
+                request_id="req",
+                actor_user_id="user",
+                session_id="session",
+                trusted_ip="127.0.0.1",
+                switch_to_manual_confirmed=True,
+            )
+        )
+
+    assert caught.value.code == "TARGET_REVISION_NOT_FOUND"
+
+
+@pytest.mark.anyio
+async def test_restore_requires_confirmation() -> None:
+    target, *_ = service()
+    original = await target.set_manual(manual())
+
+    with pytest.raises(AppError) as caught:
+        await target.restore(
+            RestoreTargetCommand(
+                subscription_id=SUBSCRIPTION_ID,
+                source_revision_id=original.revision.id,
+                reason="confirm restore",
+                expected_version=original.binding.version,
+                idempotency_key="restore-confirm",
+                request_id="req",
+                actor_user_id="user",
+                session_id="session",
+                trusted_ip="127.0.0.1",
+            )
+        )
+
+    assert caught.value.code == "TARGET_CONFIRMATION_REQUIRED"
+
+
+@pytest.mark.anyio
+async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
+    target, repository, *_ = service()
+    repository.binding = None
+
+    assert await target.list() == ()
+    assert await target.get(SUBSCRIPTION_ID) is None
+    assert await target.history(SUBSCRIPTION_ID) == ()
+
+    repository.binding = SimpleNamespace(
+        subscription_id=SUBSCRIPTION_ID,
+        current_revision_id=None,
+        status="MISSING",
+        version=1,
+        activated_at=None,
+        stale_reason=None,
+    )
+    created = await target.set_manual(manual())
+
+    assert await target.list() == (await target.get(SUBSCRIPTION_ID),)
+    assert (await target.get(SUBSCRIPTION_ID)).revision_id == created.revision.id
 
 
 @pytest.mark.anyio

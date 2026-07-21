@@ -33,3 +33,19 @@ async def test_repository_writes_without_committing() -> None:
     session.add.assert_called_once_with(revision)
     session.flush.assert_awaited_once()
     assert not hasattr(session, "commit") or not session.commit.called
+
+
+@pytest.mark.anyio
+async def test_list_bindings_has_stable_order() -> None:
+    session = MagicMock()
+    result = MagicMock()
+    result.all.return_value = []
+    session.scalars = AsyncMock(return_value=result)
+    repository = TargetRepository(session)
+
+    assert await repository.list_bindings() == ()
+
+    statement = session.scalars.await_args.args[0]
+    sql = str(statement.compile(dialect=postgresql.dialect()))
+    assert "ORDER BY subscription_target_binding.created_at" in sql
+    assert "subscription_target_binding.id" in sql

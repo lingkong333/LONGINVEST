@@ -14,6 +14,7 @@ from long_invest.modules.targets.contracts import (
     TargetBindingView,
     TargetMutationResult,
     TargetRevisionView,
+    TargetSnapshot,
     TargetSource,
     TargetStatus,
     TargetValues,
@@ -50,8 +51,8 @@ class TargetService:
 
     async def set_manual(self, command: ManualTargetCommand) -> TargetMutationResult:
         subscription, binding = await self._lock(command.subscription_id)
-        digest = _manual_hash(command)
-        replay = await self._replay(command, digest)
+        request_digest = _request_digest(command)
+        replay = await self._replay(command, request_digest)
         if replay is not None:
             return replay
         self._check_version(binding.version, command.expected_version)
@@ -75,10 +76,13 @@ class TargetService:
             source=TargetSource.MANUAL,
             source_revision_id=None,
             target_date=command.target_date,
-            content_hash=digest,
         )
         return await self._activate(
-            command, binding, revision, action="target.manual_activated"
+            command,
+            binding,
+            revision,
+            action="target.manual_activated",
+            request_digest=request_digest,
         )
 
     async def restore(self, command: RestoreTargetCommand) -> TargetMutationResult:
@@ -86,8 +90,8 @@ class TargetService:
         source = await self._repository.get_revision(command.source_revision_id)
         if source is None or source.subscription_id != command.subscription_id:
             raise _error("TARGET_REVISION_NOT_FOUND", "目标历史版本不存在", 404)
-        digest = _restore_hash(command, source)
-        replay = await self._replay(command, digest)
+        request_digest = _request_digest(command)
+        replay = await self._replay(command, request_digest)
         if replay is not None:
             return replay
         if binding.version != command.expected_version:
@@ -104,11 +108,26 @@ class TargetService:
             source=TargetSource.RESTORED,
             source_revision_id=source.id,
             target_date=source.target_date,
-            content_hash=digest,
         )
         return await self._activate(
-            command, binding, revision, action="target.history_restored"
+            command,
+            binding,
+            revision,
+            action="target.restored",
+            request_digest=request_digest,
         )
+
+    async def list(self) -> tuple[TargetSnapshot, ...]:
+        snapshots = []
+        for binding in await self._repository.list_bindings():
+            snapshot = await self._snapshot(binding)
+            if snapshot is not None:
+                snapshots.append(snapshot)
+        return tuple(snapshots)
+
+    async def get(self, subscription_id: UUID) -> TargetSnapshot | None:
+        binding = await self._repository.get_binding(subscription_id)
+        return await self._snapshot(binding) if binding is not None else None
 
     async def history(self, subscription_id: UUID) -> tuple[TargetRevisionView, ...]:
         return tuple(
@@ -147,32 +166,44 @@ class TargetService:
             trusted_ip=command.trusted_ip,
         )
 
-    async def _replay(self, command, digest):
+    async def _replay(self, command, request_digest):
         row = await self._repository.find_revision_by_idempotency(
             command.subscription_id, command.idempotency_key
         )
         if row is None:
             return None
-        if row.content_hash != digest:
+        audit = await self._audit.find_by_idempotency(
+            _audit_key(command.subscription_id, command.idempotency_key)
+        )
+        after = dict(audit.after_summary or {}) if audit is not None else {}
+        if after.get("_request_digest") != request_digest:
             raise _error(
                 "TARGET_IDEMPOTENCY_CONFLICT",
                 "同一幂等键已用于不同目标内容",
                 409,
             )
+        try:
+            binding = TargetBindingView(
+                subscription_id=row.subscription_id,
+                current_revision_id=row.id,
+                status=TargetStatus.READY,
+                version=int(after["binding_version"]),
+                activated_at=datetime.fromisoformat(str(after["activated_at"])),
+                stale_reason=None,
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise _error(
+                "TARGET_IDEMPOTENCY_CONFLICT",
+                "幂等审计事实不完整",
+                409,
+            ) from exc
         return TargetMutationResult(
             code=(
                 "TARGET_HISTORY_RESTORED"
                 if row.source == TargetSource.RESTORED.value
                 else "TARGET_MANUAL_ACTIVATED"
             ),
-            binding=TargetBindingView(
-                subscription_id=row.subscription_id,
-                current_revision_id=row.id,
-                status=TargetStatus.READY,
-                version=row.revision_no + 1,
-                activated_at=row.created_at,
-                stale_reason=None,
-            ),
+            binding=binding,
             revision=_revision_view(row),
             replayed=True,
         )
@@ -191,7 +222,6 @@ class TargetService:
         source,
         source_revision_id,
         target_date,
-        content_hash,
     ):
         revisions = await self._repository.list_revisions(command.subscription_id)
         revision = TargetRevision(
@@ -209,7 +239,14 @@ class TargetService:
             parameter_snapshot={},
             data_version=None,
             source_code_hash=None,
-            content_hash=content_hash,
+            content_hash=_content_hash(
+                subscription_id=command.subscription_id,
+                values=values,
+                source=source,
+                source_revision_id=source_revision_id,
+                target_date=target_date,
+                reason=command.reason,
+            ),
             reason=command.reason,
             large_change_confirmed=getattr(command, "large_change_confirmed", False),
             request_id=command.request_id,
@@ -222,7 +259,9 @@ class TargetService:
         await self._repository.persist_revision(revision)
         return revision
 
-    async def _activate(self, command, binding, revision, *, action):
+    async def _activate(
+        self, command, binding, revision, *, action, request_digest
+    ):
         before_revision_id = binding.current_revision_id
         binding.current_revision_id = revision.id
         binding.status = TargetStatus.READY.value
@@ -249,6 +288,8 @@ class TargetService:
                 after_summary={
                     "revision_id": str(revision.id),
                     "binding_version": binding.version,
+                    "activated_at": binding.activated_at.isoformat(),
+                    "_request_digest": request_digest,
                 },
                 actor_user_id=command.actor_user_id,
                 session_id=command.session_id,
@@ -297,6 +338,29 @@ class TargetService:
             ),
             binding=_binding_view(binding),
             revision=_revision_view(revision),
+        )
+
+    async def _snapshot(self, binding) -> TargetSnapshot | None:
+        if binding.current_revision_id is None or binding.activated_at is None:
+            return None
+        revision = await self._repository.get_revision(binding.current_revision_id)
+        if revision is None:
+            return None
+        return TargetSnapshot(
+            subscription_id=binding.subscription_id,
+            revision_id=revision.id,
+            revision_no=revision.revision_no,
+            binding_version=binding.version,
+            values=_values(revision),
+            source=TargetSource(revision.source),
+            status=TargetStatus(binding.status),
+            target_date=revision.target_date,
+            strategy_version_id=revision.strategy_version_id,
+            parameter_snapshot=revision.parameter_snapshot,
+            data_version=revision.data_version,
+            source_code_hash=revision.source_code_hash,
+            content_hash=revision.content_hash,
+            activated_at=binding.activated_at,
         )
 
     @staticmethod
@@ -359,28 +423,25 @@ def _revision_view(row) -> TargetRevisionView:
     )
 
 
-def _manual_hash(command) -> str:
+def _request_digest(command) -> str:
+    return _hash(command.model_dump(mode="json"))
+
+
+def _content_hash(
+    *, subscription_id, values, source, source_revision_id, target_date, reason
+) -> str:
     return _hash(
         {
-            "action": "manual",
-            "subscription_id": str(command.subscription_id),
-            "target_date": command.target_date.isoformat(),
+            "subscription_id": str(subscription_id),
             "values": {
-                key: str(value)
-                for key, value in command.values.model_dump().items()
+                key: str(value) for key, value in values.model_dump().items()
             },
-            "reason": command.reason,
-        }
-    )
-
-
-def _restore_hash(command, source) -> str:
-    return _hash(
-        {
-            "action": "restore",
-            "subscription_id": str(command.subscription_id),
-            "source_revision_id": str(source.id),
-            "reason": command.reason,
+            "source": source.value,
+            "source_revision_id": (
+                str(source_revision_id) if source_revision_id else None
+            ),
+            "target_date": target_date.isoformat(),
+            "reason": reason,
         }
     )
 

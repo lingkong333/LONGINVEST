@@ -1,4 +1,9 @@
 export { StrategyBacktestWorkspace } from "./backtest-workspace"
+export {
+  StrategyCodeEditor,
+  StrategyDiffViewer,
+} from "./codemirror-adapters"
+export { strategyEditorComponents } from "./editor-components"
 export { StrategyWorkspace } from "./strategy-workspace"
 export type {
   DraftRevision,

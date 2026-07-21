@@ -370,6 +370,7 @@ def test_trade_metric_and_daily_result_expose_complete_replay_values() -> None:
         completed_round_trips=1,
         winning_trades=1,
         losing_trades=0,
+        breakeven_trades=0,
         win_rate=Decimal("1"),
         average_trade_return=Decimal("0.2"),
         maximum_trade_gain=Decimal("0.2"),
@@ -396,3 +397,31 @@ def test_trade_metric_and_daily_result_expose_complete_replay_values() -> None:
     assert metric.winning_trades == 1
     assert trade.holding_trade_days == 5
     assert daily.cash + daily.position_market_value == daily.equity
+
+
+def test_zero_return_round_trip_is_a_valid_breakeven_trade() -> None:
+    metric = BacktestMetricView(
+        item_id=uuid4(),
+        ending_equity=Decimal("100000"),
+        total_return=Decimal("0"),
+        realized_return=Decimal("0"),
+        annualized_return=Decimal("0"),
+        max_drawdown=Decimal("0"),
+        volatility=Decimal("0"),
+        sharpe_ratio=None,
+        completed_round_trips=1,
+        winning_trades=0,
+        losing_trades=0,
+        breakeven_trades=1,
+        win_rate=Decimal("0"),
+        average_trade_return=Decimal("0"),
+        maximum_trade_gain=Decimal("0"),
+        maximum_trade_loss=Decimal("0"),
+        average_holding_trade_days=Decimal("1"),
+        longest_holding_trade_days=1,
+        capital_exposure_ratio=Decimal("0.5"),
+        open_position_at_end=False,
+        unfilled_order_count=0,
+    )
+
+    assert metric.breakeven_trades == 1

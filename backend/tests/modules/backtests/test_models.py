@@ -1,4 +1,4 @@
-from sqlalchemy import CheckConstraint, ForeignKeyConstraint, UniqueConstraint
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Numeric, UniqueConstraint
 
 from long_invest.modules.backtests.models import (
     BacktestDailyResult,
@@ -135,6 +135,7 @@ def test_backtest_forecast_and_result_models_have_complete_fields() -> None:
         "sharpe_ratio",
         "winning_trades",
         "losing_trades",
+        "breakeven_trades",
         "win_rate",
         "average_trade_return",
         "maximum_trade_gain",
@@ -193,3 +194,44 @@ def test_backtest_models_enforce_constraints_and_references() -> None:
         isinstance(constraint, UniqueConstraint)
         for constraint in BacktestMetric.__table__.constraints
     )
+
+
+def test_every_critical_backtest_numeric_column_rejects_nonfinite_values() -> None:
+    models = (
+        BacktestTask,
+        BacktestForecastSnapshot,
+        BacktestTargetAdjustment,
+        BacktestOrder,
+        BacktestTrade,
+        BacktestMetric,
+        BacktestDailyResult,
+    )
+    for model in models:
+        constraint_sql = " ".join(
+            str(constraint.sqltext)
+            for constraint in model.__table__.constraints
+            if isinstance(constraint, CheckConstraint)
+        )
+        numeric_fields = (
+            column.name
+            for column in model.__table__.columns
+            if isinstance(column.type, Numeric)
+        )
+        for field in numeric_fields:
+            assert f"{field} <> 'NaN'::numeric" in constraint_sql
+            assert f"{field} < 'Infinity'::numeric" in constraint_sql
+            assert f"{field} > '-Infinity'::numeric" in constraint_sql
+
+
+def test_metric_trade_counts_include_breakeven_trades() -> None:
+    counts_constraint = next(
+        constraint
+        for constraint in BacktestMetric.__table__.constraints
+        if constraint.name == "ck_backtest_metric_counts_nonnegative"
+    )
+    sql = str(counts_constraint.sqltext)
+    assert "breakeven_trades >= 0" in sql
+    assert (
+        "winning_trades + losing_trades + breakeven_trades "
+        "= completed_round_trips"
+    ) in sql

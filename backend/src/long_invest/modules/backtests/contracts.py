@@ -361,6 +361,7 @@ class BacktestMetricView(StrictContract):
     completed_round_trips: int = Field(ge=0)
     winning_trades: int = Field(ge=0)
     losing_trades: int = Field(ge=0)
+    breakeven_trades: int = Field(ge=0)
     win_rate: Decimal | None = Field(default=None, ge=0, le=1)
     average_trade_return: Decimal | None
     maximum_trade_gain: Decimal | None
@@ -373,9 +374,12 @@ class BacktestMetricView(StrictContract):
 
     @model_validator(mode="after")
     def validate_trade_counts(self) -> BacktestMetricView:
-        if self.winning_trades + self.losing_trades != self.completed_round_trips:
+        if (
+            self.winning_trades + self.losing_trades + self.breakeven_trades
+            != self.completed_round_trips
+        ):
             raise ValueError(
-                "winning and losing trades must equal completed round trips"
+                "winning, losing, and breakeven trades must equal completed round trips"
             )
         if self.completed_round_trips == 0 and self.win_rate is not None:
             raise ValueError("win rate is unavailable when there are no trades")

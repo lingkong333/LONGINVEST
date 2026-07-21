@@ -24,6 +24,15 @@ from sqlalchemy.orm import Mapped, mapped_column
 from long_invest.platform.database.base import Base
 
 
+def _finite_numeric(*fields: str) -> str:
+    return " AND ".join(
+        f"{field} <> 'NaN'::numeric "
+        f"AND {field} < 'Infinity'::numeric "
+        f"AND {field} > '-Infinity'::numeric"
+        for field in fields
+    )
+
+
 class BacktestTask(Base):
     __tablename__ = "backtest_task"
     __table_args__ = (
@@ -64,6 +73,12 @@ class BacktestTask(Base):
         CheckConstraint(
             "hysteresis_ratio >= 0 AND minimum_hysteresis >= 0",
             name="hysteresis_nonnegative",
+        ),
+        CheckConstraint(
+            _finite_numeric(
+                "hysteresis_ratio", "minimum_hysteresis", "initial_capital"
+            ),
+            name="numeric_finite",
         ),
         CheckConstraint(
             "length(trim(environment_version)) > 0 "
@@ -230,6 +245,12 @@ class BacktestForecastSnapshot(Base):
             "AND low_watch < high_watch AND high_watch < high_strong",
             name="targets_ordered",
         ),
+        CheckConstraint(
+            _finite_numeric(
+                "low_strong", "low_watch", "high_watch", "high_strong"
+            ),
+            name="numeric_finite",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -285,6 +306,20 @@ class BacktestTargetAdjustment(Base):
         CheckConstraint("length(data_hash) = 64", name="data_hash_sha256"),
         CheckConstraint(
             "published_at <= effective_at", name="publication_before_effective"
+        ),
+        CheckConstraint(
+            _finite_numeric(
+                "adjustment_factor",
+                "before_low_strong",
+                "before_low_watch",
+                "before_high_watch",
+                "before_high_strong",
+                "after_low_strong",
+                "after_low_watch",
+                "after_high_watch",
+                "after_high_strong",
+            ),
+            name="numeric_finite",
         ),
     )
 
@@ -349,6 +384,19 @@ class BacktestOrder(Base):
             "'STRONG_HIGH')",
             name="target_zone_valid",
         ),
+        CheckConstraint(
+            _finite_numeric(
+                "execution_price",
+                "quantity",
+                "cash_before",
+                "position_before",
+                "target_low_strong",
+                "target_low_watch",
+                "target_high_watch",
+                "target_high_strong",
+            ),
+            name="numeric_finite",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -401,6 +449,21 @@ class BacktestTrade(Base):
             "'STRONG_HIGH')",
             name="target_zone_valid",
         ),
+        CheckConstraint(
+            _finite_numeric(
+                "price",
+                "quantity",
+                "cash_after",
+                "position_after",
+                "target_low_strong",
+                "target_low_watch",
+                "target_high_watch",
+                "target_high_strong",
+                "realized_return_amount",
+                "realized_return_rate",
+            ),
+            name="numeric_finite",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -440,8 +503,9 @@ class BacktestMetric(Base):
         CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
         CheckConstraint(
             "completed_round_trips >= 0 AND winning_trades >= 0 "
-            "AND losing_trades >= 0 "
-            "AND winning_trades + losing_trades = completed_round_trips "
+            "AND losing_trades >= 0 AND breakeven_trades >= 0 "
+            "AND winning_trades + losing_trades + breakeven_trades "
+            "= completed_round_trips "
             "AND longest_holding_trade_days >= 0 AND unfilled_order_count >= 0",
             name="counts_nonnegative",
         ),
@@ -455,6 +519,24 @@ class BacktestMetric(Base):
             "(completed_round_trips = 0 AND win_rate IS NULL) OR "
             "(completed_round_trips > 0 AND win_rate >= 0 AND win_rate <= 1)",
             name="win_rate_consistent",
+        ),
+        CheckConstraint(
+            _finite_numeric(
+                "ending_equity",
+                "total_return",
+                "realized_return",
+                "annualized_return",
+                "max_drawdown",
+                "volatility",
+                "sharpe_ratio",
+                "win_rate",
+                "average_trade_return",
+                "maximum_trade_gain",
+                "maximum_trade_loss",
+                "average_holding_trade_days",
+                "capital_exposure_ratio",
+            ),
+            name="numeric_finite",
         ),
     )
 
@@ -477,6 +559,7 @@ class BacktestMetric(Base):
     completed_round_trips: Mapped[int] = mapped_column(Integer, nullable=False)
     winning_trades: Mapped[int] = mapped_column(Integer, nullable=False)
     losing_trades: Mapped[int] = mapped_column(Integer, nullable=False)
+    breakeven_trades: Mapped[int] = mapped_column(Integer, nullable=False)
     win_rate: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     average_trade_return: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     maximum_trade_gain: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
@@ -515,6 +598,21 @@ class BacktestDailyResult(Base):
         CheckConstraint(
             "zone IN ('UNKNOWN','STRONG_LOW','LOW','NORMAL','HIGH','STRONG_HIGH')",
             name="zone_valid",
+        ),
+        CheckConstraint(
+            _finite_numeric(
+                "cash",
+                "position_quantity",
+                "close_price",
+                "position_market_value",
+                "equity",
+                "drawdown",
+                "target_low_strong",
+                "target_low_watch",
+                "target_high_watch",
+                "target_high_strong",
+            ),
+            name="numeric_finite",
         ),
     )
 

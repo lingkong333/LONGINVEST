@@ -126,6 +126,12 @@ class DockerStrategyRunnerClient:
                         _MANAGED_LABEL: "true",
                         _WORKER_LABEL: self._worker_id,
                     },
+                    entrypoint=[
+                        "python",
+                        "-m",
+                        "long_invest.modules.strategies.runner_execution",
+                    ],
+                    command=[],
                     nano_cpus=1_000_000_000,
                     mem_limit="512m",
                     memswap_limit="512m",
@@ -142,6 +148,8 @@ class DockerStrategyRunnerClient:
                 ),
                 deadline,
             )
+            # The entrypoint waits for input; /tmp must be mounted before the
+            # archive is copied or Docker would hide it behind the tmpfs.
             self._call(container.start, deadline)
             self._call(lambda: container.put_archive("/tmp", archive), deadline)
             try:

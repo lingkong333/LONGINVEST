@@ -1,3 +1,4 @@
+import json
 from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
@@ -20,6 +21,10 @@ from long_invest.modules.strategies.runner_execution import (
     execute_runner_payload,
     wait_for_runner_payload,
 )
+from long_invest.modules.strategies.runner_execution import (
+    main as runner_main,
+)
+from long_invest.modules.strategies.static_analysis import StrategyStaticAnalysisError
 
 SOURCE = """
 import numpy as np
@@ -446,3 +451,53 @@ def test_trusted_runner_revalidates_fixed_history_rows(
 
     with pytest.raises(ValueError, match="training history"):
         execute_runner_payload(payload)
+
+
+@pytest.mark.parametrize(
+    "dangerous_source",
+    [
+        "from numpy.lib._datasource import open as reader\nreader('/tmp/value')",
+        "import numpy.lib._datasource as ds\nreader = ds.open\nreader('/tmp/value')",
+        "history.to_xml('/tmp/value.xml')",
+        "history.to_numpy().dump('/tmp/value.npy')",
+    ],
+)
+def test_trusted_runner_repeats_file_capability_checks(
+    dangerous_source: str,
+) -> None:
+    request = _request()
+    payload = build_runner_payload(
+        source_code=SOURCE,
+        request=request,
+        context=_context(request),
+        schema=PARAMETER_SCHEMA,
+    )
+    payload["source_code"] = SOURCE.replace(
+        "def calculate_targets(history, params, context):",
+        f"{dangerous_source}\ndef calculate_targets(history, params, context):",
+    )
+
+    with pytest.raises(StrategyStaticAnalysisError) as error:
+        execute_runner_payload(payload)
+
+    assert error.value.code == "DANGEROUS_CAPABILITY"
+
+
+def test_executable_runner_waits_for_input_and_writes_json_result(
+    tmp_path, capsys
+) -> None:
+    request = _request()
+    payload = build_runner_payload(
+        source_code=SOURCE,
+        request=request,
+        context=_context(request),
+        schema=PARAMETER_SCHEMA,
+    )
+    input_path = tmp_path / "input.json"
+    input_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert runner_main(input_path=input_path, timeout_seconds=1) == 0
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["low_strong"] == 8.0
+    assert output["diagnostics"]["rows"] == 2

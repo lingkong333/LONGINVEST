@@ -3,12 +3,16 @@ from __future__ import annotations
 import builtins
 import json
 import math
+import sys
 import time
 from collections.abc import Mapping
+from datetime import date
+from decimal import Decimal
 from os import PathLike
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 from long_invest.modules.strategies.forecast import HISTORY_COLUMNS
@@ -19,6 +23,8 @@ from long_invest.modules.strategies.static_analysis import (
 )
 
 PAYLOAD_FIELDS = frozenset({"source_code", "parameters", "context", "history"})
+RUNNER_INPUT_PATH = Path("/tmp/input.json")
+RUNNER_INPUT_TIMEOUT_SECONDS = 10.0
 
 
 def execute_runner_payload(payload: Mapping[str, object]) -> object:
@@ -69,6 +75,37 @@ def wait_for_runner_payload(
         if not isinstance(raw_payload, Mapping):
             raise ValueError("runner payload shape is invalid")
         return raw_payload
+
+
+def main(
+    *,
+    input_path: str | PathLike[str] = RUNNER_INPUT_PATH,
+    timeout_seconds: float = RUNNER_INPUT_TIMEOUT_SECONDS,
+) -> int:
+    payload = wait_for_runner_payload(
+        input_path,
+        timeout_seconds=timeout_seconds,
+    )
+    result = execute_runner_payload(payload)
+    output = json.dumps(
+        result,
+        default=_runner_json_default,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    sys.stdout.write(output)
+    return 0
+
+
+def _runner_json_default(value: object) -> object:
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (date, pd.Timestamp)):
+        return value.isoformat()
+    raise TypeError(f"runner result is not JSON-compatible: {type(value).__name__}")
 
 
 def _validated_history_frame(history: list[object]) -> pd.DataFrame:
@@ -169,3 +206,7 @@ def _safe_import(
     ):
         raise ImportError("strategy import is not allowed")
     return builtins.__import__(name, globals_, locals_, fromlist or (), level)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

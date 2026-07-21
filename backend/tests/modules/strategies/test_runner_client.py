@@ -202,6 +202,12 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
         "long-invest.strategy-runner": "true",
         "long-invest.strategy-worker": "strategy-worker-1",
     }
+    assert options["entrypoint"] == [
+        "python",
+        "-m",
+        "long_invest.modules.strategies.runner_execution",
+    ]
+    assert options["command"] == []
     assert options["nano_cpus"] == 1_000_000_000
     assert options["mem_limit"] == "512m"
     assert options["memswap_limit"] == "512m"

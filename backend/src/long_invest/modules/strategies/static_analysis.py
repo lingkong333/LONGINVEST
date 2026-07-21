@@ -79,12 +79,15 @@ FORBIDDEN_ATTRIBUTES = frozenset(
 DANGEROUS_LIBRARY_SEGMENTS = frozenset(
     {
         *FORBIDDEN_ATTRIBUTES,
+        "ExcelWriter",
         "ExcelFile",
         "HDFStore",
         "DataSource",
         "attrgetter",
         "ctypes",
         "ctypeslib",
+        "csv",
+        "dump",
         "fromfile",
         "io",
         "load",
@@ -94,6 +97,7 @@ DANGEROUS_LIBRARY_SEGMENTS = frozenset(
         "methodcaller",
         "os",
         "pathlib",
+        "pickle",
         "save",
         "savetxt",
         "socket",
@@ -101,6 +105,24 @@ DANGEROUS_LIBRARY_SEGMENTS = frozenset(
         "tofile",
         "open_memmap",
         "urllib",
+        "write",
+        "write_array",
+        "xml",
+    }
+)
+SAFE_PURE_CONVERSION_SEGMENTS = frozenset(
+    {
+        "to_datetime",
+        "to_dict",
+        "to_frame",
+        "to_list",
+        "to_numpy",
+        "to_numeric",
+        "to_period",
+        "to_records",
+        "to_series",
+        "to_timedelta",
+        "to_timestamp",
     }
 )
 MAX_CONSTANT_BYTES = 64 * 1024
@@ -261,7 +283,11 @@ def _attribute_chain(node: ast.Attribute) -> tuple[str, ...]:
 
 
 def is_dangerous_library_segment(value: str) -> bool:
-    return value in DANGEROUS_LIBRARY_SEGMENTS or value.startswith("read_")
+    if value in FORBIDDEN_CALLS or value in DANGEROUS_LIBRARY_SEGMENTS:
+        return True
+    if value.startswith("_") or value.startswith(("load", "read_", "save")):
+        return True
+    return value.startswith("to_") and value not in SAFE_PURE_CONVERSION_SEGMENTS
 
 
 def _validate_constants(tree: ast.AST) -> None:

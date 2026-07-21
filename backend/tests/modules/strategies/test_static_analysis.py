@@ -213,6 +213,10 @@ def test_static_analysis_deeply_freezes_metadata_and_schema() -> None:
         "from pandas import io as pandas_io\npandas_io.common.urlopen('https://x')",
         "import numpy.ctypeslib as native\nnative.load_library('x', '/tmp')",
         "import operator\noperator.attrgetter('io.common.os.system')(pd)('id')",
+        "from numpy.lib._datasource import open as reader\nreader('/tmp/value')",
+        "import numpy.lib._datasource as ds\nreader = ds.open\nreader('/tmp/value')",
+        "history.to_xml('/tmp/value.xml')",
+        "history.to_numpy().dump('/tmp/value.npy')",
     ],
 )
 def test_static_analysis_rejects_dangerous_library_capability_chains(
@@ -227,6 +231,23 @@ def test_static_analysis_rejects_dangerous_library_capability_chains(
         analyze_strategy_source(source)
 
     assert error.value.code == "DANGEROUS_CAPABILITY"
+
+
+def test_static_analysis_keeps_normal_pandas_numpy_calculation_available() -> None:
+    source = VALID_SOURCE.replace(
+        "close = Decimal(str(history",
+        (
+            "values = history.to_numpy()\n"
+            "    mean = np.mean(values)\n"
+            "    rolling = history['close'].rolling(2).mean()\n"
+            "    assert pd.notna(mean)\n"
+            "    close = Decimal(str(history"
+        ),
+    )
+
+    result = analyze_strategy_source(source)
+
+    assert result.api_version == "1.0"
 
 
 @pytest.mark.parametrize(

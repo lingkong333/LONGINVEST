@@ -268,6 +268,7 @@ class TargetService:
             created_at=self._now(),
         )
         await self._repository.persist_revision(revision)
+        await self._repository.flush()
         return revision
 
     async def _activate(

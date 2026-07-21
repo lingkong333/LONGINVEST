@@ -174,6 +174,48 @@ async def test_manual_target_creates_revision_binding_audit_and_reevaluation() -
 
 
 @pytest.mark.anyio
+async def test_revision_is_flushed_before_binding_audit_and_events() -> None:
+    calls = []
+
+    class OrderedRepository(Repository):
+        async def persist_revision(self, revision):
+            calls.append("persist_revision")
+            await super().persist_revision(revision)
+
+        async def flush(self):
+            calls.append("flush")
+
+    class OrderedAudit(Sink):
+        async def append(self, item):
+            calls.append("audit")
+            await super().append(item)
+
+    class OrderedEvents(Sink):
+        async def append(self, item):
+            calls.append(item.event_type)
+            await super().append(item)
+
+    target = TargetService(
+        OrderedRepository(),
+        subscriptions=Subscriptions(),
+        audit=OrderedAudit(),
+        events=OrderedEvents(),
+        now=lambda: NOW,
+    )
+
+    await target.set_manual(manual())
+
+    assert calls == [
+        "persist_revision",
+        "flush",
+        "audit",
+        "target.activated",
+        "signal.reevaluation_requested",
+        "flush",
+    ]
+
+
+@pytest.mark.anyio
 async def test_large_manual_change_requires_second_confirmation() -> None:
     target, repository, *_ = service()
     first = await target.set_manual(manual(key="first"))

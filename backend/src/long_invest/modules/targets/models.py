@@ -168,6 +168,15 @@ class TargetCalculationRun(Base):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String(100))
+    training_start_date: Mapped[date | None] = mapped_column(Date)
+    training_end_date: Mapped[date | None] = mapped_column(Date)
+    qfq_data_version: Mapped[int | None] = mapped_column(Integer)
+    current_target_version: Mapped[int | None] = mapped_column(Integer)
+    reason: Mapped[str | None] = mapped_column(String(500))
+    resource_usage: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    error_summary: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -185,6 +194,13 @@ class TargetReview(Base):
     baseline_revision_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    low_strong_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    low_watch_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    high_watch_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    high_strong_change: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
+    reviewer_user_id: Mapped[str | None] = mapped_column(String(64))
+    review_comment: Mapped[str | None] = mapped_column(String(500))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

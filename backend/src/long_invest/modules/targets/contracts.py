@@ -59,6 +59,12 @@ class TargetReviewStatus(StrEnum):
     SUPERSEDED = "SUPERSEDED"
 
 
+class TargetCalculationErrorCode(StrEnum):
+    STRATEGY_FORECAST_TIMEOUT = "STRATEGY_FORECAST_TIMEOUT"
+    STRATEGY_TARGET_INVALID = "STRATEGY_TARGET_INVALID"
+    TARGET_CALCULATION_FAILED = "TARGET_CALCULATION_FAILED"
+
+
 class TargetValues(StrictContract):
     low_strong: Decimal
     low_watch: Decimal
@@ -176,7 +182,7 @@ class TargetCalculationRunView(FrozenParametersContract):
     subscription_id: UUID
     strategy_version_id: UUID
     status: TargetCalculationStatus
-    failure_code: str | None = None
+    failure_code: TargetCalculationErrorCode | None = None
     created_at: AwareDatetime
 
 

@@ -1,3 +1,4 @@
+# ruff: noqa: E501
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -24,7 +25,15 @@ def test_strategy_forecast_contract_freezes_training_only_input() -> None:
         end_date=date(2025, 12, 31),
         data_version=1,
         content_hash="a" * 64,
-        rows=({"trade_date": "2025-12-31", "close": "10.00"},),
+        rows=(
+            {
+                "trade_date": date(2025, 12, 31),
+                "open": "10",
+                "high": "10",
+                "low": "10",
+                "close": "10",
+            },
+        ),
     )
     request = StrategyForecastRequest(
         strategy_version_id=uuid4(),
@@ -51,6 +60,56 @@ def test_strategy_forecast_result_requires_valid_target_values() -> None:
         diagnostics={"sample_count": 250},
     )
     assert result.diagnostics["sample_count"] == 250
+
+
+def test_training_data_rejects_rows_outside_the_training_window() -> None:
+    with pytest.raises(ValidationError):
+        TrainingDataSnapshot(
+            security_id=uuid4(),
+            symbol="600000.SH",
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 1),
+            data_version=1,
+            content_hash="a" * 64,
+            rows=(
+                {
+                    "trade_date": date(2025, 1, 2),
+                    "open": "9",
+                    "high": "11",
+                    "low": "8",
+                    "close": "10",
+                },
+            ),
+        )
+
+
+def test_forecast_request_deeply_freezes_nested_parameters() -> None:
+    request = StrategyForecastRequest(
+        strategy_version_id=uuid4(),
+        source_code_hash="a" * 64,
+        parameter_snapshot={"nested": {"value": 1}},
+        parameter_hash="b" * 64,
+        training_data=TrainingDataSnapshot(
+            security_id=uuid4(),
+            symbol="600000.SH",
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 1, 1),
+            data_version=1,
+            content_hash="c" * 64,
+            rows=(
+                {
+                    "trade_date": date(2025, 1, 1),
+                    "open": "1",
+                    "high": "1",
+                    "low": "1",
+                    "close": "1",
+                },
+            ),
+        ),
+        requested_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+    with pytest.raises(TypeError):
+        request.parameter_snapshot["nested"]["value"] = 2
 
 
 def test_strategy_readiness_uses_stable_status_and_error_codes() -> None:

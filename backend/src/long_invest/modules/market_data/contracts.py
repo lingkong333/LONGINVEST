@@ -37,6 +37,8 @@ class QualityResolutionAction(StrEnum):
 @dataclass(frozen=True, slots=True)
 class AdjustmentTimelineEntry:
     event_date: date
+    effective_date: date
+    published_at: datetime
     source: str
     adjustment_factor: Decimal
     data_hash: str
@@ -56,6 +58,7 @@ class AdjustmentTimelinePort(Protocol):
         security_id: UUID,
         start_date: date,
         end_date: date,
+        as_of: datetime,
     ) -> tuple[AdjustmentTimelineEntry, ...]: ...
 
 

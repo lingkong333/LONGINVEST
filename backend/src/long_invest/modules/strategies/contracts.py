@@ -1,7 +1,9 @@
+# ruff: noqa: E501
 from __future__ import annotations
 
 from collections.abc import Mapping
 from datetime import date
+from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Protocol
@@ -14,6 +16,7 @@ from pydantic import (
     Field,
     field_serializer,
     field_validator,
+    model_validator,
 )
 
 from long_invest.modules.targets.contracts import TargetValues
@@ -21,6 +24,18 @@ from long_invest.modules.targets.contracts import TargetValues
 
 class StrictContract(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+def _deep_freeze(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return MappingProxyType(
+            {str(key): _deep_freeze(item) for key, item in value.items()}
+        )
+    if isinstance(value, (list, tuple)):
+        return tuple(_deep_freeze(item) for item in value)
+    if isinstance(value, (set, frozenset)):
+        return frozenset(_deep_freeze(item) for item in value)
+    return value
 
 
 class StrategyForecastErrorCode(StrEnum):
@@ -43,7 +58,7 @@ class FrozenMappingContract(StrictContract):
     @field_validator("parameter_snapshot")
     @classmethod
     def freeze_parameter_snapshot(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return MappingProxyType({str(key): item for key, item in value.items()})
+        return _deep_freeze(value)
 
     @field_serializer("parameter_snapshot")
     def serialize_parameter_snapshot(self, value: Mapping[str, Any]) -> dict[str, Any]:
@@ -64,7 +79,29 @@ class TrainingDataSnapshot(StrictContract):
     def freeze_rows(
         cls, value: tuple[Mapping[str, Any], ...]
     ) -> tuple[Mapping[str, Any], ...]:
-        return tuple(MappingProxyType(dict(row)) for row in value)
+        return tuple(_deep_freeze(row) for row in value)
+
+    @model_validator(mode="after")
+    def validate_rows(self) -> TrainingDataSnapshot:
+        if not self.rows:
+            raise ValueError("training rows must not be empty")
+        dates = [row.get("trade_date") for row in self.rows]
+        if any(not isinstance(value, date) for value in dates):
+            raise ValueError("training rows require trade_date")
+        if dates != sorted(dates) or len(set(dates)) != len(dates):
+            raise ValueError("training rows must be strictly ordered")
+        if dates[0] < self.start_date or dates[-1] > self.end_date:
+            raise ValueError("training rows exceed requested range")
+        for row in self.rows:
+            try:
+                low, open_, close, high = (
+                    Decimal(str(row[key])) for key in ("low", "open", "close", "high")
+                )
+            except (KeyError, ValueError) as exc:
+                raise ValueError("training rows require OHLC") from exc
+            if low > min(open_, close) or high < max(open_, close):
+                raise ValueError("training row OHLC is inconsistent")
+        return self
 
 
 class StrategyForecastRequest(FrozenMappingContract):
@@ -82,7 +119,7 @@ class StrategyForecastResult(StrictContract):
     @field_validator("diagnostics")
     @classmethod
     def freeze_diagnostics(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
-        return MappingProxyType(dict(value))
+        return _deep_freeze(value)
 
 
 class StrategyReadiness(StrictContract):

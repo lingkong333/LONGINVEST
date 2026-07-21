@@ -67,5 +67,29 @@ class BacktestSignalInput(StrictContract):
     targets: TargetValues
 
 
+class BacktestPositionStatus(StrEnum):
+    FLAT = "FLAT"
+    HOLDING = "HOLDING"
+
+
+class BacktestSignalZone(StrEnum):
+    STRONG_LOW = "STRONG_LOW"
+    LOW = "LOW"
+    NORMAL = "NORMAL"
+    HIGH = "HIGH"
+    STRONG_HIGH = "STRONG_HIGH"
+
+
+class BacktestSignalRuleInput(BacktestSignalInput):
+    previous_zone: BacktestSignalZone
+    position_status: BacktestPositionStatus
+    hysteresis_ratio: Decimal = Field(ge=0)
+    minimum_hysteresis: Decimal = Field(ge=0)
+
+
+class BacktestSignalRuleResult(StrictContract):
+    zone: BacktestSignalZone
+
+
 class BacktestSignalRulePort(Protocol):
-    def evaluate(self, signal: BacktestSignalInput) -> str: ...
+    def evaluate(self, signal: BacktestSignalRuleInput) -> BacktestSignalRuleResult: ...

@@ -1,12 +1,14 @@
 import json
 import math
 from dataclasses import FrozenInstanceError
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from decimal import Decimal
 from uuid import uuid4
 
 import pytest
 
 from long_invest.modules.market_data.contracts import (
+    AdjustmentTimelineEntry,
     OpenQualityIssue,
     QualityIssuePage,
     QualityIssueStatus,
@@ -16,6 +18,21 @@ from long_invest.modules.market_data.contracts import (
     RequestQualityRefetch,
     ResolveQualityIssue,
 )
+
+
+def test_adjustment_timeline_entry_freezes_effective_and_publication_dates() -> None:
+    entry = AdjustmentTimelineEntry(
+        event_date=date(2026, 1, 2),
+        effective_date=date(2026, 1, 2),
+        published_at=datetime(2026, 1, 1, tzinfo=UTC),
+        source="provider",
+        adjustment_factor=Decimal("0.5"),
+        data_hash="a" * 64,
+    )
+
+    assert entry.effective_date == date(2026, 1, 2)
+    with pytest.raises(FrozenInstanceError):
+        entry.source = "changed"  # type: ignore[misc]
 
 
 def _open_command(**overrides: object) -> OpenQualityIssue:

@@ -169,7 +169,16 @@ def test_validation_and_strategy_run_statuses_match_persistence_constraints() ->
         "CANCELED",
     }
     validation = StrategyValidationRunView(
-        id=uuid4(), status=ValidationRunStatus.SUCCEEDED
+        id=uuid4(),
+        strategy_id=uuid4(),
+        strategy_version_id=None,
+        draft_version=3,
+        source_code_hash="a" * 64,
+        evidence_snapshot={"static_analysis": "passed"},
+        status=ValidationRunStatus.SUCCEEDED,
+        error_code=None,
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+        completed_at=datetime(2026, 7, 21, tzinfo=UTC),
     )
     run = StrategyRunView(
         id=uuid4(),
@@ -179,7 +188,60 @@ def test_validation_and_strategy_run_statuses_match_persistence_constraints() ->
     assert validation.status is ValidationRunStatus.SUCCEEDED
     assert run.status is StrategyRunStatus.CANCELED
     with pytest.raises(ValidationError):
-        StrategyValidationRunView(id=uuid4(), status=StrategyLifecycleStatus.PUBLISHED)
+        StrategyValidationRunView(
+            **(validation.model_dump() | {"status": StrategyLifecycleStatus.PUBLISHED})
+        )
+
+
+def test_validation_run_freezes_exact_validated_draft_and_evidence() -> None:
+    validation = StrategyValidationRunView(
+        id=uuid4(),
+        strategy_id=uuid4(),
+        strategy_version_id=None,
+        draft_version=2,
+        source_code_hash="b" * 64,
+        evidence_snapshot={"checks": ["static", "sandbox"]},
+        status=ValidationRunStatus.SUCCEEDED,
+        error_code=None,
+        created_at=datetime(2026, 7, 21, tzinfo=UTC),
+        completed_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+
+    assert validation.model_dump(mode="json")["evidence_snapshot"] == {
+        "checks": ["static", "sandbox"]
+    }
+    with pytest.raises(TypeError):
+        validation.evidence_snapshot["checks"] = []  # type: ignore[index]
+
+
+def test_validation_run_requires_consistent_completion_and_failure_metadata() -> None:
+    values = {
+        "id": uuid4(),
+        "strategy_id": uuid4(),
+        "strategy_version_id": None,
+        "draft_version": 1,
+        "source_code_hash": "c" * 64,
+        "evidence_snapshot": {},
+        "status": ValidationRunStatus.RUNNING,
+        "error_code": None,
+        "created_at": datetime(2026, 7, 21, tzinfo=UTC),
+        "completed_at": None,
+    }
+    StrategyValidationRunView(**values)
+    with pytest.raises(ValidationError):
+        StrategyValidationRunView(
+            **(values | {"status": ValidationRunStatus.SUCCEEDED})
+        )
+    with pytest.raises(ValidationError):
+        StrategyValidationRunView(
+            **(
+                values
+                | {
+                    "status": ValidationRunStatus.FAILED,
+                    "completed_at": datetime(2026, 7, 21, tzinfo=UTC),
+                }
+            )
+        )
 
 
 def test_strategy_nested_frozen_values_dump_as_json() -> None:

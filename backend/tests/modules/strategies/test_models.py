@@ -35,6 +35,15 @@ def test_strategy_module_owns_all_lifecycle_records() -> None:
         "validation_run_id",
         "published_at",
     } <= set(StrategyVersion.__table__.c.keys())
+    assert {
+        "strategy_id",
+        "strategy_version_id",
+        "draft_version",
+        "source_code_hash",
+        "evidence_snapshot",
+        "created_at",
+        "completed_at",
+    } <= set(StrategyValidationRun.__table__.c.keys())
 
 
 def _constraint_names(model: type) -> set[str | None]:
@@ -66,6 +75,10 @@ def test_strategy_models_enforce_lifecycle_and_immutable_version_invariants() ->
         "ck_strategy_version_runner_image_digest_sha256",
         "ck_strategy_version_publication_consistent",
         "ck_strategy_validation_run_status_valid",
+        "ck_strategy_validation_run_draft_version_positive",
+        "ck_strategy_validation_run_source_code_hash_sha256",
+        "ck_strategy_validation_run_completion_consistent",
+        "ck_strategy_validation_run_completion_time_valid",
         "ck_strategy_run_status_valid",
     } <= (
         _constraint_names(Strategy)
@@ -83,6 +96,7 @@ def test_strategy_models_enforce_lifecycle_and_immutable_version_invariants() ->
     )
     assert "strategy.id" in _foreign_key_targets(StrategyVersion)
     assert "strategy_validation_run.id" in _foreign_key_targets(StrategyVersion)
+    assert "strategy.id" in _foreign_key_targets(StrategyValidationRun)
     assert "strategy_version.id" in _foreign_key_targets(StrategyRun)
     source_hash_constraint = next(
         item

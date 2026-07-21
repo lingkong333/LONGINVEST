@@ -125,6 +125,19 @@ def _protect_published_strategy_versions() -> None:
         CREATE FUNCTION protect_published_strategy_version()
         RETURNS trigger AS $$
         BEGIN
+            IF NEW.status = 'PUBLISHED' AND OLD.status <> 'PUBLISHED' THEN
+                IF NOT EXISTS (
+                    SELECT 1 FROM strategy_validation_run validation
+                    WHERE validation.id = NEW.validation_run_id
+                      AND validation.strategy_id = NEW.strategy_id
+                      AND validation.strategy_version_id = NEW.id
+                      AND validation.source_code_hash = NEW.source_code_hash
+                      AND validation.status = 'SUCCEEDED'
+                ) THEN
+                    RAISE EXCEPTION
+                        'published strategy requires matching validation evidence';
+                END IF;
+            END IF;
             IF OLD.status IN ('PUBLISHED', 'ARCHIVED') THEN
                 IF ROW(
                     NEW.id, NEW.strategy_id, NEW.version_no,
@@ -172,6 +185,11 @@ def _create_indexes() -> None:
             "ix_strategy_validation_run_status",
             "strategy_validation_run",
             ("status",),
+        ),
+        (
+            "ix_strategy_validation_run_draft_evidence",
+            "strategy_validation_run",
+            ("strategy_id", "draft_version", "source_code_hash", "status"),
         ),
         (
             "ix_strategy_run_strategy_version_status",
@@ -258,9 +276,7 @@ def _create_strategy_tables() -> None:
             name=op.f("fk_strategy_draft_strategy_id_strategy"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_strategy_draft")),
-        sa.UniqueConstraint(
-            "strategy_id", name="uq_strategy_draft_strategy_id"
-        ),
+        sa.UniqueConstraint("strategy_id", name="uq_strategy_draft_strategy_id"),
     )
     op.create_table(
         "strategy_draft_revision",
@@ -275,13 +291,9 @@ def _create_strategy_tables() -> None:
         sa.ForeignKeyConstraint(
             ["draft_id"],
             ["strategy_draft.id"],
-            name=op.f(
-                "fk_strategy_draft_revision_draft_id_strategy_draft"
-            ),
+            name=op.f("fk_strategy_draft_revision_draft_id_strategy_draft"),
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_strategy_draft_revision")
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_strategy_draft_revision")),
         sa.UniqueConstraint(
             "draft_id",
             "revision_no",
@@ -291,16 +303,57 @@ def _create_strategy_tables() -> None:
     op.create_table(
         "strategy_validation_run",
         sa.Column("id", sa.UUID(), nullable=False),
+        sa.Column("strategy_id", sa.UUID(), nullable=False),
         sa.Column("strategy_version_id", sa.UUID(), nullable=True),
+        sa.Column("draft_version", sa.Integer(), nullable=False),
+        sa.Column("source_code_hash", sa.String(64), nullable=False),
+        sa.Column(
+            "evidence_snapshot",
+            postgresql.JSONB(),
+            server_default=sa.text("'{}'::jsonb"),
+            nullable=False,
+        ),
         sa.Column("status", sa.String(32), nullable=False),
         sa.Column("error_code", sa.String(100), nullable=True),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
             "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED')",
             name=op.f("ck_strategy_validation_run_status_valid"),
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_strategy_validation_run")
+        sa.CheckConstraint(
+            "draft_version > 0",
+            name=op.f("ck_strategy_validation_run_draft_version_positive"),
         ),
+        sa.CheckConstraint(
+            "source_code_hash ~ '^[0-9a-f]{64}$'",
+            name=op.f("ck_strategy_validation_run_source_code_hash_sha256"),
+        ),
+        sa.CheckConstraint(
+            "(status IN ('PENDING','RUNNING') AND completed_at IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'SUCCEEDED' AND completed_at IS NOT NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'FAILED' AND completed_at IS NOT NULL "
+            "AND error_code IS NOT NULL)",
+            name=op.f("ck_strategy_validation_run_completion_consistent"),
+        ),
+        sa.CheckConstraint(
+            "completed_at IS NULL OR completed_at >= created_at",
+            name=op.f("ck_strategy_validation_run_completion_time_valid"),
+        ),
+        sa.ForeignKeyConstraint(
+            ["strategy_id"],
+            ["strategy.id"],
+            name=op.f("fk_strategy_validation_run_strategy_id_strategy"),
+            ondelete="RESTRICT",
+        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_strategy_validation_run")),
     )
     op.create_table(
         "strategy_version",
@@ -360,9 +413,7 @@ def _create_strategy_tables() -> None:
         sa.ForeignKeyConstraint(
             ["validation_run_id"],
             ["strategy_validation_run.id"],
-            name=op.f(
-                "fk_strategy_version_validation_run_id_strategy_validation_run"
-            ),
+            name=op.f("fk_strategy_version_validation_run_id_strategy_validation_run"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_strategy_version")),
@@ -373,9 +424,7 @@ def _create_strategy_tables() -> None:
         ),
     )
     op.create_foreign_key(
-        op.f(
-            "fk_strategy_validation_run_strategy_version_id_strategy_version"
-        ),
+        op.f("fk_strategy_validation_run_strategy_version_id_strategy_version"),
         "strategy_validation_run",
         "strategy_version",
         ["strategy_version_id"],
@@ -510,17 +559,11 @@ def _create_backtest_root_tables() -> None:
         sa.ForeignKeyConstraint(
             ["task_id"],
             ["backtest_task.id"],
-            name=op.f(
-                "fk_backtest_universe_snapshot_task_id_backtest_task"
-            ),
+            name=op.f("fk_backtest_universe_snapshot_task_id_backtest_task"),
             ondelete="RESTRICT",
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_backtest_universe_snapshot")
-        ),
-        sa.UniqueConstraint(
-            "task_id", name="uq_backtest_universe_snapshot_task_id"
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_universe_snapshot")),
+        sa.UniqueConstraint("task_id", name="uq_backtest_universe_snapshot_task_id"),
     )
     op.create_table(
         "backtest_item",
@@ -610,9 +653,7 @@ def _create_backtest_snapshot_tables() -> None:
         sa.Column("training_start_date", sa.Date(), nullable=False),
         sa.Column("training_end_date", sa.Date(), nullable=False),
         sa.Column("training_row_count", sa.Integer(), nullable=False),
-        sa.Column(
-            "training_fetched_at", sa.DateTime(timezone=True), nullable=False
-        ),
+        sa.Column("training_fetched_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("training_data_hash", sa.String(64), nullable=False),
         sa.Column("source_code_hash", sa.String(64), nullable=False),
         sa.Column("parameter_hash", sa.String(64), nullable=False),
@@ -651,9 +692,7 @@ def _create_backtest_snapshot_tables() -> None:
         ),
         sa.CheckConstraint(
             "runner_image_digest ~ '^sha256:[0-9a-f]{64}$'",
-            name=op.f(
-                "ck_backtest_forecast_snapshot_runner_image_digest_sha256"
-            ),
+            name=op.f("ck_backtest_forecast_snapshot_runner_image_digest_sha256"),
         ),
         sa.CheckConstraint(
             _ordered_targets(),
@@ -666,17 +705,11 @@ def _create_backtest_snapshot_tables() -> None:
         sa.ForeignKeyConstraint(
             ["item_id"],
             ["backtest_item.id"],
-            name=op.f(
-                "fk_backtest_forecast_snapshot_item_id_backtest_item"
-            ),
+            name=op.f("fk_backtest_forecast_snapshot_item_id_backtest_item"),
             ondelete="RESTRICT",
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_backtest_forecast_snapshot")
-        ),
-        sa.UniqueConstraint(
-            "item_id", name="uq_backtest_forecast_snapshot_item_id"
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_forecast_snapshot")),
+        sa.UniqueConstraint("item_id", name="uq_backtest_forecast_snapshot_item_id"),
     )
     adjustment_columns = (
         "before_low_strong",
@@ -709,9 +742,7 @@ def _create_backtest_snapshot_tables() -> None:
         ),
         sa.CheckConstraint(
             "published_at <= effective_at",
-            name=op.f(
-                "ck_backtest_target_adjustment_publication_before_effective"
-            ),
+            name=op.f("ck_backtest_target_adjustment_publication_before_effective"),
         ),
         sa.CheckConstraint(
             f"{_ordered_targets('before_')} AND {_ordered_targets('after_')}",
@@ -728,14 +759,10 @@ def _create_backtest_snapshot_tables() -> None:
         sa.ForeignKeyConstraint(
             ["item_id"],
             ["backtest_item.id"],
-            name=op.f(
-                "fk_backtest_target_adjustment_item_id_backtest_item"
-            ),
+            name=op.f("fk_backtest_target_adjustment_item_id_backtest_item"),
             ondelete="RESTRICT",
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_backtest_target_adjustment")
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_target_adjustment")),
         sa.UniqueConstraint(
             "item_id",
             "event_date",
@@ -1013,8 +1040,7 @@ def _create_backtest_result_tables() -> None:
             name=op.f("ck_backtest_daily_result_position_status_valid"),
         ),
         sa.CheckConstraint(
-            "zone IN ('UNKNOWN','STRONG_LOW','LOW','NORMAL','HIGH',"
-            "'STRONG_HIGH')",
+            "zone IN ('UNKNOWN','STRONG_LOW','LOW','NORMAL','HIGH','STRONG_HIGH')",
             name=op.f("ck_backtest_daily_result_zone_valid"),
         ),
         sa.CheckConstraint(
@@ -1027,9 +1053,7 @@ def _create_backtest_result_tables() -> None:
             name=op.f("fk_backtest_daily_result_item_id_backtest_item"),
             ondelete="RESTRICT",
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_backtest_daily_result")
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_daily_result")),
         sa.UniqueConstraint(
             "item_id",
             "trade_date",
@@ -1088,22 +1112,16 @@ def _create_target_workflow_tables() -> None:
         sa.ForeignKeyConstraint(
             ["subscription_id"],
             ["monitor_subscription.id"],
-            name=op.f(
-                "fk_target_calculation_run_subscription_id_monitor_subscription"
-            ),
+            name=op.f("fk_target_calculation_run_subscription_id_monitor_subscription"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["strategy_version_id"],
             ["strategy_version.id"],
-            name=op.f(
-                "fk_target_calculation_run_strategy_version_id_strategy_version"
-            ),
+            name=op.f("fk_target_calculation_run_strategy_version_id_strategy_version"),
             ondelete="RESTRICT",
         ),
-        sa.PrimaryKeyConstraint(
-            "id", name=op.f("pk_target_calculation_run")
-        ),
+        sa.PrimaryKeyConstraint("id", name=op.f("pk_target_calculation_run")),
     )
     op.create_table(
         "target_review",
@@ -1149,17 +1167,13 @@ def _create_target_workflow_tables() -> None:
         sa.ForeignKeyConstraint(
             ["candidate_revision_id"],
             ["target_revision.id"],
-            name=op.f(
-                "fk_target_review_candidate_revision_id_target_revision"
-            ),
+            name=op.f("fk_target_review_candidate_revision_id_target_revision"),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
             ["baseline_revision_id"],
             ["target_revision.id"],
-            name=op.f(
-                "fk_target_review_baseline_revision_id_target_revision"
-            ),
+            name=op.f("fk_target_review_baseline_revision_id_target_revision"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_target_review")),
@@ -1266,9 +1280,7 @@ def downgrade() -> None:
     )
     op.execute("DROP FUNCTION IF EXISTS protect_published_strategy_version")
     for table_name in reversed(IMMUTABLE_TABLES):
-        op.execute(
-            f"DROP TRIGGER IF EXISTS {table_name}_append_only ON {table_name}"
-        )
+        op.execute(f"DROP TRIGGER IF EXISTS {table_name}_append_only ON {table_name}")
     op.execute("DROP FUNCTION IF EXISTS reject_strategy_backtest_fact_mutation")
 
     op.drop_constraint(
@@ -1324,9 +1336,7 @@ def downgrade() -> None:
     )
 
     op.drop_constraint(
-        op.f(
-            "fk_strategy_validation_run_strategy_version_id_strategy_version"
-        ),
+        op.f("fk_strategy_validation_run_strategy_version_id_strategy_version"),
         "strategy_validation_run",
         type_="foreignkey",
     )

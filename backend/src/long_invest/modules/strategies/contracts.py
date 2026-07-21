@@ -244,8 +244,38 @@ class StrategyVersionView(StrictContract):
 
 class StrategyValidationRunView(StrictContract):
     id: UUID
+    strategy_id: UUID
+    strategy_version_id: UUID | None = None
+    draft_version: int = Field(ge=1)
+    source_code_hash: Sha256Hex
+    evidence_snapshot: Mapping[str, Any]
     status: ValidationRunStatus
     error_code: StrategyLifecycleErrorCode | None = None
+    created_at: AwareDatetime
+    completed_at: AwareDatetime | None = None
+
+    @field_validator("evidence_snapshot")
+    @classmethod
+    def freeze_evidence_snapshot(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return freeze_json_mapping(value)
+
+    @field_serializer("evidence_snapshot")
+    def serialize_evidence_snapshot(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return thaw_json_value(value)
+
+    @model_validator(mode="after")
+    def validate_completion(self) -> StrategyValidationRunView:
+        is_complete = self.status in {
+            ValidationRunStatus.SUCCEEDED,
+            ValidationRunStatus.FAILED,
+        }
+        if is_complete != (self.completed_at is not None):
+            raise ValueError("completed_at must match validation status")
+        if (self.status is ValidationRunStatus.FAILED) != (self.error_code is not None):
+            raise ValueError("error code must match failed validation status")
+        if self.completed_at is not None and self.completed_at < self.created_at:
+            raise ValueError("validation cannot complete before it starts")
+        return self
 
 
 class StrategyRunView(StrictContract):

@@ -210,8 +210,8 @@ async def test_legacy_target_hashes_are_checked_before_upgrade() -> None:
         )
         owner_url = owner_base.set(database=database_name)
         migration_env = os.environ.copy()
-        migration_env["LONGINVEST_DATABASE_OWNER_URL"] = (
-            owner_url.render_as_string(hide_password=False)
+        migration_env["LONGINVEST_DATABASE_OWNER_URL"] = owner_url.render_as_string(
+            hide_password=False
         )
         async with _temporary_database(maintenance, database_name):
             _run_alembic(migration_env, "upgrade", PREVIOUS_REVISION)
@@ -220,9 +220,7 @@ async def test_legacy_target_hashes_are_checked_before_upgrade() -> None:
                 _run_alembic(migration_env, "upgrade", "head")
                 await _assert_upgraded(owner_url)
             else:
-                failure = _run_alembic_failure(
-                    migration_env, "upgrade", "head"
-                )
+                failure = _run_alembic_failure(migration_env, "upgrade", "head")
                 assert "non-lowercase SHA-256 values" in failure.stderr
 
 
@@ -235,8 +233,10 @@ async def _temporary_database(maintenance, database_name: str):
     finally:
         async with maintenance.connect() as connection:
             await connection.execute(
-                text("SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
-                     "WHERE datname = :database_name AND pid <> pg_backend_pid()"),
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :database_name AND pid <> pg_backend_pid()"
+                ),
                 {"database_name": database_name},
             )
             await connection.execute(text(f'DROP DATABASE IF EXISTS "{database_name}"'))
@@ -346,8 +346,7 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
         async with database.transaction() as session:
             await session.execute(
                 text(
-                    "INSERT INTO strategy (id, name, status) "
-                    "VALUES (:id, 'T', 'DRAFT')"
+                    "INSERT INTO strategy (id, name, status) VALUES (:id, 'T', 'DRAFT')"
                 ),
                 {"id": strategy_id},
             )
@@ -389,12 +388,17 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
             await session.execute(
                 text(
                     "INSERT INTO strategy_validation_run "
-                    "(id, strategy_version_id, status) "
-                    "VALUES (:id, :strategy_version_id, 'SUCCEEDED')"
+                    "(id, strategy_id, strategy_version_id, draft_version, "
+                    "source_code_hash, evidence_snapshot, status, completed_at) "
+                    "VALUES (:id, :strategy_id, :strategy_version_id, 1, :hash, "
+                    '\'{"checks":["static","sandbox"]}\'::jsonb, '
+                    "'SUCCEEDED', now())"
                 ),
                 {
                     "id": validation_run_id,
+                    "strategy_id": strategy_id,
                     "strategy_version_id": strategy_version_id,
+                    "hash": "a" * 64,
                 },
             )
             await session.execute(
@@ -410,6 +414,57 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
                     "git_commit": "c" * 40,
                 },
             )
+
+        mismatched_version_id = uuid4()
+        mismatched_validation_id = uuid4()
+        async with database.transaction() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO strategy_version "
+                    "(id, strategy_id, version_no, source_code_hash, source_code, "
+                    "metadata, parameter_schema, environment_version, "
+                    "runner_image_digest, status) VALUES "
+                    "(:id, :strategy_id, 2, :hash, 'x', '{}'::jsonb, '{}'::jsonb, "
+                    "'py312', :digest, 'PUBLISHING')"
+                ),
+                {
+                    "id": mismatched_version_id,
+                    "strategy_id": strategy_id,
+                    "hash": "d" * 64,
+                    "digest": f"sha256:{'a' * 64}",
+                },
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO strategy_validation_run "
+                    "(id, strategy_id, strategy_version_id, draft_version, "
+                    "source_code_hash, evidence_snapshot, status, completed_at) "
+                    "VALUES (:id, :strategy_id, :strategy_version_id, 1, :hash, "
+                    "'{}'::jsonb, 'SUCCEEDED', now())"
+                ),
+                {
+                    "id": mismatched_validation_id,
+                    "strategy_id": strategy_id,
+                    "strategy_version_id": mismatched_version_id,
+                    "hash": "e" * 64,
+                },
+            )
+
+        with pytest.raises(DBAPIError, match="matching validation evidence"):
+            async with database.transaction() as session:
+                await session.execute(
+                    text(
+                        "UPDATE strategy_version SET status = 'PUBLISHED', "
+                        "validation_run_id = :validation_run_id, "
+                        "git_commit = :git_commit, published_at = now() "
+                        "WHERE id = :id"
+                    ),
+                    {
+                        "id": mismatched_version_id,
+                        "validation_run_id": mismatched_validation_id,
+                        "git_commit": "f" * 40,
+                    },
+                )
 
         valid_target = (
             "INSERT INTO target_revision "
@@ -529,18 +584,24 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
         application = Database(app_url.render_as_string(hide_password=False))
         try:
             async with application.session() as session:
-                assert await session.scalar(
-                    text(
-                        "SELECT has_table_privilege(current_user, "
-                        "'strategy_version', 'UPDATE')"
+                assert (
+                    await session.scalar(
+                        text(
+                            "SELECT has_table_privilege(current_user, "
+                            "'strategy_version', 'UPDATE')"
+                        )
                     )
-                ) is True
-                assert await session.scalar(
-                    text(
-                        "SELECT has_table_privilege(current_user, "
-                        "'backtest_forecast_snapshot', 'UPDATE')"
+                    is True
+                )
+                assert (
+                    await session.scalar(
+                        text(
+                            "SELECT has_table_privilege(current_user, "
+                            "'backtest_forecast_snapshot', 'UPDATE')"
+                        )
                     )
-                ) is False
+                    is False
+                )
             with pytest.raises(DBAPIError) as immutable_version_error:
                 async with application.transaction() as session:
                     await session.execute(
@@ -643,9 +704,7 @@ def _assert_schema_matches_models(sync_session) -> None:
         actual_foreign_keys = {
             (
                 tuple(foreign_key["constrained_columns"]),
-                (foreign_key["referred_table"],) * len(
-                    foreign_key["referred_columns"]
-                ),
+                (foreign_key["referred_table"],) * len(foreign_key["referred_columns"]),
                 tuple(foreign_key["referred_columns"]),
                 foreign_key["options"].get("ondelete"),
             )

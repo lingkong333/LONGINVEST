@@ -11,6 +11,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -97,9 +98,7 @@ class Strategy(Base):
 class StrategyDraft(Base):
     __tablename__ = "strategy_draft"
     __table_args__ = (
-        UniqueConstraint(
-            "strategy_id", name="uq_strategy_draft_strategy_id"
-        ),
+        UniqueConstraint("strategy_id", name="uq_strategy_draft_strategy_id"),
         CheckConstraint("draft_version > 0", name="version_positive"),
     )
     id: Mapped[UUID] = mapped_column(
@@ -139,17 +138,59 @@ class StrategyValidationRun(Base):
             "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED')",
             name="status_valid",
         ),
+        CheckConstraint("draft_version > 0", name="draft_version_positive"),
+        CheckConstraint(
+            "source_code_hash ~ '^[0-9a-f]{64}$'",
+            name="source_code_hash_sha256",
+        ),
+        CheckConstraint(
+            "(status IN ('PENDING','RUNNING') AND completed_at IS NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'SUCCEEDED' AND completed_at IS NOT NULL "
+            "AND error_code IS NULL) OR "
+            "(status = 'FAILED' AND completed_at IS NOT NULL "
+            "AND error_code IS NOT NULL)",
+            name="completion_consistent",
+        ),
+        CheckConstraint(
+            "completed_at IS NULL OR completed_at >= created_at",
+            name="completion_time_valid",
+        ),
         Index("ix_strategy_validation_run_status", "status"),
+        Index(
+            "ix_strategy_validation_run_draft_evidence",
+            "strategy_id",
+            "draft_version",
+            "source_code_hash",
+            "status",
+        ),
     )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    strategy_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy.id", ondelete="RESTRICT"),
+        nullable=False,
     )
     strategy_version_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("strategy_version.id", ondelete="RESTRICT"),
     )
+    draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    evidence_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class StrategyRun(Base):

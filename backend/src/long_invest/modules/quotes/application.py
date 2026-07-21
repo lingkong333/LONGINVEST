@@ -5,7 +5,11 @@ from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from long_invest.modules.quotes.contracts import QuoteCycleStatus
+from long_invest.modules.quotes.contracts import (
+    QuoteCycleStatus,
+    QuoteItemStatus,
+    SignalQuoteSnapshot,
+)
 from long_invest.modules.quotes.repository import QuoteCycleRepository
 from long_invest.modules.quotes.service import _item_view, _summary
 from long_invest.modules.securities.application import get_security_application
@@ -195,6 +199,49 @@ class QuoteApplication:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
+
+
+class TransactionalQuoteSignalPort:
+    """Public quote reader for callers that own the database transaction."""
+
+    def __init__(
+        self,
+        session: Any,
+        *,
+        repository_factory: Callable[[Any], Any] = QuoteCycleRepository,
+    ) -> None:
+        self._repository = repository_factory(session)
+
+    async def get_quote_snapshot(
+        self,
+        *,
+        item_id: UUID,
+        cycle_id: UUID,
+    ) -> SignalQuoteSnapshot | None:
+        item = await self._repository.get_signal_item(
+            item_id=item_id,
+            cycle_id=cycle_id,
+        )
+        if item is None:
+            return None
+        return SignalQuoteSnapshot(
+            cycle_id=item.cycle_id,
+            item_id=item.id,
+            symbol=item.symbol,
+            status=QuoteItemStatus(item.status),
+            price=item.price,
+            quote_time=item.quote_time,
+            scheduled_at=item.cycle.scheduled_at,
+            eligible_for_evaluation=item.eligible_for_evaluation,
+            expected_subscription_version=item.expected_subscription_version,
+        )
+
+
+def transactional_quote_signal_port(
+    session: Any,
+    **factories: Any,
+) -> TransactionalQuoteSignalPort:
+    return TransactionalQuoteSignalPort(session, **factories)
 
 
 def get_quote_application() -> QuoteApplication:

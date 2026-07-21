@@ -15,6 +15,7 @@ from long_invest.modules.securities.contracts import (
     SecurityIdentity,
     SecurityMasterSnapshot,
     SecurityType,
+    SignalSecuritySnapshot,
     SnapshotResult,
     SymbolUniverseQuery,
     validate_symbol,
@@ -240,6 +241,23 @@ class SecurityApplication:
 
 def get_security_application() -> SecurityApplication:
     return SecurityApplication(get_database())
+
+
+class TransactionalSignalSecurityPort:
+    """Public security identity reader bound to a caller-owned transaction."""
+
+    def __init__(self, session, *, repository_factory=SecurityRepository) -> None:
+        self._repository = repository_factory(session)
+
+    async def get_signal_security(self, symbol: str) -> SignalSecuritySnapshot | None:
+        security = await self._repository.get_by_symbol(symbol)
+        if security is None:
+            return None
+        return SignalSecuritySnapshot(
+            security_id=security.id,
+            symbol=security.symbol,
+            name=security.name,
+        )
 
 
 def _frozen_universe(snapshot: Any) -> FrozenUniverse:

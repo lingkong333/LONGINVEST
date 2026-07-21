@@ -13,6 +13,7 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
         "worker-realtime-quotes": "realtime-quotes",
         "worker-daily-market-data": "daily-market-data",
         "worker-qfq-refresh": "qfq-refresh",
+        "worker-signals": "signals",
     }
     for service_name, queue_name in expected.items():
         service = services[service_name]
@@ -44,6 +45,23 @@ def test_monitor_scheduler_is_an_isolated_private_service() -> None:
         "python",
         "-m",
         "long_invest.entrypoints.monitor_scheduler",
+    ]
+    assert "ports" not in service
+    assert service["read_only"] is True
+    assert service["mem_limit"] == "128m"
+    assert "no-new-privileges:true" in service["security_opt"]
+
+
+def test_signal_projector_is_an_isolated_private_service() -> None:
+    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
+        "signal-projector"
+    ]
+
+    assert service["command"] == [
+        "python",
+        "-m",
+        "long_invest.entrypoints.signal_projector",
     ]
     assert "ports" not in service
     assert service["read_only"] is True

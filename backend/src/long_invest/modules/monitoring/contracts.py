@@ -46,6 +46,19 @@ class FrozenSubscription(StrictContract):
     revision_id: UUID
 
 
+class SubscriptionSignalSnapshot(StrictContract):
+    subscription_id: UUID
+    security_id: UUID
+    symbol: str
+    status: SubscriptionStatus
+    version: int = Field(ge=1)
+    revision_id: UUID
+    target_mode: str
+    hysteresis_ratio: Decimal = Field(ge=0)
+    hysteresis_min: Decimal = Field(ge=0)
+    notification_mode: str
+
+
 class FrozenScheduleSubscriptions(StrictContract):
     schedule_id: UUID
     subscriptions: tuple[FrozenSubscription, ...]

@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from long_invest.modules.positions.contracts import (
     PositionAuditContext,
     PositionBatchResult,
+    PositionSnapshot,
     PositionStatus,
     SetPosition,
 )
@@ -202,6 +203,23 @@ class PositionApplication:
 def get_position_application() -> PositionApplication:
     return PositionApplication(
         get_database(), security_application=get_security_application()
+    )
+
+
+async def get_position_snapshot(
+    session, security_id, *, repository_factory=PositionRepository
+) -> PositionSnapshot:
+    row = await repository_factory(session).get_current(security_id)
+    if row is None:
+        return PositionSnapshot(
+            security_id=security_id,
+            status=PositionStatus.NOT_HOLDING,
+            version=0,
+        )
+    return PositionSnapshot(
+        security_id=row.security_id,
+        status=PositionStatus(row.status),
+        version=row.version,
     )
 
 

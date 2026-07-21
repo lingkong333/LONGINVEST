@@ -1185,6 +1185,363 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Targets */
+        get: operations["list_targets_api_v1_targets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{subscription_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Target */
+        get: operations["get_target_api_v1_targets__subscription_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{subscription_id}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Target History */
+        get: operations["target_history_api_v1_targets__subscription_id__history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{subscription_id}/manual": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Set Manual Target */
+        post: operations["set_manual_target_api_v1_targets__subscription_id__manual_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{subscription_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Target */
+        post: operations["restore_target_api_v1_targets__subscription_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{subscription_id}/calculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calculate Target */
+        post: operations["calculate_target_api_v1_targets__subscription_id__calculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/{subscription_id}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Target */
+        post: operations["retry_target_api_v1_targets__subscription_id__retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/targets/calculate-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Calculate Targets Batch */
+        post: operations["calculate_targets_batch_api_v1_targets_calculate_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-calculation-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Target Calculation Runs */
+        get: operations["list_target_calculation_runs_api_v1_target_calculation_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Target Reviews */
+        get: operations["list_target_reviews_api_v1_target_reviews_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-reviews/{review_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Target Review */
+        post: operations["approve_target_review_api_v1_target_reviews__review_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-reviews/{review_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Target Review */
+        post: operations["reject_target_review_api_v1_target_reviews__review_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/target-reviews/{review_id}/recalculate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Recalculate Target Review */
+        post: operations["recalculate_target_review_api_v1_target_reviews__review_id__recalculate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/states": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Signal States */
+        get: operations["list_signal_states_api_v1_signals_states_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/states/{subscription_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Signal State */
+        get: operations["get_signal_state_api_v1_signals_states__subscription_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signal-events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Signal Events */
+        get: operations["list_signal_events_api_v1_signal_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signal-events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Signal Event */
+        get: operations["get_signal_event_api_v1_signal_events__event_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signal-evaluations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Signal Evaluations */
+        get: operations["list_signal_evaluations_api_v1_signal_evaluations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signal-evaluations/{evaluation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Signal Evaluation */
+        get: operations["get_signal_evaluation_api_v1_signal_evaluations__evaluation_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/states/{subscription_id}/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Signal State */
+        post: operations["reset_signal_state_api_v1_signals_states__subscription_id__reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/signals/states/{subscription_id}/reevaluate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reevaluate Signal State */
+        post: operations["reevaluate_signal_state_api_v1_signals_states__subscription_id__reevaluate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1264,6 +1621,83 @@ export interface components {
          * @enum {string}
          */
         CalendarDayStatus: "CONFIRMED" | "PROVISIONAL" | "OVERRIDDEN" | "MISSING";
+        /** CapabilityPageData */
+        CapabilityPageData: {
+            /** Items */
+            items: components["schemas"]["CapabilityRecord"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** CapabilityPageResponse */
+        CapabilityPageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["CapabilityPageData"];
+        };
+        /** CapabilityRecord */
+        CapabilityRecord: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Status */
+            status: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** CapabilityResponse */
+        CapabilityResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["CapabilityResult"];
+        };
+        /** CapabilityResult */
+        CapabilityResult: {
+            /** Code */
+            code: string;
+            /** Accepted */
+            accepted: boolean;
+        };
+        /** CapabilityWriteRequest */
+        CapabilityWriteRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** ChangePasswordRequest */
         ChangePasswordRequest: {
             /** New Password */
@@ -1720,6 +2154,16 @@ export interface components {
             /** Confirm */
             confirm: boolean;
         };
+        /**
+         * EvaluationReason
+         * @enum {string}
+         */
+        EvaluationReason: "SCHEDULED_QUOTE" | "MANUAL_CHECK" | "TARGET_ACTIVATED" | "POSITION_BECAME_HOLDING" | "DATA_CORRECTION" | "STATE_RESET" | "RECOVERY_REEVALUATION";
+        /**
+         * EvaluationResult
+         * @enum {string}
+         */
+        EvaluationResult: "APPLIED" | "UNCHANGED" | "SKIPPED" | "SUPERSEDED";
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -1800,6 +2244,36 @@ export interface components {
             /** Confirm */
             confirm: boolean;
         };
+        /** ManualTargetRequest */
+        ManualTargetRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            values: components["schemas"]["TargetValues-Input"];
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Large Change Confirmed
+             * @default false
+             */
+            large_change_confirmed: boolean;
+            /**
+             * Switch To Manual Confirmed
+             * @default false
+             */
+            switch_to_manual_confirmed: boolean;
+        };
+        /**
+         * NotificationClass
+         * @enum {string}
+         */
+        NotificationClass: "LOW" | "LOW_CLEARED" | "HIGH" | "HIGH_CLEARED";
         /** OverrideRequest */
         OverrideRequest: {
             /**
@@ -2410,6 +2884,25 @@ export interface components {
             /** Confirm */
             confirm: boolean;
         };
+        /** RestoreTargetRequest */
+        RestoreTargetRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /**
+             * Source Revision Id
+             * Format: uuid
+             */
+            source_revision_id: string;
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+            /**
+             * Switch To Manual Confirmed
+             * @default false
+             */
+            switch_to_manual_confirmed: boolean;
+        };
         /** ResultData */
         ResultData: {
             subscription: components["schemas"]["SubscriptionRecord"];
@@ -2656,6 +3149,390 @@ export interface components {
             /** Auto Switch */
             auto_switch?: boolean | null;
         };
+        /** SignalActionRequest */
+        SignalActionRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** SignalEvaluationPageData */
+        SignalEvaluationPageData: {
+            /** Items */
+            items: components["schemas"]["SignalEvaluationView"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** SignalEvaluationPageResponse */
+        SignalEvaluationPageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalEvaluationPageData"];
+        };
+        /** SignalEvaluationResponse */
+        SignalEvaluationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalEvaluationView"];
+        };
+        /** SignalEvaluationView */
+        SignalEvaluationView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            reason: components["schemas"]["EvaluationReason"];
+            result: components["schemas"]["EvaluationResult"];
+            before_zone: components["schemas"]["SignalZone"];
+            after_zone: components["schemas"]["SignalZone"];
+            /** Subscription Version */
+            subscription_version?: number | null;
+            /** Target Revision Id */
+            target_revision_id?: string | null;
+            /** Target Version */
+            target_version?: number | null;
+            /** Target Date */
+            target_date?: string | null;
+            targets?: components["schemas"]["TargetValues-Output"] | null;
+            position_status?: components["schemas"]["PositionStatus"] | null;
+            /** Position Version */
+            position_version?: number | null;
+            /** Price */
+            price?: string | null;
+            /** Price At */
+            price_at?: string | null;
+            /** Price Version */
+            price_version?: number | null;
+            /** Quote Cycle Id */
+            quote_cycle_id?: string | null;
+            /** Quote Scheduled At */
+            quote_scheduled_at?: string | null;
+            /** Quote Item Id */
+            quote_item_id?: string | null;
+            /** Hysteresis Applied */
+            hysteresis_applied: boolean;
+            /** Used Stale Target */
+            used_stale_target: boolean;
+            /** Skip Code */
+            skip_code?: string | null;
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SignalEventPageData */
+        SignalEventPageData: {
+            /** Items */
+            items: components["schemas"]["SignalEventView"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** SignalEventPageResponse */
+        SignalEventPageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalEventPageData"];
+        };
+        /** SignalEventResponse */
+        SignalEventResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalEventView"];
+        };
+        /** SignalEventView */
+        SignalEventView: {
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /**
+             * Evaluation Id
+             * Format: uuid
+             */
+            evaluation_id: string;
+            before_zone: components["schemas"]["SignalZone"];
+            after_zone: components["schemas"]["SignalZone"];
+            reason: components["schemas"]["EvaluationReason"];
+            /** Price */
+            price: string;
+            /**
+             * Price At
+             * Format: date-time
+             */
+            price_at: string;
+            targets: components["schemas"]["TargetValues-Output"];
+            /**
+             * Target Revision Id
+             * Format: uuid
+             */
+            target_revision_id: string;
+            /** Target Version */
+            target_version: number;
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            position_status: components["schemas"]["PositionStatus"];
+            /** Position Version */
+            position_version: number;
+            /** Quote Cycle Id */
+            quote_cycle_id?: string | null;
+            /** Quote Scheduled At */
+            quote_scheduled_at?: string | null;
+            /** Quote Item Id */
+            quote_item_id?: string | null;
+            /** Used Stale Target */
+            used_stale_target: boolean;
+            /** State Version */
+            state_version: number;
+            notification_class: components["schemas"]["NotificationClass"];
+            /** Notification Eligible */
+            notification_eligible: boolean;
+            /** Suppression Reason */
+            suppression_reason?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** SignalReevaluationResponse */
+        SignalReevaluationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalReevaluationResult"];
+        };
+        /** SignalReevaluationResult */
+        SignalReevaluationResult: {
+            /** Code */
+            code: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /**
+             * Reevaluation Job Id
+             * Format: uuid
+             */
+            reevaluation_job_id: string;
+            /** Accepted */
+            accepted: boolean;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+        };
+        /** SignalStateMutationResponse */
+        SignalStateMutationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalStateMutationResult"];
+        };
+        /** SignalStateMutationResult */
+        SignalStateMutationResult: {
+            /** Code */
+            code: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            state: components["schemas"]["SignalStateView"];
+            /**
+             * Reevaluation Job Id
+             * Format: uuid
+             */
+            reevaluation_job_id: string;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+        };
+        /** SignalStatePageData */
+        SignalStatePageData: {
+            /** Items */
+            items: components["schemas"]["SignalStateView"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** SignalStatePageResponse */
+        SignalStatePageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalStatePageData"];
+        };
+        /** SignalStateResponse */
+        SignalStateResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SignalStateView"];
+        };
+        /** SignalStateView */
+        SignalStateView: {
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            zone: components["schemas"]["SignalZone"];
+            /** Version */
+            version: number;
+            /** Last Price */
+            last_price?: string | null;
+            /** Last Price At */
+            last_price_at?: string | null;
+            /** Last Subscription Version */
+            last_subscription_version?: number | null;
+            /** Last Price Version */
+            last_price_version?: number | null;
+            /** Last Quote Cycle Id */
+            last_quote_cycle_id?: string | null;
+            /** Last Quote Scheduled At */
+            last_quote_scheduled_at?: string | null;
+            /** Last Quote Item Id */
+            last_quote_item_id?: string | null;
+            /** Last Target Revision Id */
+            last_target_revision_id?: string | null;
+            /** Last Target Version */
+            last_target_version?: number | null;
+            /** Last Position Version */
+            last_position_version?: number | null;
+        };
+        /**
+         * SignalZone
+         * @enum {string}
+         */
+        SignalZone: "UNKNOWN" | "STRONG_LOW" | "LOW" | "NORMAL" | "HIGH" | "STRONG_HIGH";
         /** SubscriptionRecord */
         SubscriptionRecord: {
             /**
@@ -2678,6 +3555,244 @@ export interface components {
             current_revision_id: string | null;
             /** Archived At */
             archived_at: string | null;
+        };
+        /** TargetBindingView */
+        TargetBindingView: {
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /** Current Revision Id */
+            current_revision_id: string | null;
+            status: components["schemas"]["TargetStatus"];
+            /** Version */
+            version: number;
+            /** Activated At */
+            activated_at?: string | null;
+            /** Stale Reason */
+            stale_reason?: string | null;
+        };
+        /** TargetHistoryData */
+        TargetHistoryData: {
+            /** Items */
+            items: components["schemas"]["TargetRevisionView"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** TargetHistoryResponse */
+        TargetHistoryResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["TargetHistoryData"];
+        };
+        /** TargetMutationResponse */
+        TargetMutationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["TargetMutationResult"];
+        };
+        /** TargetMutationResult */
+        TargetMutationResult: {
+            /** Code */
+            code: string;
+            binding: components["schemas"]["TargetBindingView"];
+            revision: components["schemas"]["TargetRevisionView"];
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+        };
+        /** TargetPageData */
+        TargetPageData: {
+            /** Items */
+            items: components["schemas"]["TargetSnapshot"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** TargetPageResponse */
+        TargetPageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["TargetPageData"];
+        };
+        /** TargetResponse */
+        TargetResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["TargetSnapshot"];
+        };
+        /** TargetRevisionView */
+        TargetRevisionView: {
+            /** Parameter Snapshot */
+            parameter_snapshot: {
+                [key: string]: unknown;
+            };
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /** Revision No */
+            revision_no: number;
+            values: components["schemas"]["TargetValues-Output"];
+            source: components["schemas"]["TargetSource"];
+            /** Source Revision Id */
+            source_revision_id?: string | null;
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            /** Strategy Version Id */
+            strategy_version_id?: string | null;
+            /** Data Version */
+            data_version?: number | null;
+            /** Source Code Hash */
+            source_code_hash?: string | null;
+            /** Content Hash */
+            content_hash: string;
+            /** Reason */
+            reason: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** TargetSnapshot */
+        TargetSnapshot: {
+            /** Parameter Snapshot */
+            parameter_snapshot: {
+                [key: string]: unknown;
+            };
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Revision No */
+            revision_no: number;
+            /** Binding Version */
+            binding_version: number;
+            values: components["schemas"]["TargetValues-Output"];
+            source: components["schemas"]["TargetSource"];
+            status: components["schemas"]["TargetStatus"];
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            /** Strategy Version Id */
+            strategy_version_id?: string | null;
+            /** Data Version */
+            data_version?: number | null;
+            /** Source Code Hash */
+            source_code_hash?: string | null;
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Activated At
+             * Format: date-time
+             */
+            activated_at: string;
+        };
+        /**
+         * TargetSource
+         * @enum {string}
+         */
+        TargetSource: "MANUAL" | "RESTORED";
+        /**
+         * TargetStatus
+         * @enum {string}
+         */
+        TargetStatus: "READY" | "STALE" | "CALCULATING" | "REVIEW_REQUIRED" | "ACTIVATING" | "FAILED" | "MISSING";
+        /** TargetValues */
+        "TargetValues-Input": {
+            /** Low Strong */
+            low_strong: number | string;
+            /** Low Watch */
+            low_watch: number | string;
+            /** High Watch */
+            high_watch: number | string;
+            /** High Strong */
+            high_strong: number | string;
+        };
+        /** TargetValues */
+        "TargetValues-Output": {
+            /** Low Strong */
+            low_strong: string;
+            /** Low Watch */
+            low_watch: string;
+            /** High Watch */
+            high_watch: string;
+            /** High Strong */
+            high_strong: string;
         };
         /** TradingSessionInput */
         TradingSessionInput: {
@@ -5548,6 +6663,724 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ResultResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_targets_api_v1_targets_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_target_api_v1_targets__subscription_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    target_history_api_v1_targets__subscription_id__history_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_manual_target_api_v1_targets__subscription_id__manual_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualTargetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_target_api_v1_targets__subscription_id__restore_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RestoreTargetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TargetMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_target_api_v1_targets__subscription_id__calculate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_target_api_v1_targets__subscription_id__retry_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    calculate_targets_batch_api_v1_targets_calculate_batch_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_target_calculation_runs_api_v1_target_calculation_runs_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_target_reviews_api_v1_target_reviews_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_target_review_api_v1_target_reviews__review_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                review_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reject_target_review_api_v1_target_reviews__review_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                review_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recalculate_target_review_api_v1_target_reviews__review_id__recalculate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                review_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CapabilityWriteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CapabilityResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_signal_states_api_v1_signals_states_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalStatePageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_signal_state_api_v1_signals_states__subscription_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalStateResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_signal_events_api_v1_signal_events_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalEventPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_signal_event_api_v1_signal_events__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_signal_evaluations_api_v1_signal_evaluations_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalEvaluationPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_signal_evaluation_api_v1_signal_evaluations__evaluation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                evaluation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalEvaluationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_signal_state_api_v1_signals_states__subscription_id__reset_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignalActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalStateMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reevaluate_signal_state_api_v1_signals_states__subscription_id__reevaluate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignalActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignalReevaluationResponse"];
                 };
             };
             /** @description Validation Error */

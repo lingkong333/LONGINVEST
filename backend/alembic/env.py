@@ -60,6 +60,15 @@ from long_invest.modules.securities.models import (  # noqa: F401
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
 )
+from long_invest.modules.signals.models import (  # noqa: F401
+    SignalEvaluation,
+    SignalEvent,
+    SignalState,
+)
+from long_invest.modules.targets.models import (  # noqa: F401
+    SubscriptionTargetBinding,
+    TargetRevision,
+)
 from long_invest.modules.watchlists.models import Watchlist, WatchlistItem  # noqa: F401
 from long_invest.platform.audit.models import AuditEvent  # noqa: F401
 from long_invest.platform.config.settings import get_settings

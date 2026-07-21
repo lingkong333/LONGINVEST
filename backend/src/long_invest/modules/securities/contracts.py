@@ -198,3 +198,8 @@ def assess_monitoring_eligibility(item: SecurityMasterItem) -> SecurityEligibili
         code="ELIGIBLE",
         message="该股票可建立正式监控",
     )
+@dataclass(frozen=True, slots=True)
+class SignalSecuritySnapshot:
+    security_id: UUID
+    symbol: str
+    name: str

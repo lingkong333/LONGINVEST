@@ -1,9 +1,18 @@
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 
-from long_invest.modules.positions.application import PositionApplication
-from long_invest.modules.positions.contracts import PositionStatus, PositionView
+from long_invest.modules.positions.application import (
+    PositionApplication,
+    get_position_snapshot,
+)
+from long_invest.modules.positions.contracts import (
+    PositionSnapshot,
+    PositionStatus,
+    PositionView,
+)
 from long_invest.platform.errors import AppError
 
 
@@ -87,3 +96,33 @@ async def test_batch_isolates_each_item_failure() -> None:
         "REJECTED",
         "FAILED",
     ]
+
+
+@pytest.mark.anyio
+async def test_caller_session_reads_frozen_position_snapshot() -> None:
+    security_id = uuid4()
+    session = SimpleNamespace()
+
+    class Repository:
+        def __init__(self, received_session):
+            assert received_session is session
+
+        async def get_current(self, received_id):
+            assert received_id == security_id
+            return SimpleNamespace(
+                security_id=security_id,
+                status="HOLDING",
+                version=7,
+            )
+
+    snapshot = await get_position_snapshot(
+        session, security_id, repository_factory=Repository
+    )
+
+    assert snapshot == PositionSnapshot(
+        security_id=security_id,
+        status=PositionStatus.HOLDING,
+        version=7,
+    )
+    with pytest.raises(ValidationError):
+        snapshot.version = 8

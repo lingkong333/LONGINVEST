@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from long_invest.modules.quotes.contracts import QuoteCycleStatus
 from long_invest.modules.quotes.models import QuoteCycle, QuoteCycleItem
@@ -74,6 +74,21 @@ class QuoteCycleRepository:
             )
             .with_for_update()
             .execution_options(populate_existing=True)
+        )
+
+    async def get_signal_item(
+        self,
+        *,
+        item_id: UUID,
+        cycle_id: UUID,
+    ) -> QuoteCycleItem | None:
+        return await self.session.scalar(
+            select(QuoteCycleItem)
+            .options(joinedload(QuoteCycleItem.cycle))
+            .where(
+                QuoteCycleItem.id == item_id,
+                QuoteCycleItem.cycle_id == cycle_id,
+            )
         )
 
     async def list(

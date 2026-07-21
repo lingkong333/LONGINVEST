@@ -21,6 +21,8 @@ from long_invest.bootstrap.jobs import (
     quote_diagnostic,
     realtime_quote_cycle,
     security_master_refresh,
+    signal_evaluate_batch,
+    signal_reevaluate,
 )
 from long_invest.entrypoints.job_worker import HANDLERS
 from long_invest.modules.daily_data.contracts import DailyMissingReason
@@ -42,6 +44,8 @@ def test_market_data_handlers_are_registered_on_the_real_worker() -> None:
         "DAILY_DATA_FINALIZE": daily_data_finalize,
         "DAILY_DATA_RETRY": daily_data_retry,
         "QFQ_REFRESH": qfq_refresh,
+        "SIGNAL_EVALUATE_BATCH": signal_evaluate_batch,
+        "SIGNAL_REEVALUATE": signal_reevaluate,
     }
     assert expected == HANDLERS
 

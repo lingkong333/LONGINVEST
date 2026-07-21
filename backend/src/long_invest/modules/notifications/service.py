@@ -338,6 +338,10 @@ class NotificationService:
         delivery.lease_expires_at = None
 
 
+def transactional_notification_service(session) -> NotificationService:
+    return NotificationService(NotificationRepository(session))
+
+
 def _publish_content_hash(command: PublishNotification) -> str:
     content = {
         "event_type": command.event_type,

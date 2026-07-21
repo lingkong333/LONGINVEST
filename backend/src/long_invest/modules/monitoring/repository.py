@@ -68,6 +68,14 @@ class MonitorSubscriptionRepository:
             )
         )
 
+    async def find_open_by_symbol(self, symbol: str):
+        return await self.session.scalar(
+            select(MonitorSubscription).where(
+                MonitorSubscription.symbol == symbol,
+                MonitorSubscription.archived_at.is_(None),
+            )
+        )
+
     async def get(self, subscription_id: UUID, *, for_update=False):
         stmt = select(MonitorSubscription).where(
             MonitorSubscription.id == subscription_id

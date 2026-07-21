@@ -77,3 +77,24 @@ async def test_item_submission_query_serializes_and_refreshes() -> None:
     assert statement.get_execution_options()["populate_existing"] is True
     assert cycle_id in compiled.params.values()
     assert "600000.SH" in compiled.params.values()
+
+
+@pytest.mark.anyio
+async def test_signal_item_query_requires_matching_item_and_cycle() -> None:
+    session = AsyncMock()
+    item_id = uuid4()
+    cycle_id = uuid4()
+
+    await QuoteCycleRepository(session).get_signal_item(
+        item_id=item_id,
+        cycle_id=cycle_id,
+    )
+
+    statement = session.scalar.await_args.args[0]
+    compiled = statement.compile(dialect=postgresql.dialect())
+    sql = str(compiled)
+    assert "quote_cycle_item.id" in sql
+    assert "quote_cycle_item.cycle_id" in sql
+    assert item_id in compiled.params.values()
+    assert cycle_id in compiled.params.values()
+    assert "FOR UPDATE" not in sql.upper()

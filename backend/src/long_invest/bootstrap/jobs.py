@@ -56,7 +56,9 @@ from long_invest.modules.securities.contracts import (
     SecurityMasterSnapshot,
     SecurityType,
 )
+from long_invest.modules.signals.jobs import SignalJobApplication
 from long_invest.platform.database.engine import get_database
+from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.contracts import (
     JobExecutionContext,
     JobItemStatus,
@@ -1035,3 +1037,90 @@ def _qfq_application() -> Any:
 
 def _daily_data_application() -> DailyDataApplication:
     return DailyDataApplication(get_database())
+
+
+async def signal_evaluate_batch(context: JobExecutionContext) -> JobResult:
+    try:
+        cycle_id = UUID(str(context.config["quote_cycle_id"]))
+        item_ids = tuple(
+            UUID(str(value)) for value in context.config["eligible_item_ids"]
+        )
+        if not item_ids or len(item_ids) != len(set(item_ids)):
+            raise ValueError
+    except (KeyError, TypeError, ValueError):
+        return JobResult.failure(
+            code="SIGNAL_BATCH_CONFIG_INVALID",
+            message="信号批量任务的冻结范围无效",
+            retryable=False,
+        )
+    report = await _signal_job_application().evaluate_batch(
+        cycle_id=cycle_id,
+        item_ids=item_ids,
+        request_id=str(context.job_id),
+    )
+    data = {
+        "total": len(report.items),
+        "succeeded": report.succeeded,
+        "failed": report.failed,
+        "items": [
+            {
+                "item_id": str(item.item_id) if item.item_id is not None else None,
+                "subscription_id": (
+                    str(item.subscription_id)
+                    if getattr(item, "subscription_id", None) is not None
+                    else None
+                ),
+                "success": item.success,
+                "code": item.code,
+            }
+            for item in report.items
+        ],
+    }
+    if report.failed == 0:
+        return JobResult(
+            success=True,
+            code="SUCCESS",
+            message="信号批量判断完成",
+            retryable=False,
+            data=data,
+        )
+    if report.succeeded > 0:
+        return JobResult(
+            success=True,
+            code="PARTIAL",
+            message="信号批量判断部分完成",
+            retryable=False,
+            data=data,
+        )
+    return JobResult.failure(
+        code="SIGNAL_BATCH_FAILED",
+        message="信号批量判断全部失败",
+        retryable=True,
+        data=data,
+    )
+
+
+async def signal_reevaluate(context: JobExecutionContext) -> JobResult:
+    try:
+        outcome = await _signal_job_application().reevaluate(
+            config=context.config,
+            request_id=str(context.job_id),
+            idempotency_key=f"signal-job:{context.job_id}",
+        )
+    except AppError as exc:
+        return JobResult.failure(
+            code=exc.code,
+            message=exc.message,
+            retryable=exc.status_code >= 500,
+        )
+    return JobResult(
+        success=True,
+        code="SUCCESS",
+        message="信号重新判断完成",
+        retryable=False,
+        data={"outcome_code": outcome.code},
+    )
+
+
+def _signal_job_application() -> SignalJobApplication:
+    return SignalJobApplication(get_database())

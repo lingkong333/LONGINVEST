@@ -40,6 +40,8 @@ class FakeContainer:
         wait_error: Exception | None = None,
         archive_error: Exception | None = None,
         remove_error: Exception | None = None,
+        remove_succeeds_then_times_out: bool = False,
+        scan_error: Exception | None = None,
     ) -> None:
         self.stdout = stdout
         self.stderr = stderr
@@ -47,6 +49,8 @@ class FakeContainer:
         self.wait_error = wait_error
         self.archive_error = archive_error
         self.remove_error = remove_error
+        self.remove_succeeds_then_times_out = remove_succeeds_then_times_out
+        self.scan_error = scan_error
         self.attrs = {"State": {"OOMKilled": oom_killed}}
         self.id = "container-1"
         self.managed = False
@@ -88,6 +92,11 @@ class FakeContainer:
     def remove(self, *, force: bool) -> None:
         assert force is True
         self.events.append("remove")
+        if self.remove_succeeds_then_times_out:
+            self.remove_succeeds_then_times_out = False
+            self.removed = True
+            self.managed = False
+            raise TimeoutError("response was lost after Docker removed the container")
         if self.remove_error:
             error = self.remove_error
             self.remove_error = None
@@ -120,6 +129,8 @@ class FakeContainers:
                 "long-invest.strategy-worker=strategy-worker-1",
             ]
         }
+        if self.container.scan_error:
+            raise self.container.scan_error
         return [self.container] if self.container.managed else []
 
 
@@ -337,6 +348,28 @@ def test_new_client_recovers_labeled_container_after_process_restart() -> None:
 
     assert second.pending_cleanup_container_ids == ()
     assert container.removed is True
+
+
+def test_empty_label_scan_clears_cleanup_timeout_after_successful_delete() -> None:
+    container = FakeContainer(remove_succeeds_then_times_out=True)
+    client, _ = _client(container)
+
+    client.run(_payload())
+    assert client.pending_cleanup_container_ids == (container.id,)
+    assert container.managed is False
+
+    assert client.recover_pending_cleanup() == ()
+    assert client.pending_cleanup_container_ids == ()
+
+
+def test_failed_label_scan_keeps_known_pending_cleanup() -> None:
+    container = FakeContainer(remove_error=TimeoutError("remove failed"))
+    client, _ = _client(container)
+    client.run(_payload())
+    assert client.pending_cleanup_container_ids == (container.id,)
+    container.scan_error = TimeoutError("Docker list failed")
+
+    assert client.recover_pending_cleanup() == (container.id,)
 
 
 @pytest.mark.parametrize("content", [b"[]", b"not-json", b"{\"x\": NaN}"])

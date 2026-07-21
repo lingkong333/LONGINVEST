@@ -88,18 +88,18 @@ class DockerStrategyRunnerClient:
             )
         except Exception:
             return self.pending_cleanup_container_ids
+        remaining_ids: set[str] = set()
         for container in containers:
             container_id = getattr(container, "id", None)
-            if isinstance(container_id, str) and container_id:
-                self._pending_cleanup_ids.add(container_id)
             try:
                 self._call(
                     lambda value=container: value.remove(force=True), deadline
                 )
             except Exception:
+                if isinstance(container_id, str) and container_id:
+                    remaining_ids.add(container_id)
                 continue
-            if isinstance(container_id, str):
-                self._pending_cleanup_ids.discard(container_id)
+        self._pending_cleanup_ids = remaining_ids
         return self.pending_cleanup_container_ids
 
     def run(self, payload: Mapping[str, object]) -> Mapping[str, object]:

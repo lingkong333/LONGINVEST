@@ -228,9 +228,7 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
                 )
         if isinstance(node, ast.Call):
             name = _call_name(node.func)
-            if name in FORBIDDEN_CALLS or (
-                name is not None and is_dangerous_library_segment(name)
-            ):
+            if name in FORBIDDEN_CALLS:
                 raise StrategyStaticAnalysisError(
                     DANGEROUS_CAPABILITY,
                     f"dangerous call is not allowed: {name}",
@@ -239,10 +237,7 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
         if (
             isinstance(node, ast.Name)
             and isinstance(node.ctx, ast.Load)
-            and (
-                node.id in FORBIDDEN_CALLS
-                or is_dangerous_library_segment(node.id)
-            )
+            and node.id in FORBIDDEN_CALLS
         ):
             raise StrategyStaticAnalysisError(
                 DANGEROUS_CAPABILITY,
@@ -277,8 +272,6 @@ def _attribute_chain(node: ast.Attribute) -> tuple[str, ...]:
     while isinstance(current, ast.Attribute):
         segments.append(current.attr)
         current = current.value
-    if isinstance(current, ast.Name):
-        segments.append(current.id)
     return tuple(reversed(segments))
 
 

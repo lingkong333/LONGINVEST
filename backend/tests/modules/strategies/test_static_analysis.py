@@ -250,6 +250,23 @@ def test_static_analysis_keeps_normal_pandas_numpy_calculation_available() -> No
     assert result.api_version == "1.0"
 
 
+def test_static_analysis_allows_normal_calculation_variable_names() -> None:
+    source = VALID_SOURCE.replace(
+        "close = Decimal(str(history",
+        (
+            "_weight = Decimal('0.5')\n"
+            "    loading = _weight * Decimal('2')\n"
+            "    to_price = loading + Decimal('1')\n"
+            "    assert to_price > 0\n"
+            "    close = Decimal(str(history"
+        ),
+    )
+
+    result = analyze_strategy_source(source)
+
+    assert result.api_version == "1.0"
+
+
 @pytest.mark.parametrize(
     "rebind",
     [

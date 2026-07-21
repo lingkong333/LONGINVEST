@@ -6,6 +6,17 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from long_invest.modules.auth.models import AppUser, UserSession  # noqa: F401
+from long_invest.modules.backtests.models import (  # noqa: F401
+    BacktestDailyResult,
+    BacktestForecastSnapshot,
+    BacktestItem,
+    BacktestMetric,
+    BacktestOrder,
+    BacktestTargetAdjustment,
+    BacktestTask,
+    BacktestTrade,
+    BacktestUniverseSnapshot,
+)
 from long_invest.modules.calendar.models import (  # noqa: F401
     TradingCalendarCurrent,
     TradingCalendarDay,
@@ -65,8 +76,18 @@ from long_invest.modules.signals.models import (  # noqa: F401
     SignalEvent,
     SignalState,
 )
+from long_invest.modules.strategies.models import (  # noqa: F401
+    Strategy,
+    StrategyDraft,
+    StrategyDraftRevision,
+    StrategyRun,
+    StrategyValidationRun,
+    StrategyVersion,
+)
 from long_invest.modules.targets.models import (  # noqa: F401
     SubscriptionTargetBinding,
+    TargetCalculationRun,
+    TargetReview,
     TargetRevision,
 )
 from long_invest.modules.watchlists.models import Watchlist, WatchlistItem  # noqa: F401

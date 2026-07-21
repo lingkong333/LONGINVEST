@@ -165,6 +165,7 @@ class TrainingDataSnapshot(StrictContract):
 
 class StrategyForecastRequest(FrozenMappingContract):
     strategy_id: UUID
+    security_name: str = Field(min_length=1, max_length=100)
     strategy_version_id: UUID | None = None
     draft_id: UUID | None = None
     draft_version: int | None = Field(default=None, ge=1)

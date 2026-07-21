@@ -31,6 +31,7 @@ SOURCE = "def calculate_targets(history, params, context): return {}"
 def _strategy_fields() -> dict[str, object]:
     return {
         "strategy_id": uuid4(),
+        "security_name": "浦发银行",
         "draft_id": None,
         "draft_version": None,
         "source_code": SOURCE,

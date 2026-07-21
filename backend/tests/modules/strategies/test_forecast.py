@@ -111,6 +111,7 @@ def _request() -> StrategyForecastRequest:
     parameters = {"spread": 0.1}
     return StrategyForecastRequest(
         strategy_id=uuid4(),
+        security_name="浦发银行",
         strategy_version_id=uuid4(),
         draft_id=None,
         draft_version=None,

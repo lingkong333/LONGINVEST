@@ -96,6 +96,25 @@ def test_hysteresis_buffer_uses_larger_of_ratio_and_minimum() -> None:
     ) == Decimal("0.50")
 
 
+@pytest.mark.parametrize("target", ["0", "-0.01"])
+def test_hysteresis_buffer_rejects_non_positive_target(target: str) -> None:
+    with pytest.raises(ValueError, match="hysteresis"):
+        hysteresis_buffer(Decimal(target), Decimal("0.02"), Decimal("0.02"))
+
+
+def test_hysteresis_buffer_converts_finite_overflow_to_value_error() -> None:
+    with pytest.raises(ValueError, match="hysteresis"):
+        hysteresis_buffer(
+            Decimal("10"), Decimal("1e999999"), Decimal("0.02")
+        )
+
+
+def test_hysteresis_buffer_accepts_a_very_large_finite_minimum() -> None:
+    minimum = Decimal("1e999999")
+
+    assert hysteresis_buffer(Decimal("10"), Decimal("0.02"), minimum) == minimum
+
+
 @pytest.mark.parametrize(
     ("target", "ratio", "minimum"),
     [
@@ -212,6 +231,23 @@ def test_large_buffers_only_delay_adjacent_exits(
     )
 
     assert next_zone(current, input_value) is expected
+
+
+def test_next_zone_converts_finite_buffer_overflow_to_value_error(
+    targets: TargetValues,
+) -> None:
+    input_value = signal_input("9.10", targets, ratio="9e999999")
+
+    with pytest.raises(ValueError, match="hysteresis"):
+        next_zone(SignalZone.LOW, input_value)
+
+
+def test_next_zone_accepts_a_very_large_finite_minimum(
+    targets: TargetValues,
+) -> None:
+    input_value = signal_input("9.10", targets, minimum="1e999999")
+
+    assert next_zone(SignalZone.LOW, input_value) is SignalZone.LOW
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 
 from long_invest.modules.signals.contracts import (
     EvaluationReason,
@@ -38,12 +38,20 @@ def hysteresis_buffer(
         not target.is_finite()
         or not ratio.is_finite()
         or not minimum.is_finite()
-        or target < 0
+        or target <= 0
         or ratio < 0
         or minimum < 0
     ):
-        raise ValueError("hysteresis inputs must be finite and non-negative")
-    return max(target * ratio, minimum)
+        raise ValueError(
+            "hysteresis target must be positive and inputs finite and non-negative"
+        )
+    try:
+        scaled = target * ratio
+    except DecimalException as exc:
+        raise ValueError("hysteresis result must be finite") from exc
+    if not scaled.is_finite():
+        raise ValueError("hysteresis result must be finite")
+    return max(scaled, minimum)
 
 
 def next_zone(current: SignalZone, signal_input: SignalInput) -> SignalZone:

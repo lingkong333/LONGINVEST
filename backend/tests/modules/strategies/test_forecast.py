@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -11,9 +11,15 @@ from long_invest.modules.strategies.contracts import (
 from long_invest.modules.strategies.forecast import (
     StrategyForecastFailure,
     build_runner_payload,
+    hash_parameter_snapshot,
+    hash_source_code,
+    hash_training_data_snapshot,
     normalize_runner_result,
 )
-from long_invest.modules.strategies.runner_execution import execute_runner_payload
+from long_invest.modules.strategies.runner_execution import (
+    execute_runner_payload,
+    wait_for_runner_payload,
+)
 
 SOURCE = """
 import numpy as np
@@ -54,15 +60,16 @@ def calculate_targets(history, params, context):
         },
     }
 """
+PARAMETER_SCHEMA = {
+    "type": "object",
+    "properties": {"spread": {"type": "number", "exclusiveMinimum": 0}},
+    "required": ["spread"],
+    "additionalProperties": False,
+}
 
 
 def _request() -> StrategyForecastRequest:
-    return StrategyForecastRequest(
-        strategy_version_id=uuid4(),
-        source_code_hash="a" * 64,
-        parameter_snapshot={"spread": 0.1},
-        parameter_hash="b" * 64,
-        training_data=TrainingDataSnapshot(
+    training_data = TrainingDataSnapshot(
             security_id=uuid4(),
             symbol="600000.SH",
             start_date=date(2025, 1, 2),
@@ -89,7 +96,17 @@ def _request() -> StrategyForecastRequest:
                     "amount": "12000",
                 },
             ),
-        ),
+        )
+    training_data = training_data.model_copy(
+        update={"content_hash": hash_training_data_snapshot(training_data)}
+    )
+    parameters = {"spread": 0.1}
+    return StrategyForecastRequest(
+        strategy_version_id=uuid4(),
+        source_code_hash=hash_source_code(SOURCE),
+        parameter_snapshot=parameters,
+        parameter_hash=hash_parameter_snapshot(parameters),
+        training_data=training_data,
         requested_at=datetime(2026, 7, 21, tzinfo=UTC),
     )
 
@@ -132,19 +149,19 @@ def test_runner_payload_executes_with_training_dataframe_and_normalizes_targets(
 
 
 def test_runner_payload_rejects_parameters_that_do_not_match_schema() -> None:
-    request = _request().model_copy(update={"parameter_snapshot": {"spread": 0}})
+    request = _request().model_copy(
+        update={
+            "parameter_snapshot": {"spread": 0},
+            "parameter_hash": hash_parameter_snapshot({"spread": 0}),
+        }
+    )
 
     with pytest.raises(StrategyForecastFailure) as error:
         build_runner_payload(
             source_code=SOURCE,
             request=request,
             context=_context(request),
-            schema={
-                "type": "object",
-                "properties": {"spread": {"type": "number", "exclusiveMinimum": 0}},
-                "required": ["spread"],
-                "additionalProperties": False,
-            },
+                schema=PARAMETER_SCHEMA,
         )
 
     assert error.value.code == "STRATEGY_PARAMETER_INVALID"
@@ -160,7 +177,7 @@ def test_runner_payload_rejects_any_test_data_context_field() -> None:
             source_code=SOURCE,
             request=request,
             context=context,
-            schema={"type": "object"},
+            schema=PARAMETER_SCHEMA,
         )
 
     assert error.value.code is StrategyForecastErrorCode.TEST_DATA_EXPOSED_TO_STRATEGY
@@ -246,6 +263,110 @@ def test_runner_payload_reports_missing_required_market_field() -> None:
     assert error.value.code is StrategyForecastErrorCode.TRAINING_DATA_INVALID
 
 
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    [
+        ("source_code_hash", "a" * 64),
+        ("parameter_hash", "b" * 64),
+    ],
+)
+def test_runner_payload_recomputes_and_rejects_stale_hashes(
+    field: str, replacement: str
+) -> None:
+    request = _request().model_copy(update={field: replacement})
+
+    with pytest.raises(StrategyForecastFailure) as error:
+        build_runner_payload(
+            source_code=SOURCE,
+            request=request,
+            context=_context(request),
+            schema=PARAMETER_SCHEMA,
+        )
+
+    assert error.value.code == "STRATEGY_INPUT_HASH_MISMATCH"
+
+
+def test_runner_payload_recomputes_and_rejects_stale_training_hash() -> None:
+    request = _request()
+    request = request.model_copy(
+        update={
+            "training_data": request.training_data.model_copy(
+                update={"content_hash": "d" * 64}
+            )
+        }
+    )
+
+    with pytest.raises(StrategyForecastFailure) as error:
+        build_runner_payload(
+            source_code=SOURCE,
+            request=request,
+            context=_context(request),
+            schema=PARAMETER_SCHEMA,
+        )
+
+    assert error.value.code == "STRATEGY_INPUT_HASH_MISMATCH"
+
+
+@pytest.mark.parametrize("bar_count", [1, 1001])
+def test_runner_payload_enforces_strategy_bar_limits(bar_count: int) -> None:
+    request = _request()
+    row = dict(request.training_data.rows[0])
+    start = date(2020, 1, 1)
+    rows = tuple(
+        {**row, "trade_date": start + timedelta(days=index)}
+        for index in range(bar_count)
+    )
+    snapshot = request.training_data.model_copy(
+        update={
+            "rows": rows,
+            "start_date": start,
+            "end_date": start + timedelta(days=bar_count - 1),
+        }
+    )
+    snapshot = snapshot.model_copy(
+        update={"content_hash": hash_training_data_snapshot(snapshot)}
+    )
+    request = request.model_copy(update={"training_data": snapshot})
+
+    with pytest.raises(StrategyForecastFailure) as error:
+        build_runner_payload(
+            source_code=SOURCE,
+            request=request,
+            context=_context(request),
+            schema=PARAMETER_SCHEMA,
+        )
+
+    assert error.value.code is StrategyForecastErrorCode.INSUFFICIENT_HISTORY
+
+
+@pytest.mark.parametrize(
+    "row_update",
+    [
+        {"extra": "not allowed"},
+        {"volume": "-1"},
+        {"amount": float("inf")},
+        {"low": "11", "open": "10"},
+    ],
+)
+def test_runner_payload_rejects_invalid_fixed_market_rows(
+    row_update: dict[str, object],
+) -> None:
+    request = _request()
+    rows = tuple({**dict(row), **row_update} for row in request.training_data.rows)
+    snapshot = request.training_data.model_copy(update={"rows": rows})
+    request = request.model_copy(update={"training_data": snapshot})
+
+    with pytest.raises(StrategyForecastFailure) as error:
+        build_runner_payload(
+            source_code=SOURCE,
+            request=request,
+            context=_context(request),
+            schema=PARAMETER_SCHEMA,
+        )
+
+    assert error.value.code is StrategyForecastErrorCode.TRAINING_DATA_INVALID
+
+
 def test_runner_result_turns_hostile_diagnostic_object_into_stable_failure() -> None:
     class HostileDiagnostic:
         @property
@@ -264,3 +385,64 @@ def test_runner_result_turns_hostile_diagnostic_object_into_stable_failure() -> 
         )
 
     assert error.value.code is StrategyForecastErrorCode.STRATEGY_TARGET_INVALID
+
+
+def test_runner_process_waits_until_tmpfs_input_is_available(tmp_path) -> None:
+    input_path = tmp_path / "input.json"
+    payload = {"ready": True}
+
+    def create_input(_: float) -> None:
+        input_path.write_text('{"ready":true}', encoding="utf-8")
+
+    loaded = wait_for_runner_payload(
+        input_path,
+        timeout_seconds=1,
+        poll_interval_seconds=0.01,
+        sleep=create_input,
+    )
+
+    assert loaded == payload
+
+
+@pytest.mark.parametrize(
+    "history",
+    [
+        [
+            {
+                "trade_date": "2025-01-02",
+                "open": "10",
+                "high": "11",
+                "low": "9",
+                "close": "10",
+                "volume": "-1",
+                "amount": "10",
+            }
+        ],
+        [
+            {
+                "trade_date": "2025-01-02",
+                "open": "10",
+                "high": "11",
+                "low": "9",
+                "close": "10",
+                "volume": "1",
+                "amount": "10",
+                "unexpected": 1,
+            }
+        ],
+    ],
+)
+def test_trusted_runner_revalidates_fixed_history_rows(
+    history: list[dict[str, object]],
+) -> None:
+    request = _request()
+    payload = build_runner_payload(
+        source_code=SOURCE,
+        request=request,
+        context=_context(request),
+        schema=PARAMETER_SCHEMA,
+    )
+    payload["history"] = history
+
+    with pytest.raises(ValueError, match="training history"):
+        execute_runner_payload(payload)

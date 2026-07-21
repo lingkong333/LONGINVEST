@@ -29,13 +29,17 @@ class FakeContainer:
         oom_killed: bool = False,
         wait_error: Exception | None = None,
         archive_error: Exception | None = None,
+        remove_error: Exception | None = None,
     ) -> None:
         self.stdout = stdout
         self.stderr = stderr
         self.status_code = status_code
         self.wait_error = wait_error
         self.archive_error = archive_error
+        self.remove_error = remove_error
         self.attrs = {"State": {"OOMKilled": oom_killed}}
+        self.id = "container-1"
+        self.events: list[str] = []
         self.archive: bytes | None = None
         self.started = False
         self.killed = False
@@ -44,14 +48,17 @@ class FakeContainer:
 
     def put_archive(self, path: str, data: bytes) -> None:
         assert path == "/tmp"
+        self.events.append("put_archive")
         if self.archive_error:
             raise self.archive_error
         self.archive = data
 
     def start(self) -> None:
+        self.events.append("start")
         self.started = True
 
     def wait(self, *, timeout: float) -> dict[str, int]:
+        self.events.append("wait")
         self.wait_timeout = timeout
         if self.wait_error:
             raise self.wait_error
@@ -64,10 +71,16 @@ class FakeContainer:
         return self.stdout if stdout and not stderr else self.stderr
 
     def kill(self) -> None:
+        self.events.append("kill")
         self.killed = True
 
     def remove(self, *, force: bool) -> None:
         assert force is True
+        self.events.append("remove")
+        if self.remove_error:
+            error = self.remove_error
+            self.remove_error = None
+            raise error
         self.removed = True
 
 
@@ -80,10 +93,15 @@ class FakeContainers:
         self.create_kwargs = kwargs
         return self.container
 
+    def get(self, container_id: str) -> FakeContainer:
+        assert container_id == self.container.id
+        return self.container
+
 
 class FakeDockerClient:
     def __init__(self, container: FakeContainer) -> None:
         self.containers = FakeContainers(container)
+        self.api = type("FakeApi", (), {"timeout": 60.0})()
 
 
 def _payload() -> dict[str, object]:
@@ -99,7 +117,17 @@ def _payload() -> dict[str, object]:
             "data_version": 1,
             "calculation_reason": "manual",
         },
-        "history": [],
+        "history": [
+            {
+                "trade_date": "2025-12-31",
+                "open": "10",
+                "high": "11",
+                "low": "9",
+                "close": "10",
+                "volume": "100",
+                "amount": "1000",
+            }
+        ],
     }
 
 
@@ -125,6 +153,8 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
     assert result["low_strong"] == "1"
     assert container.started is True
     assert container.removed is True
+    assert container.events[:3] == ["start", "put_archive", "wait"]
+    assert docker_client.api.timeout <= 10
     options = docker_client.containers.create_kwargs
     assert options is not None
     assert options["image"] == IMAGE
@@ -146,6 +176,9 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
         member = archive.getmember("input.json")
         archived_payload = json.load(archive.extractfile(member))
     assert archived_payload == _payload()
+    assert member.uid == 65532
+    assert member.gid == 65532
+    assert member.mode == 0o400
 
 
 def test_runner_timeout_is_clamped_to_ten_seconds_and_cleans_up() -> None:
@@ -156,7 +189,8 @@ def test_runner_timeout_is_clamped_to_ten_seconds_and_cleans_up() -> None:
         client.run(_payload())
 
     assert error.value.code == "STRATEGY_FORECAST_TIMEOUT"
-    assert container.wait_timeout == 10
+    assert container.wait_timeout is not None
+    assert 0 < container.wait_timeout <= 10
     assert container.killed is True
     assert container.removed is True
 
@@ -198,6 +232,17 @@ def test_runner_rejects_test_period_fields_before_creating_container() -> None:
     assert docker_client.containers.create_kwargs is None
 
 
+def test_runner_does_not_guess_leakage_from_nested_parameter_names() -> None:
+    container = FakeContainer()
+    client, _ = _client(container)
+    payload = _payload()
+    payload["parameters"] = {"test_window": 20}
+
+    result = client.run(payload)
+
+    assert result["low_strong"] == "1"
+
+
 def test_runner_removes_container_when_input_copy_fails() -> None:
     container = FakeContainer(archive_error=RuntimeError("copy failed"))
     client, _ = _client(container)
@@ -216,3 +261,15 @@ def test_runner_requires_digest_pinned_image() -> None:
             image="long-invest-strategy-runner:latest",
             seccomp_profile="/etc/long-invest/seccomp.json",
         )
+
+
+def test_runner_records_failed_cleanup_and_can_recover_it() -> None:
+    container = FakeContainer(remove_error=TimeoutError("docker unavailable"))
+    client, _ = _client(container)
+
+    client.run(_payload())
+
+    assert client.pending_cleanup_container_ids == (container.id,)
+    assert client.recover_pending_cleanup() == ()
+    assert client.pending_cleanup_container_ids == ()
+    assert container.removed is True

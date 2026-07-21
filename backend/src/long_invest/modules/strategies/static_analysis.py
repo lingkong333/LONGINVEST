@@ -7,6 +7,8 @@ from typing import Any
 
 from jsonschema import Draft202012Validator, SchemaError
 
+from long_invest.platform.json_snapshot import freeze_json_mapping
+
 ALLOWED_IMPORTS = frozenset(
     {
         "collections",
@@ -76,6 +78,10 @@ FORBIDDEN_ATTRIBUTES = frozenset(
 )
 MAX_CONSTANT_BYTES = 64 * 1024
 MAX_SOURCE_BYTES = 256 * 1024
+SCHEMA_REFERENCE_FORBIDDEN = "PARAMETER_SCHEMA_REFERENCE_FORBIDDEN"
+DANGEROUS_CAPABILITY = "DANGEROUS_CAPABILITY"
+ENTRYPOINT_REBOUND = "ENTRYPOINT_REBOUND"
+_REFERENCE_KEYWORDS = frozenset({"$ref", "$dynamicRef", "$recursiveRef"})
 
 
 class StrategyStaticAnalysisError(ValueError):
@@ -119,16 +125,20 @@ def analyze_strategy_source(source: str) -> StrategyStaticAnalysis:
         )
     _validate_metadata(metadata)
     schema = metadata["parameter_schema"]
+    _reject_schema_references(schema)
     try:
         Draft202012Validator.check_schema(schema)
     except SchemaError as exc:
         raise StrategyStaticAnalysisError(
             "PARAMETER_SCHEMA_INVALID", "parameter_schema is not valid JSON Schema"
         ) from exc
+    frozen_metadata = freeze_json_mapping(metadata)
+    frozen_schema = frozen_metadata["parameter_schema"]
+    assert isinstance(frozen_schema, MappingProxyType)
     return StrategyStaticAnalysis(
         api_version=api_version,
-        metadata=MappingProxyType(metadata),
-        parameter_schema=MappingProxyType(schema),
+        metadata=frozen_metadata,
+        parameter_schema=frozen_schema,
     )
 
 
@@ -138,6 +148,13 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
             imported = (alias.name for alias in node.names)
         elif isinstance(node, ast.ImportFrom):
             imported = (node.module or "",)
+            for alias in node.names:
+                if alias.name in FORBIDDEN_ATTRIBUTES or alias.name.startswith("_"):
+                    raise StrategyStaticAnalysisError(
+                        DANGEROUS_CAPABILITY,
+                        f"dangerous import is not allowed: {alias.name}",
+                        line=getattr(node, "lineno", None),
+                    )
         else:
             imported = ()
         for module_name in imported:
@@ -151,7 +168,7 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
             name = _call_name(node.func)
             if name in FORBIDDEN_CALLS or name in FORBIDDEN_ATTRIBUTES:
                 raise StrategyStaticAnalysisError(
-                    "DANGEROUS_CAPABILITY",
+                    DANGEROUS_CAPABILITY,
                     f"dangerous call is not allowed: {name}",
                     line=getattr(node, "lineno", None),
                 )
@@ -161,14 +178,16 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
             and node.id in FORBIDDEN_CALLS
         ):
             raise StrategyStaticAnalysisError(
-                "DANGEROUS_CAPABILITY",
+                DANGEROUS_CAPABILITY,
                 f"dangerous capability is not allowed: {node.id}",
                 line=getattr(node, "lineno", None),
             )
-        if isinstance(node, ast.Attribute) and node.attr.startswith("__"):
+        if isinstance(node, ast.Attribute) and (
+            node.attr.startswith("__") or node.attr in FORBIDDEN_ATTRIBUTES
+        ):
             raise StrategyStaticAnalysisError(
-                "DANGEROUS_CAPABILITY",
-                "dunder attribute access is not allowed",
+                DANGEROUS_CAPABILITY,
+                "dangerous attribute access is not allowed",
                 line=getattr(node, "lineno", None),
             )
 
@@ -209,6 +228,39 @@ def _validate_entrypoint(tree: ast.Module) -> None:
         raise StrategyStaticAnalysisError(
             "ENTRYPOINT_MISSING", "calculate_targets entrypoint is required"
         )
+    for node in ast.walk(tree):
+        if (
+            isinstance(node, ast.Name)
+            and isinstance(node.ctx, (ast.Store, ast.Del))
+            and node.id == "calculate_targets"
+        ):
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
+            )
+        if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+            (alias.asname or alias.name.split(".", maxsplit=1)[0])
+            == "calculate_targets"
+            for alias in node.names
+        ):
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=getattr(node, "lineno", None),
+            )
+        if isinstance(node, ast.ClassDef) and node.name == "calculate_targets":
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=node.lineno,
+            )
+        if isinstance(node, ast.ExceptHandler) and node.name == "calculate_targets":
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=node.lineno,
+            )
     function = functions[0]
     args = function.args
     positional = [*args.posonlyargs, *args.args]
@@ -294,3 +346,17 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
         raise StrategyStaticAnalysisError(
             "PARAMETER_SCHEMA_INVALID", "parameter_schema must be an object"
         )
+
+
+def _reject_schema_references(value: object) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _REFERENCE_KEYWORDS:
+                raise StrategyStaticAnalysisError(
+                    SCHEMA_REFERENCE_FORBIDDEN,
+                    "parameter_schema references are not allowed",
+                )
+            _reject_schema_references(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            _reject_schema_references(item)

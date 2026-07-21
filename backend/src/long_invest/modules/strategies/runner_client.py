@@ -4,18 +4,23 @@ import io
 import json
 import re
 import tarfile
+import time
 from collections.abc import Mapping
-from contextlib import suppress
 from typing import Any
 
 from requests.exceptions import ReadTimeout
 
-from long_invest.modules.strategies.forecast import CONTEXT_FIELDS
+from long_invest.modules.strategies.forecast import CONTEXT_FIELDS, HISTORY_COLUMNS
 from long_invest.modules.strategies.runner_execution import PAYLOAD_FIELDS
 
 MAX_TIMEOUT_SECONDS = 10.0
 MAX_OUTPUT_BYTES = 128 * 1024
 _DIGEST_PINNED_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+FORECAST_TIMEOUT = "STRATEGY_FORECAST_TIMEOUT"
+RUNNER_FAILED = "STRATEGY_RUNNER_FAILED"
+OUTPUT_INVALID = "STRATEGY_RUNNER_OUTPUT_INVALID"
+TEST_DATA_EXPOSED = "TEST_DATA_EXPOSED_TO_STRATEGY"
+_CLEANUP_RESERVE_SECONDS = 0.25
 
 
 class StrategyRunnerFailure(RuntimeError):
@@ -47,57 +52,96 @@ class DockerStrategyRunnerClient:
         self._seccomp_profile = seccomp_profile
         self._timeout_seconds = min(float(timeout_seconds), MAX_TIMEOUT_SECONDS)
         self._max_output_bytes = max_output_bytes
+        self._pending_cleanup_ids: set[str] = set()
+        self._api = getattr(docker_client, "api", None)
+        if self._api is None or not hasattr(self._api, "timeout"):
+            raise ValueError("docker client must expose a bounded request timeout")
+        self._api.timeout = min(float(self._api.timeout), self._timeout_seconds)
+
+    @property
+    def pending_cleanup_container_ids(self) -> tuple[str, ...]:
+        return tuple(sorted(self._pending_cleanup_ids))
+
+    def recover_pending_cleanup(self) -> tuple[str, ...]:
+        deadline = time.monotonic() + self._timeout_seconds
+        for container_id in tuple(self._pending_cleanup_ids):
+            try:
+                container = self._call(
+                    lambda value=container_id: (
+                        self._docker_client.containers.get(value)
+                    ),
+                    deadline,
+                )
+                self._call(
+                    lambda value=container: value.remove(force=True), deadline
+                )
+            except Exception:
+                continue
+            self._pending_cleanup_ids.discard(container_id)
+        return self.pending_cleanup_container_ids
 
     def run(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         _validate_payload(payload)
         archive = _build_input_archive(payload)
         container = None
+        deadline = time.monotonic() + self._timeout_seconds
         try:
-            container = self._docker_client.containers.create(
-                image=self._image,
-                detach=True,
-                network_disabled=True,
-                network_mode="none",
-                read_only=True,
-                user="65532:65532",
-                cap_drop=["ALL"],
-                security_opt=[
-                    "no-new-privileges:true",
-                    f"seccomp={self._seccomp_profile}",
-                ],
-                nano_cpus=1_000_000_000,
-                mem_limit="512m",
-                memswap_limit="512m",
-                pids_limit=32,
-                tmpfs={"/tmp": "rw,noexec,nosuid,nodev,size=64m"},
-                volumes={},
-                environment={},
-                working_dir="/tmp",
-                init=True,
-                log_config={
-                    "type": "local",
-                    "config": {"max-size": "128k", "max-file": "1"},
-                },
+            container = self._call(
+                lambda: self._docker_client.containers.create(
+                    image=self._image,
+                    detach=True,
+                    network_disabled=True,
+                    network_mode="none",
+                    read_only=True,
+                    user="65532:65532",
+                    cap_drop=["ALL"],
+                    security_opt=[
+                        "no-new-privileges:true",
+                        f"seccomp={self._seccomp_profile}",
+                    ],
+                    nano_cpus=1_000_000_000,
+                    mem_limit="512m",
+                    memswap_limit="512m",
+                    pids_limit=32,
+                    tmpfs={"/tmp": "rw,noexec,nosuid,nodev,size=64m"},
+                    volumes={},
+                    environment={},
+                    working_dir="/tmp",
+                    init=True,
+                    log_config={
+                        "type": "local",
+                        "config": {"max-size": "128k", "max-file": "1"},
+                    },
+                ),
+                deadline,
             )
-            container.put_archive("/tmp", archive)
-            container.start()
+            self._call(container.start, deadline)
+            self._call(lambda: container.put_archive("/tmp", archive), deadline)
             try:
-                wait_result = container.wait(timeout=self._timeout_seconds)
+                wait_timeout = max(
+                    0.001, self._remaining(deadline) - _CLEANUP_RESERVE_SECONDS
+                )
+                wait_result = self._call(
+                    lambda: container.wait(timeout=wait_timeout), deadline
+                )
             except (TimeoutError, ReadTimeout) as exc:
-                with suppress(Exception):
-                    container.kill()
+                self._best_effort_kill(container, deadline)
                 raise StrategyRunnerFailure(
-                    "STRATEGY_FORECAST_TIMEOUT", "strategy execution timed out"
+                    FORECAST_TIMEOUT, "strategy execution timed out"
                 ) from exc
 
-            container.reload()
+            self._call(container.reload, deadline)
             if bool(container.attrs.get("State", {}).get("OOMKilled")):
                 raise StrategyRunnerFailure(
                     "STRATEGY_RUNNER_OOM", "strategy exceeded its memory limit"
                 )
             status_code = int(wait_result.get("StatusCode", -1))
-            stdout = container.logs(stdout=True, stderr=False)
-            stderr = container.logs(stdout=False, stderr=True)
+            stdout = self._call(
+                lambda: container.logs(stdout=True, stderr=False), deadline
+            )
+            stderr = self._call(
+                lambda: container.logs(stdout=False, stderr=True), deadline
+            )
             if len(stdout) + len(stderr) > self._max_output_bytes:
                 raise StrategyRunnerFailure(
                     "STRATEGY_RUNNER_OUTPUT_TOO_LARGE",
@@ -105,59 +149,96 @@ class DockerStrategyRunnerClient:
                 )
             if status_code != 0:
                 raise StrategyRunnerFailure(
-                    "STRATEGY_RUNNER_FAILED", "strategy runner exited unsuccessfully"
+                    RUNNER_FAILED, "strategy runner exited unsuccessfully"
                 )
             try:
                 result = json.loads(stdout)
             except (UnicodeDecodeError, json.JSONDecodeError) as exc:
                 raise StrategyRunnerFailure(
-                    "STRATEGY_RUNNER_OUTPUT_INVALID",
+                    OUTPUT_INVALID,
                     "strategy runner returned invalid output",
                 ) from exc
             if not isinstance(result, Mapping):
                 raise StrategyRunnerFailure(
-                    "STRATEGY_RUNNER_OUTPUT_INVALID",
+                    OUTPUT_INVALID,
                     "strategy runner returned invalid output",
                 )
             return result
         except StrategyRunnerFailure:
             raise
+        except (TimeoutError, ReadTimeout) as exc:
+            if container is not None:
+                self._best_effort_kill(container, deadline)
+            raise StrategyRunnerFailure(
+                FORECAST_TIMEOUT, "strategy runner exceeded its deadline"
+            ) from exc
         except Exception as exc:
             raise StrategyRunnerFailure(
-                "STRATEGY_RUNNER_FAILED", "strategy runner could not be executed"
+                RUNNER_FAILED, "strategy runner could not be executed"
             ) from exc
         finally:
             if container is not None:
-                with suppress(Exception):
-                    container.remove(force=True)
+                self._best_effort_remove(container, deadline)
+
+    def _call(self, operation: Any, deadline: float) -> Any:
+        remaining = self._remaining(deadline)
+        self._api.timeout = min(remaining, MAX_TIMEOUT_SECONDS)
+        return operation()
+
+    @staticmethod
+    def _remaining(deadline: float) -> float:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("strategy runner deadline expired")
+        return remaining
+
+    def _best_effort_kill(self, container: Any, deadline: float) -> None:
+        try:
+            self._call(container.kill, deadline)
+        except Exception:
+            self._record_pending_cleanup(container)
+
+    def _best_effort_remove(self, container: Any, deadline: float) -> None:
+        try:
+            self._call(lambda: container.remove(force=True), deadline)
+        except Exception:
+            self._record_pending_cleanup(container)
+        else:
+            container_id = getattr(container, "id", None)
+            if isinstance(container_id, str):
+                self._pending_cleanup_ids.discard(container_id)
+
+    def _record_pending_cleanup(self, container: Any) -> None:
+        container_id = getattr(container, "id", None)
+        if isinstance(container_id, str) and container_id:
+            self._pending_cleanup_ids.add(container_id)
 
 
 def _validate_payload(payload: Mapping[str, object]) -> None:
     if set(payload) != PAYLOAD_FIELDS:
         raise StrategyRunnerFailure(
-            "TEST_DATA_EXPOSED_TO_STRATEGY", "runner payload contains forbidden fields"
+            TEST_DATA_EXPOSED, "runner payload contains forbidden fields"
         )
+    source_code = payload.get("source_code")
+    parameters = payload.get("parameters")
     context = payload.get("context")
+    history = payload.get("history")
     if not isinstance(context, Mapping) or set(context) != CONTEXT_FIELDS:
         raise StrategyRunnerFailure(
-            "TEST_DATA_EXPOSED_TO_STRATEGY", "runner context contains forbidden fields"
+            TEST_DATA_EXPOSED, "runner context contains forbidden fields"
         )
-    if _contains_test_field(payload):
+    if (
+        not isinstance(source_code, str)
+        or not isinstance(parameters, Mapping)
+        or not isinstance(history, list)
+        or any(
+            not isinstance(row, Mapping) or set(row) != set(HISTORY_COLUMNS)
+            for row in history
+        )
+    ):
         raise StrategyRunnerFailure(
-            "TEST_DATA_EXPOSED_TO_STRATEGY", "runner payload contains test-period data"
+            TEST_DATA_EXPOSED, "runner payload was not built from a training snapshot"
         )
-
-
-def _contains_test_field(value: object) -> bool:
-    if isinstance(value, Mapping):
-        return any(
-            (isinstance(key, str) and (key == "test" or key.startswith("test_")))
-            or _contains_test_field(item)
-            for key, item in value.items()
-        )
-    if isinstance(value, (list, tuple)):
-        return any(_contains_test_field(item) for item in value)
-    return False
 
 
 def _build_input_archive(payload: Mapping[str, object]) -> bytes:
@@ -169,6 +250,10 @@ def _build_input_archive(payload: Mapping[str, object]) -> bytes:
         info = tarfile.TarInfo("input.json")
         info.size = len(encoded)
         info.mode = 0o400
+        info.uid = 65532
+        info.gid = 65532
+        info.uname = "nonroot"
+        info.gname = "nonroot"
         info.mtime = 0
         archive.addfile(info, io.BytesIO(encoded))
     return stream.getvalue()

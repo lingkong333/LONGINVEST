@@ -18,7 +18,9 @@ MAX_TIMEOUT_SECONDS = 10.0
 MAX_OUTPUT_BYTES = 128 * 1024
 MAX_SECCOMP_PROFILE_BYTES = 64 * 1024
 TRUSTED_SECCOMP_PROFILE_PATH = Path("/etc/long-invest/seccomp.json")
-_DIGEST_PINNED_IMAGE = re.compile(r"^.+@sha256:[0-9a-f]{64}$")
+_DIGEST_PINNED_IMAGE = re.compile(
+    r"^(?:sha256:[0-9a-f]{64}|.+@sha256:[0-9a-f]{64})$"
+)
 _WORKER_ID = re.compile(r"^[A-Za-z0-9_.-]{1,63}$")
 FORECAST_TIMEOUT = "STRATEGY_FORECAST_TIMEOUT"
 RUNNER_FAILED = "STRATEGY_RUNNER_FAILED"

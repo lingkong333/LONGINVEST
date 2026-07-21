@@ -1,6 +1,23 @@
 name: longinvest
 
 services:
+  strategy-runner-image:
+    profiles: ["strategy-runner-build"]
+    image: ${LONGINVEST_STRATEGY_RUNNER_IMAGE:-longinvest-strategy-runner:local}
+    build:
+      context: ..
+      dockerfile: deploy/docker/strategy-runner.Dockerfile
+    network_mode: none
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
+    mem_limit: 512m
+    pids_limit: 32
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=./security/strategy-runner-seccomp.json
+
   postgres:
     image: postgres:16-alpine
     environment:

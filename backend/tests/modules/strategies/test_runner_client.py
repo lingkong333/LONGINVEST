@@ -317,6 +317,16 @@ def test_runner_requires_digest_pinned_image() -> None:
         )
 
 
+def test_runner_accepts_local_immutable_image_id() -> None:
+    client = DockerStrategyRunnerClient(
+        docker_client=FakeDockerClient(FakeContainer()),
+        image="sha256:" + "b" * 64,
+        worker_id="worker-1",
+    )
+
+    assert client is not None
+
+
 def test_runner_records_failed_cleanup_and_can_recover_it() -> None:
     container = FakeContainer(remove_error=TimeoutError("docker unavailable"))
     client, _ = _client(container)

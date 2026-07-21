@@ -240,6 +240,14 @@ def test_expression_signatures_preserve_ordered_sql_semantics() -> None:
     ) != _check_signature("status IN ('FAILED','READY')", columns)
 
 
+def test_postgres_check_definition_keeps_separate_parenthesized_groups() -> None:
+    definition = "CHECK ((value IS NULL OR value > 0) AND (status IS NOT NULL))"
+
+    assert _unwrap_postgres_check_definition(definition) == (
+        "(value IS NULL OR value > 0) AND (status IS NOT NULL)"
+    )
+
+
 def test_expression_signatures_ignore_postgres_equivalent_wrapping() -> None:
     columns = [{"name": "status"}]
 
@@ -795,10 +803,9 @@ def _inspect_schema(sync_session):
                 tuple(item["column_names"])
                 for item in inspector.get_unique_constraints(table_name)
             },
-            "check_constraints": {
-                item["name"]: _check_signature(item["sqltext"], columns)
-                for item in inspector.get_check_constraints(table_name)
-            },
+            "check_constraints": _inspect_check_constraints(
+                sync_session, table_name, columns
+            ),
             "indexes": {
                 (item["name"], tuple(item["column_names"]), item["unique"])
                 for item in inspector.get_indexes(table_name)
@@ -806,6 +813,41 @@ def _inspect_schema(sync_session):
             },
         }
     return snapshot
+
+
+def _inspect_check_constraints(sync_session, table_name: str, columns):
+    rows = sync_session.execute(
+        text(
+            "SELECT constraint_record.conname AS name, "
+            "pg_get_constraintdef(constraint_record.oid, true) AS definition "
+            "FROM pg_constraint AS constraint_record "
+            "JOIN pg_class AS table_record "
+            "ON table_record.oid = constraint_record.conrelid "
+            "JOIN pg_namespace AS namespace_record "
+            "ON namespace_record.oid = table_record.relnamespace "
+            "WHERE constraint_record.contype = 'c' "
+            "AND table_record.relname = :table_name "
+            "AND namespace_record.nspname = current_schema()"
+        ),
+        {"table_name": table_name},
+    ).mappings()
+    return {
+        row["name"]: _check_signature(
+            _unwrap_postgres_check_definition(row["definition"]), columns
+        )
+        for row in rows
+    }
+
+
+def _unwrap_postgres_check_definition(definition: str) -> str:
+    match = re.fullmatch(
+        r"CHECK\s*\((.*)\)(?: NO INHERIT)?(?: NOT VALID)?",
+        definition,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise AssertionError(f"unsupported PostgreSQL CHECK definition: {definition!r}")
+    return match.group(1)
 
 
 def _run_alembic(environment: dict[str, str], command: str, revision: str) -> None:

@@ -83,6 +83,7 @@ class SubscriptionPort:
             created_at=NOW,
         )
         self.session.add(revision)
+        await self.session.flush()
         self.owner.current_revision_id = revision.id
         self.owner.version += 1
         await self.session.flush()

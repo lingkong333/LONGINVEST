@@ -179,6 +179,12 @@ class TargetCalculationRun(Base):
             "(current_target_version IS NULL OR current_target_version > 0)",
             name="versions_positive",
         ),
+        Index(
+            "ix_target_calculation_run_subscription_created",
+            "subscription_id",
+            "created_at",
+        ),
+        Index("ix_target_calculation_run_status", "status"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -235,6 +241,8 @@ class TargetReview(Base):
             "baseline_revision_id <> candidate_revision_id",
             name="distinct_revisions",
         ),
+        Index("ix_target_review_status_created", "status", "created_at"),
+        Index("ix_target_review_candidate", "candidate_revision_id"),
     )
 
     id: Mapped[UUID] = mapped_column(

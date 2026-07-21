@@ -1,4 +1,5 @@
 import os
+import re
 import subprocess
 import sys
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from sqlalchemy import inspect, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.schema import UniqueConstraint
 
 from long_invest.modules.backtests.models import BacktestTask
 from long_invest.modules.strategies.models import Strategy
@@ -44,6 +46,21 @@ TABLES = (
     "target_calculation_run",
     "target_review",
 )
+EXPECTED_INDEXES = {
+    "ix_strategy_status",
+    "ix_strategy_validation_run_status",
+    "ix_strategy_run_strategy_version_status",
+    "ix_backtest_task_status_created",
+    "ix_backtest_task_strategy_version",
+    "ix_backtest_item_task_status",
+    "ix_backtest_item_security",
+    "ix_backtest_order_item_status",
+    "ix_backtest_trade_item_execute_date",
+    "ix_target_calculation_run_subscription_created",
+    "ix_target_calculation_run_status",
+    "ix_target_review_status_created",
+    "ix_target_review_candidate",
+}
 
 
 def test_strategy_backtest_migration_is_the_single_head() -> None:
@@ -84,6 +101,29 @@ def test_strategy_backtest_migration_declares_all_tables_and_constraints() -> No
         "fk_target_revision_strategy_version_id_strategy_version",
     ):
         assert constraint in source
+    assert "ck_target_revision_source_valid" in source
+    assert "ck_target_revision_source_revision_consistent" in source
+    for index_name in EXPECTED_INDEXES:
+        assert index_name in source
+
+
+def test_new_constraint_and_index_names_are_globally_unique() -> None:
+    relation_names: list[str] = list(TABLES)
+    for table_name in TABLES:
+        table = Base.metadata.tables[table_name]
+        relation_names.extend(
+            constraint.name
+            for constraint in table.constraints
+            if isinstance(constraint, UniqueConstraint)
+        )
+        relation_names.extend(index.name for index in table.indexes)
+
+    assert len(relation_names) == len(set(relation_names))
+    assert {
+        index.name
+        for table_name in TABLES
+        for index in Base.metadata.tables[table_name].indexes
+    } >= EXPECTED_INDEXES
 
 
 @pytest.fixture
@@ -103,10 +143,15 @@ async def test_strategy_backtest_migration_lifecycle_and_constraints() -> None:
     settings = AppSettings(_env_file=None)
     database_name = f"longinvest_sb_{uuid4().hex}"
     owner_base = make_url(settings.database_owner_url)
+    app_base = make_url(settings.database_url)
     maintenance_url = owner_base.set(database="postgres")
     owner_url = owner_base.set(database=database_name)
+    app_url = app_base.set(database=database_name)
     migration_env = os.environ.copy()
     migration_env["LONGINVEST_DATABASE_OWNER_URL"] = owner_url.render_as_string(
+        hide_password=False
+    )
+    migration_env["LONGINVEST_DATABASE_URL"] = app_url.render_as_string(
         hide_password=False
     )
 
@@ -121,7 +166,43 @@ async def test_strategy_backtest_migration_lifecycle_and_constraints() -> None:
         _run_alembic(migration_env, "downgrade", PREVIOUS_REVISION)
         await _assert_downgraded(owner_url)
         _run_alembic(migration_env, "upgrade", "head")
-        await _assert_upgraded(owner_url)
+        await _assert_upgraded(owner_url, app_url=app_url, test_constraints=True)
+
+
+@pytest.mark.skipif(
+    os.getenv("LONGINVEST_STRATEGY_BACKTEST_MIGRATION_TESTS") != "1",
+    reason=(
+        "set LONGINVEST_STRATEGY_BACKTEST_MIGRATION_TESTS=1 "
+        "for PostgreSQL migration tests"
+    ),
+)
+@pytest.mark.anyio
+async def test_legacy_target_hashes_are_checked_before_upgrade() -> None:
+    settings = AppSettings(_env_file=None)
+    owner_base = make_url(settings.database_owner_url)
+    for legacy_hash, succeeds in (("A" * 64, False), ("a" * 64, True)):
+        database_name = f"longinvest_legacy_{uuid4().hex}"
+        maintenance = create_async_engine(
+            owner_base.set(database="postgres"),
+            isolation_level="AUTOCOMMIT",
+            pool_pre_ping=True,
+        )
+        owner_url = owner_base.set(database=database_name)
+        migration_env = os.environ.copy()
+        migration_env["LONGINVEST_DATABASE_OWNER_URL"] = (
+            owner_url.render_as_string(hide_password=False)
+        )
+        async with _temporary_database(maintenance, database_name):
+            _run_alembic(migration_env, "upgrade", PREVIOUS_REVISION)
+            await _insert_legacy_target(owner_url, legacy_hash)
+            if succeeds:
+                _run_alembic(migration_env, "upgrade", "head")
+                await _assert_upgraded(owner_url)
+            else:
+                failure = _run_alembic_failure(
+                    migration_env, "upgrade", "head"
+                )
+                assert "non-lowercase SHA-256 values" in failure.stderr
 
 
 @asynccontextmanager
@@ -153,7 +234,70 @@ def _run_alembic(environment: dict[str, str], command: str, revision: str) -> No
     )
 
 
-async def _assert_upgraded(owner_url) -> None:
+def _run_alembic_failure(
+    environment: dict[str, str], command: str, revision: str
+) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(
+        [sys.executable, "-m", "alembic", command, revision],
+        cwd=BACKEND,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    assert result.returncode != 0
+    return result
+
+
+async def _insert_legacy_target(owner_url, content_hash: str) -> None:
+    database = Database(owner_url.render_as_string(hide_password=False))
+    security_id = uuid4()
+    subscription_id = uuid4()
+    try:
+        async with database.transaction() as session:
+            await session.execute(
+                text(
+                    "INSERT INTO security "
+                    "(id, symbol, exchange_code, name, market, security_type, "
+                    "listing_status, provider_codes, master_version, source, "
+                    "source_version) VALUES "
+                    "(:id, '600000.SH', 'SH', 'T', 'SH', 'A_SHARE', 'LISTED', "
+                    "'{}'::jsonb, 1, 'test', '1')"
+                ),
+                {"id": security_id},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO monitor_subscription "
+                    "(id, security_id, symbol, status, version) VALUES "
+                    "(:id, :security_id, '600000.SH', 'CONFIGURING', 1)"
+                ),
+                {"id": subscription_id, "security_id": security_id},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO target_revision "
+                    "(id, subscription_id, revision_no, low_strong, low_watch, "
+                    "high_watch, high_strong, source, target_date, "
+                    "parameter_snapshot, content_hash, reason, "
+                    "large_change_confirmed, request_id, idempotency_key, "
+                    "actor_user_id, session_id, trusted_ip) VALUES "
+                    "(:id, :subscription_id, 1, 8, 9, 12, 13, 'MANUAL', "
+                    "CURRENT_DATE, '{}'::jsonb, :hash, 'test', false, "
+                    "'request', 'legacy', 'user', 'session', '127.0.0.1')"
+                ),
+                {
+                    "id": uuid4(),
+                    "subscription_id": subscription_id,
+                    "hash": content_hash,
+                },
+            )
+    finally:
+        await database.dispose()
+
+
+async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -> None:
     database = Database(owner_url.render_as_string(hide_password=False))
     try:
         async with database.session() as session:
@@ -168,9 +312,14 @@ async def _assert_upgraded(owner_url) -> None:
             )
             assert set(TABLES) <= existing
             await session.run_sync(_assert_schema_matches_models)
+            await _assert_target_source_constraint_sql(session)
+
+        if not test_constraints:
+            return
 
         strategy_id = uuid4()
         strategy_version_id = uuid4()
+        validation_run_id = uuid4()
         security_id = uuid4()
         subscription_id = uuid4()
         async with database.transaction() as session:
@@ -215,6 +364,54 @@ async def _assert_upgraded(owner_url) -> None:
                     "(:id, :security_id, '600000.SH', 'CONFIGURING', 1)"
                 ),
                 {"id": subscription_id, "security_id": security_id},
+            )
+            await session.execute(
+                text(
+                    "INSERT INTO strategy_validation_run "
+                    "(id, strategy_version_id, status) "
+                    "VALUES (:id, :strategy_version_id, 'SUCCEEDED')"
+                ),
+                {
+                    "id": validation_run_id,
+                    "strategy_version_id": strategy_version_id,
+                },
+            )
+            await session.execute(
+                text(
+                    "UPDATE strategy_version SET status = 'PUBLISHED', "
+                    "validation_run_id = :validation_run_id, "
+                    "git_commit = :git_commit, published_at = now() "
+                    "WHERE id = :id"
+                ),
+                {
+                    "id": strategy_version_id,
+                    "validation_run_id": validation_run_id,
+                    "git_commit": "c" * 40,
+                },
+            )
+
+        valid_target = (
+            "INSERT INTO target_revision "
+            "(id, subscription_id, revision_no, low_strong, low_watch, "
+            "high_watch, high_strong, source, target_date, strategy_version_id, "
+            "parameter_snapshot, content_hash, reason, large_change_confirmed, "
+            "request_id, idempotency_key, actor_user_id, session_id, trusted_ip) "
+            "VALUES (:id, :subscription_id, :revision, 8, 9, 12, 13, :source, "
+            "CURRENT_DATE, :strategy_version_id, '{}'::jsonb, :hash, 'test', "
+            "false, 'request', :idempotency_key, 'user', 'session', '127.0.0.1')"
+        )
+        async with database.transaction() as session:
+            await session.execute(
+                text(valid_target),
+                {
+                    "id": uuid4(),
+                    "subscription_id": subscription_id,
+                    "revision": 10,
+                    "source": "STRATEGY",
+                    "strategy_version_id": strategy_version_id,
+                    "hash": "b" * 64,
+                    "idempotency_key": "valid-strategy",
+                },
             )
 
         with pytest.raises(DBAPIError) as invalid_hash_error:
@@ -306,6 +503,37 @@ async def _assert_upgraded(owner_url) -> None:
         assert "fk_strategy_version_strategy_id_strategy" in str(
             orphan_version_error.value.orig
         )
+
+        assert app_url is not None
+        application = Database(app_url.render_as_string(hide_password=False))
+        try:
+            async with application.session() as session:
+                assert await session.scalar(
+                    text(
+                        "SELECT has_table_privilege(current_user, "
+                        "'strategy_version', 'UPDATE')"
+                    )
+                ) is True
+                assert await session.scalar(
+                    text(
+                        "SELECT has_table_privilege(current_user, "
+                        "'backtest_forecast_snapshot', 'UPDATE')"
+                    )
+                ) is False
+            with pytest.raises(DBAPIError) as immutable_version_error:
+                async with application.transaction() as session:
+                    await session.execute(
+                        text(
+                            "UPDATE strategy_version SET source_code = 'changed' "
+                            "WHERE id = :id"
+                        ),
+                        {"id": strategy_version_id},
+                    )
+            assert "published strategy version facts are immutable" in str(
+                immutable_version_error.value.orig
+            )
+        finally:
+            await application.dispose()
     finally:
         await database.dispose()
 
@@ -365,6 +593,17 @@ def _assert_schema_matches_models(sync_session) -> None:
         }
         assert actual_unique_constraints == expected_unique_constraints
 
+        expected_indexes = {
+            (index.name, tuple(column.name for column in index.columns))
+            for index in model_table.indexes
+        }
+        actual_indexes = {
+            (index["name"], tuple(index["column_names"]))
+            for index in inspector.get_indexes(table_name)
+            if "duplicates_constraint" not in index
+        }
+        assert actual_indexes == expected_indexes
+
         expected_foreign_keys = {
             (
                 tuple(foreign_key.parent.name for foreign_key in constraint.elements),
@@ -392,3 +631,38 @@ def _assert_schema_matches_models(sync_session) -> None:
             for foreign_key in inspector.get_foreign_keys(table_name)
         }
         assert actual_foreign_keys == expected_foreign_keys
+
+
+async def _assert_target_source_constraint_sql(session) -> None:
+    rows = (
+        await session.execute(
+            text(
+                "SELECT conname, pg_get_constraintdef(oid, true) AS definition "
+                "FROM pg_constraint WHERE conrelid = 'target_revision'::regclass "
+                "AND conname IN ('ck_target_revision_source_valid', "
+                "'ck_target_revision_source_revision_consistent')"
+            )
+        )
+    ).mappings()
+    definitions = {row["conname"]: row["definition"] for row in rows}
+
+    expected_source_sql = next(
+        str(constraint.sqltext)
+        for constraint in Base.metadata.tables["target_revision"].constraints
+        if constraint.name == "ck_target_revision_source_valid"
+    )
+    expected_sources = set(re.findall(r"'([A-Z_]+)'", expected_source_sql))
+    actual_sources = set(
+        re.findall(
+            r"'([A-Z_]+)'",
+            definitions["ck_target_revision_source_valid"],
+        )
+    )
+    assert actual_sources == expected_sources
+
+    revision_definition = definitions[
+        "ck_target_revision_source_revision_consistent"
+    ].lower()
+    assert revision_definition.count("restored") == 2
+    assert "source_revision_id is not null" in revision_definition
+    assert "source_revision_id is null" in revision_definition

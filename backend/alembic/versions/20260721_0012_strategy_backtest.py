@@ -98,6 +98,137 @@ def _protect_immutable_facts() -> None:
         )
 
 
+def _validate_target_revision_history() -> None:
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM target_revision
+                WHERE content_hash !~ '^[0-9a-f]{64}$'
+                   OR (source_code_hash IS NOT NULL
+                       AND source_code_hash !~ '^[0-9a-f]{64}$')
+            ) THEN
+                RAISE EXCEPTION
+                    'stage4 migration blocked: target_revision contains '
+                    'non-lowercase SHA-256 values';
+            END IF;
+        END;
+        $$
+        """
+    )
+
+
+def _protect_published_strategy_versions() -> None:
+    op.execute(
+        """
+        CREATE FUNCTION protect_published_strategy_version()
+        RETURNS trigger AS $$
+        BEGIN
+            IF OLD.status IN ('PUBLISHED', 'ARCHIVED') THEN
+                IF ROW(
+                    NEW.id, NEW.strategy_id, NEW.version_no,
+                    NEW.source_code_hash, NEW.source_code,
+                    NEW.metadata, NEW.parameter_schema,
+                    NEW.environment_version, NEW.runner_image_digest,
+                    NEW.git_commit, NEW.validation_run_id,
+                    NEW.published_at, NEW.created_at
+                ) IS DISTINCT FROM ROW(
+                    OLD.id, OLD.strategy_id, OLD.version_no,
+                    OLD.source_code_hash, OLD.source_code,
+                    OLD.metadata, OLD.parameter_schema,
+                    OLD.environment_version, OLD.runner_image_digest,
+                    OLD.git_commit, OLD.validation_run_id,
+                    OLD.published_at, OLD.created_at
+                ) THEN
+                    RAISE EXCEPTION
+                        'published strategy version facts are immutable';
+                END IF;
+                IF OLD.status = 'ARCHIVED' AND NEW.status <> 'ARCHIVED' THEN
+                    RAISE EXCEPTION 'archived strategy version is immutable';
+                END IF;
+                IF OLD.status = 'PUBLISHED'
+                   AND NEW.status NOT IN ('PUBLISHED', 'ARCHIVED') THEN
+                    RAISE EXCEPTION
+                        'published strategy version can only be archived';
+                END IF;
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    )
+    op.execute(
+        "CREATE TRIGGER strategy_version_published_immutable "
+        "BEFORE UPDATE ON strategy_version FOR EACH ROW "
+        "EXECUTE FUNCTION protect_published_strategy_version()"
+    )
+
+
+def _create_indexes() -> None:
+    indexes = (
+        ("ix_strategy_status", "strategy", ("status",)),
+        (
+            "ix_strategy_validation_run_status",
+            "strategy_validation_run",
+            ("status",),
+        ),
+        (
+            "ix_strategy_run_strategy_version_status",
+            "strategy_run",
+            ("strategy_version_id", "status"),
+        ),
+        (
+            "ix_backtest_task_status_created",
+            "backtest_task",
+            ("status", "created_at"),
+        ),
+        (
+            "ix_backtest_task_strategy_version",
+            "backtest_task",
+            ("strategy_version_id",),
+        ),
+        (
+            "ix_backtest_item_task_status",
+            "backtest_item",
+            ("task_id", "status"),
+        ),
+        ("ix_backtest_item_security", "backtest_item", ("security_id",)),
+        (
+            "ix_backtest_order_item_status",
+            "backtest_order",
+            ("item_id", "status"),
+        ),
+        (
+            "ix_backtest_trade_item_execute_date",
+            "backtest_trade",
+            ("item_id", "execute_date"),
+        ),
+        (
+            "ix_target_calculation_run_subscription_created",
+            "target_calculation_run",
+            ("subscription_id", "created_at"),
+        ),
+        (
+            "ix_target_calculation_run_status",
+            "target_calculation_run",
+            ("status",),
+        ),
+        (
+            "ix_target_review_status_created",
+            "target_review",
+            ("status", "created_at"),
+        ),
+        (
+            "ix_target_review_candidate",
+            "target_review",
+            ("candidate_revision_id",),
+        ),
+    )
+    for index_name, table_name, columns in indexes:
+        op.create_index(index_name, table_name, list(columns), unique=False)
+
+
 def _create_strategy_tables() -> None:
     op.create_table(
         "strategy",
@@ -127,7 +258,9 @@ def _create_strategy_tables() -> None:
             name=op.f("fk_strategy_draft_strategy_id_strategy"),
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_strategy_draft")),
-        sa.UniqueConstraint("strategy_id", name="strategy"),
+        sa.UniqueConstraint(
+            "strategy_id", name="uq_strategy_draft_strategy_id"
+        ),
     )
     op.create_table(
         "strategy_draft_revision",
@@ -149,7 +282,11 @@ def _create_strategy_tables() -> None:
         sa.PrimaryKeyConstraint(
             "id", name=op.f("pk_strategy_draft_revision")
         ),
-        sa.UniqueConstraint("draft_id", "revision_no", name="draft_revision"),
+        sa.UniqueConstraint(
+            "draft_id",
+            "revision_no",
+            name="uq_strategy_draft_revision_draft_id_revision_no",
+        ),
     )
     op.create_table(
         "strategy_validation_run",
@@ -229,7 +366,11 @@ def _create_strategy_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_strategy_version")),
-        sa.UniqueConstraint("strategy_id", "version_no", name="version_number"),
+        sa.UniqueConstraint(
+            "strategy_id",
+            "version_no",
+            name="uq_strategy_version_strategy_id_version_no",
+        ),
     )
     op.create_foreign_key(
         op.f(
@@ -377,7 +518,9 @@ def _create_backtest_root_tables() -> None:
         sa.PrimaryKeyConstraint(
             "id", name=op.f("pk_backtest_universe_snapshot")
         ),
-        sa.UniqueConstraint("task_id", name="task"),
+        sa.UniqueConstraint(
+            "task_id", name="uq_backtest_universe_snapshot_task_id"
+        ),
     )
     op.create_table(
         "backtest_item",
@@ -451,7 +594,11 @@ def _create_backtest_root_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_item")),
-        sa.UniqueConstraint("task_id", "security_id", name="task_security"),
+        sa.UniqueConstraint(
+            "task_id",
+            "security_id",
+            name="uq_backtest_item_task_id_security_id",
+        ),
     )
 
 
@@ -527,7 +674,9 @@ def _create_backtest_snapshot_tables() -> None:
         sa.PrimaryKeyConstraint(
             "id", name=op.f("pk_backtest_forecast_snapshot")
         ),
-        sa.UniqueConstraint("item_id", name="item"),
+        sa.UniqueConstraint(
+            "item_id", name="uq_backtest_forecast_snapshot_item_id"
+        ),
     )
     adjustment_columns = (
         "before_low_strong",
@@ -587,7 +736,11 @@ def _create_backtest_snapshot_tables() -> None:
         sa.PrimaryKeyConstraint(
             "id", name=op.f("pk_backtest_target_adjustment")
         ),
-        sa.UniqueConstraint("item_id", "event_date", name="item_event_date"),
+        sa.UniqueConstraint(
+            "item_id",
+            "event_date",
+            name="uq_backtest_target_adjustment_item_id_event_date",
+        ),
     )
 
 
@@ -670,7 +823,10 @@ def _create_backtest_result_tables() -> None:
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_order")),
         sa.UniqueConstraint(
-            "item_id", "signal_date", "direction", name="item_signal_direction"
+            "item_id",
+            "signal_date",
+            "direction",
+            name="uq_backtest_order_item_id_signal_date_direction",
         ),
     )
     op.create_table(
@@ -740,7 +896,7 @@ def _create_backtest_result_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_trade")),
-        sa.UniqueConstraint("order_id", name="order"),
+        sa.UniqueConstraint("order_id", name="uq_backtest_trade_order_id"),
     )
     required_metric_columns = (
         "ending_equity",
@@ -816,7 +972,7 @@ def _create_backtest_result_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_metric")),
-        sa.UniqueConstraint("item_id", name="item"),
+        sa.UniqueConstraint("item_id", name="uq_backtest_metric_item_id"),
     )
     daily_numeric_columns = (
         "cash",
@@ -874,7 +1030,11 @@ def _create_backtest_result_tables() -> None:
         sa.PrimaryKeyConstraint(
             "id", name=op.f("pk_backtest_daily_result")
         ),
-        sa.UniqueConstraint("item_id", "trade_date", name="item_trade_date"),
+        sa.UniqueConstraint(
+            "item_id",
+            "trade_date",
+            name="uq_backtest_daily_result_item_id_trade_date",
+        ),
     )
 
 
@@ -1007,12 +1167,24 @@ def _create_target_workflow_tables() -> None:
 
 
 def upgrade() -> None:
+    _validate_target_revision_history()
     _create_strategy_tables()
     _create_backtest_root_tables()
     _create_backtest_snapshot_tables()
     _create_backtest_result_tables()
     _create_target_workflow_tables()
+    _create_indexes()
 
+    op.drop_constraint(
+        "ck_target_revision_source_valid",
+        "target_revision",
+        type_="check",
+    )
+    op.drop_constraint(
+        "ck_target_revision_source_revision_consistent",
+        "target_revision",
+        type_="check",
+    )
     op.drop_constraint(
         "ck_target_revision_content_hash_sha256",
         "target_revision",
@@ -1022,6 +1194,18 @@ def upgrade() -> None:
         "ck_target_revision_source_code_hash_sha256",
         "target_revision",
         type_="check",
+    )
+    op.create_check_constraint(
+        op.f("ck_target_revision_source_valid"),
+        "target_revision",
+        "source IN ('MANUAL','STRATEGY','RESTORED','DATA_CORRECTION',"
+        "'STRATEGY_CHANGE','PARAMETER_CHANGE')",
+    )
+    op.create_check_constraint(
+        op.f("ck_target_revision_source_revision_consistent"),
+        "target_revision",
+        "(source = 'RESTORED' AND source_revision_id IS NOT NULL) OR "
+        "(source <> 'RESTORED' AND source_revision_id IS NULL)",
     )
     op.create_check_constraint(
         op.f("ck_target_revision_content_hash_sha256"),
@@ -1049,6 +1233,7 @@ def upgrade() -> None:
     )
 
     _protect_immutable_facts()
+    _protect_published_strategy_versions()
     role = _application_role()
     op.execute(f"GRANT SELECT, INSERT ON TABLE {', '.join(TABLES)} TO {role}")
     op.execute(f"GRANT UPDATE ON TABLE {', '.join(MUTABLE_TABLES)} TO {role}")
@@ -1057,6 +1242,29 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        """
+        DO $$
+        BEGIN
+            IF EXISTS (
+                SELECT 1 FROM target_revision
+                WHERE source NOT IN ('MANUAL', 'RESTORED')
+                   OR (source = 'RESTORED' AND source_revision_id IS NULL)
+                   OR (source = 'MANUAL' AND source_revision_id IS NOT NULL)
+            ) THEN
+                RAISE EXCEPTION
+                    'stage4 downgrade blocked: target_revision contains '
+                    'sources unsupported by revision 0011';
+            END IF;
+        END;
+        $$
+        """
+    )
+    op.execute(
+        "DROP TRIGGER IF EXISTS strategy_version_published_immutable "
+        "ON strategy_version"
+    )
+    op.execute("DROP FUNCTION IF EXISTS protect_published_strategy_version")
     for table_name in reversed(IMMUTABLE_TABLES):
         op.execute(
             f"DROP TRIGGER IF EXISTS {table_name}_append_only ON {table_name}"
@@ -1072,6 +1280,27 @@ def downgrade() -> None:
         op.f("ck_target_revision_strategy_version_consistent"),
         "target_revision",
         type_="check",
+    )
+    op.drop_constraint(
+        op.f("ck_target_revision_source_revision_consistent"),
+        "target_revision",
+        type_="check",
+    )
+    op.drop_constraint(
+        op.f("ck_target_revision_source_valid"),
+        "target_revision",
+        type_="check",
+    )
+    op.create_check_constraint(
+        op.f("ck_target_revision_source_valid"),
+        "target_revision",
+        "source IN ('MANUAL','RESTORED')",
+    )
+    op.create_check_constraint(
+        op.f("ck_target_revision_source_revision_consistent"),
+        "target_revision",
+        "(source = 'RESTORED' AND source_revision_id IS NOT NULL) OR "
+        "(source = 'MANUAL' AND source_revision_id IS NULL)",
     )
     op.drop_constraint(
         op.f("ck_target_revision_source_code_hash_sha256"),

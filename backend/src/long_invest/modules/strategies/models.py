@@ -6,6 +6,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -21,7 +22,11 @@ from long_invest.platform.database.base import Base
 class StrategyVersion(Base):
     __tablename__ = "strategy_version"
     __table_args__ = (
-        UniqueConstraint("strategy_id", "version_no", name="version_number"),
+        UniqueConstraint(
+            "strategy_id",
+            "version_no",
+            name="uq_strategy_version_strategy_id_version_no",
+        ),
         CheckConstraint("version_no > 0", name="version_positive"),
         CheckConstraint(
             "source_code_hash ~ '^[0-9a-f]{64}$'",
@@ -80,6 +85,7 @@ class Strategy(Base):
             "'PUBLISHED','PUBLISH_FAILED','ARCHIVED')",
             name="status_valid",
         ),
+        Index("ix_strategy_status", "status"),
     )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
@@ -91,7 +97,9 @@ class Strategy(Base):
 class StrategyDraft(Base):
     __tablename__ = "strategy_draft"
     __table_args__ = (
-        UniqueConstraint("strategy_id", name="strategy"),
+        UniqueConstraint(
+            "strategy_id", name="uq_strategy_draft_strategy_id"
+        ),
         CheckConstraint("draft_version > 0", name="version_positive"),
     )
     id: Mapped[UUID] = mapped_column(
@@ -107,7 +115,11 @@ class StrategyDraft(Base):
 class StrategyDraftRevision(Base):
     __tablename__ = "strategy_draft_revision"
     __table_args__ = (
-        UniqueConstraint("draft_id", "revision_no", name="draft_revision"),
+        UniqueConstraint(
+            "draft_id",
+            "revision_no",
+            name="uq_strategy_draft_revision_draft_id_revision_no",
+        ),
         CheckConstraint("revision_no > 0", name="revision_positive"),
     )
     id: Mapped[UUID] = mapped_column(
@@ -127,6 +139,7 @@ class StrategyValidationRun(Base):
             "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED')",
             name="status_valid",
         ),
+        Index("ix_strategy_validation_run_status", "status"),
     )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
@@ -145,6 +158,11 @@ class StrategyRun(Base):
         CheckConstraint(
             "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED','CANCELED')",
             name="status_valid",
+        ),
+        Index(
+            "ix_strategy_run_strategy_version_status",
+            "strategy_version_id",
+            "status",
         ),
     )
     id: Mapped[UUID] = mapped_column(

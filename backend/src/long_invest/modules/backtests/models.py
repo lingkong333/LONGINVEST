@@ -9,6 +9,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
@@ -86,6 +87,8 @@ class BacktestTask(Base):
             "AND length(trim(data_source)) > 0",
             name="required_text_nonblank",
         ),
+        Index("ix_backtest_task_status_created", "status", "created_at"),
+        Index("ix_backtest_task_strategy_version", "strategy_version_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -125,7 +128,9 @@ class BacktestTask(Base):
 class BacktestUniverseSnapshot(Base):
     __tablename__ = "backtest_universe_snapshot"
     __table_args__ = (
-        UniqueConstraint("task_id", name="task"),
+        UniqueConstraint(
+            "task_id", name="uq_backtest_universe_snapshot_task_id"
+        ),
         CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"),
     )
 
@@ -144,7 +149,11 @@ class BacktestUniverseSnapshot(Base):
 class BacktestItem(Base):
     __tablename__ = "backtest_item"
     __table_args__ = (
-        UniqueConstraint("task_id", "security_id", name="task_security"),
+        UniqueConstraint(
+            "task_id",
+            "security_id",
+            name="uq_backtest_item_task_id_security_id",
+        ),
         CheckConstraint(
             "status IN ('PENDING','FETCHING_DATA','VALIDATING_DATA','FORECASTING',"
             "'FROZEN','SIMULATING','SAVING','SUCCEEDED','FAILED','SKIPPED','CANCELED')",
@@ -180,6 +189,8 @@ class BacktestItem(Base):
             "AND length(trim(test_price_basis)) > 0)",
             name="test_snapshot_consistent",
         ),
+        Index("ix_backtest_item_task_status", "task_id", "status"),
+        Index("ix_backtest_item_security", "security_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -218,7 +229,9 @@ class BacktestItem(Base):
 class BacktestForecastSnapshot(Base):
     __tablename__ = "backtest_forecast_snapshot"
     __table_args__ = (
-        UniqueConstraint("item_id", name="item"),
+        UniqueConstraint(
+            "item_id", name="uq_backtest_forecast_snapshot_item_id"
+        ),
         CheckConstraint(
             "training_start_date <= training_end_date AND training_row_count > 0",
             name="training_range_valid",
@@ -281,7 +294,11 @@ class BacktestForecastSnapshot(Base):
 class BacktestTargetAdjustment(Base):
     __tablename__ = "backtest_target_adjustment"
     __table_args__ = (
-        UniqueConstraint("item_id", "event_date", name="item_event_date"),
+        UniqueConstraint(
+            "item_id",
+            "event_date",
+            name="uq_backtest_target_adjustment_item_id_event_date",
+        ),
         CheckConstraint(
             "adjustment_factor > 0 AND adjustment_factor <> 'NaN'::numeric "
             "AND adjustment_factor < 'Infinity'::numeric",
@@ -348,7 +365,10 @@ class BacktestOrder(Base):
     __tablename__ = "backtest_order"
     __table_args__ = (
         UniqueConstraint(
-            "item_id", "signal_date", "direction", name="item_signal_direction"
+            "item_id",
+            "signal_date",
+            "direction",
+            name="uq_backtest_order_item_id_signal_date_direction",
         ),
         CheckConstraint(
             "status IN ('PENDING','FILLED','UNFILLED_AT_END')",
@@ -390,6 +410,7 @@ class BacktestOrder(Base):
             ),
             name="numeric_finite",
         ),
+        Index("ix_backtest_order_item_status", "item_id", "status"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -418,7 +439,7 @@ class BacktestOrder(Base):
 class BacktestTrade(Base):
     __tablename__ = "backtest_trade"
     __table_args__ = (
-        UniqueConstraint("order_id", name="order"),
+        UniqueConstraint("order_id", name="uq_backtest_trade_order_id"),
         CheckConstraint("direction IN ('BUY','SELL')", name="direction_valid"),
         CheckConstraint(
             "price > 0 AND quantity > 0 AND cash_after >= 0 "
@@ -457,6 +478,9 @@ class BacktestTrade(Base):
             ),
             name="numeric_finite",
         ),
+        Index(
+            "ix_backtest_trade_item_execute_date", "item_id", "execute_date"
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -492,7 +516,7 @@ class BacktestTrade(Base):
 class BacktestMetric(Base):
     __tablename__ = "backtest_metric"
     __table_args__ = (
-        UniqueConstraint("item_id", name="item"),
+        UniqueConstraint("item_id", name="uq_backtest_metric_item_id"),
         CheckConstraint("content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"),
         CheckConstraint(
             "completed_round_trips >= 0 AND winning_trades >= 0 "
@@ -569,7 +593,11 @@ class BacktestMetric(Base):
 class BacktestDailyResult(Base):
     __tablename__ = "backtest_daily_result"
     __table_args__ = (
-        UniqueConstraint("item_id", "trade_date", name="item_trade_date"),
+        UniqueConstraint(
+            "item_id",
+            "trade_date",
+            name="uq_backtest_daily_result_item_id_trade_date",
+        ),
         CheckConstraint(
             "cash >= 0 AND position_quantity >= 0 AND close_price > 0 "
             "AND position_market_value >= 0 AND equity >= 0 "

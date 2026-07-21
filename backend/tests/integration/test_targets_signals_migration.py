@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 import sys
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -302,6 +303,114 @@ def test_expression_signatures_keep_postgres_array_any_equivalent_to_in() -> Non
     ) == _check_signature("status IN ('A', 'B')", columns)
 
 
+def test_expression_signatures_ignore_reflected_string_column_casts() -> None:
+    columns = [{"name": "status", "type": String(32)}]
+
+    reflected = (
+        "status::text = ANY (ARRAY['A'::character varying, "
+        "'B'::character varying]::text[])"
+    )
+    assert _check_signature(reflected, columns) == _check_signature(
+        "status IN ('A', 'B')", columns
+    )
+
+
+def test_expression_signatures_preserve_non_string_column_text_casts() -> None:
+    columns = [{"name": "value", "type": Integer()}]
+
+    assert _check_signature("value::text = '1'", columns) != _check_signature(
+        "value = '1'", columns
+    )
+
+
+class _FakeMaintenanceConnection:
+    def __init__(self, maintenance) -> None:
+        self.maintenance = maintenance
+
+    async def execute(self, statement, parameters=None) -> None:
+        sql = str(statement)
+        self.maintenance.calls.append(sql)
+        if "pg_terminate_backend" in sql and self.maintenance.terminate_error:
+            raise self.maintenance.terminate_error
+        if "DROP DATABASE" in sql and self.maintenance.drop_error:
+            raise self.maintenance.drop_error
+
+
+class _FakeMaintenanceConnectionContext:
+    def __init__(self, maintenance) -> None:
+        self.connection = _FakeMaintenanceConnection(maintenance)
+
+    async def __aenter__(self):
+        return self.connection
+
+    async def __aexit__(self, exc_type, exc, traceback) -> None:
+        return None
+
+
+class _FakeMaintenance:
+    def __init__(
+        self,
+        *,
+        terminate_error: Exception | None = None,
+        drop_error: Exception | None = None,
+        dispose_error: Exception | None = None,
+    ) -> None:
+        self.terminate_error = terminate_error
+        self.drop_error = drop_error
+        self.dispose_error = dispose_error
+        self.calls: list[str] = []
+        self.dispose_calls = 0
+
+    def connect(self) -> _FakeMaintenanceConnectionContext:
+        return _FakeMaintenanceConnectionContext(self)
+
+    async def dispose(self) -> None:
+        self.dispose_calls += 1
+        if self.dispose_error:
+            raise self.dispose_error
+
+
+@pytest.mark.anyio
+async def test_temporary_database_preserves_body_error_and_notes_cleanup_error() -> (
+    None
+):
+    maintenance = _FakeMaintenance(drop_error=RuntimeError("drop failed"))
+
+    with pytest.raises(RuntimeError, match="body failed") as captured:
+        async with _temporary_database_lifecycle(maintenance, "temporary_database"):
+            raise RuntimeError("body failed")
+
+    assert any("drop failed" in note for note in captured.value.__notes__)
+    assert maintenance.dispose_calls == 1
+
+
+@pytest.mark.anyio
+async def test_temporary_database_notes_all_cleanup_errors_on_body_error() -> None:
+    maintenance = _FakeMaintenance(
+        drop_error=RuntimeError("drop failed"),
+        dispose_error=RuntimeError("dispose failed"),
+    )
+
+    with pytest.raises(RuntimeError, match="body failed") as captured:
+        async with _temporary_database_lifecycle(maintenance, "temporary_database"):
+            raise RuntimeError("body failed")
+
+    assert any("drop failed" in note for note in captured.value.__notes__)
+    assert any("dispose failed" in note for note in captured.value.__notes__)
+    assert maintenance.dispose_calls == 1
+
+
+@pytest.mark.anyio
+async def test_temporary_database_raises_cleanup_error_after_successful_body() -> None:
+    maintenance = _FakeMaintenance(drop_error=RuntimeError("drop failed"))
+
+    with pytest.raises(RuntimeError, match="drop failed"):
+        async with _temporary_database_lifecycle(maintenance, "temporary_database"):
+            pass
+
+    assert maintenance.dispose_calls == 1
+
+
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
@@ -376,12 +485,7 @@ async def test_targets_signals_migration_lifecycle_in_temporary_database() -> No
         isolation_level="AUTOCOMMIT",
         pool_pre_ping=True,
     )
-    created = False
-    try:
-        async with maintenance.connect() as connection:
-            await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
-            created = True
-
+    async with _temporary_database_lifecycle(maintenance, database_name):
         _run_alembic(migration_env, "upgrade", "head")
         await _assert_upgraded_database(owner_url, app_url)
 
@@ -390,22 +494,6 @@ async def test_targets_signals_migration_lifecycle_in_temporary_database() -> No
 
         _run_alembic(migration_env, "upgrade", "head")
         await _assert_upgraded_database(owner_url, app_url)
-    finally:
-        try:
-            if created:
-                async with maintenance.connect() as connection:
-                    await connection.execute(
-                        text(
-                            "SELECT pg_terminate_backend(pid) "
-                            "FROM pg_stat_activity "
-                            "WHERE datname = :database_name "
-                            "AND pid <> pg_backend_pid()"
-                        ),
-                        {"database_name": database_name},
-                    )
-                    await connection.execute(text(f'DROP DATABASE "{database_name}"'))
-        finally:
-            await maintenance.dispose()
 
 
 @pytest.mark.skipif(
@@ -894,8 +982,7 @@ _LITERAL_DECORATION_CASTS = {
 
 
 def _check_signature(sql: str, columns):
-    del columns
-    return _expression_signature(sql)
+    return _expression_signature(sql, _column_type_mapping(columns))
 
 
 def _assert_schema_snapshot(expected, actual) -> None:
@@ -908,7 +995,8 @@ def _server_default_signature(expression: str | None):
     return _expression_signature(expression)
 
 
-def _expression_signature(expression: str):
+def _expression_signature(expression: str, column_types=None):
+    column_types = column_types or {}
     tokens = []
     position = 0
     while position < len(expression):
@@ -987,6 +1075,13 @@ def _expression_signature(expression: str):
     def apply_cast(value, cast_type):
         type_name, _modifiers, dimensions = cast_type
         unqualified_type = type_name.rsplit(".", maxsplit=1)[-1]
+        if (
+            value[0] == "identifier"
+            and dimensions == 0
+            and unqualified_type in {"character varying", "text", "varchar"}
+            and _is_string_column_type(column_types.get(value[1]))
+        ):
+            return value
         if (
             value[0] in {"string", "number"}
             and dimensions == 0
@@ -1079,3 +1174,95 @@ def _expression_signature(expression: str):
             f"unparsed SQL tokens {tokens[index:]!r} in {expression!r}"
         )
     return signature
+
+
+def _column_type_mapping(columns) -> dict[str, object | None]:
+    if isinstance(columns, dict):
+        source = columns.get("columns", columns)
+        return {
+            str(name).lower(): (
+                details.get("type") if isinstance(details, dict) else details
+            )
+            for name, details in source.items()
+        }
+
+    mapping = {}
+    for column in columns:
+        if isinstance(column, str):
+            mapping[column.lower()] = None
+        elif isinstance(column, dict):
+            mapping[str(column["name"]).lower()] = column.get("type")
+        else:
+            mapping[str(column.name).lower()] = column.type
+    return mapping
+
+
+def _is_string_column_type(column_type) -> bool:
+    if isinstance(column_type, String):
+        return True
+    if isinstance(column_type, tuple) and column_type:
+        return column_type[0] in {"character varying", "string", "text", "varchar"}
+    if isinstance(column_type, str):
+        return column_type.lower() in {
+            "character varying",
+            "string",
+            "text",
+            "varchar",
+        }
+    return False
+
+
+@asynccontextmanager
+async def _temporary_database_lifecycle(maintenance, database_name: str):
+    primary_error: BaseException | None = None
+    cleanup_errors: list[tuple[str, BaseException]] = []
+    created = False
+
+    try:
+        async with maintenance.connect() as connection:
+            await connection.execute(text(f'CREATE DATABASE "{database_name}"'))
+        created = True
+        try:
+            yield
+        except BaseException as error:
+            primary_error = error
+    except BaseException as error:
+        primary_error = error
+    finally:
+        if created:
+            try:
+                async with maintenance.connect() as connection:
+                    await connection.execute(
+                        text(
+                            "SELECT pg_terminate_backend(pid) "
+                            "FROM pg_stat_activity "
+                            "WHERE datname = :database_name "
+                            "AND pid <> pg_backend_pid()"
+                        ),
+                        {"database_name": database_name},
+                    )
+            except BaseException as error:
+                cleanup_errors.append(("terminate connections", error))
+
+            try:
+                async with maintenance.connect() as connection:
+                    await connection.execute(text(f'DROP DATABASE "{database_name}"'))
+            except BaseException as error:
+                cleanup_errors.append(("drop database", error))
+
+        try:
+            await maintenance.dispose()
+        except BaseException as error:
+            cleanup_errors.append(("dispose engine", error))
+
+    if primary_error is not None:
+        for stage, error in cleanup_errors:
+            primary_error.add_note(f"cleanup failed during {stage}: {error!r}")
+        raise primary_error
+
+    if cleanup_errors:
+        stage, error = cleanup_errors[0]
+        for extra_stage, extra_error in cleanup_errors[1:]:
+            error.add_note(f"cleanup failed during {extra_stage}: {extra_error!r}")
+        error.add_note(f"first cleanup failure occurred during {stage}")
+        raise error

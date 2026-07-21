@@ -150,7 +150,9 @@ async def _seed(database):
         created_at=NOW,
     )
     async with database.transaction() as session:
-        session.add_all([security, owner])
+        session.add(security)
+        await session.flush()
+        session.add(owner)
         await session.flush()
         session.add(revision)
         await session.flush()

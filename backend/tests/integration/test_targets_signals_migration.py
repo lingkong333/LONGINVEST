@@ -4,6 +4,7 @@ import subprocess
 import sys
 from copy import deepcopy
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -153,7 +154,7 @@ def test_schema_checker_rejects_structural_drift(mutation: str) -> None:
                 "id": {
                     "type": ("uuid",),
                     "nullable": False,
-                    "server_default": True,
+                    "server_default": _server_default_signature("now()"),
                 }
             },
             "foreign_keys": {
@@ -173,7 +174,7 @@ def test_schema_checker_rejects_structural_drift(mutation: str) -> None:
     elif mutation == "foreign_key_missing":
         actual["sample"]["foreign_keys"].clear()
     else:
-        actual["sample"]["columns"]["id"]["server_default"] = False
+        actual["sample"]["columns"]["id"]["server_default"] = None
 
     with pytest.raises(AssertionError):
         _assert_schema_snapshot(expected, actual)
@@ -186,6 +187,72 @@ def test_model_schema_snapshot_covers_every_target_and_signal_column() -> None:
     for table in MODEL_TABLES:
         assert set(snapshot[table.name]["columns"]) == set(table.columns.keys())
         assert snapshot[table.name]["primary_key"] == ("id",)
+
+
+@pytest.mark.parametrize("mutation", ("check_operator", "default_expression"))
+def test_schema_checker_rejects_expression_drift(mutation: str) -> None:
+    columns = [{"name": "value"}]
+    expected = {
+        "sample": {
+            "columns": {
+                "value": {
+                    "type": ("integer",),
+                    "nullable": False,
+                    "server_default": _server_default_signature("now()"),
+                }
+            },
+            "foreign_keys": set(),
+            "primary_key": ("value",),
+            "unique_constraints": set(),
+            "check_constraints": {
+                "ck_sample_positive": _check_signature("value > 0", columns)
+            },
+            "indexes": set(),
+        }
+    }
+    actual = deepcopy(expected)
+
+    if mutation == "check_operator":
+        actual["sample"]["check_constraints"]["ck_sample_positive"] = _check_signature(
+            "value < 0", columns
+        )
+    else:
+        actual["sample"]["columns"]["value"]["server_default"] = (
+            _server_default_signature("clock_timestamp()")
+        )
+
+    with pytest.raises(AssertionError):
+        _assert_schema_snapshot(expected, actual)
+
+
+def test_expression_signatures_preserve_ordered_sql_semantics() -> None:
+    columns = [{"name": "value"}, {"name": "status"}]
+
+    assert _check_signature("value > 0", columns) != _check_signature(
+        "value < 0", columns
+    )
+    assert _check_signature(
+        "value > 0 AND status IS NOT NULL", columns
+    ) != _check_signature("status IS NOT NULL AND value > 0", columns)
+    assert _check_signature(
+        "status IN ('READY','FAILED')", columns
+    ) != _check_signature("status IN ('FAILED','READY')", columns)
+
+
+def test_expression_signatures_ignore_postgres_equivalent_wrapping() -> None:
+    columns = [{"name": "status"}]
+
+    assert _check_signature(
+        "status IN ('READY','FAILED')", columns
+    ) == _check_signature(
+        "((\"status\")::text = ANY ((ARRAY['READY'::character varying, "
+        "'FAILED'::text])::text[]))",
+        columns,
+    )
+    assert _server_default_signature("now()") == _server_default_signature("((now()))")
+    assert _server_default_signature("now()") != _server_default_signature(
+        "clock_timestamp()"
+    )
 
 
 @pytest.fixture
@@ -542,7 +609,7 @@ def _inspect_schema(sync_session):
                 column["name"]: {
                     "type": _type_signature(column["type"]),
                     "nullable": column["nullable"],
-                    "server_default": column.get("default") is not None,
+                    "server_default": _server_default_signature(column.get("default")),
                 }
                 for column in columns
             },
@@ -684,7 +751,11 @@ def _expected_model_schema():
                 column.name: {
                     "type": _type_signature(column.type),
                     "nullable": column.nullable,
-                    "server_default": column.server_default is not None,
+                    "server_default": _server_default_signature(
+                        None
+                        if column.server_default is None
+                        else str(column.server_default.arg)
+                    ),
                 }
                 for column in columns
             },
@@ -740,28 +811,160 @@ def _type_signature(column_type):
     raise AssertionError(f"unsupported schema type: {column_type!r}")
 
 
-def _check_signature(sql: str, columns) -> tuple[frozenset[str], tuple[str, ...]]:
-    lowered = sql.lower()
-    names = [
-        column["name"] if isinstance(column, dict) else column.name
-        for column in columns
-    ]
-    column_names = frozenset(
-        name
-        for name in names
-        if re.search(
-            rf"(?<![a-z0-9_]){re.escape(name)}(?![a-z0-9_])",
-            lowered,
-        )
-    )
-    string_literals = [f"string:{value}" for value in re.findall(r"'([^']*)'", sql)]
-    numeric_literals = [
-        f"number:{value}"
-        for value in re.findall(r"(?<![a-z0-9_])\d+(?:\.\d+)?", lowered)
-    ]
-    literals = tuple(sorted(string_literals + numeric_literals))
-    return column_names, literals
+_POSTGRES_CAST = re.compile(
+    r"::\s*(?:[a-z_][a-z0-9_]*\s*\.\s*)?"
+    r"(?:character\s+varying|timestamp\s+(?:with|without)\s+time\s+zone|"
+    r"double\s+precision|smallint|integer|bigint|numeric|decimal|real|"
+    r"boolean|date|text|varchar|bpchar|jsonb?|uuid)"
+    r"(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?(?:\s*\[\s*\])?",
+    re.IGNORECASE,
+)
+_SQL_TOKEN = re.compile(
+    r"\s+|"
+    r"'(?:''|[^'])*'|"
+    r'"(?:""|[^"])*"|'
+    r"\d+(?:\.\d+)?|"
+    r">=|<=|<>|!=|=|>|<|"
+    r"[(),\[\]]|"
+    r"[a-z_][a-z0-9_$.]*",
+    re.IGNORECASE,
+)
+_SQL_KEYWORDS = {"AND", "OR", "NOT", "IS", "NULL", "IN", "ANY", "ARRAY"}
+
+
+def _check_signature(sql: str, columns):
+    del columns
+    return _expression_signature(sql)
 
 
 def _assert_schema_snapshot(expected, actual) -> None:
     assert actual == expected
+
+
+def _server_default_signature(expression: str | None):
+    if expression is None:
+        return None
+    return _expression_signature(expression)
+
+
+def _expression_signature(expression: str):
+    without_casts = _POSTGRES_CAST.sub("", expression)
+    tokens = []
+    position = 0
+    while position < len(without_casts):
+        match = _SQL_TOKEN.match(without_casts, position)
+        if match is None:
+            raise AssertionError(
+                f"unsupported SQL expression near {without_casts[position:]!r}"
+            )
+        token = match.group(0)
+        position = match.end()
+        if token.isspace():
+            continue
+        if token.startswith('"'):
+            token = token[1:-1].replace('""', '"')
+        if re.fullmatch(r"[a-z_][a-z0-9_$.]*", token, re.IGNORECASE):
+            upper = token.upper()
+            token = upper if upper in _SQL_KEYWORDS else token.lower()
+        tokens.append(token)
+
+    index = 0
+
+    def peek(offset: int = 0) -> str | None:
+        target = index + offset
+        return tokens[target] if target < len(tokens) else None
+
+    def take(expected: str | None = None) -> str:
+        nonlocal index
+        token = peek()
+        if token is None or (expected is not None and token != expected):
+            raise AssertionError(
+                f"expected {expected!r}, got {token!r} in {expression!r}"
+            )
+        index += 1
+        return token
+
+    def parse_list(closing: str):
+        items = []
+        if peek() != closing:
+            while True:
+                items.append(parse_or())
+                if peek() != ",":
+                    break
+                take(",")
+        take(closing)
+        return tuple(items)
+
+    def parse_primary():
+        token = take()
+        if token == "(":
+            value = parse_or()
+            take(")")
+            return value
+        if token == "ARRAY":
+            take("[")
+            return ("array", parse_list("]"))
+        if token.startswith("'"):
+            return ("string", token[1:-1].replace("''", "'"))
+        if re.fullmatch(r"\d+(?:\.\d+)?", token):
+            return ("number", str(Decimal(token).normalize()))
+        if peek() == "(":
+            take("(")
+            return ("call", token, parse_list(")"))
+        return ("identifier", token)
+
+    def parse_predicate():
+        left = parse_primary()
+        if peek() == "IS":
+            take("IS")
+            negated = peek() == "NOT"
+            if negated:
+                take("NOT")
+            take("NULL")
+            return ("is_not_null" if negated else "is_null", left)
+
+        negated = peek() == "NOT" and peek(1) == "IN"
+        if negated:
+            take("NOT")
+        if peek() == "IN":
+            take("IN")
+            take("(")
+            return ("not_in" if negated else "in", left, parse_list(")"))
+
+        operator = peek()
+        if operator in {">", "<", ">=", "<=", "<>", "!=", "="}:
+            take()
+            right = parse_primary()
+            if operator == "=" and right[0] == "call" and right[1] == "ANY":
+                array = right[2]
+                if len(array) == 1 and array[0][0] == "array":
+                    return ("in", left, array[0][1])
+            return ("compare", "<>" if operator == "!=" else operator, left, right)
+        return left
+
+    def parse_not():
+        if peek() == "NOT":
+            take("NOT")
+            return ("not", parse_not())
+        return parse_predicate()
+
+    def parse_and():
+        value = parse_not()
+        while peek() == "AND":
+            take("AND")
+            value = ("and", value, parse_not())
+        return value
+
+    def parse_or():
+        value = parse_and()
+        while peek() == "OR":
+            take("OR")
+            value = ("or", value, parse_and())
+        return value
+
+    signature = parse_or()
+    if index != len(tokens):
+        raise AssertionError(
+            f"unparsed SQL tokens {tokens[index:]!r} in {expression!r}"
+        )
+    return signature

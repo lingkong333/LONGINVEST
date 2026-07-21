@@ -179,6 +179,16 @@ class TargetCalculationRun(Base):
             "(current_target_version IS NULL OR current_target_version > 0)",
             name="versions_positive",
         ),
+        CheckConstraint(
+            "subscription_version > 0 AND length(trim(idempotency_key)) > 0 "
+            "AND request_digest ~ '^[0-9a-f]{64}$'",
+            name="request_snapshot_valid",
+        ),
+        UniqueConstraint(
+            "subscription_id",
+            "idempotency_key",
+            name="uq_target_calculation_run_subscription_id_idempotency_key",
+        ),
         Index(
             "ix_target_calculation_run_subscription_created",
             "subscription_id",
@@ -195,11 +205,19 @@ class TargetCalculationRun(Base):
         ForeignKey("monitor_subscription.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    subscription_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    subscription_revision_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("monitor_subscription_revision.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     strategy_version_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("strategy_version.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )

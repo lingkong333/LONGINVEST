@@ -54,9 +54,20 @@ class SubscriptionSignalSnapshot(StrictContract):
     version: int = Field(ge=1)
     revision_id: UUID
     target_mode: str
+    strategy_version_id: UUID | None = None
+    parameter_snapshot: Mapping[str, Any] = Field(default_factory=dict)
     hysteresis_ratio: Decimal = Field(ge=0)
     hysteresis_min: Decimal = Field(ge=0)
     notification_mode: str
+
+    @field_validator("parameter_snapshot", mode="after")
+    @classmethod
+    def freeze_signal_parameters(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return _deep_freeze(value)
+
+    @field_serializer("parameter_snapshot")
+    def serialize_signal_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return _deep_thaw(value)
 
 
 class FrozenScheduleSubscriptions(StrictContract):

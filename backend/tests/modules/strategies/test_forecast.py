@@ -80,6 +80,9 @@ def _request() -> StrategyForecastRequest:
             start_date=date(2025, 1, 2),
             end_date=date(2025, 1, 3),
             data_version=7,
+            fetched_at=datetime(2026, 7, 21, tzinfo=UTC),
+            source="EASTMONEY",
+            price_basis="QFQ_AS_OF",
             content_hash="c" * 64,
             rows=(
                 {
@@ -107,8 +110,16 @@ def _request() -> StrategyForecastRequest:
     )
     parameters = {"spread": 0.1}
     return StrategyForecastRequest(
+        strategy_id=uuid4(),
         strategy_version_id=uuid4(),
+        draft_id=None,
+        draft_version=None,
+        source_code=SOURCE,
         source_code_hash=hash_source_code(SOURCE),
+        metadata={"name": "runner test"},
+        parameter_schema=PARAMETER_SCHEMA,
+        environment_version="runner-1",
+        runner_image_digest="sha256:" + "d" * 64,
         parameter_snapshot=parameters,
         parameter_hash=hash_parameter_snapshot(parameters),
         training_data=training_data,

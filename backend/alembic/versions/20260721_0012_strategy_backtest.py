@@ -533,8 +533,12 @@ def _create_backtest_root_tables() -> None:
         sa.Column("test_start_date", sa.Date(), nullable=False),
         sa.Column("test_end_date", sa.Date(), nullable=False),
         sa.Column("strategy_version_id", sa.UUID(), nullable=True),
+        sa.Column("draft_id", sa.UUID(), nullable=True),
+        sa.Column("draft_version", sa.Integer(), nullable=True),
         sa.Column("draft_source_code", sa.String(), nullable=True),
         sa.Column("source_code_hash", sa.String(64), nullable=False),
+        sa.Column("strategy_metadata", postgresql.JSONB(), nullable=False),
+        sa.Column("parameter_schema", postgresql.JSONB(), nullable=False),
         sa.Column(
             "parameter_snapshot",
             postgresql.JSONB(),
@@ -573,8 +577,10 @@ def _create_backtest_root_tables() -> None:
             name=op.f("ck_backtest_task_status_valid"),
         ),
         sa.CheckConstraint(
-            "(strategy_version_id IS NOT NULL AND draft_source_code IS NULL) "
-            "OR (strategy_version_id IS NULL AND draft_source_code IS NOT NULL "
+            "(strategy_version_id IS NOT NULL AND draft_id IS NULL "
+            "AND draft_version IS NULL AND draft_source_code IS NULL) OR "
+            "(strategy_version_id IS NULL AND draft_id IS NOT NULL "
+            "AND draft_version > 0 AND draft_source_code IS NOT NULL "
             "AND length(trim(draft_source_code)) > 0)",
             name=op.f("ck_backtest_task_strategy_source_valid"),
         ),
@@ -613,6 +619,12 @@ def _create_backtest_root_tables() -> None:
             ["strategy_version_id"],
             ["strategy_version.id"],
             name=op.f("fk_backtest_task_strategy_version_id_strategy_version"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["draft_id"],
+            ["strategy_draft.id"],
+            name=op.f("fk_backtest_task_draft_id_strategy_draft"),
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_task")),
@@ -870,7 +882,7 @@ def _create_backtest_result_tables() -> None:
         sa.Column("execute_date", sa.Date()),
         sa.Column("direction", sa.String(8), nullable=False),
         sa.Column("execution_price", sa.Numeric(20, 6)),
-        sa.Column("quantity", sa.Numeric(20, 6), nullable=False),
+        sa.Column("quantity", sa.Numeric(20, 6), nullable=True),
         sa.Column("cash_before", sa.Numeric(20, 2), nullable=False),
         sa.Column("position_before", sa.Numeric(20, 6), nullable=False),
         *_target_columns(),
@@ -885,14 +897,16 @@ def _create_backtest_result_tables() -> None:
         ),
         sa.CheckConstraint(
             "(status = 'FILLED' AND execute_date IS NOT NULL "
-            "AND execute_date > signal_date AND execution_price > 0) OR "
+            "AND execute_date > signal_date AND execution_price > 0 "
+            "AND quantity > 0) OR "
             "(status IN ('PENDING','UNFILLED_AT_END') "
-            "AND execute_date IS NULL AND execution_price IS NULL)",
+            "AND execute_date IS NULL AND execution_price IS NULL "
+            "AND quantity IS NULL)",
             name=op.f("ck_backtest_order_execution_consistent"),
         ),
         sa.CheckConstraint(
-            "quantity > 0 AND cash_before >= 0 AND position_before >= 0",
-            name=op.f("ck_backtest_order_quantity_positive"),
+            "cash_before >= 0 AND position_before >= 0",
+            name=op.f("ck_backtest_order_balances_nonnegative"),
         ),
         sa.CheckConstraint(
             _ordered_targets("target_"),
@@ -1138,7 +1152,11 @@ def _create_target_workflow_tables() -> None:
         "target_calculation_run",
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("subscription_id", sa.UUID(), nullable=False),
+        sa.Column("subscription_version", sa.Integer(), nullable=False),
+        sa.Column("subscription_revision_id", sa.UUID(), nullable=False),
         sa.Column("strategy_version_id", sa.UUID(), nullable=False),
+        sa.Column("idempotency_key", sa.String(200), nullable=False),
+        sa.Column("request_digest", sa.String(64), nullable=False),
         sa.Column(
             "parameter_snapshot",
             postgresql.JSONB(),
@@ -1180,10 +1198,24 @@ def _create_target_workflow_tables() -> None:
             "AND (current_target_version IS NULL OR current_target_version > 0)",
             name=op.f("ck_target_calculation_run_versions_positive"),
         ),
+        sa.CheckConstraint(
+            "subscription_version > 0 AND length(trim(idempotency_key)) > 0 "
+            "AND request_digest ~ '^[0-9a-f]{64}$'",
+            name=op.f("ck_target_calculation_run_request_snapshot_valid"),
+        ),
         sa.ForeignKeyConstraint(
             ["subscription_id"],
             ["monitor_subscription.id"],
             name=op.f("fk_target_calculation_run_subscription_id_monitor_subscription"),
+            ondelete="RESTRICT",
+        ),
+        sa.ForeignKeyConstraint(
+            ["subscription_revision_id"],
+            ["monitor_subscription_revision.id"],
+            name=op.f(
+                "fk_target_calculation_run_subscription_revision_id_"
+                "monitor_subscription_revision"
+            ),
             ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
@@ -1193,6 +1225,11 @@ def _create_target_workflow_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_target_calculation_run")),
+        sa.UniqueConstraint(
+            "subscription_id",
+            "idempotency_key",
+            name="uq_target_calculation_run_subscription_id_idempotency_key",
+        ),
     )
     op.create_table(
         "target_review",

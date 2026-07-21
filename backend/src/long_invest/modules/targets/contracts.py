@@ -185,7 +185,11 @@ class TargetBindingView(StrictContract):
 class TargetCalculationRunView(FrozenParametersContract):
     id: UUID
     subscription_id: UUID
+    subscription_version: int = Field(ge=1)
+    subscription_revision_id: UUID
     strategy_version_id: UUID
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    request_digest: Sha256Hex
     status: TargetCalculationStatus
     failure_code: TargetCalculationErrorCode | None = None
     training_start_date: date | None = None

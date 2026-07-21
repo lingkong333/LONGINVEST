@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, DecimalException
 from hashlib import sha256
 from typing import Any
+from uuid import UUID
 
 import numpy as np
 from jsonschema import Draft202012Validator
@@ -55,12 +56,24 @@ class StrategyForecastFailure(RuntimeError):
 
 def build_runner_payload(
     *,
-    source_code: str,
     request: StrategyForecastRequest,
     context: Mapping[str, object],
-    schema: Mapping[str, object],
+    source_code: str | None = None,
+    schema: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     normalized_context = _normalize_context(request, context)
+    if source_code is not None and source_code != request.source_code:
+        raise StrategyForecastFailure(
+            INPUT_HASH_MISMATCH, "strategy source differs from frozen request"
+        )
+    if schema is not None and thaw_json_value(schema) != thaw_json_value(
+        request.parameter_schema
+    ):
+        raise StrategyForecastFailure(
+            PARAMETER_SCHEMA_MISMATCH,
+            "parameter schema differs from frozen request",
+        )
+    source_code = request.source_code
     analysis = analyze_strategy_source(source_code)
     parameters = thaw_json_value(request.parameter_snapshot)
     if (
@@ -70,7 +83,7 @@ def build_runner_payload(
         raise StrategyForecastFailure(
             INPUT_HASH_MISMATCH, "strategy source or parameter snapshot changed"
         )
-    schema_value = thaw_json_value(schema)
+    schema_value = thaw_json_value(request.parameter_schema)
     if schema_value != thaw_json_value(analysis.parameter_schema):
         raise StrategyForecastFailure(
             PARAMETER_SCHEMA_MISMATCH,
@@ -116,7 +129,17 @@ def hash_parameter_snapshot(parameters: Mapping[str, object]) -> str:
 
 
 def hash_training_data_snapshot(training_data: object) -> str:
-    required = ("symbol", "start_date", "end_date", "data_version", "rows")
+    required = (
+        "security_id",
+        "symbol",
+        "start_date",
+        "end_date",
+        "data_version",
+        "fetched_at",
+        "source",
+        "price_basis",
+        "rows",
+    )
     try:
         snapshot = {name: getattr(training_data, name) for name in required}
     except AttributeError as exc:
@@ -170,7 +193,9 @@ def _normalize_context(
     expected = {
         "symbol": request.training_data.symbol,
         "exchange": request.training_data.symbol.rsplit(".", maxsplit=1)[1],
-        "strategy_version_id": str(request.strategy_version_id),
+        "strategy_version_id": str(
+            request.strategy_version_id or request.draft_id
+        ),
         "data_version": request.training_data.data_version,
     }
     if any(context[key] != value for key, value in expected.items()):
@@ -229,6 +254,10 @@ def _canonical_json_bytes(value: object) -> bytes:
 def _canonical_json_value(value: object) -> Any:
     if type(value) is date:
         return value.isoformat()
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, UUID):
+        return str(value)
     if isinstance(value, Decimal):
         if not value.is_finite():
             raise ValueError("non-finite decimal")

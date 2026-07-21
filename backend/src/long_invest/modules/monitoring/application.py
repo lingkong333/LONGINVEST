@@ -267,12 +267,14 @@ class TransactionalMonitorSubscriptionPort:
         service_factory=MonitorSubscriptionService,
         audit_factory=SubscriptionAudit,
         event_factory=MonitorSubscriptionOutbox,
+        strategy_readiness=None,
     ) -> None:
         self._session = session
         self._repository = repository_factory(session)
         self._service_factory = service_factory
         self._audit_factory = audit_factory
         self._event_factory = event_factory
+        self._strategy_readiness = strategy_readiness or UnavailableStrategyReadiness()
 
     async def lock(self, subscription_id):
         owner = await self._repository.get(subscription_id, for_update=True)
@@ -291,6 +293,8 @@ class TransactionalMonitorSubscriptionPort:
             version=owner.version,
             revision_id=revision.id,
             target_mode=revision.target_mode,
+            strategy_version_id=getattr(revision, "strategy_version_id", None),
+            parameter_snapshot=dict(getattr(revision, "parameters", {})),
             hysteresis_ratio=revision.hysteresis_ratio,
             hysteresis_min=revision.hysteresis_min,
             notification_mode=revision.notification_mode,
@@ -341,6 +345,65 @@ class TransactionalMonitorSubscriptionPort:
                 target_version_id=revision.target_version_id,
                 strategy_version_id=None,
                 parameters=dict(revision.parameters),
+                hysteresis_ratio=revision.hysteresis_ratio,
+                hysteresis_min=revision.hysteresis_min,
+                notification_mode=revision.notification_mode,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                expected_version=expected_version,
+            ),
+            audit_context=SubscriptionAuditContext(
+                request_id=request_id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                trusted_ip=trusted_ip,
+            ),
+        )
+
+    async def switch_to_strategy(
+        self,
+        *,
+        subscription_id,
+        strategy_version_id,
+        parameters,
+        expected_version,
+        reason,
+        idempotency_key,
+        request_id,
+        actor_user_id,
+        session_id,
+        trusted_ip,
+    ):
+        owner = await self._repository.get(subscription_id, for_update=True)
+        if owner is None or owner.current_revision_id is None:
+            return None
+        revision = await self._repository.get_revision(
+            subscription_id, owner.current_revision_id
+        )
+        if revision is None:
+            return None
+        if not await self._strategy_readiness.published_version(strategy_version_id):
+            raise AppError(
+                code="MONITOR_SUBSCRIPTION_NOT_READY",
+                message="订阅策略尚未发布或已失效",
+                status_code=409,
+            )
+        service = self._service_factory(
+            self._repository,
+            audit=self._audit_factory(self._session),
+            events=self._event_factory(self._session),
+            target_readiness=UnavailableTargetReadiness(),
+            strategy_readiness=self._strategy_readiness,
+        )
+        return await service.configure(
+            subscription_id,
+            SubscriptionConfig(
+                schedule_id=revision.schedule_id,
+                schedule_revision_id=revision.schedule_revision_id,
+                target_mode="STRATEGY",
+                target_version_id=revision.target_version_id,
+                strategy_version_id=strategy_version_id,
+                parameters=dict(parameters),
                 hysteresis_ratio=revision.hysteresis_ratio,
                 hysteresis_min=revision.hysteresis_min,
                 notification_mode=revision.notification_mode,

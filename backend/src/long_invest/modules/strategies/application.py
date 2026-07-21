@@ -8,6 +8,8 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.strategies.contracts import (
+    StrategyLifecycleStatus,
+    StrategyVersionView,
     ValidationEvidenceClaim,
     ValidationEvidenceVerifier,
 )
@@ -89,6 +91,32 @@ class StrategyApplication:
 
     async def list_versions(self, strategy_id: UUID, **kwargs: Any):
         return await self._read("list_versions", strategy_id, **kwargs)
+
+    async def get_execution_snapshot(
+        self, strategy_version_id: UUID
+    ) -> StrategyVersionView | None:
+        version = await self._read("get_published_version_by_id", strategy_version_id)
+        if version is None:
+            return None
+        return StrategyVersionView(
+            id=version.id,
+            strategy_id=version.strategy_id,
+            version_no=version.version_no,
+            source_code=version.source_code,
+            metadata=version.strategy_metadata,
+            parameter_schema=version.parameter_schema,
+            environment_version=version.environment_version,
+            runner_image_digest=version.runner_image_digest,
+            source_code_hash=version.source_code_hash,
+            git_commit=version.git_commit,
+            validation_run_id=version.validation_run_id,
+            status=StrategyLifecycleStatus(version.status),
+            published_at=version.published_at,
+            created_at=version.created_at,
+        )
+
+    async def published_version(self, strategy_version_id: UUID) -> bool:
+        return await self.get_execution_snapshot(strategy_version_id) is not None
 
     async def diff(self, strategy_id: UUID, *, revision_id: UUID):
         return await self._read("diff", strategy_id, revision_id=revision_id)

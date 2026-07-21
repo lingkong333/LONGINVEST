@@ -24,9 +24,34 @@ from long_invest.modules.strategies.contracts import (
 )
 from long_invest.modules.targets.contracts import TargetValues
 
+FROZEN_AT = datetime(2026, 7, 21, tzinfo=UTC)
+SOURCE = "def calculate_targets(history, params, context): return {}"
+
+
+def _strategy_fields() -> dict[str, object]:
+    return {
+        "strategy_id": uuid4(),
+        "draft_id": None,
+        "draft_version": None,
+        "source_code": SOURCE,
+        "metadata": {},
+        "parameter_schema": {},
+        "environment_version": "runner-1",
+        "runner_image_digest": "sha256:" + "d" * 64,
+    }
+
+
+def _data_provenance() -> dict[str, object]:
+    return {
+        "fetched_at": FROZEN_AT,
+        "source": "EASTMONEY",
+        "price_basis": "QFQ_AS_OF",
+    }
+
 
 def test_strategy_forecast_contract_freezes_training_only_input() -> None:
     snapshot = TrainingDataSnapshot(
+        **_data_provenance(),
         security_id=uuid4(),
         symbol="600000.SH",
         start_date=date(2025, 1, 1),
@@ -44,6 +69,7 @@ def test_strategy_forecast_contract_freezes_training_only_input() -> None:
         ),
     )
     request = StrategyForecastRequest(
+        **_strategy_fields(),
         strategy_version_id=uuid4(),
         source_code_hash="b" * 64,
         parameter_snapshot={"window": 20},
@@ -73,6 +99,7 @@ def test_strategy_forecast_result_requires_valid_target_values() -> None:
 def test_training_data_rejects_rows_outside_the_training_window() -> None:
     with pytest.raises(ValidationError):
         TrainingDataSnapshot(
+            **_data_provenance(),
             security_id=uuid4(),
             symbol="600000.SH",
             start_date=date(2025, 1, 1),
@@ -93,11 +120,13 @@ def test_training_data_rejects_rows_outside_the_training_window() -> None:
 
 def test_forecast_request_deeply_freezes_nested_parameters() -> None:
     request = StrategyForecastRequest(
+        **_strategy_fields(),
         strategy_version_id=uuid4(),
         source_code_hash="a" * 64,
         parameter_snapshot={"nested": {"value": 1}},
         parameter_hash="b" * 64,
         training_data=TrainingDataSnapshot(
+            **_data_provenance(),
             security_id=uuid4(),
             symbol="600000.SH",
             start_date=date(2025, 1, 1),
@@ -246,6 +275,7 @@ def test_validation_run_requires_consistent_completion_and_failure_metadata() ->
 
 def test_strategy_nested_frozen_values_dump_as_json() -> None:
     request = StrategyForecastRequest(
+        **_strategy_fields(),
         strategy_version_id=uuid4(),
         source_code_hash="a" * 64,
         parameter_snapshot=MappingProxyType(
@@ -253,6 +283,7 @@ def test_strategy_nested_frozen_values_dump_as_json() -> None:
         ),
         parameter_hash="b" * 64,
         training_data=TrainingDataSnapshot(
+            **_data_provenance(),
             security_id=uuid4(),
             symbol="600000.SH",
             start_date=date(2025, 1, 1),

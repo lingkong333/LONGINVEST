@@ -141,8 +141,12 @@ class BacktestTaskSnapshot(StrictContract):
     universe_hash: Sha256Hex
     date_range: BacktestDateRange
     strategy_version_id: UUID | None
+    draft_id: UUID | None
+    draft_version: int | None = Field(ge=1)
     draft_source_code: str | None
     source_code_hash: Sha256Hex
+    strategy_metadata: Mapping[str, Any]
+    parameter_schema: Mapping[str, Any]
     parameter_snapshot: Mapping[str, Any]
     parameter_hash: Sha256Hex
     environment_version: str = Field(min_length=1)
@@ -155,12 +159,12 @@ class BacktestTaskSnapshot(StrictContract):
     price_basis: str = Field(min_length=1)
     data_source: str = Field(min_length=1)
 
-    @field_validator("parameter_snapshot")
+    @field_validator("parameter_snapshot", "strategy_metadata", "parameter_schema")
     @classmethod
     def freeze_parameters(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
         return freeze_json_mapping(value)
 
-    @field_serializer("parameter_snapshot")
+    @field_serializer("parameter_snapshot", "strategy_metadata", "parameter_schema")
     def serialize_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
         return thaw_json_value(value)
 
@@ -177,11 +181,20 @@ class BacktestTaskSnapshot(StrictContract):
         if self.mode is BacktestMode.SINGLE and len(self.universe_snapshot) != 1:
             raise ValueError("single backtest must contain exactly one security")
         has_version = self.strategy_version_id is not None
-        has_draft = self.draft_source_code is not None
+        has_draft = any(
+            value is not None
+            for value in (self.draft_id, self.draft_version, self.draft_source_code)
+        )
         if has_version == has_draft:
             raise ValueError("choose one published version or frozen draft source")
         if self.draft_source_code is not None and not self.draft_source_code.strip():
             raise ValueError("draft source code must not be blank")
+        if has_draft and (
+            self.draft_id is None
+            or self.draft_version is None
+            or self.draft_source_code is None
+        ):
+            raise ValueError("frozen draft requires id, version, and source code")
         return self
 
 
@@ -279,7 +292,7 @@ class BacktestOrderView(StrictContract):
     status: BacktestOrderStatus
     direction: BacktestOrderDirection
     execution_price: Decimal | None = Field(default=None, gt=0)
-    quantity: Decimal = Field(gt=0)
+    quantity: Decimal | None = Field(default=None, gt=0)
     cash_before: Decimal = Field(ge=0)
     position_before: Decimal = Field(ge=0)
     target_values: TargetValues
@@ -288,11 +301,16 @@ class BacktestOrderView(StrictContract):
     @model_validator(mode="after")
     def validate_execution(self) -> BacktestOrderView:
         is_filled = self.status is BacktestOrderStatus.FILLED
-        has_execution = (
-            self.execute_date is not None and self.execution_price is not None
-        )
+        execution_fields = (self.execute_date, self.execution_price, self.quantity)
+        has_execution = all(value is not None for value in execution_fields)
         if is_filled != has_execution:
-            raise ValueError("filled status must match execution date and price")
+            raise ValueError(
+                "filled status must match execution date, price, and quantity"
+            )
+        if not is_filled and any(value is not None for value in execution_fields):
+            raise ValueError(
+                "pending or unfilled order cannot contain execution values"
+            )
         if self.execute_date is not None and self.execute_date <= self.signal_date:
             raise ValueError("order execution must occur on D+1 or later")
         return self

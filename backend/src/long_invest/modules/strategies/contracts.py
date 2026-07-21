@@ -116,6 +116,9 @@ class TrainingDataSnapshot(StrictContract):
     start_date: date
     end_date: date
     data_version: int = Field(ge=1)
+    fetched_at: AwareDatetime
+    source: str = Field(min_length=1, max_length=64)
+    price_basis: str = Field(min_length=1, max_length=32)
     content_hash: Sha256Hex
     rows: tuple[Mapping[str, Any], ...]
 
@@ -161,11 +164,38 @@ class TrainingDataSnapshot(StrictContract):
 
 
 class StrategyForecastRequest(FrozenMappingContract):
-    strategy_version_id: UUID
+    strategy_id: UUID
+    strategy_version_id: UUID | None = None
+    draft_id: UUID | None = None
+    draft_version: int | None = Field(default=None, ge=1)
+    source_code: str = Field(min_length=1)
     source_code_hash: Sha256Hex
+    metadata: Mapping[str, Any]
+    parameter_schema: Mapping[str, Any]
+    environment_version: str = Field(min_length=1)
+    runner_image_digest: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
     parameter_hash: Sha256Hex
     training_data: TrainingDataSnapshot
     requested_at: AwareDatetime
+
+    @field_validator("metadata", "parameter_schema")
+    @classmethod
+    def freeze_strategy_mapping(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return freeze_json_mapping(value)
+
+    @field_serializer("metadata", "parameter_schema")
+    def serialize_strategy_mapping(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return thaw_json_value(value)
+
+    @model_validator(mode="after")
+    def validate_strategy_snapshot(self) -> StrategyForecastRequest:
+        has_version = self.strategy_version_id is not None
+        has_draft = self.draft_id is not None or self.draft_version is not None
+        if has_version == has_draft:
+            raise ValueError("choose one published strategy version or frozen draft")
+        if has_draft and (self.draft_id is None or self.draft_version is None):
+            raise ValueError("frozen draft requires id and version")
+        return self
 
 
 class StrategyForecastResult(StrictContract):
@@ -311,6 +341,16 @@ class StrategyForecastPort(Protocol):
     ) -> StrategyForecastResult: ...
 
 
+class TestDataPort(Protocol):
+    async def get_test_data(
+        self,
+        *,
+        security_id: UUID,
+        start_date: date,
+        end_date: date,
+    ) -> TrainingDataSnapshot | None: ...
+
+
 class TrainingDataPort(Protocol):
     async def get_training_data(
         self,
@@ -325,3 +365,9 @@ class StrategyReadinessPort(Protocol):
     async def get_strategy_readiness(
         self, strategy_version_id: UUID
     ) -> StrategyReadiness | None: ...
+
+
+class StrategyExecutionSnapshotPort(Protocol):
+    async def get_execution_snapshot(
+        self, strategy_version_id: UUID
+    ) -> StrategyVersionView | None: ...

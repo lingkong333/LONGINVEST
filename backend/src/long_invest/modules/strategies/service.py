@@ -116,6 +116,14 @@ class StrategyService:
             strategy_id, page=page, page_size=page_size
         )
 
+    async def get_published_version_by_id(
+        self, strategy_version_id: UUID
+    ) -> StrategyVersion | None:
+        version = await self._repository.get_version_by_id(strategy_version_id)
+        if version is None or str(version.status) not in {"PUBLISHED", "ARCHIVED"}:
+            return None
+        return version
+
     async def get_validation_evidence(
         self, validation_run_id: UUID
     ) -> StrategyValidationRun:

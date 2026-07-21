@@ -179,7 +179,7 @@ def test_backtest_models_enforce_constraints_and_references() -> None:
         "ck_backtest_target_adjustment_factor_positive",
         "ck_backtest_order_status_valid",
         "ck_backtest_order_execution_consistent",
-        "ck_backtest_order_quantity_positive",
+        "ck_backtest_order_balances_nonnegative",
         "ck_backtest_order_target_zone_valid",
         "ck_backtest_trade_values_valid",
         "ck_backtest_trade_target_zone_valid",

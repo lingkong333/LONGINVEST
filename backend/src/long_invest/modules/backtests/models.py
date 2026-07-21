@@ -49,8 +49,10 @@ class BacktestTask(Base):
             name="status_valid",
         ),
         CheckConstraint(
-            "(strategy_version_id IS NOT NULL AND draft_source_code IS NULL) OR "
-            "(strategy_version_id IS NULL AND draft_source_code IS NOT NULL "
+            "(strategy_version_id IS NOT NULL AND draft_id IS NULL "
+            "AND draft_version IS NULL AND draft_source_code IS NULL) OR "
+            "(strategy_version_id IS NULL AND draft_id IS NOT NULL "
+            "AND draft_version > 0 AND draft_source_code IS NOT NULL "
             "AND length(trim(draft_source_code)) > 0)",
             name="strategy_source_valid",
         ),
@@ -105,8 +107,14 @@ class BacktestTask(Base):
         PG_UUID(as_uuid=True),
         ForeignKey("strategy_version.id", ondelete="RESTRICT"),
     )
+    draft_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("strategy_draft.id", ondelete="RESTRICT")
+    )
+    draft_version: Mapped[int | None] = mapped_column(Integer)
     draft_source_code: Mapped[str | None] = mapped_column(String)
     source_code_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    strategy_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    parameter_schema: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     parameter_snapshot: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -377,14 +385,16 @@ class BacktestOrder(Base):
         CheckConstraint("direction IN ('BUY','SELL')", name="direction_valid"),
         CheckConstraint(
             "(status = 'FILLED' AND execute_date IS NOT NULL "
-            "AND execute_date > signal_date AND execution_price > 0) OR "
+            "AND execute_date > signal_date AND execution_price > 0 "
+            "AND quantity > 0) OR "
             "(status IN ('PENDING','UNFILLED_AT_END') "
-            "AND execute_date IS NULL AND execution_price IS NULL)",
+            "AND execute_date IS NULL AND execution_price IS NULL "
+            "AND quantity IS NULL)",
             name="execution_consistent",
         ),
         CheckConstraint(
-            "quantity > 0 AND cash_before >= 0 AND position_before >= 0",
-            name="quantity_positive",
+            "cash_before >= 0 AND position_before >= 0",
+            name="balances_nonnegative",
         ),
         CheckConstraint(
             "target_low_strong > 0 AND target_low_strong < target_low_watch "
@@ -426,7 +436,7 @@ class BacktestOrder(Base):
     execute_date: Mapped[date | None] = mapped_column(Date)
     direction: Mapped[str] = mapped_column(String(8), nullable=False)
     execution_price: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
-    quantity: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
+    quantity: Mapped[Decimal | None] = mapped_column(Numeric(20, 6))
     cash_before: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     position_before: Mapped[Decimal] = mapped_column(Numeric(20, 6), nullable=False)
     target_low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)

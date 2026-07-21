@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 from git.index.base import IndexFile
 
+from long_invest.modules.strategies import git_store
 from long_invest.modules.strategies.git_store import StrategyGitStore
 
 
@@ -223,6 +224,31 @@ def test_concurrent_publications_each_commit_their_own_source(tmp_path):
     for strategy_id, commit in results:
         path = f"strategies/{strategy_id}/v1/strategy.py"
         assert store.commit_contains(commit, path)
+
+
+def test_process_lock_wait_uses_same_repository_deadline(tmp_path, monkeypatch):
+    class BusyLock:
+        def __init__(self):
+            self.timeouts = []
+
+        def acquire(self, *, timeout):
+            self.timeouts.append(timeout)
+            return False
+
+        def release(self):
+            raise AssertionError("an unacquired lock must not be released")
+
+    lock = BusyLock()
+    monkeypatch.setattr(git_store, "_PROCESS_GIT_LOCK", lock)
+
+    with pytest.raises(
+        TimeoutError, match="repository is busy"
+    ), git_store._repository_lock(
+        tmp_path / "repo.lock", timeout_seconds=0.01
+    ):
+        raise AssertionError("busy lock must not enter critical section")
+
+    assert lock.timeouts == [0.01]
 
 
 @pytest.mark.parametrize("strategy_id", ["../escape", "main; rm -rf /"])

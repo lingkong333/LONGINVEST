@@ -8,6 +8,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.strategies.git_store import StrategyGitStore
+from long_invest.modules.strategies.models import StrategyValidationRun
 from long_invest.modules.strategies.outbox import StrategyOutboxAdapter
 from long_invest.modules.strategies.repository import StrategyRepository
 from long_invest.modules.strategies.service import (
@@ -22,12 +23,39 @@ from long_invest.platform.errors import AppError
 
 
 class ValidationEvidenceVerifier(Protocol):
-    async def verify(self, evidence_snapshot: dict[str, Any]) -> bool: ...
+    async def verify(
+        self,
+        validation_run_id: UUID,
+        *,
+        expected_evidence_hash: str,
+    ) -> bool: ...
 
 
-class FailClosedEvidenceVerifier:
-    async def verify(self, evidence_snapshot: dict[str, Any]) -> bool:
-        return False
+class PersistedValidationEvidenceVerifier:
+    """Re-read immutable validation evidence before freezing a publication."""
+
+    def __init__(self, database: Database) -> None:
+        self._database = database
+
+    async def verify(
+        self,
+        validation_run_id: UUID,
+        *,
+        expected_evidence_hash: str,
+    ) -> bool:
+        try:
+            async with self._database.session() as session:
+                run = await session.get(StrategyValidationRun, validation_run_id)
+            if (
+                run is None
+                or str(run.status) != "SUCCEEDED"
+                or run.completed_at is None
+            ):
+                return False
+            actual_hash = StrategyService.hash_snapshot(run.evidence_snapshot)
+        except (AppError, SQLAlchemyError, TimeoutError, TypeError, ValueError):
+            return False
+        return actual_hash == expected_evidence_hash
 
 
 class StrategyApplication:
@@ -42,7 +70,7 @@ class StrategyApplication:
         service_factory: Callable[..., Any] = StrategyService,
         environment_version: str = "python-3.12",
         runner_image_digest: str = "",
-        evidence_verifier: ValidationEvidenceVerifier | None = None,
+        evidence_verifier: ValidationEvidenceVerifier,
     ) -> None:
         self._database = database
         self._git = git_store
@@ -52,7 +80,7 @@ class StrategyApplication:
         self._service_factory = service_factory
         self._environment_version = environment_version
         self._runner_image_digest = runner_image_digest
-        self._evidence_verifier = evidence_verifier or FailClosedEvidenceVerifier()
+        self._evidence_verifier = evidence_verifier
 
     async def list(self, **kwargs: Any):
         return await self._read("list", **kwargs)
@@ -204,15 +232,18 @@ class StrategyApplication:
         validation = await self._read(
             "get_validation_evidence", validation_run_id
         )
-        if not await self._evidence_verifier.verify(validation.evidence_snapshot):
+        evidence_hash = StrategyService.hash_snapshot(
+            validation.evidence_snapshot
+        )
+        if not await self._evidence_verifier.verify(
+            validation_run_id,
+            expected_evidence_hash=evidence_hash,
+        ):
             raise AppError(
                 code="STRATEGY_VALIDATION_STALE",
                 message="发布前无法核实回测和验证事实",
                 status_code=409,
             )
-        evidence_hash = StrategyService.hash_snapshot(
-            validation.evidence_snapshot
-        )
         evidence = PublishEvidence(
             validation_run_id=validation_run_id,
             expected_draft_version=expected_draft_version,
@@ -392,8 +423,9 @@ def get_strategy_application() -> StrategyApplication:
     root = Path(
         getattr(settings, "strategy_git_path", "/var/lib/long-invest/strategies")
     )
+    database = get_database()
     return StrategyApplication(
-        get_database(),
+        database,
         git_store=StrategyGitStore(root),
         environment_version=getattr(
             settings, "strategy_environment_version", "python-3.12"
@@ -403,6 +435,7 @@ def get_strategy_application() -> StrategyApplication:
             "strategy_runner_image_digest",
             "",
         ),
+        evidence_verifier=PersistedValidationEvidenceVerifier(database),
     )
 
 

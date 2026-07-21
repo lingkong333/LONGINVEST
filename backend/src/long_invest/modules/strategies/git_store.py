@@ -219,16 +219,24 @@ def _serialize_manifest(manifest: dict[str, Any], source_code_hash: str) -> str:
 @contextmanager
 def _repository_lock(path: Path, timeout_seconds: float = 30.0) -> Iterator[None]:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with _PROCESS_GIT_LOCK, path.open("a+b") as handle:
-        _acquire_file_lock(handle, timeout_seconds)
-        try:
-            yield
-        finally:
-            _release_file_lock(handle)
-
-
-def _acquire_file_lock(handle: BinaryIO, timeout_seconds: float) -> None:
     deadline = time.monotonic() + timeout_seconds
+    acquired = _PROCESS_GIT_LOCK.acquire(timeout=max(0.0, timeout_seconds))
+    if not acquired:
+        raise TimeoutError("strategy Git repository is busy")
+    try:
+        with path.open("a+b") as handle:
+            _acquire_file_lock(handle, deadline)
+            try:
+                yield
+            finally:
+                _release_file_lock(handle)
+    finally:
+        _PROCESS_GIT_LOCK.release()
+
+
+def _acquire_file_lock(handle: BinaryIO, deadline: float) -> None:
+    if time.monotonic() >= deadline:
+        raise TimeoutError("strategy Git repository is busy")
     if os.name != "nt":
         import fcntl
 

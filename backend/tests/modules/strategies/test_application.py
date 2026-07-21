@@ -1,13 +1,17 @@
 import asyncio
 import hashlib
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from long_invest.modules.strategies.application import StrategyApplication
-from long_invest.modules.strategies.service import FrozenPublication
+from long_invest.modules.strategies.application import (
+    PersistedValidationEvidenceVerifier,
+    StrategyApplication,
+)
+from long_invest.modules.strategies.service import FrozenPublication, StrategyService
 from long_invest.platform.errors import AppError
 
 
@@ -35,9 +39,24 @@ class Verifier:
         self.result = result
         self.calls = []
 
-    async def verify(self, snapshot):
-        self.calls.append(snapshot)
+    async def verify(self, validation_run_id, *, expected_evidence_hash):
+        self.calls.append((validation_run_id, expected_evidence_hash))
         return self.result
+
+
+class EvidenceDatabase:
+    def __init__(self, row):
+        self.row = row
+
+    @asynccontextmanager
+    async def session(self):
+        row = self.row
+
+        class Session:
+            async def get(self, _model, _run_id):
+                return row
+
+        yield Session()
 
 
 class Service:
@@ -70,6 +89,9 @@ class Service:
 
     async def fail_publish_run(self, run_id, error_code, **_kwargs):
         self.failed.append((run_id, error_code))
+        if self.version.status == "PUBLISHED":
+            self.run.status = "SUCCEEDED"
+            return self.version
         self.version.status = "PUBLISH_FAILED"
         self.run.status = "FAILED"
         return self.version
@@ -223,6 +245,35 @@ def test_publish_only_freezes_and_returns_persistent_run():
     assert database.transactions == 1
 
 
+def test_persisted_evidence_verifier_accepts_exact_completed_record():
+    version, _run = release_and_run()
+    snapshot = evidence(version)
+    validation_run_id = version.validation_run_id
+    verifier = PersistedValidationEvidenceVerifier(
+        EvidenceDatabase(
+            SimpleNamespace(
+                id=validation_run_id,
+                status="SUCCEEDED",
+                completed_at=datetime.now(UTC),
+                evidence_snapshot=snapshot,
+            )
+        )
+    )
+
+    accepted = asyncio.run(
+        verifier.verify(
+            validation_run_id,
+            expected_evidence_hash=StrategyService.hash_snapshot(snapshot),
+        )
+    )
+    rejected = asyncio.run(
+        verifier.verify(validation_run_id, expected_evidence_hash="0" * 64)
+    )
+
+    assert accepted is True
+    assert rejected is False
+
+
 def test_worker_executes_git_outside_transaction_then_completes():
     database = Database()
     version, run = release_and_run()
@@ -281,3 +332,25 @@ def test_recovery_replays_git_after_crash_before_database_completion():
 
     assert result.status == "PUBLISHED"
     assert len(git_store.calls) == 2
+
+
+def test_commit_confirmation_error_does_not_downgrade_published_run():
+    database = Database()
+    version, run = release_and_run()
+    service = Service(version, run, evidence(version))
+    original_complete = service.complete_publish_run
+
+    async def commit_then_raise(*args, **kwargs):
+        result = await original_complete(*args, **kwargs)
+        assert result.status == "PUBLISHED"
+        raise OSError("connection lost after commit")
+
+    service.complete_publish_run = commit_then_raise
+    subject = application(database, service, GitStore(database), Verifier())
+
+    with pytest.raises(AppError) as raised:
+        asyncio.run(subject.execute_publish(run.id))
+
+    assert raised.value.code == "STRATEGY_PUBLISH_FAILED"
+    assert version.status == "PUBLISHED"
+    assert run.status == "SUCCEEDED"

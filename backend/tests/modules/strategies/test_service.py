@@ -760,8 +760,13 @@ async def test_publish_freezes_current_source_and_reuses_failed_snapshot():
         "GIT_FAILED",
         context=context("pub-failed-1"),
     )
-    retried = await subject.begin_publish(
+    failed_replay = await subject.begin_publish(
         created.strategy.id, evidence, context("pub-1")
+    )
+    assert failed_replay.version.status == "PUBLISH_FAILED"
+    assert failed_replay.replayed is True
+    retried = await subject.begin_publish(
+        created.strategy.id, evidence, context("pub-2")
     )
 
     assert retried.version.id == frozen.version.id
@@ -794,6 +799,37 @@ async def test_publish_failure_is_audited_and_emitted():
     assert failed.status == "PUBLISH_FAILED"
     assert audit.items[-1].action_code == "strategy.publish_failed"
     assert events.items[-1].topic == "strategy.publish_failed"
+
+
+@async_test
+async def test_failure_confirmation_converges_already_published_run_to_success():
+    subject, repository, *_ = service()
+    created = await subject.create("策略", context())
+    validation_id, validation = succeeded_validation(
+        created.strategy.id, 1, subject.hash_source("")
+    )
+    repository.validation_runs[validation_id] = validation
+    repository.strategies[created.strategy.id].status = "VALIDATED"
+    frozen = await subject.begin_publish(
+        created.strategy.id,
+        publish_evidence(validation, 1),
+        context("pub-1"),
+    )
+    await subject.claim_publish_run(frozen.run.id)
+    await subject.complete_publish_run(
+        frozen.run.id,
+        git_commit="a" * 40,
+        context=context("pub-worker-1"),
+    )
+
+    version = await subject.fail_publish_run(
+        frozen.run.id,
+        "STRATEGY_DATABASE_FAILED",
+        context=context("pub-failed-1"),
+    )
+
+    assert version.status == "PUBLISHED"
+    assert repository.runs[frozen.run.id].status == "SUCCEEDED"
 
 
 @async_test

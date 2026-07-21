@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 from uuid import uuid4
 
@@ -25,6 +26,7 @@ from long_invest.platform.audit.service import AuditService
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
+from long_invest.platform.jobs.models import Job
 from long_invest.platform.outbox.models import EventOutbox
 
 pytestmark = pytest.mark.skipif(
@@ -55,6 +57,50 @@ def transaction_service(session) -> StrategyService:
         audit=AuditService(session),
         events=StrategyOutboxAdapter(session),
     )
+
+
+def validation_checks(run: StrategyValidationRun) -> dict:
+    snapshot = run.evidence_snapshot
+    facts = {
+        key: snapshot[key]
+        for key in (
+            "source_code_hash",
+            "metadata_hash",
+            "parameter_schema_hash",
+            "parameter_hash",
+            "environment_hash",
+            "runner_image_digest",
+        )
+    }
+    common = {
+        "run_id": str(uuid4()),
+        "task_id": str(uuid4()),
+        "snapshot_id": str(uuid4()),
+        "status": "SUCCEEDED",
+        **facts,
+    }
+    training = {
+        "training_start": "2010-01-01",
+        "training_end": "2020-12-31",
+        "training_data_hash": hashlib.sha256(b"training-bars").hexdigest(),
+    }
+    return {
+        "static_analysis": dict(common),
+        "fixed_sample": {**common, **training},
+        "specified_stock": {
+            **common,
+            **training,
+            "security_id": str(uuid4()),
+        },
+        "holdout_backtest": {
+            **common,
+            **training,
+            "security_id": str(uuid4()),
+            "test_start": "2021-01-01",
+            "test_end": "2022-12-31",
+            "test_data_hash": hashlib.sha256(b"test-bars").hexdigest(),
+        },
+    }
 
 
 class FailingAudit:
@@ -98,17 +144,42 @@ async def test_strategy_revision_validation_and_publish_binding_are_atomic() -> 
                 validation.id,
                 succeeded=True,
                 error_code=None,
-                evidence_snapshot={"all_required_checks_passed": True},
+                evidence_snapshot=validation_checks(validation),
                 context=command_context(f"complete-{key}"),
             )
         async with database.transaction() as session:
-            frozen = await transaction_service(session).begin_publish(
+            service = transaction_service(session)
+            completed_validation = await service.get_validation_evidence(validation.id)
+            frozen = await service.begin_publish(
                 created.strategy.id,
                 PublishEvidence(
                     validation_run_id=validation.id,
                     expected_draft_version=draft.draft_version,
+                    evidence_hash=service.hash_snapshot(
+                        completed_validation.evidence_snapshot
+                    ),
                 ),
                 command_context(f"publish-{key}"),
+            )
+        async with database.transaction() as session:
+            service = transaction_service(session)
+            await service.claim_publish_run(frozen.run.id)
+            await service.complete_publish_run(
+                frozen.run.id,
+                git_commit="a" * 40,
+                context=command_context(f"publish-complete-{key}"),
+            )
+        async with database.transaction() as session:
+            service = transaction_service(session)
+            await service.archive(
+                created.strategy.id,
+                expected_version=draft.draft_version,
+                context=command_context(f"archive-{key}"),
+            )
+            restored = await service.restore(
+                created.strategy.id,
+                expected_version=draft.draft_version,
+                context=command_context(f"restore-{key}"),
             )
 
         async with database.session() as session:
@@ -131,13 +202,43 @@ async def test_strategy_revision_validation_and_publish_binding_are_atomic() -> 
                 .select_from(EventOutbox)
                 .where(EventOutbox.aggregate_id == str(created.strategy.id))
             )
+            jobs = list(
+                (
+                    await session.scalars(
+                        select(Job).where(
+                            Job.request_id.in_(
+                                (
+                                    f"request-validate-{key}",
+                                    f"request-publish-{key}",
+                                )
+                            )
+                        )
+                    )
+                ).all()
+            )
+            dispatch_count = await session.scalar(
+                select(func.count())
+                .select_from(EventOutbox)
+                .where(
+                    EventOutbox.topic == "jobs.dispatch",
+                    EventOutbox.aggregate_id.in_([str(job.id) for job in jobs]),
+                )
+            )
         assert stored_validation is not None and stored_version is not None
         assert stored_validation.strategy_version_id == stored_version.id
+        assert restored.status == "PUBLISHED"
+        assert stored_version.status == "PUBLISHED"
         assert stored_version.strategy_metadata == stored_validation.evidence_snapshot[
             "metadata"
         ]
         assert revision_count == 1
-        assert audit_count == event_count == 5
+        assert audit_count == event_count == 8
+        assert {job.job_type for job in jobs} == {
+            "STRATEGY_VALIDATE",
+            "STRATEGY_PUBLISH",
+        }
+        assert {job.status for job in jobs} == {"PENDING_DISPATCH"}
+        assert dispatch_count == 2
     finally:
         await database.dispose()
 

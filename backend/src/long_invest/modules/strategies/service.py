@@ -599,6 +599,15 @@ class StrategyService:
                     status_code=503,
                 )
             if existing.status == "PUBLISH_FAILED":
+                retry_audit_key = _audit_key(
+                    "strategy.publish_requested",
+                    strategy.id,
+                    context.idempotency_key,
+                )
+                if await self._audit.find_by_idempotency(retry_audit_key) is not None:
+                    return FrozenPublication(
+                        version=existing, run=run, replayed=True
+                    )
                 existing.status = "PUBLISHING"
                 run.status = "PENDING"
                 await self._repository.set_strategy_run_status(run.id, "PENDING")
@@ -606,6 +615,23 @@ class StrategyService:
                     strategy_id, "PUBLISHING"
                 )
                 strategy.status = "PUBLISHING"
+                await self._record(
+                    "strategy.publish_requested",
+                    strategy,
+                    context,
+                    before={
+                        "status": "PUBLISH_FAILED",
+                        "draft_version": draft.draft_version,
+                    },
+                    after={
+                        "status": "PUBLISHING",
+                        "version_id": str(existing.id),
+                        "version_no": existing.version_no,
+                        "run_id": str(run.id),
+                        "source_code_hash": actual_hash,
+                        "evidence_hash": snapshot_hash,
+                    },
+                )
             if existing.status in {"PUBLISHING", "PUBLISHED"}:
                 return FrozenPublication(
                     version=existing, run=run, replayed=True
@@ -802,6 +828,16 @@ class StrategyService:
         )
         if version is None:
             raise _not_found()
+        if version.status == "PUBLISHED":
+            if version.git_commit is None:
+                raise AppError(
+                    code="STRATEGY_PUBLISH_STATE_UNCERTAIN",
+                    message="已发布版本缺少 Git 提交标识，暂时不可绑定",
+                    status_code=503,
+                )
+            run.status = "SUCCEEDED"
+            await self._repository.set_strategy_run_status(run.id, "SUCCEEDED")
+            return version
         if run.status == "FAILED":
             replay = await self._audit.find_by_idempotency(
                 _audit_key(
@@ -1025,7 +1061,13 @@ class StrategyService:
                 topic=topic,
                 strategy_id=strategy.id,
                 dedupe_key=audit_key,
-                payload={"event_type": topic, "strategy_id": str(strategy.id), **after},
+                payload={
+                    "event_type": topic,
+                    "strategy_id": str(strategy.id),
+                    "request_id": context.request_id,
+                    "actor_user_id": context.actor_user_id,
+                    **after,
+                },
             )
         )
 

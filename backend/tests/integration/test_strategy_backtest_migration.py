@@ -1,3 +1,4 @@
+import ast
 import os
 import re
 import subprocess
@@ -124,6 +125,26 @@ def test_new_constraint_and_index_names_are_globally_unique() -> None:
         for table_name in TABLES
         for index in Base.metadata.tables[table_name].indexes
     } >= EXPECTED_INDEXES
+
+
+def test_explicit_constraint_and_index_names_bypass_naming_convention() -> None:
+    tree = ast.parse(MIGRATION.read_text(encoding="utf-8"))
+    named_operations = {
+        "create_check_constraint",
+        "create_foreign_key",
+        "create_index",
+        "drop_constraint",
+        "drop_index",
+    }
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in named_operations:
+            continue
+        first_argument = node.args[0]
+        assert isinstance(first_argument, ast.Call)
+        assert isinstance(first_argument.func, ast.Attribute)
+        assert first_argument.func.attr == "f"
 
 
 @pytest.fixture

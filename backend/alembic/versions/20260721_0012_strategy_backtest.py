@@ -226,7 +226,7 @@ def _create_indexes() -> None:
         ),
     )
     for index_name, table_name, columns in indexes:
-        op.create_index(index_name, table_name, list(columns), unique=False)
+        op.create_index(op.f(index_name), table_name, list(columns), unique=False)
 
 
 def _create_strategy_tables() -> None:
@@ -1176,22 +1176,22 @@ def upgrade() -> None:
     _create_indexes()
 
     op.drop_constraint(
-        "ck_target_revision_source_valid",
+        op.f("ck_target_revision_source_valid"),
         "target_revision",
         type_="check",
     )
     op.drop_constraint(
-        "ck_target_revision_source_revision_consistent",
+        op.f("ck_target_revision_source_revision_consistent"),
         "target_revision",
         type_="check",
     )
     op.drop_constraint(
-        "ck_target_revision_content_hash_sha256",
+        op.f("ck_target_revision_content_hash_sha256"),
         "target_revision",
         type_="check",
     )
     op.drop_constraint(
-        "ck_target_revision_source_code_hash_sha256",
+        op.f("ck_target_revision_source_code_hash_sha256"),
         "target_revision",
         type_="check",
     )

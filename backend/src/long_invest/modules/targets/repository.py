@@ -101,14 +101,37 @@ class TargetRepository:
         )
 
     async def list_revisions(
-        self, subscription_id: UUID
+        self,
+        subscription_id: UUID,
+        *,
+        page: int = 1,
+        page_size: int = 50,
     ) -> tuple[TargetRevision, ...]:
+        _validate_page(page, page_size)
         rows = await self._session.scalars(
             select(TargetRevision)
             .where(TargetRevision.subscription_id == subscription_id)
-            .order_by(TargetRevision.revision_no.desc(), TargetRevision.id.desc())
+            .order_by(TargetRevision.created_at.desc(), TargetRevision.id.desc())
+            .limit(page_size)
+            .offset((page - 1) * page_size)
         )
         return tuple(rows.all())
+
+    async def count_revisions(self, subscription_id: UUID) -> int:
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(TargetRevision)
+            .where(TargetRevision.subscription_id == subscription_id)
+        )
+        return int(total or 0)
+
+    async def next_revision_no(self, subscription_id: UUID) -> int:
+        current = await self._session.scalar(
+            select(func.max(TargetRevision.revision_no)).where(
+                TargetRevision.subscription_id == subscription_id
+            )
+        )
+        return int(current or 0) + 1
 
     async def persist_revision(self, revision: TargetRevision) -> None:
         self._session.add(revision)

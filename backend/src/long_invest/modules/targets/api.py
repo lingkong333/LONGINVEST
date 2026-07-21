@@ -81,6 +81,7 @@ class RestoreTargetRequest(StrictRequest):
 class CapabilityWriteRequest(StrictRequest):
     confirm: StrictBool
     reason: str = Field(min_length=1, max_length=500)
+    expected_version: int = Field(ge=1)
 
     @field_validator("reason", mode="before")
     @classmethod
@@ -95,6 +96,7 @@ class TargetPageData(BaseModel):
 
 class TargetHistoryData(BaseModel):
     items: list[TargetRevisionView]
+    pagination: Pagination
 
 
 class TargetPageResponse(SuccessEnvelope):
@@ -142,8 +144,8 @@ class CapabilityResponse(SuccessEnvelope):
     response_model=TargetPageResponse,
 )
 async def list_targets(
-    application: Application,
     _identity: ReadIdentity,
+    application: Application,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
@@ -162,8 +164,8 @@ async def list_targets(
 )
 async def get_target(
     subscription_id: UUID,
-    application: Application,
     _identity: ReadIdentity,
+    application: Application,
 ) -> dict[str, Any]:
     target = await application.get(subscription_id)
     if target is None:
@@ -181,12 +183,19 @@ async def get_target(
 )
 async def target_history(
     subscription_id: UUID,
-    application: Application,
     _identity: ReadIdentity,
+    application: Application,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    items = await application.history(subscription_id)
+    items, total = await application.history(
+        subscription_id, page=page, page_size=page_size
+    )
     return success_response(
-        data={"items": [item.model_dump(mode="json") for item in items]}
+        data={
+            "items": [item.model_dump(mode="json") for item in items],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
     )
 
 
@@ -197,11 +206,12 @@ async def target_history(
 async def set_manual_target(
     subscription_id: UUID,
     body: ManualTargetRequest,
-    application: Application,
     identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
     _require_confirmation(body.confirm)
+    idempotency_key = _validated_idempotency_key(idempotency_key)
     result = await application.set_manual(
         ManualTargetCommand(
             subscription_id=subscription_id,
@@ -225,11 +235,12 @@ async def set_manual_target(
 async def restore_target(
     subscription_id: UUID,
     body: RestoreTargetRequest,
-    application: Application,
     identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
     _require_confirmation(body.confirm)
+    idempotency_key = _validated_idempotency_key(idempotency_key)
     result = await application.restore(
         RestoreTargetCommand(
             subscription_id=subscription_id,
@@ -251,11 +262,10 @@ async def restore_target(
 async def calculate_target(
     subscription_id: UUID,
     body: CapabilityWriteRequest,
-    _application: Application,
     _identity_value: WriteIdentity,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body)
+    return _unavailable_write(body, idempotency_key)
 
 
 @router.post(
@@ -265,11 +275,10 @@ async def calculate_target(
 async def retry_target(
     subscription_id: UUID,
     body: CapabilityWriteRequest,
-    _application: Application,
     _identity_value: WriteIdentity,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body)
+    return _unavailable_write(body, idempotency_key)
 
 
 @router.post(
@@ -278,11 +287,10 @@ async def retry_target(
 )
 async def calculate_targets_batch(
     body: CapabilityWriteRequest,
-    _application: Application,
     _identity_value: WriteIdentity,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body)
+    return _unavailable_write(body, idempotency_key)
 
 
 @router.get(
@@ -290,7 +298,6 @@ async def calculate_targets_batch(
     response_model=CapabilityPageResponse,
 )
 async def list_target_calculation_runs(
-    _application: Application,
     _identity: ReadIdentity,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -303,7 +310,6 @@ async def list_target_calculation_runs(
     response_model=CapabilityPageResponse,
 )
 async def list_target_reviews(
-    _application: Application,
     _identity: ReadIdentity,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -318,11 +324,10 @@ async def list_target_reviews(
 async def approve_target_review(
     review_id: UUID,
     body: CapabilityWriteRequest,
-    _application: Application,
     _identity_value: WriteIdentity,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body)
+    return _unavailable_write(body, idempotency_key)
 
 
 @router.post(
@@ -332,11 +337,10 @@ async def approve_target_review(
 async def reject_target_review(
     review_id: UUID,
     body: CapabilityWriteRequest,
-    _application: Application,
     _identity_value: WriteIdentity,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body)
+    return _unavailable_write(body, idempotency_key)
 
 
 @router.post(
@@ -346,15 +350,17 @@ async def reject_target_review(
 async def recalculate_target_review(
     review_id: UUID,
     body: CapabilityWriteRequest,
-    _application: Application,
     _identity_value: WriteIdentity,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body)
+    return _unavailable_write(body, idempotency_key)
 
 
-def _unavailable_write(body: CapabilityWriteRequest) -> dict[str, Any]:
+def _unavailable_write(
+    body: CapabilityWriteRequest, idempotency_key: str
+) -> dict[str, Any]:
     _require_confirmation(body.confirm)
+    _validated_idempotency_key(idempotency_key)
     raise _capability_not_ready()
 
 
@@ -365,6 +371,17 @@ def _require_confirmation(confirm: bool) -> None:
             message="目标操作需要明确确认",
             status_code=409,
         )
+
+
+def _validated_idempotency_key(value: str) -> str:
+    key = value.strip()
+    if not key:
+        raise AppError(
+            code="IDEMPOTENCY_KEY_REQUIRED",
+            message="目标写操作需要幂等键",
+            status_code=422,
+        )
+    return key
 
 
 def _capability_not_ready() -> AppError:

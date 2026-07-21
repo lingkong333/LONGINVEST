@@ -135,10 +135,20 @@ class TargetService:
         binding = await self._repository.get_binding(subscription_id)
         return await self._snapshot(binding) if binding is not None else None
 
-    async def history(self, subscription_id: UUID) -> tuple[TargetRevisionView, ...]:
-        return tuple(
-            _revision_view(row)
-            for row in await self._repository.list_revisions(subscription_id)
+    async def history(
+        self,
+        subscription_id: UUID,
+        *,
+        page: int = 1,
+        page_size: int = 50,
+    ) -> tuple[tuple[TargetRevisionView, ...], int]:
+        _validate_page(page, page_size)
+        rows = await self._repository.list_revisions(
+            subscription_id, page=page, page_size=page_size
+        )
+        return (
+            tuple(_revision_view(row) for row in rows),
+            await self._repository.count_revisions(subscription_id),
         )
 
     async def _lock_subscription(self, subscription_id):
@@ -234,11 +244,12 @@ class TargetService:
         source_revision_id,
         target_date,
     ):
-        revisions = await self._repository.list_revisions(command.subscription_id)
         revision = TargetRevision(
             id=uuid4(),
             subscription_id=command.subscription_id,
-            revision_no=max((row.revision_no for row in revisions), default=0) + 1,
+            revision_no=await self._repository.next_revision_no(
+                command.subscription_id
+            ),
             low_strong=values.low_strong,
             low_watch=values.low_watch,
             high_watch=values.high_watch,

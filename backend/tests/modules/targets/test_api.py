@@ -104,7 +104,7 @@ def _application():
     application = SimpleNamespace(
         list=AsyncMock(return_value=((_snapshot(),), 1)),
         get=AsyncMock(return_value=_snapshot()),
-        history=AsyncMock(return_value=(_revision(),)),
+        history=AsyncMock(return_value=((_revision(),), 1)),
         set_manual=AsyncMock(return_value=_mutation()),
         restore=AsyncMock(return_value=_mutation()),
     )
@@ -224,7 +224,10 @@ def test_target_openapi_has_concrete_unique_operations_and_required_headers() ->
     [
         (ManualTargetRequest, _manual_body(extra="forbidden")),
         (RestoreTargetRequest, _restore_body(extra="forbidden")),
-        (CapabilityWriteRequest, {"confirm": True, "reason": "x", "extra": 1}),
+        (
+            CapabilityWriteRequest,
+            {"confirm": True, "reason": "x", "expected_version": 1, "extra": 1},
+        ),
     ],
 )
 def test_target_write_bodies_are_strict(request_type, body) -> None:
@@ -238,7 +241,9 @@ def test_authenticated_reads_paginate_and_missing_current_is_404() -> None:
 
     listed = client.get("/api/v1/targets?page=2&page_size=20")
     current = client.get(f"/api/v1/targets/{SUBSCRIPTION_ID}")
-    history = client.get(f"/api/v1/targets/{SUBSCRIPTION_ID}/history")
+    history = client.get(
+        f"/api/v1/targets/{SUBSCRIPTION_ID}/history?page=2&page_size=20"
+    )
 
     assert listed.status_code == current.status_code == history.status_code == 200
     assert listed.json()["data"]["pagination"] == {
@@ -247,6 +252,14 @@ def test_authenticated_reads_paginate_and_missing_current_is_404() -> None:
         "total": 1,
     }
     application.list.assert_awaited_once_with(page=2, page_size=20)
+    assert history.json()["data"]["pagination"] == {
+        "page": 2,
+        "page_size": 20,
+        "total": 1,
+    }
+    application.history.assert_awaited_once_with(
+        SUBSCRIPTION_ID, page=2, page_size=20
+    )
     application.get.return_value = None
     missing = client.get(f"/api/v1/targets/{uuid4()}")
     assert missing.status_code == 404
@@ -297,7 +310,7 @@ def test_unavailable_capabilities_are_authenticated_concrete_409() -> None:
     client = TestClient(_app())
     response = client.post(
         f"/api/v1/targets/{SUBSCRIPTION_ID}/calculate",
-        json={"confirm": True, "reason": "calculate"},
+        json={"confirm": True, "reason": "calculate", "expected_version": 1},
         headers={"Idempotency-Key": "calculate"},
     )
     read = client.get("/api/v1/target-calculation-runs")
@@ -305,6 +318,33 @@ def test_unavailable_capabilities_are_authenticated_concrete_409() -> None:
     assert response.status_code == read.status_code == 409
     assert response.json()["code"] == "TARGET_CAPABILITY_NOT_READY"
     assert read.json()["code"] == "TARGET_CAPABILITY_NOT_READY"
+
+
+def test_capability_write_requires_expected_version() -> None:
+    with pytest.raises(ValidationError):
+        CapabilityWriteRequest.model_validate(
+            {"confirm": True, "reason": "calculate"}
+        )
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (f"/api/v1/targets/{SUBSCRIPTION_ID}/manual", _manual_body()),
+        (f"/api/v1/targets/{SUBSCRIPTION_ID}/restore", _restore_body()),
+        (
+            f"/api/v1/targets/{SUBSCRIPTION_ID}/calculate",
+            {"confirm": True, "reason": "calculate", "expected_version": 1},
+        ),
+    ],
+)
+def test_blank_idempotency_key_is_stable_422(path, body) -> None:
+    response = TestClient(_app()).post(
+        path, json=body, headers={"Idempotency-Key": "   "}
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "IDEMPOTENCY_KEY_REQUIRED"
 
 
 def test_unauthenticated_target_routes_are_rejected() -> None:
@@ -373,3 +413,32 @@ def test_manual_write_uses_origin_session_and_csrf_protection() -> None:
     command = application.set_manual.await_args.args[0]
     assert command.actor_user_id == str(user_id)
     assert command.session_id == str(session_id)
+
+
+def test_authentication_runs_before_default_application_placeholder() -> None:
+    unauthenticated = FastAPI()
+    register_exception_handlers(unauthenticated)
+    unauthenticated.include_router(router)
+
+    async def reject():
+        raise AppError(code="AUTH_REQUIRED", message="login", status_code=401)
+
+    unauthenticated.dependency_overrides[require_authenticated_request] = reject
+    unauthenticated.dependency_overrides[require_verified_write_request] = reject
+    client = TestClient(unauthenticated)
+    assert client.get("/api/v1/targets").status_code == 401
+    assert client.post(
+        f"/api/v1/targets/{SUBSCRIPTION_ID}/manual",
+        json=_manual_body(),
+        headers={"Idempotency-Key": "auth-first"},
+    ).status_code == 401
+
+    authenticated = FastAPI()
+    register_exception_handlers(authenticated)
+    authenticated.include_router(router)
+    identity = _identity()
+    authenticated.dependency_overrides[require_authenticated_request] = lambda: identity
+    authenticated.dependency_overrides[require_verified_write_request] = (
+        lambda: identity
+    )
+    assert TestClient(authenticated).get("/api/v1/targets").status_code == 409

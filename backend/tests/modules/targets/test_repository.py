@@ -70,3 +70,30 @@ async def test_list_bindings_rejects_invalid_pages_and_counts_total() -> None:
     for page, page_size in ((0, 50), (1, 0), (1, 201)):
         with pytest.raises(ValueError):
             await repository.list_current_rows(page=page, page_size=page_size)
+
+
+@pytest.mark.anyio
+async def test_revision_history_is_paged_counted_and_time_descending() -> None:
+    session = MagicMock()
+    result = MagicMock()
+    result.all.return_value = []
+    session.scalars = AsyncMock(return_value=result)
+    session.scalar = AsyncMock(side_effect=[7, 4])
+    repository = TargetRepository(session)
+    subscription_id = uuid4()
+
+    assert await repository.list_revisions(
+        subscription_id, page=2, page_size=3
+    ) == ()
+    statement = session.scalars.await_args.args[0]
+    sql = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "ORDER BY target_revision.created_at DESC" in sql
+    assert "target_revision.id DESC" in sql
+    assert "LIMIT 3 OFFSET 3" in sql
+    assert await repository.count_revisions(subscription_id) == 7
+    assert await repository.next_revision_no(subscription_id) == 5

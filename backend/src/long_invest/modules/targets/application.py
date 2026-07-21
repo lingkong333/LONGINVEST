@@ -41,8 +41,10 @@ class TargetApplication:
     async def get(self, subscription_id):
         return await self._read("get", subscription_id)
 
-    async def history(self, subscription_id):
-        return await self._read("history", subscription_id)
+    async def history(self, subscription_id, *, page: int = 1, page_size: int = 50):
+        return await self._read(
+            "history", subscription_id, page=page, page_size=page_size
+        )
 
     async def _read(self, method, *args, **kwargs):
         try:

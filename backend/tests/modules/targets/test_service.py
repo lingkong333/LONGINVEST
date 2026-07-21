@@ -70,8 +70,16 @@ class Repository:
         self.get_revision_calls += 1
         return next((row for row in self.revisions if row.id == revision_id), None)
 
-    async def list_revisions(self, _subscription_id):
-        return tuple(reversed(self.revisions))
+    async def list_revisions(self, _subscription_id, *, page=1, page_size=50):
+        ordered = tuple(reversed(self.revisions))
+        start = (page - 1) * page_size
+        return ordered[start : start + page_size]
+
+    async def count_revisions(self, _subscription_id):
+        return len(self.revisions)
+
+    async def next_revision_no(self, _subscription_id):
+        return max((row.revision_no for row in self.revisions), default=0) + 1
 
     async def persist_revision(self, revision):
         self.revisions.append(revision)
@@ -530,7 +538,7 @@ async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
 
     assert await target.list() == ((), 0)
     assert await target.get(SUBSCRIPTION_ID) is None
-    assert await target.history(SUBSCRIPTION_ID) == ()
+    assert await target.history(SUBSCRIPTION_ID) == ((), 0)
 
     repository.binding = SimpleNamespace(
         subscription_id=SUBSCRIPTION_ID,
@@ -548,6 +556,11 @@ async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
     assert repository.get_revision_calls == calls_before_list
     assert await target.list(page=2, page_size=1) == ((), 1)
     assert (await target.get(SUBSCRIPTION_ID)).revision_id == created.revision.id
+    history, total = await target.history(
+        SUBSCRIPTION_ID, page=2, page_size=1
+    )
+    assert history == ()
+    assert total == 1
 
 
 @pytest.mark.anyio

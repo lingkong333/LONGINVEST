@@ -40,19 +40,20 @@ async def test_list_bindings_has_stable_order() -> None:
     session = MagicMock()
     result = MagicMock()
     result.all.return_value = []
-    session.scalars = AsyncMock(return_value=result)
+    session.execute = AsyncMock(return_value=result)
     repository = TargetRepository(session)
 
-    assert await repository.list_bindings(page=2, page_size=2) == ()
+    assert await repository.list_current_rows(page=2, page_size=2) == ()
 
-    statement = session.scalars.await_args.args[0]
+    statement = session.execute.await_args.args[0]
     sql = str(
         statement.compile(
             dialect=postgresql.dialect(),
             compile_kwargs={"literal_binds": True},
         )
     )
-    assert "ORDER BY subscription_target_binding.created_at DESC" in sql
+    assert "JOIN target_revision" in sql
+    assert "ORDER BY subscription_target_binding.activated_at DESC" in sql
     assert "subscription_target_binding.id DESC" in sql
     assert "LIMIT 2 OFFSET 2" in sql
     assert "current_revision_id IS NOT NULL" in sql
@@ -68,4 +69,4 @@ async def test_list_bindings_rejects_invalid_pages_and_counts_total() -> None:
     assert await repository.count_bindings() == 7
     for page, page_size in ((0, 50), (1, 0), (1, 201)):
         with pytest.raises(ValueError):
-            await repository.list_bindings(page=page, page_size=page_size)
+            await repository.list_current_rows(page=page, page_size=page_size)

@@ -31,29 +31,39 @@ class TargetRepository:
             )
         )
 
-    async def list_bindings(
+    async def list_current_rows(
         self, *, page: int = 1, page_size: int = 50
-    ) -> tuple[SubscriptionTargetBinding, ...]:
+    ) -> tuple[tuple[SubscriptionTargetBinding, TargetRevision], ...]:
         _validate_page(page, page_size)
-        rows = await self._session.scalars(
-            select(SubscriptionTargetBinding)
+        rows = await self._session.execute(
+            select(SubscriptionTargetBinding, TargetRevision)
+            .join(
+                TargetRevision,
+                TargetRevision.id
+                == SubscriptionTargetBinding.current_revision_id,
+            )
             .where(
                 SubscriptionTargetBinding.current_revision_id.is_not(None),
                 SubscriptionTargetBinding.activated_at.is_not(None),
             )
             .order_by(
-                SubscriptionTargetBinding.created_at.desc(),
+                SubscriptionTargetBinding.activated_at.desc(),
                 SubscriptionTargetBinding.id.desc(),
             )
             .limit(page_size)
             .offset((page - 1) * page_size)
         )
-        return tuple(rows.all())
+        return tuple((binding, revision) for binding, revision in rows.all())
 
     async def count_bindings(self) -> int:
         total = await self._session.scalar(
             select(func.count())
             .select_from(SubscriptionTargetBinding)
+            .join(
+                TargetRevision,
+                TargetRevision.id
+                == SubscriptionTargetBinding.current_revision_id,
+            )
             .where(
                 SubscriptionTargetBinding.current_revision_id.is_not(None),
                 SubscriptionTargetBinding.activated_at.is_not(None),

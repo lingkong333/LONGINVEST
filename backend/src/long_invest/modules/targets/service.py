@@ -50,11 +50,12 @@ class TargetService:
         self._now = now or (lambda: datetime.now(UTC))
 
     async def set_manual(self, command: ManualTargetCommand) -> TargetMutationResult:
-        subscription, binding = await self._lock(command.subscription_id)
+        subscription = await self._lock_subscription(command.subscription_id)
         request_digest = _request_digest(command)
         replay = await self._replay(command, request_digest)
         if replay is not None:
             return replay
+        binding = await self._binding_for_new(subscription)
         self._check_version(binding.version, command.expected_version)
         await self._ensure_manual(subscription, command)
 
@@ -86,14 +87,15 @@ class TargetService:
         )
 
     async def restore(self, command: RestoreTargetCommand) -> TargetMutationResult:
-        subscription, binding = await self._lock(command.subscription_id)
-        source = await self._repository.get_revision(command.source_revision_id)
-        if source is None or source.subscription_id != command.subscription_id:
-            raise _error("TARGET_REVISION_NOT_FOUND", "目标历史版本不存在", 404)
+        subscription = await self._lock_subscription(command.subscription_id)
         request_digest = _request_digest(command)
         replay = await self._replay(command, request_digest)
         if replay is not None:
             return replay
+        binding = await self._binding_for_new(subscription)
+        source = await self._repository.get_revision(command.source_revision_id)
+        if source is None or source.subscription_id != command.subscription_id:
+            raise _error("TARGET_REVISION_NOT_FOUND", "目标历史版本不存在", 404)
         if binding.version != command.expected_version:
             raise _error("TARGET_RESTORE_STALE", "目标绑定已变化，请刷新后重试", 409)
         if not command.switch_to_manual_confirmed:
@@ -121,14 +123,13 @@ class TargetService:
         self, *, page: int = 1, page_size: int = 50
     ) -> tuple[tuple[TargetSnapshot, ...], int]:
         _validate_page(page, page_size)
-        snapshots = []
-        for binding in await self._repository.list_bindings(
+        rows = await self._repository.list_current_rows(
             page=page, page_size=page_size
-        ):
-            snapshot = await self._snapshot(binding)
-            if snapshot is not None:
-                snapshots.append(snapshot)
-        return tuple(snapshots), await self._repository.count_bindings()
+        )
+        return (
+            tuple(_snapshot(binding, revision) for binding, revision in rows),
+            await self._repository.count_bindings(),
+        )
 
     async def get(self, subscription_id: UUID) -> TargetSnapshot | None:
         binding = await self._repository.get_binding(subscription_id)
@@ -140,16 +141,21 @@ class TargetService:
             for row in await self._repository.list_revisions(subscription_id)
         )
 
-    async def _lock(self, subscription_id):
+    async def _lock_subscription(self, subscription_id):
         subscription = await self._subscriptions.lock(subscription_id)
         if subscription is None:
             raise _error("TARGET_SUBSCRIPTION_NOT_FOUND", "监控订阅不存在", 404)
+        return subscription
+
+    async def _binding_for_new(self, subscription):
         if str(subscription.status) == "ARCHIVED":
             raise _error("TARGET_SUBSCRIPTION_ARCHIVED", "监控订阅已归档", 409)
-        binding = await self._repository.lock_binding(subscription_id)
+        binding = await self._repository.lock_binding(subscription.subscription_id)
         if binding is None:
-            binding = await self._repository.create_binding(subscription_id)
-        return subscription, binding
+            binding = await self._repository.create_binding(
+                subscription.subscription_id
+            )
+        return binding
 
     async def _ensure_manual(self, subscription, command) -> None:
         if subscription.target_mode != "STRATEGY":
@@ -351,22 +357,7 @@ class TargetService:
         revision = await self._repository.get_revision(binding.current_revision_id)
         if revision is None:
             return None
-        return TargetSnapshot(
-            subscription_id=binding.subscription_id,
-            revision_id=revision.id,
-            revision_no=revision.revision_no,
-            binding_version=binding.version,
-            values=_values(revision),
-            source=TargetSource(revision.source),
-            status=TargetStatus(binding.status),
-            target_date=revision.target_date,
-            strategy_version_id=revision.strategy_version_id,
-            parameter_snapshot=revision.parameter_snapshot,
-            data_version=revision.data_version,
-            source_code_hash=revision.source_code_hash,
-            content_hash=revision.content_hash,
-            activated_at=binding.activated_at,
-        )
+        return _snapshot(binding, revision)
 
     @staticmethod
     def _check_version(actual, expected):
@@ -425,6 +416,25 @@ def _revision_view(row) -> TargetRevisionView:
         content_hash=row.content_hash,
         reason=row.reason,
         created_at=row.created_at,
+    )
+
+
+def _snapshot(binding, revision) -> TargetSnapshot:
+    return TargetSnapshot(
+        subscription_id=binding.subscription_id,
+        revision_id=revision.id,
+        revision_no=revision.revision_no,
+        binding_version=binding.version,
+        values=_values(revision),
+        source=TargetSource(revision.source),
+        status=TargetStatus(binding.status),
+        target_date=revision.target_date,
+        strategy_version_id=revision.strategy_version_id,
+        parameter_snapshot=revision.parameter_snapshot,
+        data_version=revision.data_version,
+        source_code_hash=revision.source_code_hash,
+        content_hash=revision.content_hash,
+        activated_at=binding.activated_at,
     )
 
 

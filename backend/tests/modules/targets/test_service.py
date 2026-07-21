@@ -27,6 +27,7 @@ class Repository:
             stale_reason=None,
         )
         self.revisions = []
+        self.get_revision_calls = 0
 
     async def lock_binding(self, _subscription_id):
         return self.binding
@@ -34,8 +35,15 @@ class Repository:
     async def get_binding(self, _subscription_id):
         return self.binding
 
-    async def list_bindings(self, *, page=1, page_size=50):
-        items = () if self.binding is None else (self.binding,)
+    async def list_current_rows(self, *, page=1, page_size=50):
+        revision = None
+        if self.binding is not None and self.binding.current_revision_id is not None:
+            revision = next(
+                row
+                for row in self.revisions
+                if row.id == self.binding.current_revision_id
+            )
+        items = () if revision is None else ((self.binding, revision),)
         start = (page - 1) * page_size
         return items[start : start + page_size]
 
@@ -59,6 +67,7 @@ class Repository:
         return next((row for row in self.revisions if row.idempotency_key == key), None)
 
     async def get_revision(self, revision_id):
+        self.get_revision_calls += 1
         return next((row for row in self.revisions if row.id == revision_id), None)
 
     async def list_revisions(self, _subscription_id):
@@ -309,6 +318,37 @@ async def test_same_key_with_different_content_conflicts() -> None:
 
 
 @pytest.mark.anyio
+async def test_successful_request_replays_after_subscription_is_archived() -> None:
+    subscriptions = Subscriptions()
+    target, repository, audit, events = service(subscriptions=subscriptions)
+    command = manual()
+    first = await target.set_manual(command)
+    subscriptions.snapshot.status = "ARCHIVED"
+
+    replay = await target.set_manual(command)
+
+    assert replay.replayed is True
+    assert replay.binding == first.binding
+    assert len(repository.revisions) == len(audit.items) == 1
+    assert len(events.items) == 2
+
+
+@pytest.mark.anyio
+async def test_archived_subscription_does_not_hide_idempotency_conflict() -> None:
+    subscriptions = Subscriptions()
+    target, *_ = service(subscriptions=subscriptions)
+    await target.set_manual(manual())
+    subscriptions.snapshot.status = "ARCHIVED"
+
+    with pytest.raises(AppError) as caught:
+        await target.set_manual(
+            manual(target_values=values(("7", "9", "12", "13")))
+        )
+
+    assert caught.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.anyio
 async def test_expected_binding_version_conflicts() -> None:
     target, *_ = service()
 
@@ -461,6 +501,9 @@ async def test_target_reads_have_stable_empty_and_current_behavior() -> None:
     created = await target.set_manual(manual())
 
     assert await target.list() == ((await target.get(SUBSCRIPTION_ID),), 1)
+    calls_before_list = repository.get_revision_calls
+    await target.list(page=1, page_size=200)
+    assert repository.get_revision_calls == calls_before_list
     assert await target.list(page=2, page_size=1) == ((), 1)
     assert (await target.get(SUBSCRIPTION_ID)).revision_id == created.revision.id
 
@@ -496,3 +539,30 @@ async def test_restore_stale_binding_has_specific_conflict_code() -> None:
         )
 
     assert caught.value.code == "TARGET_RESTORE_STALE"
+
+
+@pytest.mark.anyio
+async def test_restore_replays_after_subscription_is_archived() -> None:
+    subscriptions = Subscriptions()
+    target, *_ = service(subscriptions=subscriptions)
+    original = await target.set_manual(manual(key="original"))
+    command = RestoreTargetCommand(
+        subscription_id=SUBSCRIPTION_ID,
+        source_revision_id=original.revision.id,
+        reason="restore before archive",
+        expected_version=original.binding.version,
+        idempotency_key="restore-before-archive",
+        request_id="req-restore",
+        actor_user_id="user-1",
+        session_id="session-1",
+        trusted_ip="127.0.0.1",
+        switch_to_manual_confirmed=True,
+    )
+    first = await target.restore(command)
+    subscriptions.snapshot.status = "ARCHIVED"
+
+    replay = await target.restore(command)
+
+    assert replay.replayed is True
+    assert replay.binding == first.binding
+    assert replay.revision == first.revision

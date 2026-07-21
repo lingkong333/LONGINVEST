@@ -10,6 +10,10 @@ from long_invest.modules.monitor_schedules.application import (
     MonitorScheduleApplication,
     get_monitor_schedule_application,
 )
+from long_invest.modules.monitoring.contracts import (
+    SubscriptionSignalSnapshot,
+    SubscriptionStatus,
+)
 from long_invest.modules.monitoring.outbox import MonitorSubscriptionOutbox
 from long_invest.modules.monitoring.repository import MonitorSubscriptionRepository
 from long_invest.modules.monitoring.service import (
@@ -252,6 +256,105 @@ class MonitorSubscriptionApplication:
             ) from exc
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _unavailable() from exc
+
+
+class TransactionalMonitorSubscriptionPort:
+    def __init__(
+        self,
+        session,
+        *,
+        repository_factory=MonitorSubscriptionRepository,
+        service_factory=MonitorSubscriptionService,
+        audit_factory=SubscriptionAudit,
+        event_factory=MonitorSubscriptionOutbox,
+    ) -> None:
+        self._session = session
+        self._repository = repository_factory(session)
+        self._service_factory = service_factory
+        self._audit_factory = audit_factory
+        self._event_factory = event_factory
+
+    async def lock(self, subscription_id):
+        owner = await self._repository.get(subscription_id, for_update=True)
+        if owner is None or owner.current_revision_id is None:
+            return None
+        revision = await self._repository.get_revision(
+            subscription_id, owner.current_revision_id
+        )
+        if revision is None:
+            return None
+        return SubscriptionSignalSnapshot(
+            subscription_id=owner.id,
+            security_id=owner.security_id,
+            symbol=owner.symbol,
+            status=SubscriptionStatus(owner.status),
+            version=owner.version,
+            revision_id=revision.id,
+            target_mode=revision.target_mode,
+            hysteresis_ratio=revision.hysteresis_ratio,
+            hysteresis_min=revision.hysteresis_min,
+            notification_mode=revision.notification_mode,
+        )
+
+    async def get_subscription_snapshot(self, subscription_id):
+        return await self.lock(subscription_id)
+
+    async def switch_to_manual(
+        self,
+        *,
+        subscription_id,
+        expected_version,
+        reason,
+        idempotency_key,
+        request_id,
+        actor_user_id,
+        session_id,
+        trusted_ip,
+    ):
+        owner = await self._repository.get(subscription_id, for_update=True)
+        if owner is None or owner.current_revision_id is None:
+            return None
+        revision = await self._repository.get_revision(
+            subscription_id, owner.current_revision_id
+        )
+        if revision is None:
+            return None
+        service = self._service_factory(
+            self._repository,
+            audit=self._audit_factory(self._session),
+            events=self._event_factory(self._session),
+            target_readiness=UnavailableTargetReadiness(),
+            strategy_readiness=UnavailableStrategyReadiness(),
+        )
+        return await service.configure(
+            subscription_id,
+            SubscriptionConfig(
+                schedule_id=revision.schedule_id,
+                schedule_revision_id=revision.schedule_revision_id,
+                target_mode="MANUAL",
+                target_version_id=revision.target_version_id,
+                strategy_version_id=None,
+                parameters=dict(revision.parameters),
+                hysteresis_ratio=revision.hysteresis_ratio,
+                hysteresis_min=revision.hysteresis_min,
+                notification_mode=revision.notification_mode,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                expected_version=expected_version,
+            ),
+            audit_context=SubscriptionAuditContext(
+                request_id=request_id,
+                actor_user_id=actor_user_id,
+                session_id=session_id,
+                trusted_ip=trusted_ip,
+            ),
+        )
+
+
+def transactional_monitor_subscription_port(
+    session, **factories
+) -> TransactionalMonitorSubscriptionPort:
+    return TransactionalMonitorSubscriptionPort(session, **factories)
 
 
 def get_monitor_subscription_application():

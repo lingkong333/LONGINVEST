@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 from uuid import UUID
 
 from pydantic import (
@@ -221,6 +221,10 @@ class TargetSnapshotPort(Protocol):
     async def get_target_snapshot(
         self, subscription_id: UUID
     ) -> TargetSnapshot | None: ...
+
+
+class SignalNotificationPort(Protocol):
+    async def publish(self, notification: Any) -> Any: ...
 
 
 def _validate_signal_price(value: Decimal) -> Decimal:

@@ -51,6 +51,12 @@ class PositionView(StrictContract):
     updated_at: datetime | None = None
 
 
+class PositionSnapshot(StrictContract):
+    security_id: UUID
+    status: PositionStatus
+    version: int = Field(ge=0)
+
+
 class PositionHistoryView(StrictContract):
     id: UUID
     security_id: UUID

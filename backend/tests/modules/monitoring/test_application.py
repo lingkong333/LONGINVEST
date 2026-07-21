@@ -1,13 +1,21 @@
 from contextlib import asynccontextmanager
 from datetime import date
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
-from long_invest.modules.monitoring.application import MonitorSubscriptionApplication
-from long_invest.modules.monitoring.contracts import SubscriptionStatus
+from long_invest.modules.monitoring.application import (
+    MonitorSubscriptionApplication,
+    transactional_monitor_subscription_port,
+)
+from long_invest.modules.monitoring.contracts import (
+    SubscriptionSignalSnapshot,
+    SubscriptionStatus,
+)
 from long_invest.modules.securities.contracts import (
     ListingStatus,
     Market,
@@ -152,3 +160,135 @@ async def test_create_rejects_non_a_share_before_transaction() -> None:
     with pytest.raises(AppError) as caught:
         await app.create(symbol="600000.SH", reason="创建", idempotency_key="invalid")
     assert caught.value.code == "MONITOR_SUBSCRIPTION_CONFLICT"
+
+
+@pytest.mark.anyio
+async def test_transactional_port_locks_and_returns_frozen_signal_snapshot() -> None:
+    subscription_id = uuid4()
+    security_id = uuid4()
+    revision_id = uuid4()
+    session = SimpleNamespace()
+
+    class Repository:
+        def __init__(self, received_session):
+            assert received_session is session
+
+        async def get(self, received_id, *, for_update=False):
+            assert received_id == subscription_id
+            assert for_update is True
+            return SimpleNamespace(
+                id=subscription_id,
+                security_id=security_id,
+                symbol="600000.SH",
+                status="ENABLED",
+                version=3,
+                current_revision_id=revision_id,
+            )
+
+        async def get_revision(self, received_id, received_revision_id):
+            assert (received_id, received_revision_id) == (
+                subscription_id,
+                revision_id,
+            )
+            return SimpleNamespace(
+                id=revision_id,
+                target_mode="STRATEGY",
+                hysteresis_ratio=Decimal("0.010000"),
+                hysteresis_min=Decimal("0.020000"),
+                notification_mode="DEFAULT",
+            )
+
+    port = transactional_monitor_subscription_port(
+        session, repository_factory=Repository
+    )
+    snapshot = await port.lock(subscription_id)
+
+    assert snapshot == SubscriptionSignalSnapshot(
+        subscription_id=subscription_id,
+        security_id=security_id,
+        symbol="600000.SH",
+        status=SubscriptionStatus.ENABLED,
+        version=3,
+        revision_id=revision_id,
+        target_mode="STRATEGY",
+        hysteresis_ratio=Decimal("0.010000"),
+        hysteresis_min=Decimal("0.020000"),
+        notification_mode="DEFAULT",
+    )
+    with pytest.raises(ValidationError):
+        snapshot.version = 4
+
+
+@pytest.mark.anyio
+async def test_transactional_port_switches_to_manual_without_committing() -> None:
+    subscription_id = uuid4()
+    revision_id = uuid4()
+    calls = []
+
+    class Session:
+        async def commit(self):
+            raise AssertionError("caller owns commit")
+
+        async def close(self):
+            raise AssertionError("caller owns close")
+
+    session = Session()
+
+    class Repository:
+        def __init__(self, received_session):
+            assert received_session is session
+
+        async def get(self, received_id, *, for_update=False):
+            assert received_id == subscription_id
+            assert for_update is True
+            return SimpleNamespace(
+                id=subscription_id,
+                current_revision_id=revision_id,
+                version=3,
+            )
+
+        async def get_revision(self, received_id, received_revision_id):
+            return SimpleNamespace(
+                id=received_revision_id,
+                schedule_id=None,
+                schedule_revision_id=None,
+                target_version_id=None,
+                strategy_version_id=uuid4(),
+                parameters={"lookback": 20},
+                hysteresis_ratio=Decimal("0.01"),
+                hysteresis_min=Decimal("0.02"),
+                notification_mode="DEFAULT",
+            )
+
+    class Service:
+        def __init__(self, repository, **_ports):
+            self.repository = repository
+
+        async def configure(self, received_id, config, audit_context=None):
+            calls.append((received_id, config, audit_context))
+            return SimpleNamespace(revision=SimpleNamespace(id=uuid4()))
+
+    port = transactional_monitor_subscription_port(
+        session,
+        repository_factory=Repository,
+        service_factory=Service,
+        audit_factory=lambda _session: object(),
+        event_factory=lambda _session: object(),
+    )
+    await port.switch_to_manual(
+        subscription_id=subscription_id,
+        expected_version=3,
+        reason="manual target",
+        idempotency_key="idem:switch-manual",
+        request_id="req-1",
+        actor_user_id="user-1",
+        session_id="session-1",
+        trusted_ip="127.0.0.1",
+    )
+
+    received_id, config, context = calls[0]
+    assert received_id == subscription_id
+    assert config.target_mode == "MANUAL"
+    assert config.strategy_version_id is None
+    assert config.parameters == {"lookback": 20}
+    assert context.request_id == "req-1"

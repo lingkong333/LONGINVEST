@@ -12,6 +12,9 @@ from long_invest.modules.auth.dependencies import (
     require_authenticated_request,
     require_verified_write_request,
 )
+from long_invest.modules.monitoring.application import (
+    transactional_monitor_subscription_port,
+)
 from long_invest.modules.targets.application import TargetApplication
 from long_invest.modules.targets.contracts import (
     ManualTargetCommand,
@@ -21,6 +24,7 @@ from long_invest.modules.targets.contracts import (
     TargetSnapshot,
     TargetValues,
 )
+from long_invest.platform.database.engine import get_database
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import Pagination, SuccessEnvelope
@@ -29,8 +33,10 @@ router = APIRouter(tags=["targets"])
 
 
 def get_target_application() -> TargetApplication:
-    # Task 6 replaces this dependency with the transaction-bound monitoring port.
-    raise _capability_not_ready()
+    return TargetApplication(
+        get_database(),
+        subscription_factory=transactional_monitor_subscription_port,
+    )
 
 
 Application = Annotated[TargetApplication, Depends(get_target_application)]

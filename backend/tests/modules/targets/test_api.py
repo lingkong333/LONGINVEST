@@ -22,6 +22,7 @@ from long_invest.modules.targets.api import (
     get_target_application,
     router,
 )
+from long_invest.modules.targets.application import TargetApplication
 from long_invest.modules.targets.contracts import (
     TargetBindingView,
     TargetMutationResult,
@@ -433,12 +434,10 @@ def test_authentication_runs_before_default_application_placeholder() -> None:
         headers={"Idempotency-Key": "auth-first"},
     ).status_code == 401
 
-    authenticated = FastAPI()
-    register_exception_handlers(authenticated)
-    authenticated.include_router(router)
-    identity = _identity()
-    authenticated.dependency_overrides[require_authenticated_request] = lambda: identity
-    authenticated.dependency_overrides[require_verified_write_request] = (
-        lambda: identity
-    )
-    assert TestClient(authenticated).get("/api/v1/targets").status_code == 409
+
+
+def test_default_target_application_is_production_ready() -> None:
+    application = get_target_application()
+
+    assert isinstance(application, TargetApplication)
+    assert callable(application._subscription_factory)

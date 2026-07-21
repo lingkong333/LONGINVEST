@@ -61,6 +61,34 @@ class NotificationClass(StrEnum):
     HIGH_CLEARED = "HIGH_CLEARED"
 
 
+class PriceZoneRuleInput(StrictContract):
+    price: Decimal
+    targets: TargetValues
+    previous_zone: SignalZone
+    hysteresis_ratio: Decimal = Field(ge=0)
+    hysteresis_min: Decimal = Field(ge=0)
+
+    @field_validator("price")
+    @classmethod
+    def validate_rule_price(cls, value: Decimal) -> Decimal:
+        return _validate_signal_price(value)
+
+    @field_validator("hysteresis_ratio", "hysteresis_min")
+    @classmethod
+    def validate_rule_hysteresis(cls, value: Decimal) -> Decimal:
+        if not value.is_finite():
+            raise ValueError("hysteresis must be finite")
+        return value
+
+
+class PriceZoneRuleResult(StrictContract):
+    zone: SignalZone
+
+
+class PriceZoneRulePort(Protocol):
+    def evaluate(self, value: PriceZoneRuleInput) -> PriceZoneRuleResult: ...
+
+
 class SignalInput(StrictContract):
     subscription_id: UUID
     security_id: UUID

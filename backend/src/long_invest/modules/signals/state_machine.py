@@ -55,18 +55,32 @@ def hysteresis_buffer(
 
 
 def next_zone(current: SignalZone, signal_input: SignalInput) -> SignalZone:
-    price = signal_input.price
-    targets = signal_input.targets
+    return next_zone_for_values(
+        current=current,
+        price=signal_input.price,
+        targets=signal_input.targets,
+        ratio=signal_input.hysteresis_ratio,
+        minimum=signal_input.hysteresis_min,
+        reason=signal_input.reason,
+    )
+
+
+def next_zone_for_values(
+    *,
+    current: SignalZone,
+    price: Decimal,
+    targets: TargetValues,
+    ratio: Decimal,
+    minimum: Decimal,
+    reason: EvaluationReason,
+) -> SignalZone:
     desired = base_zone(price, targets)
 
     if (
         current in {SignalZone.UNKNOWN, SignalZone.NORMAL}
-        or signal_input.reason in _RECLASSIFICATION_REASONS
+        or reason in _RECLASSIFICATION_REASONS
     ):
         return desired
-
-    ratio = signal_input.hysteresis_ratio
-    minimum = signal_input.hysteresis_min
 
     if current is SignalZone.LOW:
         if desired is SignalZone.NORMAL:

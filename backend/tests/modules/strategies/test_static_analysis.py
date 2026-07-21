@@ -163,6 +163,11 @@ def test_static_analysis_rejects_dangerous_aliases(dangerous_source: str) -> Non
         "calculate_targets, other = other, calculate_targets",
         "del calculate_targets",
         "import math as calculate_targets",
+        (
+            "if True:\n"
+            "    def calculate_targets(history, params, context):\n"
+            "        return {}"
+        ),
     ],
 )
 def test_static_analysis_rejects_entrypoint_rebinding(rebind: str) -> None:

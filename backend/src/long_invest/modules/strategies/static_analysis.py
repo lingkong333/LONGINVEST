@@ -228,6 +228,7 @@ def _validate_entrypoint(tree: ast.Module) -> None:
         raise StrategyStaticAnalysisError(
             "ENTRYPOINT_MISSING", "calculate_targets entrypoint is required"
         )
+    function = functions[0]
     for node in ast.walk(tree):
         if (
             isinstance(node, ast.Name)
@@ -255,13 +256,22 @@ def _validate_entrypoint(tree: ast.Module) -> None:
                 "calculate_targets cannot be rebound",
                 line=node.lineno,
             )
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "calculate_targets"
+            and node is not function
+        ):
+            raise StrategyStaticAnalysisError(
+                ENTRYPOINT_REBOUND,
+                "calculate_targets cannot be rebound",
+                line=node.lineno,
+            )
         if isinstance(node, ast.ExceptHandler) and node.name == "calculate_targets":
             raise StrategyStaticAnalysisError(
                 ENTRYPOINT_REBOUND,
                 "calculate_targets cannot be rebound",
                 line=node.lineno,
             )
-    function = functions[0]
     args = function.args
     positional = [*args.posonlyargs, *args.args]
     valid = (

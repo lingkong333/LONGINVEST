@@ -475,10 +475,10 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
                 await session.execute(
                     text(
                         "UPDATE strategy_validation_run "
-                        "SET evidence_snapshot = '{\"tampered\":true}'::jsonb "
+                        "SET evidence_snapshot = CAST(:evidence AS jsonb) "
                         "WHERE id = :id"
                     ),
-                    {"id": validation_run_id},
+                    {"id": validation_run_id, "evidence": '{"tampered":true}'},
                 )
 
         valid_target = (

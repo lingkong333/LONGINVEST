@@ -173,6 +173,48 @@ def test_crossing_multiple_zones_goes_directly_to_the_base_zone(
 
 
 @pytest.mark.parametrize(
+    ("current", "price", "ratio", "minimum", "expected"),
+    [
+        (SignalZone.LOW, "12.50", "10", "0.02", SignalZone.HIGH),
+        (SignalZone.LOW, "13.00", "0.02", "100", SignalZone.STRONG_HIGH),
+        (SignalZone.HIGH, "8.50", "10", "0.02", SignalZone.LOW),
+        (SignalZone.HIGH, "8.00", "0.02", "100", SignalZone.STRONG_LOW),
+        (SignalZone.STRONG_LOW, "10.00", "10", "0.02", SignalZone.NORMAL),
+        (SignalZone.STRONG_LOW, "12.50", "0.02", "100", SignalZone.HIGH),
+        (
+            SignalZone.STRONG_LOW,
+            "13.00",
+            "10",
+            "0.02",
+            SignalZone.STRONG_HIGH,
+        ),
+        (SignalZone.STRONG_HIGH, "10.00", "10", "0.02", SignalZone.NORMAL),
+        (SignalZone.STRONG_HIGH, "8.50", "0.02", "100", SignalZone.LOW),
+        (
+            SignalZone.STRONG_HIGH,
+            "8.00",
+            "10",
+            "0.02",
+            SignalZone.STRONG_LOW,
+        ),
+    ],
+)
+def test_large_buffers_only_delay_adjacent_exits(
+    current: SignalZone,
+    price: str,
+    ratio: str,
+    minimum: str,
+    expected: SignalZone,
+    targets: TargetValues,
+) -> None:
+    input_value = signal_input(
+        price, targets, ratio=ratio, minimum=minimum
+    )
+
+    assert next_zone(current, input_value) is expected
+
+
+@pytest.mark.parametrize(
     "reason", [EvaluationReason.TARGET_ACTIVATED, EvaluationReason.STATE_RESET]
 )
 def test_reclassification_reasons_bypass_old_hysteresis(

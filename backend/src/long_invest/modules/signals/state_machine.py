@@ -61,32 +61,36 @@ def next_zone(current: SignalZone, signal_input: SignalInput) -> SignalZone:
     minimum = signal_input.hysteresis_min
 
     if current is SignalZone.LOW:
-        if desired is SignalZone.STRONG_LOW:
-            return desired
-        boundary = targets.low_watch + hysteresis_buffer(
-            targets.low_watch, ratio, minimum
-        )
-        return desired if price > boundary else current
+        if desired is SignalZone.NORMAL:
+            boundary = targets.low_watch + hysteresis_buffer(
+                targets.low_watch, ratio, minimum
+            )
+            return desired if price > boundary else current
+        return desired
 
     if current is SignalZone.STRONG_LOW:
-        boundary = targets.low_strong + hysteresis_buffer(
-            targets.low_strong, ratio, minimum
-        )
-        return desired if price > boundary else current
+        if desired is SignalZone.LOW:
+            boundary = targets.low_strong + hysteresis_buffer(
+                targets.low_strong, ratio, minimum
+            )
+            return desired if price > boundary else current
+        return desired
 
     if current is SignalZone.HIGH:
-        if desired is SignalZone.STRONG_HIGH:
-            return desired
-        boundary = targets.high_watch - hysteresis_buffer(
-            targets.high_watch, ratio, minimum
-        )
-        return desired if price < boundary else current
+        if desired is SignalZone.NORMAL:
+            boundary = targets.high_watch - hysteresis_buffer(
+                targets.high_watch, ratio, minimum
+            )
+            return desired if price < boundary else current
+        return desired
 
     if current is SignalZone.STRONG_HIGH:
-        boundary = targets.high_strong - hysteresis_buffer(
-            targets.high_strong, ratio, minimum
-        )
-        return desired if price < boundary else current
+        if desired is SignalZone.HIGH:
+            boundary = targets.high_strong - hysteresis_buffer(
+                targets.high_strong, ratio, minimum
+            )
+            return desired if price < boundary else current
+        return desired
 
     return desired
 

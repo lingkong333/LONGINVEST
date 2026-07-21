@@ -1,9 +1,9 @@
 export type StrategyAction = "validate" | "test" | "publish" | "archive"
 
 export interface StrategyRunResult {
-  status: "SUCCEEDED" | "FAILED" | "RUNNING"
+  status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED"
   sourceVersion: number
-  summary: string
+  summary?: string
   details?: string[]
 }
 
@@ -59,24 +59,156 @@ export interface HoldoutBacktestInput {
   testEndDate: string
 }
 
-export type HoldoutBacktestStatus =
-  | "QUEUED"
+export type BacktestTaskStatus =
+  | "PENDING"
   | "RUNNING"
+  | "PAUSING"
   | "PAUSED"
-  | "PARTIAL_SUCCESS"
+  | "SUCCEEDED"
+  | "PARTIAL"
+  | "FAILED"
+  | "CANCELING"
+  | "CANCELED"
+
+export type BacktestItemStatus =
+  | "PENDING"
+  | "FETCHING_DATA"
+  | "VALIDATING_DATA"
+  | "FORECASTING"
+  | "FROZEN"
+  | "SIMULATING"
+  | "SAVING"
   | "SUCCEEDED"
   | "FAILED"
+  | "SKIPPED"
   | "CANCELED"
-  | "TIMED_OUT"
-  | "OFFLINE"
+
+export interface TargetValuesDto {
+  lowStrong: string
+  lowWatch: string
+  highWatch: string
+  highStrong: string
+}
+
+export interface BacktestForecastDto {
+  itemId: string
+  trainingStartDate: string
+  trainingEndDate: string
+  trainingRowCount: number
+  trainingFetchedAt: string
+  trainingDataHash: string
+  sourceCodeHash: string
+  parameterHash: string
+  values: TargetValuesDto
+  diagnostics: Record<string, unknown>
+  environmentVersion: string
+  runnerImageDigest: string
+  priceBasis: string
+  frozenAt: string
+}
+
+export interface BacktestAdjustmentDto {
+  itemId: string
+  eventDate: string
+  beforeValues: TargetValuesDto
+  afterValues: TargetValuesDto
+  adjustmentFactor: string
+  source: string
+  dataHash: string
+  publishedAt: string
+  effectiveAt: string
+}
+
+export interface BacktestOrderDto {
+  id: string
+  itemId: string
+  signalDate: string
+  executeDate: string | null
+  status: "PENDING" | "FILLED" | "UNFILLED_AT_END"
+  direction: "BUY" | "SELL"
+  executionPrice: string | null
+  quantity: string
+  cashBefore: string
+  positionBefore: string
+  targetValues: TargetValuesDto
+  targetZone: string
+}
+
+export interface BacktestTradeDto {
+  id: string
+  itemId: string
+  orderId: string
+  executeDate: string
+  direction: "BUY" | "SELL"
+  price: string
+  quantity: string
+  cashAfter: string
+  positionAfter: string
+  targetValues: TargetValuesDto
+  targetZone: string
+  roundTripNo: number
+  holdingTradeDays: number | null
+  realizedReturnAmount: string | null
+  realizedReturnRate: string | null
+}
+
+export interface BacktestMetricsDto {
+  itemId: string
+  endingEquity: string
+  totalReturn: string
+  realizedReturn: string
+  annualizedReturn: string
+  maxDrawdown: string
+  volatility: string
+  sharpeRatio: string | null
+  completedRoundTrips: number
+  winningTrades: number
+  losingTrades: number
+  breakevenTrades: number
+  winRate: string | null
+  averageTradeReturn: string | null
+  maximumTradeGain: string | null
+  maximumTradeLoss: string | null
+  averageHoldingTradeDays: string | null
+  longestHoldingTradeDays: number
+  capitalExposureRatio: string
+  openPositionAtEnd: boolean
+  unfilledOrderCount: number
+}
+
+export interface BacktestItemDto {
+  id?: string
+  taskId?: string
+  securityId?: string
+  status: BacktestItemStatus | string
+  failureCode?: string
+  failureMessage?: string
+}
+
+export interface BacktestDailyResultDto {
+  itemId: string
+  tradeDate: string
+  cash: string
+  positionQuantity: string
+  closePrice: string
+  positionMarketValue: string
+  equity: string
+  drawdown: string
+  targetValues: TargetValuesDto
+  zone: string
+  positionStatus: "FLAT" | "HOLDING"
+}
 
 export interface HoldoutBacktestResult {
   id: string
-  status: HoldoutBacktestStatus
-  frozenTargets: Array<{ label: string; price: string }>
-  adjustments: Array<{ eventDate: string; factor: string; source: string }>
-  trades: Array<{ date: string; direction: "BUY" | "SELL"; price: string; quantity: string }>
-  metrics: Array<{ label: string; value: string }>
+  status: BacktestTaskStatus | string
+  item?: BacktestItemDto
+  forecast: BacktestForecastDto | null
+  adjustments: BacktestAdjustmentDto[]
+  orders: BacktestOrderDto[]
+  trades: BacktestTradeDto[]
+  metrics: BacktestMetricsDto | null
+  dailyResults: BacktestDailyResultDto[]
   failureMessage?: string
 }
 

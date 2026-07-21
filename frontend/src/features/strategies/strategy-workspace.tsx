@@ -1,7 +1,7 @@
 import Editor from "@monaco-editor/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { Archive, CheckCircle2, Clipboard, FlaskConical, History, RotateCcw, Rocket, Save } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Controller, useWatch } from "react-hook-form"
 import { z } from "zod"
 
@@ -22,10 +22,31 @@ import {
   type StrategyRunResult,
 } from "./types"
 
+const schemaTypes = new Set(["null", "boolean", "object", "array", "number", "string", "integer"])
+
+function isSchemaNode(value: unknown): boolean {
+  if (typeof value === "boolean") return true
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false
+  const schema = value as Record<string, unknown>
+  if ("type" in schema) {
+    const types = Array.isArray(schema.type) ? schema.type : [schema.type]
+    if (!types.length || types.some((type) => typeof type !== "string" || !schemaTypes.has(type))) return false
+  }
+  if ("properties" in schema) {
+    if (typeof schema.properties !== "object" || schema.properties === null || Array.isArray(schema.properties)) return false
+    if (Object.values(schema.properties).some((child) => !isSchemaNode(child))) return false
+  }
+  if ("required" in schema && (!Array.isArray(schema.required) || schema.required.some((item) => typeof item !== "string"))) return false
+  if ("items" in schema && !isSchemaNode(schema.items)) return false
+  if ("additionalProperties" in schema && typeof schema.additionalProperties !== "boolean" && !isSchemaNode(schema.additionalProperties)) return false
+  if ("enum" in schema && (!Array.isArray(schema.enum) || schema.enum.length === 0)) return false
+  return true
+}
+
 function isJsonSchema(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value)
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    return isSchemaNode(parsed)
   } catch {
     return false
   }
@@ -35,16 +56,30 @@ const draftSchema = z.object({
   name: z.string().trim().min(1, "请输入策略名称"),
   description: z.string().trim().min(1, "请输入策略说明"),
   sourceCode: z.string().min(1, "请输入 Python 策略源码"),
-  parameterSchema: z.string().refine(isJsonSchema, "请输入合法的 JSON"),
+  parameterSchema: z.string().superRefine((value, context) => {
+    try { JSON.parse(value) } catch {
+      context.addIssue({ code: "custom", message: "请输入合法的 JSON" })
+      return
+    }
+    if (!isJsonSchema(value)) context.addIssue({ code: "custom", message: "请输入合法的 JSON Schema" })
+  }),
 })
 
 type DraftForm = z.input<typeof draftSchema>
 type ReasonAction = StrategyAction | "restore"
 
+type DraftField = keyof DraftForm
+type ConflictChoice = "server" | "local" | "custom"
+
+interface ConflictResolution {
+  choice: ConflictChoice
+  custom: string
+}
+
 interface ConflictState extends SaveConflict {
   base: StrategyDraft
   local: DraftForm
-  mergedSourceCode: string
+  resolutions: Record<DraftField, ConflictResolution>
 }
 
 function toDraftInput(values: DraftForm, expectedVersion: number): DraftSaveInput {
@@ -77,6 +112,22 @@ function containsConflictMarker(value: string): boolean {
   return /^(<{7}|={7}|>{7})/m.test(value)
 }
 
+const draftFields: Array<{ field: DraftField; label: string }> = [
+  { field: "name", label: "策略名称" },
+  { field: "description", label: "策略说明" },
+  { field: "parameterSchema", label: "参数 JSON Schema" },
+  { field: "sourceCode", label: "Python 策略源码" },
+]
+
+function cloneDraft(draft: StrategyDraft): StrategyDraft {
+  return structuredClone(draft)
+}
+
+function conflictResolutions(server: StrategyDraft): ConflictState["resolutions"] {
+  const values = draftDefaults(server)
+  return Object.fromEntries(draftFields.map(({ field }) => [field, { choice: "server", custom: values[field] }])) as ConflictState["resolutions"]
+}
+
 const versionStatusLabels = {
   PUBLISHING: "发布中",
   PUBLISHED: "已发布",
@@ -87,7 +138,7 @@ const versionStatusLabels = {
 export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api: StrategyApi }) {
   const queryClient = useQueryClient()
   const [expectedVersion, setExpectedVersion] = useState<number | null>(null)
-  const [baseDraft, setBaseDraft] = useState<StrategyDraft | null>(null)
+  const baseDraftRef = useRef<StrategyDraft | null>(null)
   const [conflict, setConflict] = useState<ConflictState | null>(null)
   const [mergeConfirmed, setMergeConfirmed] = useState(false)
   const [reasonAction, setReasonAction] = useState<ReasonAction | null>(null)
@@ -99,6 +150,7 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
   const [actionPending, setActionPending] = useState(false)
   const [validationResult, setValidationResult] = useState<StrategyRunResult | undefined>()
   const [testResult, setTestResult] = useState<StrategyRunResult | undefined>()
+  const [lastActionResult, setLastActionResult] = useState<{ action: StrategyAction; result: StrategyRunResult } | null>(null)
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null)
 
   const draftQuery = useQuery({ queryKey: ["strategies", strategyId, "draft"], queryFn: () => api.getDraft(strategyId) })
@@ -111,6 +163,7 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
   useEffect(() => {
     if (!draftQuery.data || form.formState.isDirty) return
     form.reset(draftDefaults(draftQuery.data))
+    baseDraftRef.current = cloneDraft(draftQuery.data)
   }, [draftQuery.data, form])
 
   const saveMutation = useMutation({
@@ -119,7 +172,7 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
       queryClient.setQueryData(["strategies", strategyId, "draft"], saved)
       form.reset(draftDefaults(saved))
       setExpectedVersion(saved.version)
-      setBaseDraft(saved)
+      baseDraftRef.current = cloneDraft(saved)
       setConflict(null)
       setMergeConfirmed(false)
       setActionMessage("草稿已保存")
@@ -127,7 +180,12 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
     onError: (error, input) => {
       if (!isSaveConflict(error)) return
       const local = { name: input.name, description: input.description, sourceCode: input.sourceCode, parameterSchema: input.parameterSchema }
-      setConflict({ ...error, base: baseDraft ?? error.current, local, mergedSourceCode: local.sourceCode })
+      setConflict({
+        ...error,
+        base: cloneDraft(baseDraftRef.current ?? error.current),
+        local,
+        resolutions: conflictResolutions(error.current),
+      })
     },
   })
 
@@ -187,13 +245,27 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
         queryClient.setQueryData(["strategies", strategyId, "draft"], restored)
         form.reset(draftDefaults(restored))
         setExpectedVersion(restored.version)
-        setBaseDraft(restored)
+        baseDraftRef.current = cloneDraft(restored)
         setActionMessage("回滚成功")
       } else {
-        if (["validate", "test", "publish"].includes(reasonAction) && form.formState.isDirty) {
+        let actionDraft = draftQuery.data
+        if (["validate", "test", "publish", "archive"].includes(reasonAction) && form.formState.isDirty) {
           try { await saveCurrent() } catch (error) {
             if (isSaveConflict(error)) setReasonAction(null)
             else setActionError("草稿保存失败，后续操作已中止。请检查网络后重试。")
+            return
+          }
+          actionDraft = queryClient.getQueryData<StrategyDraft>(["strategies", strategyId, "draft"]) ?? actionDraft
+        }
+        if (!actionDraft.allowedActions.includes(reasonAction)) {
+          setActionError("服务器已不允许执行此操作，操作已中止。")
+          return
+        }
+        if (reasonAction === "publish") {
+          const freshValidation = actionDraft.validationResult?.status === "SUCCEEDED" && actionDraft.validationResult.sourceVersion === actionDraft.version
+          const freshTest = actionDraft.testResult?.status === "SUCCEEDED" && actionDraft.testResult.sourceVersion === actionDraft.version
+          if (!freshValidation || !freshTest) {
+            setActionError("当前草稿的验证或测试已失效，发布已中止。")
             return
           }
         }
@@ -204,10 +276,17 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
           archive: api.archiveStrategy,
         }
         const result = await calls[reasonAction](strategyId, reason.trim())
+        if (reasonAction === "publish" || reasonAction === "archive") setLastActionResult({ action: reasonAction, result })
         if (reasonAction === "validate") setValidationResult(result)
         if (reasonAction === "test") setTestResult(result)
-        const labels = { validate: "验证已完成", test: "测试已完成", publish: "发布已提交", archive: "归档已提交" }
-        setActionMessage(labels[reasonAction])
+        if (result.status === "FAILED" || result.status === "CANCELED") {
+          setActionError(result.summary ?? (result.status === "FAILED" ? "操作执行失败。" : "操作已取消。"))
+          setReasonAction(null)
+          return
+        }
+        const completedLabels = { validate: "验证已完成", test: "测试已完成", publish: "发布已完成", archive: "归档已完成" }
+        const submittedLabels = { validate: "验证已提交", test: "测试已提交", publish: "发布已提交", archive: "归档已提交" }
+        setActionMessage(result.status === "SUCCEEDED" ? completedLabels[reasonAction] : submittedLabels[reasonAction])
       }
       setReasonAction(null)
       setReason("")
@@ -220,8 +299,14 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
   }
 
   const submitMerge = async () => {
-    if (!conflict || !mergeConfirmed || containsConflictMarker(conflict.mergedSourceCode)) return
-    const merged = { ...conflict.local, sourceCode: conflict.mergedSourceCode }
+    if (!conflict || !mergeConfirmed) return
+    const server = draftDefaults(conflict.current)
+    const merged = Object.fromEntries(draftFields.map(({ field }) => {
+      const resolution = conflict.resolutions[field]
+      const value = resolution.choice === "server" ? server[field] : resolution.choice === "local" ? conflict.local[field] : resolution.custom
+      return [field, value]
+    })) as DraftForm
+    if (containsConflictMarker(merged.sourceCode)) return
     try { await saveMutation.mutateAsync(toDraftInput(merged, conflict.current.version)) } catch { /* keep conflict dialog open */ }
   }
 
@@ -247,8 +332,9 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
         <FormField control={form.control} name="parameterSchema" label="参数 JSON Schema">{({ field }) => <textarea className="min-h-32 w-full border border-input bg-card p-3 font-mono text-sm" {...field} />}</FormField>
         {saveMutation.isError && !conflict ? <p role="alert" className="text-sm text-destructive">保存失败，请检查网络后重试。</p> : null}
         {actionMessage ? <p role="status" className="text-sm text-primary">{actionMessage}</p> : null}
-        {(validationResult ?? draftQuery.data.validationResult) ? <section aria-label="验证运行结果"><h2 className="text-sm font-semibold">验证运行结果</h2><p>{(validationResult ?? draftQuery.data.validationResult)?.summary}</p>{(validationResult ?? draftQuery.data.validationResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
-        {(testResult ?? draftQuery.data.testResult) ? <section aria-label="测试运行结果"><h2 className="text-sm font-semibold">测试运行结果</h2><p>{(testResult ?? draftQuery.data.testResult)?.summary}</p>{(testResult ?? draftQuery.data.testResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
+        {lastActionResult ? <section aria-label="最近操作结果" className="border border-border p-3"><h2 className="text-sm font-semibold">最近操作结果</h2><p role={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "alert" : "status"} className={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "text-destructive" : ""}>{lastActionResult.result.summary ?? `状态：${lastActionResult.result.status}`}</p>{lastActionResult.result.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
+        {(validationResult ?? draftQuery.data.validationResult) ? <section aria-label="验证运行结果"><h2 className="text-sm font-semibold">验证运行结果</h2><p role={(validationResult ?? draftQuery.data.validationResult)?.status === "FAILED" || (validationResult ?? draftQuery.data.validationResult)?.status === "CANCELED" ? "alert" : "status"}>{(validationResult ?? draftQuery.data.validationResult)?.summary}</p>{(validationResult ?? draftQuery.data.validationResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
+        {(testResult ?? draftQuery.data.testResult) ? <section aria-label="测试运行结果"><h2 className="text-sm font-semibold">测试运行结果</h2><p role={(testResult ?? draftQuery.data.testResult)?.status === "FAILED" || (testResult ?? draftQuery.data.testResult)?.status === "CANCELED" ? "alert" : "status"}>{(testResult ?? draftQuery.data.testResult)?.summary}</p>{(testResult ?? draftQuery.data.testResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
       </form>
       <aside className="space-y-5 border-l border-border pl-0 lg:pl-5">
         <section>
@@ -266,16 +352,20 @@ export function StrategyWorkspace({ strategyId, api }: { strategyId: string; api
           <DialogTitle>保存冲突</DialogTitle>
           <DialogDescription>服务器草稿已更新。自动保存已暂停，请选择保留服务器版本或完成三方人工合并。</DialogDescription>
           {conflict ? <div className="grid gap-3 text-sm">
-            <strong>基础版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{JSON.stringify(draftDefaults(conflict.base), null, 2)}</pre>
-            <strong>本地版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{JSON.stringify(conflict.local, null, 2)}</pre>
-            <strong>服务器版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{JSON.stringify(draftDefaults(conflict.current), null, 2)}</pre>
-            <label className="grid gap-1 font-medium">人工合并结果<textarea aria-label="人工合并结果" className="min-h-32 border border-input p-2 font-mono" value={conflict.mergedSourceCode} onChange={(event) => setConflict({ ...conflict, mergedSourceCode: event.target.value })} /></label>
-            {containsConflictMarker(conflict.mergedSourceCode) ? <p role="alert" className="text-destructive">仍有未解决的冲突标记，不能提交。</p> : null}
+            {draftFields.map(({ field, label }) => {
+              const base = draftDefaults(conflict.base)[field]
+              const local = conflict.local[field]
+              const server = draftDefaults(conflict.current)[field]
+              const resolution = conflict.resolutions[field]
+              const customLabel = field === "sourceCode" ? "人工合并结果" : `${label}人工合并结果`
+              return <fieldset key={field} className="grid gap-2 border border-border p-3"><legend className="font-semibold">{label}</legend><div className="grid gap-2 sm:grid-cols-3"><div><strong>基础版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{base}</pre></div><div><strong>本地版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{local}</pre></div><div><strong>服务器版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{server}</pre></div></div><div className="flex flex-wrap gap-3"><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "server"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "server" } } })} />{label}采用服务器版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "local"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "local" } } })} />{label}采用本地版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "custom"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "custom" } } })} />人工编辑</label></div><textarea aria-label={customLabel} className="min-h-20 border border-input p-2 font-mono" value={resolution.custom} onChange={(event) => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { choice: "custom", custom: event.target.value } } })} /></fieldset>
+            })}
+            {containsConflictMarker(conflict.resolutions.sourceCode.choice === "local" ? conflict.local.sourceCode : conflict.resolutions.sourceCode.choice === "server" ? conflict.current.sourceCode : conflict.resolutions.sourceCode.custom) ? <p role="alert" className="text-destructive">仍有未解决的冲突标记，不能提交。</p> : null}
             <label className="flex gap-2"><input type="checkbox" checked={mergeConfirmed} onChange={(event) => setMergeConfirmed(event.target.checked)} />我已核对三方内容</label>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={() => void navigator.clipboard?.writeText(JSON.stringify(conflict.local, null, 2))}><Clipboard size={16} />复制本地内容</Button>
-              <Button type="button" variant="secondary" onClick={() => { form.reset(draftDefaults(conflict.current)); setExpectedVersion(conflict.current.version); setBaseDraft(conflict.current); setConflict(null) }}>放弃本地修改并采用服务器版本</Button>
-              <Button type="button" onClick={() => void submitMerge()} disabled={!mergeConfirmed || containsConflictMarker(conflict.mergedSourceCode) || saveMutation.isPending}>提交人工合并</Button>
+              <Button type="button" variant="secondary" onClick={() => { form.reset(draftDefaults(conflict.current)); setExpectedVersion(conflict.current.version); baseDraftRef.current = cloneDraft(conflict.current); setConflict(null) }}>放弃本地修改并采用服务器版本</Button>
+              <Button type="button" onClick={() => void submitMerge()} disabled={!mergeConfirmed || containsConflictMarker(conflict.resolutions.sourceCode.choice === "local" ? conflict.local.sourceCode : conflict.resolutions.sourceCode.choice === "server" ? conflict.current.sourceCode : conflict.resolutions.sourceCode.custom) || saveMutation.isPending}>提交人工合并</Button>
             </div>
           </div> : null}
         </DialogContent>

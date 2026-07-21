@@ -70,6 +70,17 @@ describe("策略工作台", () => {
     expect(api.saveDraft).not.toHaveBeenCalled()
   })
 
+  it("拒绝语法正确但不是合法结构的 JSON Schema", async () => {
+    const user = userEvent.setup()
+    const api = createApi()
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={api} />)
+    const schema = await screen.findByRole("textbox", { name: "参数 JSON Schema" })
+    fireEvent.change(schema, { target: { value: '{"type":"unknown","properties":[]}' } })
+    await user.click(screen.getByRole("button", { name: "保存" }))
+    expect(await screen.findByText("请输入合法的 JSON Schema")).toBeInTheDocument()
+    expect(api.saveDraft).not.toHaveBeenCalled()
+  })
+
   it("可以手动保存，并明确显示保存失败", async () => {
     const saveDraft = vi.fn().mockRejectedValue(new Error("offline"))
     const user = userEvent.setup()
@@ -159,6 +170,32 @@ describe("策略工作台", () => {
     expect(screen.getByRole("button", { name: "提交人工合并" })).toBeDisabled()
   })
 
+  it("冲突基础版本固定为本次编辑起点，且每个字段默认保留服务器值", async () => {
+    const starting = { ...draft, sourceCode: "编辑起点", name: "起点名称" }
+    const server = { ...draft, version: 8, sourceCode: "服务器源码", name: "服务器名称", description: "服务器说明", parameterSchema: '{"type":"string"}' }
+    const saveDraft = vi.fn().mockRejectedValueOnce({ status: 409, current: server }).mockResolvedValueOnce({ ...server, version: 9 })
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi({ getDraft: vi.fn().mockResolvedValue(starting), saveDraft })} />)
+    const editor = await screen.findByRole("textbox", { name: "Python 策略源码" })
+    starting.sourceCode = "外部对象后来被修改"
+    await user.clear(editor)
+    await user.type(editor, "本地源码")
+    await user.click(screen.getByRole("button", { name: "保存" }))
+    expect(await screen.findByText("编辑起点")).toBeInTheDocument()
+    for (const field of ["策略名称", "策略说明", "参数 JSON Schema", "Python 策略源码"]) {
+      expect(screen.getByRole("radio", { name: `${field}采用服务器版本` })).toBeChecked()
+    }
+    await user.click(screen.getByRole("checkbox", { name: "我已核对三方内容" }))
+    await user.click(screen.getByRole("button", { name: "提交人工合并" }))
+    await waitFor(() => expect(saveDraft).toHaveBeenLastCalledWith("strategy-1", expect.objectContaining({
+      expectedVersion: 8,
+      name: "服务器名称",
+      description: "服务器说明",
+      parameterSchema: '{"type":"string"}',
+      sourceCode: "服务器源码",
+    })))
+  })
+
   it("验证前先保存脏草稿，保存失败就中止", async () => {
     const saveDraft = vi.fn().mockRejectedValue(new Error("offline"))
     const validateDraft = vi.fn()
@@ -173,6 +210,46 @@ describe("策略工作台", () => {
     expect(validateDraft).not.toHaveBeenCalled()
   })
 
+  it("归档前保存草稿，并按保存响应的新权限中止归档", async () => {
+    const saved = { ...draft, version: 5, allowedActions: ["validate"] as StrategyDraft["allowedActions"] }
+    const saveDraft = vi.fn().mockResolvedValue(saved)
+    const archiveStrategy = vi.fn()
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi({ saveDraft, archiveStrategy })} />)
+    await user.type(await screen.findByRole("textbox", { name: "Python 策略源码" }), "# 修改")
+    await user.click(screen.getByRole("button", { name: "归档" }))
+    await user.type(screen.getByRole("textbox", { name: "操作原因" }), "归档旧策略")
+    await user.click(screen.getByRole("button", { name: "确认执行" }))
+    expect(await screen.findByText("服务器已不允许执行此操作，操作已中止。")).toBeInTheDocument()
+    expect(saveDraft).toHaveBeenCalled()
+    expect(archiveStrategy).not.toHaveBeenCalled()
+  })
+
+  it("接口正常返回但运行状态失败时按失败展示", async () => {
+    const validateDraft = vi.fn().mockResolvedValue({ status: "FAILED", sourceVersion: 4, summary: "语法检查失败", details: ["第 2 行错误"] })
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi({ validateDraft })} />)
+    await screen.findByRole("textbox", { name: "Python 策略源码" })
+    await user.click(screen.getByRole("button", { name: "验证" }))
+    await user.type(screen.getByRole("textbox", { name: "操作原因" }), "检查语法")
+    await user.click(screen.getByRole("button", { name: "确认执行" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("语法检查失败")
+    expect(screen.getByText("第 2 行错误")).toBeInTheDocument()
+  })
+
+  it("归档返回取消状态时不显示成功，并保留结果原因", async () => {
+    const archiveStrategy = vi.fn().mockResolvedValue({ status: "CANCELED", sourceVersion: 4, summary: "归档请求已取消", details: ["策略仍被任务使用"] })
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi({ archiveStrategy })} />)
+    await screen.findByRole("textbox", { name: "Python 策略源码" })
+    await user.click(screen.getByRole("button", { name: "归档" }))
+    await user.type(screen.getByRole("textbox", { name: "操作原因" }), "归档旧策略")
+    await user.click(screen.getByRole("button", { name: "确认执行" }))
+    expect(await screen.findByRole("alert")).toHaveTextContent("归档请求已取消")
+    expect(screen.getByText("策略仍被任务使用")).toBeInTheDocument()
+    expect(screen.queryByText("归档已完成")).not.toBeInTheDocument()
+  })
+
   it("源码变化会使旧验证失效，且服务器未允许时不能发布", async () => {
     renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi()} />)
     const editor = await screen.findByRole("textbox", { name: "Python 策略源码" })
@@ -184,7 +261,7 @@ describe("策略工作台", () => {
   it.each([
     ["验证", "validateDraft", "验证已完成"],
     ["测试", "testDraft", "测试已完成"],
-    ["归档", "archiveStrategy", "归档已提交"],
+    ["归档", "archiveStrategy", "归档已完成"],
   ] as const)("可以确认执行%s并展示运行结果", async (buttonLabel, method, message) => {
     const api = createApi()
     const user = userEvent.setup()
@@ -207,7 +284,7 @@ describe("策略工作台", () => {
     await user.click(screen.getByRole("button", { name: "发布" }))
     await user.type(screen.getByRole("textbox", { name: "操作原因" }), "发布稳定版本")
     await user.click(screen.getByRole("button", { name: "确认执行" }))
-    expect(await screen.findByText("发布已提交")).toBeInTheDocument()
+    expect(await screen.findByText("发布已完成")).toBeInTheDocument()
     expect(api.publishDraft).toHaveBeenCalledWith("strategy-1", "发布稳定版本")
   })
 
@@ -261,14 +338,16 @@ describe("策略工作台", () => {
 })
 
 const result = (status: HoldoutBacktestResult["status"]): HoldoutBacktestResult => ({
-  id: "bt-1", status, frozenTargets: [], adjustments: [], trades: [], metrics: [], failureMessage: "执行失败",
+  id: "bt-1", status, forecast: null, adjustments: [], orders: [], trades: [], metrics: null, dailyResults: [],
 })
 
 describe("样本外回测", () => {
+  afterEach(() => vi.useRealTimers())
+
   it.each([
-    ["QUEUED", "回测正在排队"], ["RUNNING", "回测正在运行"], ["PAUSED", "回测已暂停"],
-    ["PARTIAL_SUCCESS", "回测部分成功"], ["FAILED", "回测失败"], ["CANCELED", "回测已取消"],
-    ["TIMED_OUT", "回测已超时"], ["OFFLINE", "回测服务离线"],
+    ["PENDING", "回测正在排队"], ["RUNNING", "回测正在运行"], ["PAUSING", "回测正在暂停"],
+    ["PAUSED", "回测已暂停"], ["PARTIAL", "回测部分成功"], ["FAILED", "回测失败"],
+    ["CANCELING", "回测正在取消"], ["CANCELED", "回测已取消"],
   ] as const)("显示 %s 状态", async (status, label) => {
     const api = createApi({ getHoldoutBacktest: vi.fn().mockResolvedValue(result(status)) })
     const user = userEvent.setup()
@@ -278,6 +357,60 @@ describe("样本外回测", () => {
     }
     await user.click(screen.getByRole("button", { name: "开始样本外回测" }))
     expect(await screen.findByText(label)).toBeInTheDocument()
+  })
+
+  it.each([
+    ["FETCHING_DATA", "正在获取行情数据"], ["VALIDATING_DATA", "正在校验行情数据"],
+    ["FORECASTING", "正在计算目标价格"], ["FROZEN", "目标价格已冻结"],
+    ["SIMULATING", "正在模拟交易"], ["SAVING", "正在保存回测结果"],
+  ] as const)("展示单股 %s 处理阶段", async (itemStatus, label) => {
+    const current = { ...result("PAUSED"), item: { status: itemStatus } }
+    const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(current), getHoldoutBacktest: vi.fn().mockResolvedValue(current) })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
+    expect(await screen.findByText(label)).toBeInTheDocument()
+  })
+
+  it("使用定时器按状态序列轮询，并在暂停后停止", async () => {
+    vi.useFakeTimers()
+    const states = [result("PENDING"), result("RUNNING"), result("PAUSING"), result("PAUSED")]
+    const getHoldoutBacktest = vi.fn().mockImplementation(async () => states.shift() ?? result("PAUSED"))
+    const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(result("PENDING")), getHoldoutBacktest })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000) })
+    expect(getHoldoutBacktest).toHaveBeenCalledTimes(4)
+    expect(screen.getByText("回测已暂停")).toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
+    expect(getHoldoutBacktest).toHaveBeenCalledTimes(4)
+  })
+
+  it("四十次自动查询后停止，并允许手动继续", async () => {
+    vi.useFakeTimers()
+    const getHoldoutBacktest = vi.fn().mockImplementation(async () => getHoldoutBacktest.mock.calls.length <= 40 ? result("RUNNING") : result("PAUSED"))
+    const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(result("PENDING")), getHoldoutBacktest })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
+    expect(getHoldoutBacktest).toHaveBeenCalledTimes(40)
+    expect(screen.getByText("自动轮询已达到 40 次上限并停止。")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "手动继续查询" }))
+    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+    expect(getHoldoutBacktest).toHaveBeenCalledTimes(41)
+    expect(screen.getByText("回测已暂停")).toBeInTheDocument()
+  })
+
+  it("未知任务和单股状态会安全降级", async () => {
+    const unknown = { ...result("NEW_SERVER_STATE"), item: { status: "NEW_ITEM_STATE" } }
+    const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(unknown), getHoldoutBacktest: vi.fn().mockResolvedValue(unknown) })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
+    expect(await screen.findByText("未知任务状态：NEW_SERVER_STATE")).toBeInTheDocument()
+    expect(screen.getByText("未知单股状态：NEW_ITEM_STATE")).toBeInTheDocument()
   })
 
   it("成功但无交易和指标时明确说明", async () => {
@@ -292,18 +425,23 @@ describe("样本外回测", () => {
   it("展示冻结目标、价格调整、交易和指标，并把方向翻译成中文", async () => {
     const complete: HoldoutBacktestResult = {
       id: "bt-2", status: "SUCCEEDED",
-      frozenTargets: [{ label: "强低位", price: "8.00" }],
-      adjustments: [{ eventDate: "2021-06-01", factor: "0.9", source: "除权" }],
-      trades: [{ date: "2021-06-02", direction: "BUY", price: "8.10", quantity: "100" }],
-      metrics: [{ label: "收益率", value: "12%" }],
+      item: { status: "SUCCEEDED" },
+      forecast: { itemId: "item1", trainingStartDate: "2020-01-01", trainingEndDate: "2020-12-31", trainingRowCount: 240, trainingFetchedAt: "2021-01-01T00:00:00Z", trainingDataHash: "a".repeat(64), sourceCodeHash: "b".repeat(64), parameterHash: "c".repeat(64), values: { lowStrong: "8.00", lowWatch: "9.00", highWatch: "12.00", highStrong: "13.00" }, diagnostics: { rows: 240 }, environmentVersion: "1", runnerImageDigest: `sha256:${"d".repeat(64)}`, priceBasis: "QFQ", frozenAt: "2021-01-01T00:00:01Z" },
+      adjustments: [{ itemId: "item1", eventDate: "2021-06-01", beforeValues: { lowStrong: "8.00", lowWatch: "9.00", highWatch: "12.00", highStrong: "13.00" }, afterValues: { lowStrong: "7.20", lowWatch: "8.10", highWatch: "10.80", highStrong: "11.70" }, adjustmentFactor: "0.9", source: "除权", dataHash: "e".repeat(64), publishedAt: "2021-05-01T00:00:00Z", effectiveAt: "2021-06-01T00:00:00Z" }],
+      orders: [{ id: "o1", itemId: "item1", signalDate: "2021-06-01", executeDate: "2021-06-02", status: "FILLED", direction: "BUY", executionPrice: "8.10", quantity: "100", cashBefore: "1000", positionBefore: "0", targetValues: { lowStrong: "7.20", lowWatch: "8.10", highWatch: "10.80", highStrong: "11.70" }, targetZone: "LOW" }],
+      trades: [{ id: "t1", itemId: "item1", orderId: "o1", executeDate: "2021-06-02", direction: "BUY", price: "8.10", quantity: "100", cashAfter: "190", positionAfter: "100", targetValues: { lowStrong: "7.20", lowWatch: "8.10", highWatch: "10.80", highStrong: "11.70" }, targetZone: "LOW", roundTripNo: 1, holdingTradeDays: null, realizedReturnAmount: null, realizedReturnRate: null }],
+      metrics: { itemId: "item1", endingEquity: "1120", totalReturn: "0.12", realizedReturn: "0", annualizedReturn: "0.12", maxDrawdown: "0.03", volatility: "0.1", sharpeRatio: "1.2", completedRoundTrips: 0, winningTrades: 0, losingTrades: 0, breakevenTrades: 0, winRate: null, averageTradeReturn: null, maximumTradeGain: null, maximumTradeLoss: null, averageHoldingTradeDays: null, longestHoldingTradeDays: 0, capitalExposureRatio: "0.8", openPositionAtEnd: true, unfilledOrderCount: 0 },
+      dailyResults: [{ itemId: "item1", tradeDate: "2021-06-02", cash: "190", positionQuantity: "100", closePrice: "9.30", positionMarketValue: "930", equity: "1120", drawdown: "0", targetValues: { lowStrong: "7.20", lowWatch: "8.10", highWatch: "10.80", highStrong: "11.70" }, zone: "NORMAL", positionStatus: "HOLDING" }],
     }
     const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(complete), getHoldoutBacktest: vi.fn().mockResolvedValue(complete) })
     renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
     for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
     fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
-    expect(await screen.findByText("8.00")).toBeInTheDocument()
+    expect(await screen.findAllByText("8.00 / 9.00 / 12.00 / 13.00")).toHaveLength(2)
     expect(screen.getByText("0.9")).toBeInTheDocument()
-    expect(screen.getByText("买入")).toBeInTheDocument()
-    expect(screen.getByText("12%")).toBeInTheDocument()
+    expect(screen.getByText("7.20 / 8.10 / 10.80 / 11.70")).toBeInTheDocument()
+    expect(screen.getByText("已成交")).toBeInTheDocument()
+    expect(screen.getAllByText("买入")).toHaveLength(2)
+    expect(screen.getAllByText("0.12").length).toBeGreaterThanOrEqual(2)
   })
 })

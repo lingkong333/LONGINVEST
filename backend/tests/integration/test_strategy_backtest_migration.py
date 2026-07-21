@@ -419,6 +419,33 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
                 },
             )
 
+        async with database.transaction() as session:
+            await session.execute(
+                text(
+                    "UPDATE strategy_version SET status = 'ARCHIVED' WHERE id = :id"
+                ),
+                {"id": strategy_version_id},
+            )
+            await session.execute(
+                text(
+                    "UPDATE strategy_version SET status = 'PUBLISHED' WHERE id = :id"
+                ),
+                {"id": strategy_version_id},
+            )
+            restored = (
+                await session.execute(
+                    text(
+                        "SELECT status, source_code_hash, validation_run_id, git_commit "
+                        "FROM strategy_version WHERE id = :id"
+                    ),
+                    {"id": strategy_version_id},
+                )
+            ).one()
+            assert restored.status == "PUBLISHED"
+            assert restored.source_code_hash == "a" * 64
+            assert restored.validation_run_id == validation_run_id
+            assert restored.git_commit == "c" * 40
+
         mismatched_version_id = uuid4()
         mismatched_validation_id = uuid4()
         async with database.transaction() as session:

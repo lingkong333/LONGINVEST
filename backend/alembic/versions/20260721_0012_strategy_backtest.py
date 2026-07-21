@@ -157,8 +157,10 @@ def _protect_published_strategy_versions() -> None:
                     RAISE EXCEPTION
                         'published strategy version facts are immutable';
                 END IF;
-                IF OLD.status = 'ARCHIVED' AND NEW.status <> 'ARCHIVED' THEN
-                    RAISE EXCEPTION 'archived strategy version is immutable';
+                IF OLD.status = 'ARCHIVED'
+                   AND NEW.status NOT IN ('ARCHIVED', 'PUBLISHED') THEN
+                    RAISE EXCEPTION
+                        'archived strategy version can only be restored';
                 END IF;
                 IF OLD.status = 'PUBLISHED'
                    AND NEW.status NOT IN ('PUBLISHED', 'ARCHIVED') THEN

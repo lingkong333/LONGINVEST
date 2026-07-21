@@ -93,7 +93,9 @@ class BacktestApplication:
                         BacktestErrorCode.INSUFFICIENT_HISTORY,
                         "训练期历史数据不足",
                     )
-                _verify_security_snapshot(entry, training)
+                _verify_security_snapshot(
+                    entry, training, BacktestErrorCode.TRAINING_DATA_INVALID
+                )
                 await self._write("claim_forecast", task_id, training)
                 execution = await self._strategy_executions.resolve_execution(task)
                 request = StrategyForecastRequest(
@@ -132,7 +134,9 @@ class BacktestApplication:
                 raise _failure(
                     BacktestErrorCode.TEST_DATA_INVALID, "测试期没有有效行情"
                 )
-            _verify_security_snapshot(entry, test_data)
+            _verify_security_snapshot(
+                entry, test_data, BacktestErrorCode.TEST_DATA_INVALID
+            )
             await self._write("claim_simulation", task_id, test_data)
             timeline = await self._adjustments.get_adjustment_timeline(
                 security_id=entry.security_id,
@@ -190,12 +194,9 @@ class BacktestApplication:
         return self._service_factory(self._repository_factory(session), events=events)
 
 
-def _verify_security_snapshot(entry, data) -> None:
+def _verify_security_snapshot(entry, data, code: BacktestErrorCode) -> None:
     if data.security_id != entry.security_id or data.symbol != entry.symbol:
-        raise _failure(
-            BacktestErrorCode.TEST_DATA_EXPOSED_TO_STRATEGY,
-            "行情数据与冻结股票不一致",
-        )
+        raise _failure(code, "行情数据与冻结股票不一致")
 
 
 def _bar(row) -> BacktestBar:

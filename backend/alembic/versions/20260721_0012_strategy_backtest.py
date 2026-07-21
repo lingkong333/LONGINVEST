@@ -178,6 +178,75 @@ def _protect_published_strategy_versions() -> None:
     )
 
 
+def _protect_validation_evidence() -> None:
+    op.execute(
+        """
+        CREATE FUNCTION protect_strategy_validation_evidence()
+        RETURNS trigger AS $$
+        BEGIN
+            IF ROW(
+                NEW.id, NEW.strategy_id, NEW.draft_version,
+                NEW.source_code_hash, NEW.created_at
+            ) IS DISTINCT FROM ROW(
+                OLD.id, OLD.strategy_id, OLD.draft_version,
+                OLD.source_code_hash, OLD.created_at
+            ) THEN
+                RAISE EXCEPTION 'strategy validation identity is immutable';
+            END IF;
+            IF OLD.strategy_version_id IS NOT NULL
+               AND NEW.strategy_version_id IS DISTINCT FROM OLD.strategy_version_id
+            THEN
+                RAISE EXCEPTION 'strategy validation version binding is immutable';
+            END IF;
+            IF OLD.status IN ('SUCCEEDED', 'FAILED')
+               AND ROW(
+                   NEW.evidence_snapshot, NEW.status,
+                   NEW.error_code, NEW.completed_at
+               ) IS DISTINCT FROM ROW(
+                   OLD.evidence_snapshot, OLD.status,
+                   OLD.error_code, OLD.completed_at
+               )
+            THEN
+                RAISE EXCEPTION 'completed strategy validation is immutable';
+            END IF;
+            IF OLD.status = 'RUNNING'
+               AND NEW.status NOT IN ('RUNNING', 'SUCCEEDED', 'FAILED') THEN
+                RAISE EXCEPTION 'strategy validation status cannot move backward';
+            END IF;
+            IF OLD.status IN ('SUCCEEDED', 'FAILED')
+               AND NEW.status <> OLD.status THEN
+                RAISE EXCEPTION 'completed strategy validation status is immutable';
+            END IF;
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+        """
+    )
+    op.execute(
+        "CREATE TRIGGER strategy_validation_evidence_immutable "
+        "BEFORE UPDATE ON strategy_validation_run FOR EACH ROW "
+        "EXECUTE FUNCTION protect_strategy_validation_evidence()"
+    )
+
+
+def _block_downgrade_with_stage4_data() -> None:
+    nonempty_checks = " OR ".join(
+        f"EXISTS (SELECT 1 FROM {table_name} LIMIT 1)" for table_name in TABLES
+    )
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF {nonempty_checks} THEN
+                RAISE EXCEPTION
+                    'stage4 downgrade blocked: stage4 tables contain data';
+            END IF;
+        END;
+        $$
+        """
+    )
+
+
 def _create_indexes() -> None:
     indexes = (
         ("ix_strategy_status", "strategy", ("status",)),
@@ -1248,6 +1317,7 @@ def upgrade() -> None:
 
     _protect_immutable_facts()
     _protect_published_strategy_versions()
+    _protect_validation_evidence()
     role = _application_role()
     op.execute(f"GRANT SELECT, INSERT ON TABLE {', '.join(TABLES)} TO {role}")
     op.execute(f"GRANT UPDATE ON TABLE {', '.join(MUTABLE_TABLES)} TO {role}")
@@ -1256,6 +1326,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    _block_downgrade_with_stage4_data()
     op.execute(
         """
         DO $$
@@ -1279,6 +1350,11 @@ def downgrade() -> None:
         "ON strategy_version"
     )
     op.execute("DROP FUNCTION IF EXISTS protect_published_strategy_version")
+    op.execute(
+        "DROP TRIGGER IF EXISTS strategy_validation_evidence_immutable "
+        "ON strategy_validation_run"
+    )
+    op.execute("DROP FUNCTION IF EXISTS protect_strategy_validation_evidence")
     for table_name in reversed(IMMUTABLE_TABLES):
         op.execute(f"DROP TRIGGER IF EXISTS {table_name}_append_only ON {table_name}")
     op.execute("DROP FUNCTION IF EXISTS reject_strategy_backtest_fact_mutation")

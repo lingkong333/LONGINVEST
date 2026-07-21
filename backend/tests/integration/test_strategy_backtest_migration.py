@@ -188,6 +188,10 @@ async def test_strategy_backtest_migration_lifecycle_and_constraints() -> None:
         await _assert_downgraded(owner_url)
         _run_alembic(migration_env, "upgrade", "head")
         await _assert_upgraded(owner_url, app_url=app_url, test_constraints=True)
+        downgrade_failure = _run_alembic_failure(
+            migration_env, "downgrade", PREVIOUS_REVISION
+        )
+        assert "stage4 tables contain data" in downgrade_failure.stderr
 
 
 @pytest.mark.skipif(
@@ -464,6 +468,17 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
                         "validation_run_id": mismatched_validation_id,
                         "git_commit": "f" * 40,
                     },
+                )
+
+        with pytest.raises(DBAPIError, match="completed strategy validation"):
+            async with database.transaction() as session:
+                await session.execute(
+                    text(
+                        "UPDATE strategy_validation_run "
+                        "SET evidence_snapshot = '{\"tampered\":true}'::jsonb "
+                        "WHERE id = :id"
+                    ),
+                    {"id": validation_run_id},
                 )
 
         valid_target = (

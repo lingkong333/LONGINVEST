@@ -7,6 +7,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import func, select
 
+from long_invest.modules.monitor_schedules.models import MonitorSchedule  # noqa: F401
 from long_invest.modules.monitoring.models import (
     MonitorSubscription,
     MonitorSubscriptionRevision,

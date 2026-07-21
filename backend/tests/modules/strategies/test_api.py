@@ -88,3 +88,21 @@ def test_every_strategy_write_route_uses_verified_write_dependency():
     for route in write_routes:
         calls = {dependency.call for dependency in route.dependant.dependencies}
         assert require_verified_write_request in calls, route.path
+
+
+def test_publish_request_cannot_replace_validated_metadata_or_schema():
+    strategy_id = uuid4()
+    response = client(Application()).post(
+        f"/api/v1/strategies/{strategy_id}/publish",
+        headers={"Idempotency-Key": "publish-1"},
+        json={
+            "validation_run_id": str(uuid4()),
+            "expected_draft_version": 1,
+            "metadata": {"name": "替换内容"},
+            "parameter_schema": {"type": "string"},
+            "confirm": True,
+            "reason": "发布",
+        },
+    )
+
+    assert response.status_code == 422

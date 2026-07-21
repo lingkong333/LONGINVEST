@@ -94,11 +94,7 @@ def publish_kwargs(strategy_id, validation_id):
     return {
         "strategy_id": strategy_id,
         "validation_run_id": validation_id,
-        "source_code_hash": "1" * 64,
-        "metadata": {"name": "策略"},
-        "parameter_schema": {"type": "object"},
-        "environment_version": "python-3.12",
-        "runner_image_digest": "sha256:" + "2" * 64,
+        "expected_draft_version": 1,
         "reason": "确认发布",
         "idempotency_key": "publish-1",
         "request_id": "req-1",

@@ -14,10 +14,10 @@ depends_on = None
 
 def upgrade() -> None:
     op.drop_constraint(
-        "ck_job_hard_timeout_not_less_than_soft", "job", type_="check"
+        op.f("ck_job_hard_timeout_not_less_than_soft"), "job", type_="check"
     )
     op.create_check_constraint(
-        "ck_job_hard_timeout_not_less_than_soft",
+        op.f("ck_job_hard_timeout_not_less_than_soft"),
         "job",
         "hard_timeout_seconds >= soft_timeout_seconds "
         "AND hard_timeout_seconds <= 86400",
@@ -26,10 +26,10 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_constraint(
-        "ck_job_hard_timeout_not_less_than_soft", "job", type_="check"
+        op.f("ck_job_hard_timeout_not_less_than_soft"), "job", type_="check"
     )
     op.create_check_constraint(
-        "ck_job_hard_timeout_not_less_than_soft",
+        op.f("ck_job_hard_timeout_not_less_than_soft"),
         "job",
         "hard_timeout_seconds >= soft_timeout_seconds "
         "AND hard_timeout_seconds <= 3600",

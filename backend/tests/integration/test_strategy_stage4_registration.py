@@ -18,4 +18,4 @@ def test_strategy_jobs_are_registered_in_the_shared_worker() -> None:
     assert job_worker.HANDLERS["STRATEGY_VALIDATE"] is strategy_validate
     assert job_worker.HANDLERS["STRATEGY_PUBLISH"] is strategy_publish
     assert job_worker.HANDLERS["TARGET_CALCULATE"] is target_calculate
-    assert callable(job_worker.HANDLERS["BACKTEST_SINGLE"])
+    assert job_worker.HANDLERS["BACKTEST_SINGLE"] is job_worker.backtest_single

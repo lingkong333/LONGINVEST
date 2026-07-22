@@ -106,6 +106,7 @@ services:
       - 127.0.0.1:18080:8000
     volumes:
       - application_logs:/var/log/longinvest
+      - strategy_git_data:/var/lib/long-invest/strategies
     healthcheck:
       test:
         - CMD
@@ -475,6 +476,7 @@ services:
         condition: service_healthy
     volumes:
       - application_logs:/var/log/longinvest
+      - strategy_git_data:/var/lib/long-invest/strategies
       - /var/run/docker.sock:/var/run/docker.sock
       - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
     group_add:
@@ -514,6 +516,7 @@ services:
         condition: service_healthy
     volumes:
       - application_logs:/var/log/longinvest
+      - strategy_git_data:/var/lib/long-invest/strategies
       - /var/run/docker.sock:/var/run/docker.sock
       - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
     group_add:
@@ -553,6 +556,7 @@ services:
         condition: service_healthy
     volumes:
       - application_logs:/var/log/longinvest
+      - strategy_git_data:/var/lib/long-invest/strategies
       - /var/run/docker.sock:/var/run/docker.sock
       - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
     group_add:
@@ -600,3 +604,4 @@ volumes:
   postgres_data:
   redis_data:
   application_logs:
+  strategy_git_data:

@@ -39,9 +39,14 @@ HANDLERS["STRATEGY_VALIDATE"] = strategy_validate
 HANDLERS["STRATEGY_PUBLISH"] = strategy_publish
 configure_target_job_application(build_target_application)
 HANDLERS["TARGET_CALCULATE"] = target_calculate
-HANDLERS["BACKTEST_SINGLE"] = build_backtest_job_handler(
-    build_backtest_application()
-)
+
+
+async def backtest_single(context):
+    handler = build_backtest_job_handler(build_backtest_application())
+    return await handler(context)
+
+
+HANDLERS["BACKTEST_SINGLE"] = backtest_single
 
 
 def execute_job(job_id: str, outbox_id: str) -> dict[str, Any]:

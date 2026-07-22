@@ -13,8 +13,8 @@ RUN apt-get update \
 
 RUN groupadd --system longinvest \
     && useradd --system --gid longinvest --home-dir /app longinvest \
-    && mkdir -p /var/log/longinvest \
-    && chown longinvest:longinvest /var/log/longinvest
+    && mkdir -p /var/log/longinvest /var/lib/long-invest/strategies \
+    && chown -R longinvest:longinvest /var/log/longinvest /var/lib/long-invest
 
 WORKDIR /app
 

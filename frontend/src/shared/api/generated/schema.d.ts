@@ -1740,7 +1740,8 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List Backtests */
+        get: operations["list_backtests_api_v1_backtests_get"];
         put?: never;
         /** Create Backtest */
         post: operations["create_backtest_api_v1_backtests_post"];
@@ -1761,6 +1762,125 @@ export interface paths {
         get: operations["get_backtest_api_v1_backtests__task_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Backtest Summary */
+        get: operations["get_backtest_summary_api_v1_backtests__task_id__summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Backtest Items */
+        get: operations["list_backtest_items_api_v1_backtests__task_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Pause Backtest */
+        post: operations["pause_backtest_api_v1_backtests__task_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resume Backtest */
+        post: operations["resume_backtest_api_v1_backtests__task_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Cancel Backtest */
+        post: operations["cancel_backtest_api_v1_backtests__task_id__cancel_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/retry-failed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Failed Backtest */
+        post: operations["retry_failed_backtest_api_v1_backtests__task_id__retry_failed_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/rerun": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rerun Backtest */
+        post: operations["rerun_backtest_api_v1_backtests__task_id__rerun_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1898,6 +2018,49 @@ export interface components {
             /** Expected Version */
             expected_version: number;
         };
+        /**
+         * BacktestAction
+         * @enum {string}
+         */
+        BacktestAction: "PAUSE" | "RESUME" | "CANCEL" | "RETRY_FAILED" | "RERUN";
+        /** BacktestCommandBody */
+        BacktestCommandBody: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** BacktestControlData */
+        BacktestControlData: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            status: components["schemas"]["BacktestTaskStatus"];
+            /** Allowed Actions */
+            allowed_actions: components["schemas"]["BacktestAction"][];
+        };
+        /** BacktestControlResponse */
+        BacktestControlResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["BacktestControlData"];
+        };
         /** BacktestDateRange */
         BacktestDateRange: {
             /**
@@ -1921,6 +2084,223 @@ export interface components {
              */
             test_end_date: string;
         };
+        /** BacktestItemPageData */
+        BacktestItemPageData: {
+            /** Items */
+            items: components["schemas"]["BacktestItemSummaryView"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** BacktestItemPageResponse */
+        BacktestItemPageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["BacktestItemPageData"];
+        };
+        /**
+         * BacktestItemStatus
+         * @enum {string}
+         */
+        BacktestItemStatus: "PENDING" | "FETCHING_DATA" | "VALIDATING_DATA" | "FORECASTING" | "FROZEN" | "SIMULATING" | "SAVING" | "SUCCEEDED" | "FAILED" | "SKIPPED" | "CANCELED";
+        /** BacktestItemSummaryView */
+        BacktestItemSummaryView: {
+            /**
+             * Item Id
+             * Format: uuid
+             */
+            item_id: string;
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            /** Name */
+            name: string;
+            status: components["schemas"]["BacktestItemStatus"];
+            /** Failure Code */
+            failure_code?: string | null;
+            /** Attempt Count */
+            attempt_count: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Ended At */
+            ended_at?: string | null;
+        };
+        /** BacktestMetricView */
+        BacktestMetricView: {
+            /**
+             * Item Id
+             * Format: uuid
+             */
+            item_id: string;
+            /** Ending Equity */
+            ending_equity: string;
+            /** Total Return */
+            total_return: string;
+            /** Realized Return */
+            realized_return: string;
+            /** Annualized Return */
+            annualized_return: string;
+            /** Max Drawdown */
+            max_drawdown: string;
+            /** Volatility */
+            volatility: string;
+            /** Sharpe Ratio */
+            sharpe_ratio: string | null;
+            /** Completed Round Trips */
+            completed_round_trips: number;
+            /** Winning Trades */
+            winning_trades: number;
+            /** Losing Trades */
+            losing_trades: number;
+            /** Breakeven Trades */
+            breakeven_trades: number;
+            /** Win Rate */
+            win_rate?: string | null;
+            /** Average Trade Return */
+            average_trade_return: string | null;
+            /** Maximum Trade Gain */
+            maximum_trade_gain: string | null;
+            /** Maximum Trade Loss */
+            maximum_trade_loss: string | null;
+            /** Average Holding Trade Days */
+            average_holding_trade_days?: string | null;
+            /** Longest Holding Trade Days */
+            longest_holding_trade_days: number;
+            /** Capital Exposure Ratio */
+            capital_exposure_ratio: string;
+            /** Open Position At End */
+            open_position_at_end: boolean;
+            /** Unfilled Order Count */
+            unfilled_order_count: number;
+        };
+        /**
+         * BacktestMode
+         * @enum {string}
+         */
+        BacktestMode: "SINGLE" | "WATCHLIST" | "MARKET";
+        /** BacktestSummaryResponse */
+        BacktestSummaryResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["BacktestSummaryView"];
+        };
+        /** BacktestSummaryView */
+        BacktestSummaryView: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            status: components["schemas"]["BacktestTaskStatus"];
+            /** Total Items */
+            total_items: number;
+            /** Completed Items */
+            completed_items: number;
+            /** Succeeded Items */
+            succeeded_items: number;
+            /** Failed Items */
+            failed_items: number;
+            /** Canceled Items */
+            canceled_items: number;
+            /** Pending Items */
+            pending_items: number;
+            /** Failure Codes */
+            failure_codes: {
+                [key: string]: number;
+            };
+            /** Allowed Actions */
+            allowed_actions: components["schemas"]["BacktestAction"][];
+            metric?: components["schemas"]["BacktestMetricView"] | null;
+        };
+        /** BacktestTaskListItemView */
+        BacktestTaskListItemView: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Rerun From Task Id */
+            rerun_from_task_id?: string | null;
+            mode: components["schemas"]["BacktestMode"];
+            status: components["schemas"]["BacktestTaskStatus"];
+            date_range: components["schemas"]["BacktestDateRange"];
+            item: components["schemas"]["BacktestItemSummaryView"];
+            /** Allowed Actions */
+            allowed_actions: components["schemas"]["BacktestAction"][];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Terminal At */
+            terminal_at?: string | null;
+        };
+        /** BacktestTaskPageData */
+        BacktestTaskPageData: {
+            /** Items */
+            items: components["schemas"]["BacktestTaskListItemView"][];
+            pagination: components["schemas"]["Pagination"];
+        };
+        /** BacktestTaskPageResponse */
+        BacktestTaskPageResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["BacktestTaskPageData"];
+        };
+        /**
+         * BacktestTaskStatus
+         * @enum {string}
+         */
+        BacktestTaskStatus: "PENDING" | "RUNNING" | "PAUSING" | "PAUSED" | "SUCCEEDED" | "PARTIAL" | "FAILED" | "CANCELING" | "CANCELED";
         /** BatchBody */
         BatchBody: {
             /** Reason */
@@ -8567,10 +8947,44 @@ export interface operations {
             };
         };
     };
+    list_backtests_api_v1_backtests_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestTaskPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_backtest_api_v1_backtests_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8622,6 +9036,256 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backtest_summary_api_v1_backtests__task_id__summary_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestSummaryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_backtest_items_api_v1_backtests__task_id__items_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestItemPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_backtest_api_v1_backtests__task_id__pause_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestCommandBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_backtest_api_v1_backtests__task_id__resume_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestCommandBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    cancel_backtest_api_v1_backtests__task_id__cancel_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestCommandBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_failed_backtest_api_v1_backtests__task_id__retry_failed_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestCommandBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestControlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rerun_backtest_api_v1_backtests__task_id__rerun_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestCommandBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BacktestControlResponse"];
                 };
             };
             /** @description Validation Error */

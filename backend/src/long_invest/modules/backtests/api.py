@@ -4,8 +4,8 @@ from collections.abc import Callable
 from typing import Annotated, Any
 from uuid import UUID, uuid5
 
-from fastapi import APIRouter, Depends, Request
-from pydantic import Field, StrictBool
+from fastapi import APIRouter, Depends, Header, Query
+from pydantic import BaseModel, Field, StrictBool
 
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -14,12 +14,18 @@ from long_invest.modules.auth.dependencies import (
 )
 from long_invest.modules.backtests.application import BacktestApplication
 from long_invest.modules.backtests.contracts import (
+    BacktestAction,
     BacktestCreateRequest,
+    BacktestItemSummaryView,
     BacktestResultView,
+    BacktestSummaryView,
+    BacktestTaskListItemView,
+    BacktestTaskStatus,
 )
 from long_invest.modules.backtests.service import BacktestCommandContext
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
+from long_invest.platform.http.schemas import Pagination, SuccessEnvelope
 from long_invest.platform.json_snapshot import thaw_json_value
 
 router = APIRouter(prefix="/api/v1/backtests", tags=["backtests"])
@@ -56,12 +62,54 @@ class CreateBacktestBody(BacktestCreateRequest):
     reason: str = Field(min_length=1, max_length=200)
 
 
-def idempotency_key(request: Request) -> str:
-    value = request.headers.get("Idempotency-Key", "").strip()
+class BacktestCommandBody(BaseModel):
+    confirm: StrictBool
+    reason: str = Field(min_length=1, max_length=200)
+
+
+class BacktestTaskPageData(BaseModel):
+    items: list[BacktestTaskListItemView]
+    pagination: Pagination
+
+
+class BacktestTaskPageResponse(SuccessEnvelope):
+    data: BacktestTaskPageData
+
+
+class BacktestSummaryResponse(SuccessEnvelope):
+    data: BacktestSummaryView
+
+
+class BacktestItemPageData(BaseModel):
+    items: list[BacktestItemSummaryView]
+    pagination: Pagination
+
+
+class BacktestItemPageResponse(SuccessEnvelope):
+    data: BacktestItemPageData
+
+
+class BacktestControlData(BaseModel):
+    task_id: UUID
+    status: BacktestTaskStatus
+    allowed_actions: list[BacktestAction]
+
+
+class BacktestControlResponse(SuccessEnvelope):
+    data: BacktestControlData
+
+
+def idempotency_key(
+    value: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=160),
+    ],
+) -> str:
+    value = value.strip()
     if not value or len(value) > 160:
         raise AppError(
             code="IDEMPOTENCY_KEY_REQUIRED",
-            message="回测创建需要有效的幂等键",
+            message="回测写操作需要有效的幂等键",
             status_code=422,
         )
     return value
@@ -125,11 +173,134 @@ async def create_backtest(
     )
 
 
+@router.get("", response_model=BacktestTaskPageResponse)
+async def list_backtests(
+    application: Application,
+    _identity: ReadIdentity,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict[str, Any]:
+    result = await application.list_tasks(page=page, page_size=page_size)
+    return success_response(
+        data={
+            "items": [_model(item) for item in result.items],
+            "pagination": {
+                "page": result.page,
+                "page_size": result.page_size,
+                "total": result.total,
+            },
+        }
+    )
+
+
 @router.get("/{task_id}")
 async def get_backtest(
     task_id: UUID, application: Application, _identity: ReadIdentity
 ) -> dict[str, Any]:
     return success_response(data=_execution(await application.get_execution(task_id)))
+
+
+@router.get("/{task_id}/summary", response_model=BacktestSummaryResponse)
+async def get_backtest_summary(
+    task_id: UUID, application: Application, _identity: ReadIdentity
+) -> dict[str, Any]:
+    return success_response(data=_model(await application.get_summary(task_id)))
+
+
+@router.get("/{task_id}/items", response_model=BacktestItemPageResponse)
+async def list_backtest_items(
+    task_id: UUID,
+    application: Application,
+    _identity: ReadIdentity,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict[str, Any]:
+    values = await application.list_items(task_id)
+    start = (page - 1) * page_size
+    return success_response(
+        data={
+            "items": [_model(item) for item in values[start : start + page_size]],
+            "pagination": {"page": page, "page_size": page_size, "total": len(values)},
+        }
+    )
+
+
+@router.post(
+    "/{task_id}/pause", status_code=202, response_model=BacktestControlResponse
+)
+async def pause_backtest(
+    task_id: UUID,
+    body: BacktestCommandBody,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    context = _command_context(body, identity, key, "暂停")
+    await application.pause(task_id, context)
+    return await _command_response(task_id, application, "回测暂停请求已受理")
+
+
+@router.post(
+    "/{task_id}/resume", status_code=202, response_model=BacktestControlResponse
+)
+async def resume_backtest(
+    task_id: UUID,
+    body: BacktestCommandBody,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    context = _command_context(body, identity, key, "继续")
+    await application.resume(task_id, context)
+    return await _command_response(task_id, application, "回测继续请求已受理")
+
+
+@router.post(
+    "/{task_id}/cancel", status_code=202, response_model=BacktestControlResponse
+)
+async def cancel_backtest(
+    task_id: UUID,
+    body: BacktestCommandBody,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    context = _command_context(body, identity, key, "取消")
+    await application.cancel(task_id, context)
+    return await _command_response(task_id, application, "回测取消请求已受理")
+
+
+@router.post(
+    "/{task_id}/retry-failed",
+    status_code=202,
+    response_model=BacktestControlResponse,
+)
+async def retry_failed_backtest(
+    task_id: UUID,
+    body: BacktestCommandBody,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    context = _command_context(body, identity, key, "重试失败项")
+    await application.retry_failed(task_id, context)
+    return await _command_response(task_id, application, "失败项重试请求已受理")
+
+
+@router.post(
+    "/{task_id}/rerun", status_code=202, response_model=BacktestControlResponse
+)
+async def rerun_backtest(
+    task_id: UUID,
+    body: BacktestCommandBody,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    context = _command_context(body, identity, key, "重新运行")
+    new_task_id = uuid5(_TASK_NAMESPACE, f"rerun:{task_id}:{key}")
+    await application.rerun(task_id, new_task_id, context)
+    return await _command_response(new_task_id, application, "回测重新运行请求已受理")
 
 
 @router.get("/{task_id}/items/{item_id}")
@@ -218,3 +389,53 @@ def _result(result: BacktestResultView) -> dict[str, Any]:
 
 def _models(values) -> list[dict[str, Any]]:
     return [value.model_dump(mode="json") for value in values]
+
+
+def _model(value: Any) -> dict[str, Any]:
+    return value.model_dump(mode="json")
+
+
+def _command_context(
+    body: BacktestCommandBody,
+    identity: AuthenticatedRequest,
+    key: str,
+    action_name: str,
+) -> BacktestCommandContext:
+    if not body.confirm:
+        raise AppError(
+            code="AUTH_CONFIRMATION_REQUIRED",
+            message=f"请确认本次回测{action_name}操作",
+            status_code=422,
+        )
+    reason = body.reason.strip()
+    if not reason:
+        raise AppError(
+            code="BACKTEST_INPUT_INVALID",
+            message="操作原因不能为空",
+            status_code=422,
+        )
+    session = getattr(identity, "session", None)
+    audit_context = identity.audit_context
+    return BacktestCommandContext(
+        request_id=audit_context.request_id,
+        idempotency_key=key,
+        actor_user_id=str(identity.user.id),
+        reason=reason,
+        session_id=str(session.id) if session is not None else None,
+        trusted_ip=getattr(audit_context, "trusted_ip", None),
+    )
+
+
+async def _command_response(
+    task_id: UUID, application: BacktestApplication, message: str
+) -> dict[str, Any]:
+    summary = await application.get_summary(task_id)
+    return success_response(
+        data={
+            "task_id": str(task_id),
+            "status": summary.status.value,
+            "allowed_actions": [action.value for action in summary.allowed_actions],
+        },
+        code="JOB_ACCEPTED",
+        message=message,
+    )

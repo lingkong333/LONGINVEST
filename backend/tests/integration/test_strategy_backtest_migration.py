@@ -16,7 +16,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.schema import UniqueConstraint
 
-from long_invest.modules.backtests.models import BacktestTask
+from long_invest.modules.backtests.models import BacktestControlCommand, BacktestTask
 from long_invest.modules.strategies.models import Strategy
 from long_invest.modules.targets.models import TargetCalculationRun, TargetReview
 from long_invest.platform.config.settings import AppSettings
@@ -27,8 +27,9 @@ BACKEND = Path(__file__).parents[2]
 MIGRATION = BACKEND / "alembic" / "versions" / "20260721_0012_strategy_backtest.py"
 ALEMBIC_ENV = BACKEND / "alembic" / "env.py"
 REVISION = "20260721_0012"
+HEAD_REVISION = "20260722_0014"
 PREVIOUS_REVISION = "20260717_0011"
-TABLES = (
+BASE_TABLES = (
     "strategy",
     "strategy_draft",
     "strategy_draft_revision",
@@ -47,7 +48,8 @@ TABLES = (
     "target_calculation_run",
     "target_review",
 )
-EXPECTED_INDEXES = {
+TABLES = (*BASE_TABLES, "backtest_control_command")
+BASE_EXPECTED_INDEXES = {
     "ix_strategy_status",
     "ix_strategy_validation_run_status",
     "ix_strategy_run_strategy_version_status",
@@ -62,6 +64,10 @@ EXPECTED_INDEXES = {
     "ix_target_review_status_created",
     "ix_target_review_candidate",
 }
+EXPECTED_INDEXES = {
+    *BASE_EXPECTED_INDEXES,
+    "ix_backtest_control_command_task_created",
+}
 
 
 def test_strategy_backtest_migration_remains_on_the_single_main_chain() -> None:
@@ -69,7 +75,7 @@ def test_strategy_backtest_migration_remains_on_the_single_main_chain() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
 
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260722_0013"]
+    assert scripts.get_heads() == ["20260722_0014"]
     assert scripts.get_revision("20260722_0013").down_revision == REVISION
 
 
@@ -83,6 +89,7 @@ def test_strategy_backtest_models_are_registered_with_alembic_metadata() -> None
     assert {
         Strategy.__table__.name,
         BacktestTask.__table__.name,
+        BacktestControlCommand.__table__.name,
         TargetCalculationRun.__table__.name,
         TargetReview.__table__.name,
     } <= set(Base.metadata.tables)
@@ -93,7 +100,7 @@ def test_strategy_backtest_migration_declares_all_tables_and_constraints() -> No
 
     assert f'revision: str = "{REVISION}"' in source
     assert f'down_revision: str | None = "{PREVIOUS_REVISION}"' in source
-    for table in TABLES:
+    for table in BASE_TABLES:
         assert f'"{table}"' in source
     for constraint in (
         "ck_strategy_version_source_code_hash_sha256",
@@ -107,7 +114,7 @@ def test_strategy_backtest_migration_declares_all_tables_and_constraints() -> No
         assert constraint in source
     assert "ck_target_revision_source_valid" in source
     assert "ck_target_revision_source_revision_consistent" in source
-    for index_name in EXPECTED_INDEXES:
+    for index_name in BASE_EXPECTED_INDEXES:
         assert index_name in source
 
 
@@ -332,7 +339,7 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
             current_revision = await session.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-            assert current_revision == REVISION
+            assert current_revision == HEAD_REVISION
             existing = await session.run_sync(
                 lambda sync_session: set(
                     inspect(sync_session.connection()).get_table_names()

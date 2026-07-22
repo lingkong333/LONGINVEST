@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from long_invest.modules.auth.models import AppUser, UserSession  # noqa: F401
 from long_invest.modules.backtests.models import (  # noqa: F401
+    BacktestControlCommand,
     BacktestDailyResult,
     BacktestForecastSnapshot,
     BacktestItem,

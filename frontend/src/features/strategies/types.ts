@@ -106,6 +106,67 @@ export type BacktestItemStatus =
   | "SKIPPED"
   | "CANCELED"
 
+export type BacktestAction = "PAUSE" | "RESUME" | "CANCEL" | "RETRY_FAILED" | "RERUN"
+
+export interface BacktestDateRangeDto {
+  trainingStartDate: string
+  trainingEndDate: string
+  testStartDate: string
+  testEndDate: string
+}
+
+export interface BacktestItemSummaryDto {
+  itemId: string
+  securityId: string
+  symbol: string
+  name: string
+  status: BacktestItemStatus | string
+  failureCode: string | null
+  attemptCount: number
+  startedAt: string | null
+  endedAt: string | null
+}
+
+export interface BacktestTaskListItemDto {
+  taskId: string
+  rerunFromTaskId: string | null
+  mode: "SINGLE" | "WATCHLIST" | "MARKET"
+  status: BacktestTaskStatus | string
+  dateRange: BacktestDateRangeDto
+  item: BacktestItemSummaryDto
+  allowedActions: BacktestAction[]
+  createdAt: string
+  updatedAt: string
+  terminalAt: string | null
+}
+
+export interface BacktestTaskPageDto {
+  items: BacktestTaskListItemDto[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export interface BacktestSummaryDto {
+  taskId: string
+  status: BacktestTaskStatus | string
+  totalItems: number
+  completedItems: number
+  succeededItems: number
+  failedItems: number
+  canceledItems: number
+  pendingItems: number
+  failureCodes: Record<string, number>
+  allowedActions: BacktestAction[]
+  metric: BacktestMetricsDto | null
+}
+
+export interface BacktestControlResultDto {
+  taskId: string
+  status: BacktestTaskStatus | string
+  allowedActions: BacktestAction[]
+}
+
 export interface TargetValuesDto {
   lowStrong: string
   lowWatch: string
@@ -251,7 +312,10 @@ export interface StrategyApi {
   archiveStrategy(strategyId: string, reason: string): Promise<StrategyRunResult>
   listVersions(strategyId: string): Promise<StrategyVersion[]>
   createHoldoutBacktest(input: HoldoutBacktestInput): Promise<HoldoutBacktestResult>
+  listHoldoutBacktests(strategyId: string): Promise<BacktestTaskPageDto>
   getHoldoutBacktest(backtestId: string): Promise<HoldoutBacktestResult>
+  getHoldoutBacktestSummary(backtestId: string): Promise<BacktestSummaryDto>
+  controlHoldoutBacktest(backtestId: string, action: BacktestAction, reason: string): Promise<BacktestControlResultDto>
 }
 
 export function isSaveConflict(error: unknown): error is SaveConflict {

@@ -6226,15 +6226,28 @@
         ],
         "summary": "Create Backtest",
         "operationId": "create_backtest_api_v1_backtests_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/CreateBacktestBody"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "200": {
@@ -6242,9 +6255,63 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "additionalProperties": true,
                   "type": "object",
+                  "additionalProperties": true,
                   "title": "Response Create Backtest Api V1 Backtests Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "List Backtests",
+        "operationId": "list_backtests_api_v1_backtests_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestTaskPageResponse"
                 }
               }
             }
@@ -6290,6 +6357,435 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Get Backtest Api V1 Backtests  Task Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/summary": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Get Backtest Summary",
+        "operationId": "get_backtest_summary_api_v1_backtests__task_id__summary_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/items": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "List Backtest Items",
+        "operationId": "list_backtest_items_api_v1_backtests__task_id__items_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestItemPageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/pause": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Pause Backtest",
+        "operationId": "pause_backtest_api_v1_backtests__task_id__pause_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestCommandBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/resume": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Resume Backtest",
+        "operationId": "resume_backtest_api_v1_backtests__task_id__resume_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestCommandBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Cancel Backtest",
+        "operationId": "cancel_backtest_api_v1_backtests__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestCommandBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/retry-failed": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Retry Failed Backtest",
+        "operationId": "retry_failed_backtest_api_v1_backtests__task_id__retry_failed_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestCommandBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestControlResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/rerun": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Rerun Backtest",
+        "operationId": "rerun_backtest_api_v1_backtests__task_id__rerun_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestCommandBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BacktestControlResponse"
                 }
               }
             }
@@ -6716,6 +7212,102 @@
         ],
         "title": "ArchiveStrategyRequest"
       },
+      "BacktestAction": {
+        "type": "string",
+        "enum": [
+          "PAUSE",
+          "RESUME",
+          "CANCEL",
+          "RETRY_FAILED",
+          "RERUN"
+        ],
+        "title": "BacktestAction"
+      },
+      "BacktestCommandBody": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason"
+        ],
+        "title": "BacktestCommandBody"
+      },
+      "BacktestControlData": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Task Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BacktestTaskStatus"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestAction"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status",
+          "allowed_actions"
+        ],
+        "title": "BacktestControlData"
+      },
+      "BacktestControlResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BacktestControlData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "BacktestControlResponse"
+      },
       "BacktestDateRange": {
         "properties": {
           "training_start_date": {
@@ -6748,6 +7340,610 @@
           "test_end_date"
         ],
         "title": "BacktestDateRange"
+      },
+      "BacktestItemPageData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestItemSummaryView"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "pagination"
+        ],
+        "title": "BacktestItemPageData"
+      },
+      "BacktestItemPageResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BacktestItemPageData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "BacktestItemPageResponse"
+      },
+      "BacktestItemStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "FETCHING_DATA",
+          "VALIDATING_DATA",
+          "FORECASTING",
+          "FROZEN",
+          "SIMULATING",
+          "SAVING",
+          "SUCCEEDED",
+          "FAILED",
+          "SKIPPED",
+          "CANCELED"
+        ],
+        "title": "BacktestItemStatus"
+      },
+      "BacktestItemSummaryView": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Item Id"
+          },
+          "security_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Security Id"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BacktestItemStatus"
+          },
+          "failure_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failure Code"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Attempt Count"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ended At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "item_id",
+          "security_id",
+          "symbol",
+          "name",
+          "status",
+          "attempt_count"
+        ],
+        "title": "BacktestItemSummaryView"
+      },
+      "BacktestMetricView": {
+        "properties": {
+          "item_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Item Id"
+          },
+          "ending_equity": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Ending Equity"
+          },
+          "total_return": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Total Return"
+          },
+          "realized_return": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Realized Return"
+          },
+          "annualized_return": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Annualized Return"
+          },
+          "max_drawdown": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Max Drawdown"
+          },
+          "volatility": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Volatility"
+          },
+          "sharpe_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sharpe Ratio"
+          },
+          "completed_round_trips": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Completed Round Trips"
+          },
+          "winning_trades": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Winning Trades"
+          },
+          "losing_trades": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Losing Trades"
+          },
+          "breakeven_trades": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Breakeven Trades"
+          },
+          "win_rate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate"
+          },
+          "average_trade_return": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Trade Return"
+          },
+          "maximum_trade_gain": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Trade Gain"
+          },
+          "maximum_trade_loss": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maximum Trade Loss"
+          },
+          "average_holding_trade_days": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Average Holding Trade Days"
+          },
+          "longest_holding_trade_days": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Longest Holding Trade Days"
+          },
+          "capital_exposure_ratio": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Capital Exposure Ratio"
+          },
+          "open_position_at_end": {
+            "type": "boolean",
+            "title": "Open Position At End"
+          },
+          "unfilled_order_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unfilled Order Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "item_id",
+          "ending_equity",
+          "total_return",
+          "realized_return",
+          "annualized_return",
+          "max_drawdown",
+          "volatility",
+          "sharpe_ratio",
+          "completed_round_trips",
+          "winning_trades",
+          "losing_trades",
+          "breakeven_trades",
+          "average_trade_return",
+          "maximum_trade_gain",
+          "maximum_trade_loss",
+          "longest_holding_trade_days",
+          "capital_exposure_ratio",
+          "open_position_at_end",
+          "unfilled_order_count"
+        ],
+        "title": "BacktestMetricView"
+      },
+      "BacktestMode": {
+        "type": "string",
+        "enum": [
+          "SINGLE",
+          "WATCHLIST",
+          "MARKET"
+        ],
+        "title": "BacktestMode"
+      },
+      "BacktestSummaryResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BacktestSummaryView"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "BacktestSummaryResponse"
+      },
+      "BacktestSummaryView": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Task Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BacktestTaskStatus"
+          },
+          "total_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Total Items"
+          },
+          "completed_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Completed Items"
+          },
+          "succeeded_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Succeeded Items"
+          },
+          "failed_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed Items"
+          },
+          "canceled_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Canceled Items"
+          },
+          "pending_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending Items"
+          },
+          "failure_codes": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Failure Codes"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestAction"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          },
+          "metric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BacktestMetricView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "task_id",
+          "status",
+          "total_items",
+          "completed_items",
+          "succeeded_items",
+          "failed_items",
+          "canceled_items",
+          "pending_items",
+          "failure_codes",
+          "allowed_actions"
+        ],
+        "title": "BacktestSummaryView"
+      },
+      "BacktestTaskListItemView": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Task Id"
+          },
+          "rerun_from_task_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerun From Task Id"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/BacktestMode"
+          },
+          "status": {
+            "$ref": "#/components/schemas/BacktestTaskStatus"
+          },
+          "date_range": {
+            "$ref": "#/components/schemas/BacktestDateRange"
+          },
+          "item": {
+            "$ref": "#/components/schemas/BacktestItemSummaryView"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestAction"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "terminal_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Terminal At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "task_id",
+          "mode",
+          "status",
+          "date_range",
+          "item",
+          "allowed_actions",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BacktestTaskListItemView"
+      },
+      "BacktestTaskPageData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BacktestTaskListItemView"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "pagination"
+        ],
+        "title": "BacktestTaskPageData"
+      },
+      "BacktestTaskPageResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BacktestTaskPageData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "BacktestTaskPageResponse"
+      },
+      "BacktestTaskStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "RUNNING",
+          "PAUSING",
+          "PAUSED",
+          "SUCCEEDED",
+          "PARTIAL",
+          "FAILED",
+          "CANCELING",
+          "CANCELED"
+        ],
+        "title": "BacktestTaskStatus"
       },
       "BatchBody": {
         "properties": {

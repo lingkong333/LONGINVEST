@@ -14,11 +14,12 @@ BACKEND = Path(__file__).parents[2]
 MIGRATION = BACKEND / "alembic" / "versions" / "20260722_0013_corporate_actions.py"
 
 
-def test_corporate_action_migration_is_the_single_head() -> None:
+def test_corporate_action_migration_precedes_backtest_controls() -> None:
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260722_0013"]
+    assert scripts.get_heads() == ["20260722_0014"]
+    assert scripts.get_revision("20260722_0014").down_revision == "20260722_0013"
 
 
 def test_corporate_action_models_are_registered_with_alembic_metadata() -> None:

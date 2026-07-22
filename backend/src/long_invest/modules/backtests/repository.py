@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.backtests.contracts import (
@@ -18,6 +18,7 @@ from long_invest.modules.backtests.contracts import (
 )
 from long_invest.modules.backtests.models import (
     BacktestAdjustmentSnapshot,
+    BacktestControlCommand,
     BacktestDailyResult,
     BacktestForecastSnapshot,
     BacktestItem,
@@ -93,6 +94,16 @@ class BacktestRepository:
             select(BacktestMetric).where(BacktestMetric.item_id == item_id)
         )
 
+    async def get_control_by_idempotency(
+        self, idempotency_key: str, *, for_update: bool = False
+    ):
+        statement = select(BacktestControlCommand).where(
+            BacktestControlCommand.idempotency_key == idempotency_key
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return await self._session.scalar(statement)
+
     async def add_task(
         self,
         task: BacktestTask,
@@ -112,6 +123,10 @@ class BacktestRepository:
         self._session.add(snapshot)
         await self._session.flush()
 
+    async def add_control(self, command: BacktestControlCommand) -> None:
+        self._session.add(command)
+        await self._session.flush()
+
     async def add_results(
         self,
         *,
@@ -127,15 +142,38 @@ class BacktestRepository:
         await self._session.flush()
 
     async def list_tasks(self, *, page: int, page_size: int):
+        has_forecast = exists(
+            select(BacktestForecastSnapshot.id).where(
+                BacktestForecastSnapshot.item_id == BacktestItem.id
+            )
+        )
         statement = (
-            select(BacktestTask)
+            select(
+                BacktestTask,
+                BacktestItem,
+                BacktestUniverseSnapshot,
+                has_forecast.label("has_forecast"),
+            )
+            .join(BacktestItem, BacktestItem.task_id == BacktestTask.id)
+            .join(
+                BacktestUniverseSnapshot,
+                BacktestUniverseSnapshot.task_id == BacktestTask.id,
+            )
             .order_by(BacktestTask.created_at.desc(), BacktestTask.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
-        rows = await self._session.scalars(statement)
+        rows = await self._session.execute(statement)
         total = await self._session.scalar(select(func.count(BacktestTask.id)))
         return list(rows.all()), int(total or 0)
+
+    async def list_items(self, task_id: UUID):
+        rows = await self._session.scalars(
+            select(BacktestItem)
+            .where(BacktestItem.task_id == task_id)
+            .order_by(BacktestItem.id)
+        )
+        return list(rows.all())
 
     async def list_orders(self, item_id: UUID):
         rows = await self._session.scalars(

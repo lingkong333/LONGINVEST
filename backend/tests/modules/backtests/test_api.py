@@ -7,14 +7,18 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 from long_invest.modules.backtests.api import (
+    BacktestCommandBody,
     CreateBacktestBody,
     create_backtest,
     get_backtest_item,
+    pause_backtest,
     router,
 )
 from long_invest.modules.backtests.contracts import (
+    BacktestAction,
     BacktestItemStatus,
     BacktestResultView,
+    BacktestTaskStatus,
 )
 
 
@@ -26,6 +30,7 @@ class TaskValue:
 class Application:
     def __init__(self) -> None:
         self.created = None
+        self.paused = None
 
     async def create(self, **kwargs):
         self.created = kwargs
@@ -49,6 +54,16 @@ class Application:
             trades=(),
             daily_results=(),
             metric=None,
+        )
+
+    async def pause(self, task_id, context):
+        self.paused = (task_id, context)
+
+    async def get_summary(self, task_id):
+        return SimpleNamespace(
+            task_id=task_id,
+            status=BacktestTaskStatus.PAUSED,
+            allowed_actions=(BacktestAction.RESUME, BacktestAction.CANCEL),
         )
 
 
@@ -99,11 +114,48 @@ def test_item_api_returns_empty_in_progress_result() -> None:
     asyncio.run(scenario())
 
 
+def test_pause_api_requires_command_context_and_returns_allowed_actions() -> None:
+    async def scenario() -> None:
+        application = Application()
+        task_id = uuid4()
+        identity = SimpleNamespace(
+            audit_context=SimpleNamespace(request_id="req-2", trusted_ip="127.0.0.1"),
+            user=SimpleNamespace(id=uuid4()),
+            session=SimpleNamespace(id=uuid4()),
+        )
+
+        response = await pause_backtest(
+            task_id,
+            BacktestCommandBody(confirm=True, reason=" 暂停检查 "),
+            application,
+            identity,
+            "pause-key",
+        )
+
+        assert response["code"] == "JOB_ACCEPTED"
+        assert response["data"] == {
+            "task_id": str(task_id),
+            "status": "PAUSED",
+            "allowed_actions": ["RESUME", "CANCEL"],
+        }
+        assert application.paused[1].reason == "暂停检查"
+        assert application.paused[1].session_id == str(identity.session.id)
+
+    asyncio.run(scenario())
+
+
 def test_router_exposes_current_single_backtest_read_surface() -> None:
     paths = {route.path for route in router.routes}
     assert {
         "/api/v1/backtests",
         "/api/v1/backtests/{task_id}",
+        "/api/v1/backtests/{task_id}/summary",
+        "/api/v1/backtests/{task_id}/items",
+        "/api/v1/backtests/{task_id}/pause",
+        "/api/v1/backtests/{task_id}/resume",
+        "/api/v1/backtests/{task_id}/cancel",
+        "/api/v1/backtests/{task_id}/retry-failed",
+        "/api/v1/backtests/{task_id}/rerun",
         "/api/v1/backtests/{task_id}/items/{item_id}",
         "/api/v1/backtests/{task_id}/items/{item_id}/target-adjustments",
         "/api/v1/backtests/{task_id}/items/{item_id}/orders",
@@ -111,3 +163,35 @@ def test_router_exposes_current_single_backtest_read_surface() -> None:
         "/api/v1/backtests/{task_id}/items/{item_id}/daily-results",
         "/api/v1/backtests/{task_id}/items/{item_id}/metric",
     } <= paths
+
+
+def test_control_and_summary_openapi_publish_concrete_responses() -> None:
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.include_router(router)
+    paths = app.openapi()["paths"]
+    operations = (
+        ("/api/v1/backtests", "get", "200"),
+        ("/api/v1/backtests/{task_id}/summary", "get", "200"),
+        ("/api/v1/backtests/{task_id}/items", "get", "200"),
+        ("/api/v1/backtests/{task_id}/pause", "post", "202"),
+        ("/api/v1/backtests/{task_id}/resume", "post", "202"),
+        ("/api/v1/backtests/{task_id}/cancel", "post", "202"),
+        ("/api/v1/backtests/{task_id}/retry-failed", "post", "202"),
+        ("/api/v1/backtests/{task_id}/rerun", "post", "202"),
+    )
+    for path, method, status in operations:
+        schema = paths[path][method]["responses"][status]["content"][
+            "application/json"
+        ]["schema"]
+        assert "$ref" in schema
+
+    pause = paths["/api/v1/backtests/{task_id}/pause"]["post"]
+    header = next(
+        parameter
+        for parameter in pause["parameters"]
+        if parameter["in"] == "header"
+        and parameter["name"] == "Idempotency-Key"
+    )
+    assert header["required"] is True

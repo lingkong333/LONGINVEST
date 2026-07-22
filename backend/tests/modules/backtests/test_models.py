@@ -2,6 +2,7 @@ from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Numeric, UniqueCon
 
 from long_invest.modules.backtests.models import (
     BacktestAdjustmentSnapshot,
+    BacktestControlCommand,
     BacktestDailyResult,
     BacktestForecastSnapshot,
     BacktestItem,
@@ -81,6 +82,10 @@ def test_backtest_task_and_item_save_complete_replay_provenance() -> None:
         "runner_image_digest",
         "hysteresis_ratio",
         "minimum_hysteresis",
+        "execution_generation",
+        "rerun_from_task_id",
+        "updated_at",
+        "terminal_at",
     } <= set(BacktestTask.__table__.c.keys())
     assert {
         "training_data_fetched_at",
@@ -96,6 +101,9 @@ def test_backtest_task_and_item_save_complete_replay_provenance() -> None:
         "test_data_hash",
         "test_price_basis",
         "execution_token",
+        "attempt_count",
+        "started_at",
+        "ended_at",
     } <= set(BacktestItem.__table__.c.keys())
     assert "ck_backtest_task_mode_valid" in _constraint_names(BacktestTask)
     assert "ck_backtest_task_status_valid" in _constraint_names(BacktestTask)
@@ -103,6 +111,21 @@ def test_backtest_task_and_item_save_complete_replay_provenance() -> None:
     assert "ck_backtest_item_status_valid" in _constraint_names(BacktestItem)
     for column in BacktestTask.__table__.columns:
         assert not (column.default is not None and column.default.arg == "")
+
+
+def test_backtest_control_commands_are_idempotent_module_owned_facts() -> None:
+    assert BacktestControlCommand.__tablename__ == "backtest_control_command"
+    assert {
+        "task_id",
+        "action",
+        "idempotency_key",
+        "request_digest",
+        "result_task_id",
+        "created_at",
+    } <= set(BacktestControlCommand.__table__.c.keys())
+    assert "uq_backtest_control_command_idempotency_key" in _constraint_names(
+        BacktestControlCommand
+    )
 
 
 def test_backtest_forecast_and_result_models_have_complete_fields() -> None:

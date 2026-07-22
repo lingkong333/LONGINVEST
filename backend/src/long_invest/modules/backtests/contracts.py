@@ -60,6 +60,14 @@ class BacktestItemStatus(StrEnum):
     CANCELED = "CANCELED"
 
 
+class BacktestAction(StrEnum):
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+    CANCEL = "CANCEL"
+    RETRY_FAILED = "RETRY_FAILED"
+    RERUN = "RERUN"
+
+
 class BacktestErrorCode(StrEnum):
     BACKTEST_DATE_RANGE_INVALID = "BACKTEST_DATE_RANGE_INVALID"
     INSUFFICIENT_HISTORY = "INSUFFICIENT_HISTORY"
@@ -476,3 +484,62 @@ class BacktestResultView(StrictContract):
     trades: tuple[BacktestTradeView, ...]
     daily_results: tuple[BacktestDailyResultView, ...]
     metric: BacktestMetricView | None
+
+
+class BacktestItemSummaryView(StrictContract):
+    item_id: UUID
+    security_id: UUID
+    symbol: str
+    name: str
+    status: BacktestItemStatus
+    failure_code: str | None = None
+    attempt_count: int = Field(ge=0)
+    started_at: AwareDatetime | None = None
+    ended_at: AwareDatetime | None = None
+
+
+class BacktestTaskListItemView(StrictContract):
+    task_id: UUID
+    rerun_from_task_id: UUID | None = None
+    mode: BacktestMode
+    status: BacktestTaskStatus
+    date_range: BacktestDateRange
+    item: BacktestItemSummaryView
+    allowed_actions: tuple[BacktestAction, ...]
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    terminal_at: AwareDatetime | None = None
+
+
+class BacktestTaskPage(StrictContract):
+    items: tuple[BacktestTaskListItemView, ...]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=200)
+    total: int = Field(ge=0)
+
+
+class BacktestSummaryView(StrictContract):
+    task_id: UUID
+    status: BacktestTaskStatus
+    total_items: int = Field(ge=0)
+    completed_items: int = Field(ge=0)
+    succeeded_items: int = Field(ge=0)
+    failed_items: int = Field(ge=0)
+    canceled_items: int = Field(ge=0)
+    pending_items: int = Field(ge=0)
+    failure_codes: Mapping[str, int]
+    allowed_actions: tuple[BacktestAction, ...]
+    metric: BacktestMetricView | None = None
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> BacktestSummaryView:
+        if self.completed_items > self.total_items:
+            raise ValueError("completed item count cannot exceed total")
+        if (
+            self.succeeded_items + self.failed_items + self.canceled_items
+            != self.completed_items
+        ):
+            raise ValueError("terminal item counts must equal completed count")
+        if self.completed_items + self.pending_items != self.total_items:
+            raise ValueError("completed and pending counts must equal total")
+        return self

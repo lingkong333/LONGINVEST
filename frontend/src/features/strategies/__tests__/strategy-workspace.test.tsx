@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { StrategyBacktestWorkspace, StrategyWorkspace as StrategyWorkspaceBase } from "@/features/strategies"
-import type { HoldoutBacktestResult, StrategyApi, StrategyDraft, StrategyEditorComponents } from "@/features/strategies"
+import type { BacktestAction, BacktestTaskListItemDto, HoldoutBacktestResult, StrategyApi, StrategyDraft, StrategyEditorComponents } from "@/features/strategies"
 
 const editorComponents: StrategyEditorComponents = {
   CodeEditor: ({ value, onChange, ariaLabel }) => <textarea aria-label={ariaLabel} value={value} onChange={(event) => onChange(event.target.value)} />,
@@ -41,7 +41,10 @@ function createApi(overrides: Partial<StrategyApi> = {}): StrategyApi {
     archiveStrategy: vi.fn().mockResolvedValue(successResult),
     listVersions: vi.fn().mockResolvedValue([]),
     createHoldoutBacktest: vi.fn(),
+    listHoldoutBacktests: vi.fn().mockResolvedValue({ items: [], page: 1, pageSize: 20, total: 0 }),
     getHoldoutBacktest: vi.fn(),
+    getHoldoutBacktestSummary: vi.fn().mockImplementation(async (taskId) => ({ taskId, status: "SUCCEEDED", totalItems: 1, completedItems: 1, succeededItems: 1, failedItems: 0, canceledItems: 0, pendingItems: 0, failureCodes: {}, allowedActions: ["RERUN"], metric: null })),
+    controlHoldoutBacktest: vi.fn().mockImplementation(async (taskId) => ({ taskId, status: "SUCCEEDED", allowedActions: ["RERUN"] })),
     ...overrides,
   }
 }
@@ -357,6 +360,19 @@ const result = (status: HoldoutBacktestResult["status"]): HoldoutBacktestResult 
   id: "bt-1", status, forecast: null, adjustments: [], orders: [], trades: [], metrics: null, dailyResults: [],
 })
 
+const task = (status: HoldoutBacktestResult["status"], allowedActions: BacktestAction[] = []): BacktestTaskListItemDto => ({
+  taskId: "bt-1",
+  rerunFromTaskId: null,
+  mode: "SINGLE",
+  status,
+  dateRange: { trainingStartDate: "2020-01-01", trainingEndDate: "2020-12-31", testStartDate: "2021-01-01", testEndDate: "2021-12-31" },
+  item: { itemId: "item-1", securityId: "security-1", symbol: "600000.SH", name: "浦发银行", status: status === "SUCCEEDED" ? "SUCCEEDED" : "PENDING", failureCode: null, attemptCount: 1, startedAt: "2026-07-22T08:00:00Z", endedAt: null },
+  allowedActions,
+  createdAt: "2026-07-22T08:00:00Z",
+  updatedAt: "2026-07-22T08:01:00Z",
+  terminalAt: null,
+})
+
 describe("样本外回测", () => {
   afterEach(() => vi.useRealTimers())
 
@@ -403,20 +419,16 @@ describe("样本外回测", () => {
     expect(getHoldoutBacktest).toHaveBeenCalledTimes(4)
   })
 
-  it("四十次自动查询后停止，并允许手动继续", async () => {
+  it("活动任务超过四十次查询后仍持续轮询", async () => {
     vi.useFakeTimers()
-    const getHoldoutBacktest = vi.fn().mockImplementation(async () => getHoldoutBacktest.mock.calls.length <= 40 ? result("RUNNING") : result("PAUSED"))
+    const getHoldoutBacktest = vi.fn().mockResolvedValue(result("RUNNING"))
     const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(result("PENDING")), getHoldoutBacktest })
     renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
     for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
     fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
-    await act(async () => { await vi.advanceTimersByTimeAsync(120_000) })
-    expect(getHoldoutBacktest).toHaveBeenCalledTimes(40)
-    expect(screen.getByText("自动轮询已达到 40 次上限并停止。")).toBeInTheDocument()
-    fireEvent.click(screen.getByRole("button", { name: "手动继续查询" }))
-    await act(async () => { await vi.advanceTimersByTimeAsync(0) })
-    expect(getHoldoutBacktest).toHaveBeenCalledTimes(41)
-    expect(screen.getByText("回测已暂停")).toBeInTheDocument()
+    await act(async () => { await vi.advanceTimersByTimeAsync(123_000) })
+    expect(getHoldoutBacktest.mock.calls.length).toBeGreaterThan(40)
+    expect(screen.getByText("回测正在运行")).toBeInTheDocument()
   })
 
   it("未知任务和单股状态会安全降级", async () => {
@@ -470,4 +482,70 @@ describe("样本外回测", () => {
     expect(screen.getAllByText("买入")).toHaveLength(2)
     expect(screen.getAllByText("0.12").length).toBeGreaterThanOrEqual(2)
   })
+
+  it("展示最近任务和汇总，并只启用服务器允许的操作", async () => {
+    const currentTask = task("RUNNING", ["PAUSE", "CANCEL"])
+    const api = createApi({
+      listHoldoutBacktests: vi.fn().mockResolvedValue({ items: [currentTask], page: 1, pageSize: 20, total: 1 }),
+      getHoldoutBacktest: vi.fn().mockResolvedValue(result("RUNNING")),
+      getHoldoutBacktestSummary: vi.fn().mockResolvedValue({ taskId: "bt-1", status: "RUNNING", totalItems: 1, completedItems: 0, succeededItems: 0, failedItems: 0, canceledItems: 0, pendingItems: 1, failureCodes: {}, allowedActions: ["PAUSE", "CANCEL"], metric: null }),
+    })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    expect(await screen.findByText("600000.SH 浦发银行")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "查看" }))
+    expect(await screen.findByRole("heading", { name: "任务汇总" })).toBeInTheDocument()
+    expect(screen.getByText(/已完成 0\/1（0%）/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "暂停" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "取消" })).toBeEnabled()
+    expect(screen.getByRole("button", { name: "继续" })).toBeDisabled()
+    expect(screen.getByRole("button", { name: "重试失败项" })).toBeDisabled()
+  })
+
+  it("任务控制要求原因、防止重复提交，并在成功后刷新三处数据", async () => {
+    let resolveControl: ((value: { taskId: string; status: "RUNNING"; allowedActions: BacktestAction[] }) => void) | undefined
+    const controlPromise = new Promise<{ taskId: string; status: "RUNNING"; allowedActions: BacktestAction[] }>((resolve) => { resolveControl = resolve })
+    const controlHoldoutBacktest = vi.fn().mockReturnValue(controlPromise)
+    const currentTask = task("FAILED", ["RETRY_FAILED", "RERUN"])
+    const api = createApi({
+      listHoldoutBacktests: vi.fn().mockResolvedValue({ items: [currentTask], page: 1, pageSize: 20, total: 1 }),
+      getHoldoutBacktest: vi.fn().mockResolvedValue(result("FAILED")),
+      getHoldoutBacktestSummary: vi.fn().mockResolvedValue({ taskId: "bt-1", status: "FAILED", totalItems: 1, completedItems: 1, succeededItems: 0, failedItems: 1, canceledItems: 0, pendingItems: 0, failureCodes: { TEST_DATA_INVALID: 1 }, allowedActions: ["RETRY_FAILED", "RERUN"], metric: null }),
+      controlHoldoutBacktest,
+    })
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    await user.click(await screen.findByRole("button", { name: "查看" }))
+    await user.click(await screen.findByRole("button", { name: "重试失败项" }))
+    const confirm = screen.getByRole("button", { name: "确认执行" })
+    expect(confirm).toBeDisabled()
+    await user.type(screen.getByRole("textbox", { name: "操作原因" }), "修复数据后重试")
+    await user.click(confirm)
+    expect(screen.getByRole("button", { name: "处理中" })).toBeDisabled()
+    expect(controlHoldoutBacktest).toHaveBeenCalledTimes(1)
+    expect(controlHoldoutBacktest).toHaveBeenCalledWith("bt-1", "RETRY_FAILED", "修复数据后重试")
+    resolveControl?.({ taskId: "bt-1", status: "RUNNING", allowedActions: ["CANCEL"] })
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "确认重试失败项" })).not.toBeInTheDocument())
+    expect(api.listHoldoutBacktests).toHaveBeenCalledTimes(2)
+    expect(api.getHoldoutBacktestSummary).toHaveBeenCalledTimes(2)
+    expect(api.getHoldoutBacktest).toHaveBeenCalledTimes(2)
+  })
+
+  it("任务操作失败时保留确认窗口和服务器原因", async () => {
+    const currentTask = task("RUNNING", ["CANCEL"])
+    const api = createApi({
+      listHoldoutBacktests: vi.fn().mockResolvedValue({ items: [currentTask], page: 1, pageSize: 20, total: 1 }),
+      getHoldoutBacktest: vi.fn().mockResolvedValue(result("RUNNING")),
+      getHoldoutBacktestSummary: vi.fn().mockResolvedValue({ taskId: "bt-1", status: "RUNNING", totalItems: 1, completedItems: 0, succeededItems: 0, failedItems: 0, canceledItems: 0, pendingItems: 1, failureCodes: {}, allowedActions: ["CANCEL"], metric: null }),
+      controlHoldoutBacktest: vi.fn().mockRejectedValue(new Error("任务状态已经变化，请刷新后重试。")),
+    })
+    const user = userEvent.setup()
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    await user.click(await screen.findByRole("button", { name: "查看" }))
+    await user.click(await screen.findByRole("button", { name: "取消" }))
+    await user.type(screen.getByRole("textbox", { name: "操作原因" }), "不再需要本次回测")
+    await user.click(screen.getByRole("button", { name: "确认执行" }))
+    expect(await screen.findByText("任务状态已经变化，请刷新后重试。")).toBeInTheDocument()
+    expect(screen.getByRole("dialog", { name: "确认取消" })).toBeInTheDocument()
+  })
+
 })

@@ -14,6 +14,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestErrorCode,
     BacktestItemStatus,
     BacktestStrategyExecutionPort,
+    BacktestTaskStatus,
 )
 from long_invest.modules.backtests.engine import BacktestBar, FixedTargetBacktestEngine
 from long_invest.modules.backtests.repository import BacktestRepository
@@ -41,6 +42,16 @@ _TERMINAL_ITEM_STATUSES = {
 _NON_FATAL_CONFLICTS = {
     "BACKTEST_ALREADY_RUNNING",
     "BACKTEST_EXECUTION_FENCED",
+    "BACKTEST_EXECUTION_SUPERSEDED",
+}
+_COOPERATIVE_STOP_CODES = {
+    "BACKTEST_PAUSED",
+    "BACKTEST_CANCELED",
+    "BACKTEST_EXECUTION_SUPERSEDED",
+}
+_STOPPED_TASK_STATUSES = {
+    BacktestTaskStatus.PAUSED,
+    BacktestTaskStatus.CANCELED,
 }
 
 
@@ -97,10 +108,45 @@ class BacktestApplication:
     async def get_result(self, task_id: UUID, item_id: UUID):
         return await self._read("get_result", task_id, item_id)
 
-    async def run(self, task_id: UUID, *, execution_token: UUID):
+    async def list_tasks(self, *, page: int, page_size: int):
+        return await self._read("list_tasks", page=page, page_size=page_size)
+
+    async def get_summary(self, task_id: UUID):
+        return await self._read("get_summary", task_id)
+
+    async def list_items(self, task_id: UUID):
+        return await self._read("list_items", task_id)
+
+    async def pause(self, task_id: UUID, context: BacktestCommandContext):
+        return await self._write("pause", task_id, context)
+
+    async def resume(self, task_id: UUID, context: BacktestCommandContext):
+        return await self._write("resume", task_id, context)
+
+    async def cancel(self, task_id: UUID, context: BacktestCommandContext):
+        return await self._write("cancel", task_id, context)
+
+    async def retry_failed(self, task_id: UUID, context: BacktestCommandContext):
+        return await self._write("retry_failed", task_id, context)
+
+    async def rerun(
+        self,
+        source_task_id: UUID,
+        new_task_id: UUID,
+        context: BacktestCommandContext,
+    ):
+        return await self._write("rerun", source_task_id, new_task_id, context)
+
+    async def run(
+        self, task_id: UUID, *, execution_token: UUID, generation: int = 1
+    ):
         try:
-            state = await self._write("start", task_id, execution_token)
+            state = await self._write(
+                "start", task_id, execution_token, expected_generation=generation
+            )
             if state.item_status in _TERMINAL_ITEM_STATUSES:
+                return state
+            if _stopped(state):
                 return state
             task = state.task
             if self._engine.rule_version != task.rule_version:
@@ -161,6 +207,11 @@ class BacktestApplication:
                     )
                     del request, result, execution
                 del training
+                state = await self._checkpoint(
+                    task_id, execution_token=execution_token, generation=generation
+                )
+                if _stopped(state):
+                    return state
 
             test_data = await self._test_data.get_test_data(
                 security_id=entry.security_id,
@@ -180,6 +231,11 @@ class BacktestApplication:
                 test_data,
                 execution_token=execution_token,
             )
+            state = await self._checkpoint(
+                task_id, execution_token=execution_token, generation=generation
+            )
+            if _stopped(state):
+                return state
             timeline = state.adjustment_snapshot
             if timeline is None:
                 timeline = await self._adjustments.prepare_adjustment_timeline(
@@ -196,6 +252,11 @@ class BacktestApplication:
                     timeline,
                     execution_token=execution_token,
                 )
+                state = await self._checkpoint(
+                    task_id, execution_token=execution_token, generation=generation
+                )
+                if _stopped(state):
+                    return state
             result = self._engine.run(
                 item_id=state.item_id,
                 security_id=entry.security_id,
@@ -206,6 +267,11 @@ class BacktestApplication:
                 hysteresis_ratio=task.hysteresis_ratio,
                 minimum_hysteresis=task.minimum_hysteresis,
             )
+            state = await self._checkpoint(
+                task_id, execution_token=execution_token, generation=generation
+            )
+            if _stopped(state):
+                return state
             return await self._write(
                 "save_success",
                 task_id,
@@ -230,9 +296,28 @@ class BacktestApplication:
             await self._record_failure(task_id, code, execution_token)
             raise _failure(code, "回测执行或结果保存失败") from exc
 
-    async def recover(self, task_id: UUID, *, execution_token: UUID):
-        await self._write("recover", task_id, execution_token=execution_token)
-        return await self.run(task_id, execution_token=execution_token)
+    async def recover(
+        self, task_id: UUID, *, execution_token: UUID, generation: int = 1
+    ):
+        await self._write(
+            "recover",
+            task_id,
+            execution_token=execution_token,
+            expected_generation=generation,
+        )
+        return await self.run(
+            task_id, execution_token=execution_token, generation=generation
+        )
+
+    async def _checkpoint(
+        self, task_id: UUID, *, execution_token: UUID, generation: int
+    ):
+        return await self._write(
+            "checkpoint",
+            task_id,
+            execution_token=execution_token,
+            expected_generation=generation,
+        )
 
     async def _record_failure(
         self, task_id: UUID, code: str, execution_token: UUID
@@ -256,8 +341,10 @@ class BacktestApplication:
             raise _failure("BACKTEST_CONFLICT", "回测请求与已有操作冲突") from exc
 
     def _service(self, session: Any):
-        events = self._event_factory(session) if self._event_factory else None
-        return self._service_factory(self._repository_factory(session), events=events)
+        effects = self._event_factory(session) if self._event_factory else None
+        return self._service_factory(
+            self._repository_factory(session), events=effects, audit=effects
+        )
 
 
 def _verify_security_snapshot(entry, data, code: BacktestErrorCode) -> None:
@@ -287,10 +374,17 @@ def _failure(code: BacktestErrorCode | str, message: str) -> AppError:
     return AppError(code=value, message=message, status_code=409)
 
 
+def _stopped(state: Any) -> bool:
+    return getattr(state, "task_status", None) in _STOPPED_TASK_STATUSES
+
+
 def build_backtest_job_handler(application: BacktestApplication):
     async def handle(context: JobExecutionContext) -> JobResult:
         try:
             task_id = UUID(str(context.config["backtest_task_id"]))
+            generation = int(context.config["generation"])
+            if generation < 1:
+                raise ValueError
         except (KeyError, TypeError, ValueError):
             return JobResult.failure(
                 code="BACKTEST_JOB_CONFIG_INVALID",
@@ -300,11 +394,25 @@ def build_backtest_job_handler(application: BacktestApplication):
         try:
             if context.config.get("recover") is True:
                 state = await application.recover(
-                    task_id, execution_token=context.job_id
+                    task_id,
+                    execution_token=context.fence_token,
+                    generation=generation,
                 )
             else:
-                state = await application.run(task_id, execution_token=context.job_id)
+                state = await application.run(
+                    task_id,
+                    execution_token=context.fence_token,
+                    generation=generation,
+                )
         except AppError as exc:
+            if exc.code in _COOPERATIVE_STOP_CODES:
+                return JobResult.success_result(
+                    data={
+                        "backtest_task_id": str(task_id),
+                        "status": exc.code.removeprefix("BACKTEST_"),
+                    },
+                    message="回测执行已按任务控制安全结束",
+                )
             return JobResult.failure(
                 code=exc.code,
                 message=exc.message,

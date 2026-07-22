@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from long_invest.modules.backtests.contracts import (
+    BacktestAction,
     BacktestDailyResultView,
     BacktestDateRange,
     BacktestErrorCode,
@@ -18,6 +19,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestOrderView,
     BacktestPositionStatus,
     BacktestSignalInput,
+    BacktestSummaryView,
     BacktestTargetAdjustmentView,
     BacktestTaskDetailView,
     BacktestTaskSnapshot,
@@ -77,6 +79,43 @@ def test_backtest_status_and_error_codes_are_stable() -> None:
         "CANCELING",
         "CANCELED",
     }
+    assert {action.value for action in BacktestAction} == {
+        "PAUSE",
+        "RESUME",
+        "CANCEL",
+        "RETRY_FAILED",
+        "RERUN",
+    }
+
+
+def test_backtest_summary_counts_are_server_validated() -> None:
+    summary = BacktestSummaryView(
+        task_id=uuid4(),
+        status=BacktestTaskStatus.FAILED,
+        total_items=1,
+        completed_items=1,
+        succeeded_items=0,
+        failed_items=1,
+        canceled_items=0,
+        pending_items=0,
+        failure_codes={"TEST_DATA_INVALID": 1},
+        allowed_actions=(BacktestAction.RETRY_FAILED, BacktestAction.RERUN),
+    )
+    assert summary.failure_codes == {"TEST_DATA_INVALID": 1}
+
+    with pytest.raises(ValidationError):
+        BacktestSummaryView(
+            task_id=uuid4(),
+            status=BacktestTaskStatus.RUNNING,
+            total_items=1,
+            completed_items=1,
+            succeeded_items=0,
+            failed_items=0,
+            canceled_items=0,
+            pending_items=1,
+            failure_codes={},
+            allowed_actions=(BacktestAction.CANCEL,),
+        )
 
 
 def test_backtest_contracts_expose_frozen_replay_snapshots() -> None:

@@ -48,6 +48,7 @@ class BacktestTask(Base):
             "'PARTIAL','FAILED','CANCELING','CANCELED')",
             name="status_valid",
         ),
+        CheckConstraint("execution_generation > 0", name="generation_positive"),
         CheckConstraint(
             "(strategy_version_id IS NOT NULL AND draft_id IS NULL "
             "AND draft_version IS NULL AND draft_source_code IS NULL) OR "
@@ -100,6 +101,13 @@ class BacktestTask(Base):
     )
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    execution_generation: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    rerun_from_task_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_task.id", ondelete="RESTRICT"),
+    )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     universe_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -135,6 +143,13 @@ class BacktestTask(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    terminal_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class BacktestUniverseSnapshot(Base):
@@ -176,6 +191,7 @@ class BacktestItem(Base):
             "(status <> 'FAILED' AND failure_code IS NULL)",
             name="failure_consistent",
         ),
+        CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
         CheckConstraint(
             "(training_data_fetched_at IS NULL AND training_data_start_date IS NULL "
             "AND training_data_end_date IS NULL AND training_data_row_count IS NULL "
@@ -221,6 +237,11 @@ class BacktestItem(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String(100))
     execution_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     training_data_fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
@@ -237,6 +258,42 @@ class BacktestItem(Base):
     test_data_row_count: Mapped[int | None] = mapped_column(Integer)
     test_data_hash: Mapped[str | None] = mapped_column(String(64))
     test_price_basis: Mapped[str | None] = mapped_column(String(32))
+
+
+class BacktestControlCommand(Base):
+    __tablename__ = "backtest_control_command"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('PAUSE','RESUME','CANCEL','RETRY_FAILED','RERUN')",
+            name="action_valid",
+        ),
+        CheckConstraint(
+            "request_digest ~ '^[0-9a-f]{64}$'", name="request_digest_sha256"
+        ),
+        UniqueConstraint(
+            "idempotency_key", name="uq_backtest_control_command_idempotency_key"
+        ),
+        Index("ix_backtest_control_command_task_created", "task_id", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    task_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_task.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    action: Mapped[str] = mapped_column(String(24), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    result_task_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_task.id", ondelete="RESTRICT"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class BacktestForecastSnapshot(Base):

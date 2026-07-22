@@ -17,6 +17,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestItemStatus,
     BacktestMode,
     BacktestTaskSnapshot,
+    BacktestTaskStatus,
     BacktestUniverseEntry,
 )
 from long_invest.modules.backtests.engine import FixedTargetBacktestEngine
@@ -52,12 +53,25 @@ class FakeService:
         self.failure_code = None
         self.saved_result = None
 
-    async def start(self, _task_id, _execution_token):
+    async def start(self, _task_id, _execution_token, **_kwargs):
         self.calls.append("start")
         return BacktestExecutionState(
             task=self.task,
+            task_status=BacktestTaskStatus.RUNNING,
+            execution_generation=1,
             item_id=self.item_id,
             item_status="FETCHING_DATA",
+            forecast=self.forecast,
+            adjustment_snapshot=self.adjustment_snapshot,
+        )
+
+    async def checkpoint(self, _task_id, **_kwargs):
+        self.calls.append("checkpoint")
+        return SimpleNamespace(
+            task=self.task,
+            task_status=BacktestTaskStatus.RUNNING,
+            item_id=self.item_id,
+            item_status=BacktestItemStatus.SIMULATING,
             forecast=self.forecast,
             adjustment_snapshot=self.adjustment_snapshot,
         )
@@ -66,6 +80,8 @@ class FakeService:
         self.calls.append("claim_forecast")
         return BacktestExecutionState(
             task=self.task,
+            task_status=BacktestTaskStatus.RUNNING,
+            execution_generation=1,
             item_id=self.item_id,
             item_status="FORECASTING",
             forecast=self.forecast,
@@ -158,12 +174,13 @@ def test_job_handler_is_a_public_single_backtest_entrypoint() -> None:
     async def scenario() -> None:
         task_id = uuid4()
         execution_id = uuid4()
+        fence_token = uuid4()
 
         class Application:
             called = None
 
-            async def run(self, value, *, execution_token):
-                self.called = (value, execution_token)
+            async def run(self, value, *, execution_token, generation):
+                self.called = (value, execution_token, generation)
                 return SimpleNamespace(item_status=BacktestItemStatus.SUCCEEDED)
 
         application = Application()
@@ -171,13 +188,13 @@ def test_job_handler_is_a_public_single_backtest_entrypoint() -> None:
         result = await handler(
             JobExecutionContext(
                 job_id=execution_id,
-                fence_token=uuid4(),
-                config={"backtest_task_id": str(task_id)},
+                fence_token=fence_token,
+                config={"backtest_task_id": str(task_id), "generation": 3},
             )
         )
 
         assert result.success is True
-        assert application.called == (task_id, execution_id)
+        assert application.called == (task_id, fence_token, 3)
 
     asyncio.run(scenario())
 
@@ -187,9 +204,11 @@ def test_terminal_run_short_circuits_without_loading_any_data() -> None:
         task = _task(uuid4())
 
         class TerminalService:
-            async def start(self, _task_id, _execution_token):
+            async def start(self, _task_id, _execution_token, **_kwargs):
                 return BacktestExecutionState(
                     task=task,
+                    task_status=BacktestTaskStatus.SUCCEEDED,
+                    execution_generation=1,
                     item_id=uuid4(),
                     item_status=BacktestItemStatus.SUCCEEDED,
                     forecast=None,
@@ -241,6 +260,8 @@ def test_forecast_race_loser_reuses_the_frozen_forecast() -> None:
                 self.forecast = _forecast(self.task, self.item_id, value)
                 return BacktestExecutionState(
                     task=self.task,
+                    task_status=BacktestTaskStatus.RUNNING,
+                    execution_generation=1,
                     item_id=self.item_id,
                     item_status=BacktestItemStatus.FROZEN,
                     forecast=self.forecast,
@@ -272,6 +293,63 @@ def test_forecast_race_loser_reuses_the_frozen_forecast() -> None:
 
         assert forecasts.requests == []
         assert order == ["load_training", "load_test"]
+
+    asyncio.run(scenario())
+
+
+def test_pause_at_forecast_checkpoint_does_not_load_test_data() -> None:
+    async def scenario() -> None:
+        security_id = uuid4()
+        task = _task(security_id)
+        training = _data(
+            security_id,
+            start=date(2024, 1, 1),
+            end=date(2024, 12, 31),
+            marker="train",
+        )
+        order: list[str] = []
+
+        class PausingService(FakeService):
+            async def checkpoint(self, _task_id, **_kwargs):
+                self.calls.append("checkpoint")
+                return BacktestExecutionState(
+                    task=self.task,
+                    task_status=BacktestTaskStatus.PAUSED,
+                    execution_generation=1,
+                    item_id=self.item_id,
+                    item_status=BacktestItemStatus.FROZEN,
+                    forecast=self.forecast,
+                    adjustment_snapshot=self.adjustment_snapshot,
+                )
+
+        service = PausingService(task)
+        application = BacktestApplication(
+            FakeDatabase(),
+            creation_snapshots=SimpleNamespace(),
+            strategy_executions=SimpleNamespace(
+                resolve_execution=_async_value(
+                    SimpleNamespace(
+                        strategy_id=uuid4(), source_code="def forecast(): pass"
+                    )
+                )
+            ),
+            training_data=DataPort(training, "load_training", order),
+            test_data=DataPort(None, "load_test", order),
+            forecasts=ForecastRecorder(order),
+            adjustments=SimpleNamespace(),
+            engine=FixedTargetBacktestEngine(
+                BacktestProductionSignalRule(ProductionPriceZoneRule()),
+                rule_version=BacktestProductionSignalRule.rule_version,
+            ),
+            repository_factory=lambda session: session,
+            service_factory=lambda _repository, **_kwargs: service,
+        )
+
+        state = await application.run(task.id, execution_token=uuid4())
+
+        assert state.task_status is BacktestTaskStatus.PAUSED
+        assert order == ["load_training", "forecast"]
+        assert service.saved_result is None
 
     asyncio.run(scenario())
 
@@ -326,8 +404,12 @@ async def _run_holdout_workflow() -> None:
         "start",
         "claim_forecast",
         "freeze_forecast",
+        "checkpoint",
         "claim_simulation",
+        "checkpoint",
         "freeze_adjustment_snapshot",
+        "checkpoint",
+        "checkpoint",
         "save_success",
     ]
     assert adjustments.calls == [

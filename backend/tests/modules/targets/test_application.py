@@ -168,3 +168,79 @@ async def test_strategy_batch_isolates_one_subscription_failure() -> None:
 
     assert results[0] == (first_id, "ONE_FAILED", None)
     assert results[1] == (second_id, succeeded.code, succeeded)
+
+
+@pytest.mark.anyio
+async def test_calculate_only_reserves_and_submits_frozen_background_job() -> None:
+    database = Database()
+    run_id, job_id = uuid4(), uuid4()
+    reservation = SimpleNamespace(run_id=run_id, replayed=False)
+    strategy_service = SimpleNamespace(reserve=AsyncMock(return_value=reservation))
+    jobs = SimpleNamespace(
+        lock_submission=AsyncMock(),
+        submit=AsyncMock(return_value=SimpleNamespace(id=job_id)),
+    )
+    command = SimpleNamespace(
+        subscription_id=uuid4(),
+        idempotency_key="calculate-1",
+        request_id="request-1",
+        actor_user_id="user-1",
+    )
+    application = TargetApplication(
+        database,
+        subscription_factory=lambda _session: object(),
+        repository_factory=lambda _session: object(),
+        audit_factory=lambda _session: object(),
+        event_factory=lambda _session: object(),
+        strategy_service_factory=lambda _repository, **_ports: strategy_service,
+        job_service_factory=lambda session: jobs,
+    )
+
+    result = await application.calculate(command)
+
+    assert result.run_id == run_id
+    assert result.job_id == job_id
+    submission = jobs.submit.await_args.args[0]
+    assert submission.job_type == "TARGET_CALCULATE"
+    assert submission.queue == "strategy-targets"
+    assert submission.config_snapshot == {"run_id": str(run_id)}
+    assert submission.idempotency_key == "calculate-1"
+    jobs.lock_submission.assert_awaited_once_with(
+        f"target-calculate:{command.subscription_id}", "calculate-1"
+    )
+    assert application._forecast is None
+    assert application._training_data is None
+
+
+@pytest.mark.anyio
+async def test_calculate_replay_uses_same_job_identity_without_new_config() -> None:
+    database = Database()
+    run_id, job_id = uuid4(), uuid4()
+    reservation = SimpleNamespace(run_id=run_id, replayed=True)
+    strategy_service = SimpleNamespace(reserve=AsyncMock(return_value=reservation))
+    jobs = SimpleNamespace(
+        lock_submission=AsyncMock(),
+        submit=AsyncMock(return_value=SimpleNamespace(id=job_id)),
+    )
+    command = SimpleNamespace(
+        subscription_id=uuid4(),
+        idempotency_key="calculate-1",
+        request_id="request-1",
+        actor_user_id="user-1",
+    )
+    application = TargetApplication(
+        database,
+        subscription_factory=lambda _session: object(),
+        repository_factory=lambda _session: object(),
+        audit_factory=lambda _session: object(),
+        event_factory=lambda _session: object(),
+        strategy_service_factory=lambda _repository, **_ports: strategy_service,
+        job_service_factory=lambda session: jobs,
+    )
+
+    result = await application.calculate(command)
+
+    assert result.replayed is True
+    submission = jobs.submit.await_args.args[0]
+    assert submission.idempotency_scope == f"target-calculate:{command.subscription_id}"
+    assert submission.config_snapshot == {"run_id": str(run_id)}

@@ -182,6 +182,11 @@ def values(base: str) -> TargetValues:
 async def test_first_calculation_activates_and_requests_signal_reevaluation(setup):
     service, repository, audit, events, _, command = setup
     reserved = await service.reserve(command)
+    plan = await service.execution_plan(reserved.run_id)
+    assert plan.reservation.run_id == reserved.run_id
+    assert plan.target_date == command.target_date
+    assert plan.training_start_date == command.training_start_date
+    assert plan.training_end_date == command.training_end_date
     await service.mark_running(reserved.run_id, data_version=7)
     result = await service.complete(
         reserved.run_id,

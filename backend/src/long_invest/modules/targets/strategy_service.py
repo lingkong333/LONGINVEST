@@ -68,6 +68,15 @@ class CalculationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class CalculationExecutionPlan:
+    reservation: CalculationReservation | None
+    target_date: date | None
+    training_start_date: date | None
+    training_end_date: date | None
+    terminal_result: CalculationResult | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ReviewCommand:
     review_id: UUID
     comment: str
@@ -155,7 +164,7 @@ class StrategyTargetService:
             qfq_data_version=None,
             current_target_version=binding.version,
             reason=command.reason,
-            resource_usage={},
+            resource_usage={"_target_date": command.target_date.isoformat()},
             error_summary=None,
             created_at=self._now(),
         )
@@ -191,6 +200,33 @@ class StrategyTargetService:
             run.status = "RUNNING"
             run.qfq_data_version = data_version
             await self._repository.flush()
+
+    async def execution_plan(self, run_id: UUID) -> CalculationExecutionPlan:
+        run = await self._required_run(run_id, lock=False)
+        if run.status in {"SUCCEEDED", "FAILED"}:
+            return CalculationExecutionPlan(
+                reservation=None,
+                target_date=None,
+                training_start_date=None,
+                training_end_date=None,
+                terminal_result=await self.result(run.id, replayed=True),
+            )
+        subscription = await self._subscriptions.lock(run.subscription_id)
+        if subscription is None:
+            raise _error("TARGET_SUBSCRIPTION_NOT_FOUND", "监控订阅不存在", 404)
+        target_date_value = dict(run.resource_usage or {}).get("_target_date")
+        try:
+            target_date = date.fromisoformat(str(target_date_value))
+        except ValueError as exc:
+            raise _error(
+                "TARGET_CALCULATION_SNAPSHOT_INVALID", "目标计算快照不完整", 409
+            ) from exc
+        return CalculationExecutionPlan(
+            reservation=_reservation(run, subscription, replayed=False),
+            target_date=target_date,
+            training_start_date=run.training_start_date,
+            training_end_date=run.training_end_date,
+        )
 
     async def list_calculations(self, *, page: int = 1, page_size: int = 50):
         rows = await self._repository.list_calculations(page=page, page_size=page_size)
@@ -247,7 +283,10 @@ class StrategyTargetService:
         await self._supersede_pending(run.subscription_id)
         if current is not None and _values(current) == values:
             run.status = "SUCCEEDED"
-            run.resource_usage = dict(resource_usage or {})
+            run.resource_usage = {
+                **_internal_usage(run.resource_usage),
+                **dict(resource_usage or {}),
+            }
             _set_result(run, "TARGET_CALCULATION_UNCHANGED", current.id, None)
             binding.status = TargetStatus.READY.value
             binding.stale_reason = None
@@ -260,7 +299,10 @@ class StrategyTargetService:
             source_code_hash=source_code_hash,
         )
         run.status = "SUCCEEDED"
-        run.resource_usage = dict(resource_usage or {})
+        run.resource_usage = {
+            **_internal_usage(run.resource_usage),
+            **dict(resource_usage or {}),
+        }
         if current is not None and _large_change(
             _values(current), values, self._threshold
         ):
@@ -690,6 +732,10 @@ def _set_result(run, code: str, revision_id: UUID | None, review_id: UUID | None
         }
     )
     run.resource_usage = usage
+
+
+def _internal_usage(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in dict(value or {}).items() if key.startswith("_")}
 
 
 def _optional_uuid(value) -> UUID | None:

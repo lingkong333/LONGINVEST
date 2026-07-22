@@ -1,7 +1,7 @@
 import hashlib
 import json
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -17,6 +17,16 @@ from long_invest.modules.targets.strategy_service import (
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
+from long_invest.platform.jobs.contracts import SubmitJob
+from long_invest.platform.jobs.service import JobService
+
+
+@dataclass(frozen=True, slots=True)
+class CalculationSubmission:
+    code: str
+    run_id: Any
+    job_id: Any
+    replayed: bool = False
 
 
 class TargetApplication:
@@ -33,6 +43,7 @@ class TargetApplication:
         training_data: Any | None = None,
         forecast: Any | None = None,
         strategy_service_factory: Callable[..., Any] = StrategyTargetService,
+        job_service_factory: Callable[..., Any] = JobService,
     ) -> None:
         self._database = database
         self._subscription_factory = subscription_factory
@@ -44,6 +55,7 @@ class TargetApplication:
         self._training_data = training_data
         self._forecast = forecast
         self._strategy_service_factory = strategy_service_factory
+        self._job_service_factory = job_service_factory
 
     async def set_manual(self, command):
         return await self._write("set_manual", command)
@@ -52,14 +64,24 @@ class TargetApplication:
         return await self._write("restore", command)
 
     async def calculate(self, command):
+        return await self._schedule("reserve", command, calculation=command)
+
+    async def execute(self, run_id):
         self._require_calculation_dependencies()
-        reservation = await self._strategy_write("reserve", command)
-        return await self._execute_reservation(command, reservation)
+        try:
+            plan = await self._strategy_read("execution_plan", run_id)
+        except AppError as exc:
+            return await self._strategy_write(
+                "fail", run_id, code=exc.code, summary=exc.message
+            )
+        if plan.terminal_result is not None:
+            return plan.terminal_result
+        return await self._execute_reservation(plan, plan.reservation)
 
     async def apply_strategy(self, command):
-        self._require_calculation_dependencies()
-        reservation = await self._strategy_write("apply_and_reserve", command)
-        return await self._execute_reservation(command.calculation, reservation)
+        return await self._schedule(
+            "apply_and_reserve", command, calculation=command.calculation
+        )
 
     async def apply_strategy_batch(self, commands):
         results = []
@@ -228,6 +250,45 @@ class TargetApplication:
                     events=self._event_factory(session),
                 )
                 return await getattr(service, method)(*args, **kwargs)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
+    async def _schedule(self, method, command, *, calculation):
+        try:
+            async with self._database.transaction() as session:
+                jobs = self._job_service_factory(session)
+                scope = f"target-calculate:{calculation.subscription_id}"
+                await jobs.lock_submission(scope, calculation.idempotency_key)
+                service = self._strategy_service_factory(
+                    self._repository_factory(session),
+                    subscriptions=self._subscription_factory(session),
+                    audit=self._audit_factory(session),
+                    events=self._event_factory(session),
+                )
+                reservation = await getattr(service, method)(command)
+                job = await jobs.submit(
+                    SubmitJob(
+                        job_type="TARGET_CALCULATE",
+                        queue="strategy-targets",
+                        idempotency_scope=scope,
+                        idempotency_key=calculation.idempotency_key,
+                        request_id=calculation.request_id,
+                        config_snapshot={"run_id": str(reservation.run_id)},
+                        business_object_type="target_calculation_run",
+                        business_object_id=str(reservation.run_id),
+                        created_by_user_id=calculation.actor_user_id,
+                        soft_timeout_seconds=300,
+                        hard_timeout_seconds=360,
+                    )
+                )
+                return CalculationSubmission(
+                    code="TARGET_CALCULATION_ACCEPTED",
+                    run_id=reservation.run_id,
+                    job_id=job.id,
+                    replayed=reservation.replayed,
+                )
         except AppError:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:

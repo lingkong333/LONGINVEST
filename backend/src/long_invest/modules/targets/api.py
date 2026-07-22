@@ -181,6 +181,9 @@ class ReviewPageResponse(SuccessEnvelope):
 class CapabilityResult(BaseModel):
     code: str
     accepted: bool
+    run_id: UUID | None = None
+    job_id: UUID | None = None
+    replayed: bool = False
 
 
 class CapabilityResponse(SuccessEnvelope):
@@ -306,6 +309,7 @@ async def restore_target(
 @router.post(
     "/api/v1/targets/{subscription_id}/calculate",
     response_model=CapabilityResponse,
+    status_code=202,
 )
 async def calculate_target(
     subscription_id: UUID,
@@ -328,7 +332,14 @@ async def calculate_target(
         )
     )
     return success_response(
-        data={"code": result.code, "accepted": True}, code=result.code
+        data={
+            "code": result.code,
+            "accepted": True,
+            "run_id": str(result.run_id),
+            "job_id": str(result.job_id),
+            "replayed": result.replayed,
+        },
+        code=result.code,
     )
 
 

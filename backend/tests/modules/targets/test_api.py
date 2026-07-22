@@ -23,7 +23,10 @@ from long_invest.modules.targets.api import (
     get_target_application,
     router,
 )
-from long_invest.modules.targets.application import TargetApplication
+from long_invest.modules.targets.application import (
+    CalculationSubmission,
+    TargetApplication,
+)
 from long_invest.modules.targets.contracts import (
     TargetBindingView,
     TargetMutationResult,
@@ -33,7 +36,6 @@ from long_invest.modules.targets.contracts import (
     TargetStatus,
     TargetValues,
 )
-from long_invest.modules.targets.strategy_service import CalculationResult
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.exception_handlers import (
     app_error_handler,
@@ -111,8 +113,8 @@ def _application():
         set_manual=AsyncMock(return_value=_mutation()),
         restore=AsyncMock(return_value=_mutation()),
         calculate=AsyncMock(
-            return_value=CalculationResult(
-                "TARGET_CALCULATION_SUCCEEDED", uuid4(), REVISION_ID
+            return_value=CalculationSubmission(
+                "TARGET_CALCULATION_ACCEPTED", uuid4(), uuid4()
             )
         ),
         list_calculation_runs=AsyncMock(return_value=((), 0)),
@@ -339,8 +341,9 @@ def test_calculation_capability_is_formally_available() -> None:
     )
     read = client.get("/api/v1/target-calculation-runs")
 
-    assert response.status_code == read.status_code == 200
-    assert response.json()["code"] == "TARGET_CALCULATION_SUCCEEDED"
+    assert response.status_code == 202
+    assert read.status_code == 200
+    assert response.json()["code"] == "TARGET_CALCULATION_ACCEPTED"
     assert read.json()["data"]["items"] == []
 
 

@@ -4,8 +4,10 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    BigInteger,
     CheckConstraint,
     DateTime,
+    Identity,
     Index,
     Integer,
     String,
@@ -43,12 +45,19 @@ class EventOutbox(Base):
             "created_at",
         ),
         Index("ix_event_outbox_lease", "status", "locked_at"),
+        Index("ix_event_outbox_topic_sequence", "topic", "stream_sequence"),
     )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True),
         primary_key=True,
         default=uuid4,
+    )
+    stream_sequence: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        nullable=False,
+        unique=True,
     )
     topic: Mapped[str] = mapped_column(String(100), nullable=False)
     aggregate_type: Mapped[str] = mapped_column(String(64), nullable=False)

@@ -47,7 +47,7 @@ def test_market_data_handlers_are_registered_on_the_real_worker() -> None:
         "SIGNAL_EVALUATE_BATCH": signal_evaluate_batch,
         "SIGNAL_REEVALUATE": signal_reevaluate,
     }
-    assert expected == HANDLERS
+    assert expected.items() <= HANDLERS.items()
 
 
 @pytest.mark.parametrize(

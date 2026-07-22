@@ -527,6 +527,8 @@ def _create_backtest_root_tables() -> None:
         sa.Column("id", sa.UUID(), nullable=False),
         sa.Column("mode", sa.String(16), nullable=False),
         sa.Column("status", sa.String(16), nullable=False),
+        sa.Column("idempotency_key", sa.String(160), nullable=False),
+        sa.Column("request_digest", sa.String(64), nullable=False),
         sa.Column("universe_hash", sa.String(64), nullable=False),
         sa.Column("training_start_date", sa.Date(), nullable=False),
         sa.Column("training_end_date", sa.Date(), nullable=False),
@@ -587,7 +589,8 @@ def _create_backtest_root_tables() -> None:
         sa.CheckConstraint(
             "universe_hash ~ '^[0-9a-f]{64}$' "
             "AND source_code_hash ~ '^[0-9a-f]{64}$' "
-            "AND parameter_hash ~ '^[0-9a-f]{64}$'",
+            "AND parameter_hash ~ '^[0-9a-f]{64}$' "
+            "AND request_digest ~ '^[0-9a-f]{64}$'",
             name=op.f("ck_backtest_task_hashes_sha256"),
         ),
         sa.CheckConstraint(
@@ -628,6 +631,9 @@ def _create_backtest_root_tables() -> None:
             ondelete="RESTRICT",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("pk_backtest_task")),
+        sa.UniqueConstraint(
+            "idempotency_key", name="uq_backtest_task_idempotency_key"
+        ),
     )
     op.create_table(
         "backtest_universe_snapshot",

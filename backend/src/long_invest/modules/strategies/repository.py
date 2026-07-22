@@ -86,6 +86,9 @@ class StrategyRepository:
             statement = statement.with_for_update()
         return await self.session.scalar(statement)
 
+    async def get_draft_by_id(self, draft_id: UUID) -> StrategyDraft | None:
+        return await self.session.get(StrategyDraft, draft_id)
+
     async def create_strategy(
         self, strategy: Strategy, draft: StrategyDraft
     ) -> None:

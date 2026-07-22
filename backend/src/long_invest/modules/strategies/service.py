@@ -98,6 +98,12 @@ class StrategyService:
             raise _not_found()
         return draft
 
+    async def get_draft_by_id(self, draft_id: UUID) -> StrategyDraft:
+        draft = await self._repository.get_draft_by_id(draft_id)
+        if draft is None:
+            raise _not_found()
+        return draft
+
     async def list_revisions(
         self, strategy_id: UUID, *, page: int, page_size: int
     ) -> tuple[list[StrategyDraftRevision], int]:

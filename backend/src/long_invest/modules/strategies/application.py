@@ -87,6 +87,9 @@ class StrategyApplication:
     async def get_draft(self, strategy_id: UUID):
         return await self._read("get_draft", strategy_id)
 
+    async def get_draft_by_id(self, draft_id: UUID):
+        return await self._read("get_draft_by_id", draft_id)
+
     async def get_validation_run(self, validation_run_id: UUID):
         return await self._read("get_validation_run", validation_run_id)
 

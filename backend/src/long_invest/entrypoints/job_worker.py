@@ -12,7 +12,16 @@ from long_invest.bootstrap.jobs import (
     signal_evaluate_batch,
     signal_reevaluate,
 )
+from long_invest.bootstrap.stage4_runtime import (
+    build_backtest_application,
+    build_target_application,
+)
+from long_invest.modules.backtests.application import build_backtest_job_handler
 from long_invest.modules.strategies.jobs import strategy_publish, strategy_validate
+from long_invest.modules.targets.jobs import (
+    configure_target_job_application,
+    target_calculate,
+)
 from long_invest.platform.jobs.worker import HANDLERS
 from long_invest.platform.jobs.worker import execute_job as execute_platform_job
 
@@ -28,6 +37,11 @@ HANDLERS["SIGNAL_EVALUATE_BATCH"] = signal_evaluate_batch
 HANDLERS["SIGNAL_REEVALUATE"] = signal_reevaluate
 HANDLERS["STRATEGY_VALIDATE"] = strategy_validate
 HANDLERS["STRATEGY_PUBLISH"] = strategy_publish
+configure_target_job_application(build_target_application)
+HANDLERS["TARGET_CALCULATE"] = target_calculate
+HANDLERS["BACKTEST_SINGLE"] = build_backtest_job_handler(
+    build_backtest_application()
+)
 
 
 def execute_job(job_id: str, outbox_id: str) -> dict[str, Any]:

@@ -96,6 +96,7 @@ def test_strategy_backtest_migration_declares_all_tables_and_constraints() -> No
     for constraint in (
         "ck_strategy_version_source_code_hash_sha256",
         "ck_backtest_task_hashes_sha256",
+        "uq_backtest_task_idempotency_key",
         "ck_backtest_forecast_snapshot_targets_ordered",
         "ck_backtest_metric_win_rate_consistent",
         "ck_target_revision_strategy_version_consistent",

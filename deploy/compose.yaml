@@ -94,6 +94,7 @@ services:
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_REDIS_URL: redis://redis:6379/0
       LONGINVEST_LOG_FILE: /var/log/longinvest/application.jsonl
+      LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -444,6 +445,123 @@ services:
     tmpfs:
       - /tmp:size=64m,mode=1777
     mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
+
+  worker-strategy:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["python", "-m", "long_invest.entrypoints.worker"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_REDIS_URL: redis://redis:6379/0
+      LONGINVEST_LOG_FILE: /var/log/longinvest/worker-strategy.jsonl
+      LONGINVEST_WORKER_QUEUES: strategy
+      LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - application_logs:/var/log/longinvest
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
+    group_add:
+      - ${LONGINVEST_DOCKER_GID:-999}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
+
+  worker-strategy-targets:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["python", "-m", "long_invest.entrypoints.worker"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_REDIS_URL: redis://redis:6379/0
+      LONGINVEST_LOG_FILE: /var/log/longinvest/worker-strategy-targets.jsonl
+      LONGINVEST_WORKER_QUEUES: strategy-targets
+      LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - application_logs:/var/log/longinvest
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
+    group_add:
+      - ${LONGINVEST_DOCKER_GID:-999}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 256m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
+
+  worker-backtest-single:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["python", "-m", "long_invest.entrypoints.worker"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_REDIS_URL: redis://redis:6379/0
+      LONGINVEST_LOG_FILE: /var/log/longinvest/worker-backtest-single.jsonl
+      LONGINVEST_WORKER_QUEUES: backtest-single
+      LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - application_logs:/var/log/longinvest
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
+    group_add:
+      - ${LONGINVEST_DOCKER_GID:-999}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    mem_limit: 384m
     security_opt:
       - no-new-privileges:true
     logging:

@@ -164,10 +164,8 @@ class BacktestCreateRequest(StrictContract):
         if has_draft and (
             self.draft_id is None
             or self.draft_version is None
-            or self.strategy_metadata is None
-            or self.parameter_schema is None
         ):
-            raise ValueError("draft backtest requires frozen metadata and schema")
+            raise ValueError("draft backtest requires id and version")
         if has_version and (
             self.strategy_metadata is not None or self.parameter_schema is not None
         ):

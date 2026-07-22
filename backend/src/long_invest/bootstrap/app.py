@@ -14,6 +14,12 @@ from long_invest.modules.auth.application import (
     close_auth_resources,
     get_auth_application,
 )
+from long_invest.modules.backtests.api import (
+    configure_backtest_application,
+)
+from long_invest.modules.backtests.api import (
+    router as backtests_router,
+)
 from long_invest.modules.calendar.api import router as calendar_router
 from long_invest.modules.daily_data.api import router as daily_data_router
 from long_invest.modules.health.api import router as health_router
@@ -53,7 +59,10 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    from long_invest.bootstrap.stage4_runtime import build_backtest_application
+
     settings = get_settings()
+    configure_backtest_application(build_backtest_application)
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
@@ -79,5 +88,6 @@ def create_app() -> FastAPI:
     app.include_router(targets_router)
     app.include_router(signals_router)
     app.include_router(strategies_router)
+    app.include_router(backtests_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

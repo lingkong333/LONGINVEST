@@ -12,10 +12,6 @@ from long_invest.modules.auth.dependencies import (
     require_authenticated_request,
     require_verified_write_request,
 )
-from long_invest.modules.monitoring.application import (
-    transactional_monitor_subscription_port,
-)
-from long_invest.modules.strategies.application import get_strategy_application
 from long_invest.modules.targets.application import TargetApplication
 from long_invest.modules.targets.contracts import (
     ManualTargetCommand,
@@ -31,7 +27,6 @@ from long_invest.modules.targets.strategy_service import (
     CalculateTargetCommand,
     ReviewCommand,
 )
-from long_invest.platform.database.engine import get_database
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import Pagination, SuccessEnvelope
@@ -40,16 +35,9 @@ router = APIRouter(tags=["targets"])
 
 
 def get_target_application() -> TargetApplication:
-    strategies = get_strategy_application()
-    return TargetApplication(
-        get_database(),
-        subscription_factory=lambda session: transactional_monitor_subscription_port(
-            session,
-            strategy_readiness=strategies,
-            strategy_snapshots=strategies,
-        ),
-        strategy_application=strategies,
-    )
+    from long_invest.bootstrap.stage4_runtime import build_target_application
+
+    return build_target_application()
 
 
 Application = Annotated[TargetApplication, Depends(get_target_application)]

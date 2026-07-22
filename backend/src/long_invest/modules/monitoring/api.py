@@ -102,6 +102,16 @@ class ResultResponse(SuccessEnvelope):
     data: ResultData
 
 
+class ActionData(BaseModel):
+    subscription_id: UUID
+    job_id: UUID
+    status: str
+
+
+class ActionResponse(SuccessEnvelope):
+    data: ActionData
+
+
 class ListData(BaseModel):
     items: list[SubscriptionRecord]
 
@@ -259,28 +269,62 @@ async def restore(
     )
 
 
-@router.post("/{subscription_id}/check-now", response_model=ResultResponse)
+@router.post(
+    "/{subscription_id}/check-now", response_model=ActionResponse, status_code=202
+)
 async def check_now(
     subscription_id: UUID,
     body: TransitionRequest,
-    _application: Application,
-    _identity: WriteIdentity,
-    _key: IdempotencyKey,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
 ):
     _confirm(body.confirm)
-    raise _capability()
+    job = await application.check_now(
+        subscription_id,
+        expected_version=body.expected_version,
+        idempotency_key=key.strip(),
+        request_id=identity.audit_context.request_id,
+        actor_user_id=str(identity.user.id),
+    )
+    return success_response(
+        data={
+            "subscription_id": subscription_id,
+            "job_id": job.id,
+            "status": str(job.status),
+        },
+        code="MONITOR_CHECK_REQUESTED",
+    )
 
 
-@router.post("/{subscription_id}/diagnose", response_model=ResultResponse)
+@router.post(
+    "/{subscription_id}/diagnose", response_model=ActionResponse, status_code=202
+)
 async def diagnose(
     subscription_id: UUID,
     body: TransitionRequest,
-    _application: Application,
-    _identity: WriteIdentity,
-    _key: IdempotencyKey,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
 ):
     _confirm(body.confirm)
-    raise _capability()
+    job = await application.diagnose(
+        subscription_id,
+        expected_version=body.expected_version,
+        idempotency_key=key.strip(),
+        request_id=identity.audit_context.request_id,
+        actor_user_id=str(identity.user.id),
+        session_id=str(identity.session.id),
+        trusted_ip=identity.audit_context.trusted_ip or "unknown",
+    )
+    return success_response(
+        data={
+            "subscription_id": subscription_id,
+            "job_id": job.id,
+            "status": str(job.status),
+        },
+        code="MONITOR_DIAGNOSTIC_REQUESTED",
+    )
 
 
 def _owner(x):
@@ -345,11 +389,3 @@ def _context(i):
             trusted_ip=i.audit_context.trusted_ip or "unknown",
         )
     }
-
-
-def _capability():
-    return AppError(
-        code="MONITOR_CAPABILITY_NOT_READY",
-        message="该监控能力尚未接入",
-        status_code=409,
-    )

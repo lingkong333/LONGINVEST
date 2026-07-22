@@ -90,6 +90,18 @@ class ReviewCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class RecalculateReviewCommand:
+    review_id: UUID
+    reason: str
+    expected_version: int
+    idempotency_key: str
+    request_id: str
+    actor_user_id: str
+    session_id: str
+    trusted_ip: str
+
+
+@dataclass(frozen=True, slots=True)
 class ApplyStrategyTargetCommand:
     calculation: CalculateTargetCommand
     strategy_version_id: UUID
@@ -379,6 +391,50 @@ class StrategyTargetService:
             run.training_start_date,
             run.training_end_date,
         )
+
+    async def recalculate_review(
+        self, command: RecalculateReviewCommand
+    ) -> CalculationReservation:
+        review = await self._repository.get_review(command.review_id, for_update=True)
+        if review is None:
+            raise _error("TARGET_REVIEW_NOT_FOUND", "复核任务不存在", 404)
+        if review.status != "PENDING":
+            raise _error("TARGET_REVIEW_ALREADY_DECIDED", "复核任务已处理", 409)
+        candidate = await self._repository.get_revision(review.candidate_revision_id)
+        if candidate is None:
+            raise _error("TARGET_REVIEW_STALE", "复核候选目标不存在", 409)
+        source_run = await self._required_run(
+            _calculation_run_id(candidate.idempotency_key), lock=False
+        )
+        if (
+            source_run.training_start_date is None
+            or source_run.training_end_date is None
+        ):
+            raise _error("TARGET_REVIEW_STALE", "复核训练区间已失效", 409)
+        return await self.reserve(
+            CalculateTargetCommand(
+                subscription_id=candidate.subscription_id,
+                target_date=candidate.target_date,
+                training_start_date=source_run.training_start_date,
+                training_end_date=source_run.training_end_date,
+                reason=command.reason,
+                expected_version=command.expected_version,
+                idempotency_key=command.idempotency_key,
+                request_id=command.request_id,
+                actor_user_id=command.actor_user_id,
+                session_id=command.session_id,
+                trusted_ip=command.trusted_ip,
+            )
+        )
+
+    async def review_subscription_id(self, review_id: UUID) -> UUID:
+        review = await self._repository.get_review(review_id)
+        if review is None:
+            raise _error("TARGET_REVIEW_NOT_FOUND", "复核任务不存在", 404)
+        candidate = await self._repository.get_revision(review.candidate_revision_id)
+        if candidate is None:
+            raise _error("TARGET_REVIEW_STALE", "复核候选目标不存在", 409)
+        return candidate.subscription_id
 
     async def decide(
         self, command: ReviewCommand, *, approve: bool

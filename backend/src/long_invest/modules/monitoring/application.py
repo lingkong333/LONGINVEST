@@ -22,6 +22,10 @@ from long_invest.modules.monitoring.service import (
     SubscriptionAuditContext,
     SubscriptionConfig,
 )
+from long_invest.modules.quotes.application import (
+    QuoteApplication,
+    get_quote_application,
+)
 from long_invest.modules.securities.application import (
     SecurityApplication,
     get_security_application,
@@ -107,6 +111,7 @@ class MonitorSubscriptionApplication:
         event_factory=MonitorSubscriptionOutbox,
         target_readiness=None,
         strategy_readiness=None,
+        quote_application: QuoteApplication | None = None,
     ):
         self.db = database
         self.security = security_application
@@ -117,6 +122,7 @@ class MonitorSubscriptionApplication:
         self.event_factory = event_factory
         self.targets = target_readiness or UnavailableTargetReadiness()
         self.strategies = strategy_readiness or UnavailableStrategyReadiness()
+        self.quotes = quote_application
 
     def _service(self, session):
         return self.service_factory(
@@ -222,6 +228,95 @@ class MonitorSubscriptionApplication:
 
     async def restore(self, id, **kwargs):
         return await self._write("restore", id, **kwargs)
+
+    async def check_now(
+        self,
+        subscription_id: UUID,
+        *,
+        expected_version: int,
+        idempotency_key: str,
+        request_id: str,
+        actor_user_id: str,
+    ):
+        owner = await self._manual_action_owner(
+            subscription_id,
+            expected_version=expected_version,
+            require_enabled=True,
+        )
+        return await self._quote_application().submit_manual(
+            symbols=(owner.symbol,),
+            timeout_seconds=30,
+            idempotency_key=_quote_action_key(
+                "check", subscription_id, idempotency_key
+            ),
+            request_id=request_id,
+            created_by_user_id=actor_user_id,
+        )
+
+    async def diagnose(
+        self,
+        subscription_id: UUID,
+        *,
+        expected_version: int,
+        idempotency_key: str,
+        request_id: str,
+        actor_user_id: str,
+        session_id: str,
+        trusted_ip: str,
+    ):
+        owner = await self._manual_action_owner(
+            subscription_id,
+            expected_version=expected_version,
+            require_enabled=False,
+        )
+        return await self._quote_application().submit_diagnostic(
+            symbols=(owner.symbol,),
+            idempotency_key=_quote_action_key(
+                "diagnose", subscription_id, idempotency_key
+            ),
+            request_id=request_id,
+            created_by_user_id=actor_user_id,
+            session_id=session_id,
+            trusted_ip=trusted_ip,
+        )
+
+    async def _manual_action_owner(
+        self,
+        subscription_id: UUID,
+        *,
+        expected_version: int,
+        require_enabled: bool,
+    ):
+        owner = await self.get(subscription_id)
+        if owner.version != expected_version:
+            raise AppError(
+                code="MONITOR_SUBSCRIPTION_VERSION_CONFLICT",
+                message="订阅版本冲突，请刷新后重试",
+                status_code=409,
+            )
+        status = SubscriptionStatus(str(owner.status))
+        if status is SubscriptionStatus.ARCHIVED:
+            raise AppError(
+                code="MONITOR_SUBSCRIPTION_ARCHIVED",
+                message="已归档订阅不能执行行情操作",
+                status_code=409,
+            )
+        if require_enabled and status is not SubscriptionStatus.ENABLED:
+            raise AppError(
+                code="MONITOR_SUBSCRIPTION_NOT_ENABLED",
+                message="只有已启用订阅可以立即检查",
+                status_code=409,
+            )
+        return owner
+
+    def _quote_application(self) -> QuoteApplication:
+        if self.quotes is None:
+            raise AppError(
+                code="MONITOR_QUOTE_BACKEND_UNAVAILABLE",
+                message="行情任务服务暂时不可用",
+                status_code=503,
+            )
+        return self.quotes
 
     async def final_eligibility(self, snapshot):
         return await self._read("final_eligibility", snapshot)
@@ -447,6 +542,7 @@ def get_monitor_subscription_application():
         get_database(),
         security_application=get_security_application(),
         schedule_application=get_monitor_schedule_application(),
+        quote_application=get_quote_application(),
     )
 
 
@@ -457,6 +553,11 @@ def _audit_key(subscription_id, idempotency_key):
         if subscription_id
         else f"monitor-subscription:create:{digest}"
     )
+
+
+def _quote_action_key(action: str, subscription_id: UUID, key: str) -> str:
+    digest = sha256(key.encode()).hexdigest()
+    return f"monitor-{action}:{subscription_id}:{digest}"
 
 
 def _unavailable():

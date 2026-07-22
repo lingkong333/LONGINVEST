@@ -4407,12 +4407,12 @@
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResultResponse"
+                  "$ref": "#/components/schemas/ActionResponse"
                 }
               }
             }
@@ -4471,12 +4471,12 @@
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ResultResponse"
+                  "$ref": "#/components/schemas/ActionResponse"
                 }
               }
             }
@@ -4501,6 +4501,95 @@
         ],
         "summary": "List Events",
         "operationId": "list_events_api_v1_notifications_events_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NotificationEventStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "event_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-events": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "List Events",
+        "operationId": "list_events_api_v1_notification_events_get",
         "parameters": [
           {
             "name": "page",
@@ -4626,6 +4715,49 @@
         }
       }
     },
+    "/api/v1/notification-events/{id}": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Get Event By Id",
+        "operationId": "get_event_by_id_api_v1_notification_events__id__get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/deliveries": {
       "get": {
         "tags": [
@@ -4633,6 +4765,111 @@
         ],
         "summary": "List Deliveries",
         "operationId": "list_deliveries_api_v1_notifications_deliveries_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "event_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/NotificationDeliveryStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "channel",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/DeliveryChannel"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-deliveries": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "List Deliveries",
+        "operationId": "list_deliveries_api_v1_notification_deliveries_get",
         "parameters": [
           {
             "name": "page",
@@ -4797,6 +5034,72 @@
         }
       }
     },
+    "/api/v1/notification-deliveries/{id}/attempts": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "List Attempts By Id",
+        "operationId": "list_attempts_by_id_api_v1_notification_deliveries__id__attempts_get",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/deliveries/{delivery_id}/retry": {
       "post": {
         "tags": [
@@ -4813,6 +5116,70 @@
               "type": "string",
               "format": "uuid",
               "title": "Delivery Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-deliveries/{id}/retry": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Retry Delivery By Id",
+        "operationId": "retry_delivery_by_id_api_v1_notification_deliveries__id__retry_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Id"
             }
           },
           {
@@ -4925,6 +5292,70 @@
         }
       }
     },
+    "/api/v1/notification-deliveries/{id}/cancel": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Cancel Delivery By Id",
+        "operationId": "cancel_delivery_by_id_api_v1_notification_deliveries__id__cancel_post",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/deliveries/retry-batch": {
       "post": {
         "tags": [
@@ -4979,6 +5410,60 @@
         }
       }
     },
+    "/api/v1/notification-deliveries/retry-batch": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Retry Batch",
+        "operationId": "retry_batch_api_v1_notification_deliveries_retry_batch_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/templates": {
       "get": {
         "tags": [
@@ -4986,6 +5471,27 @@
         ],
         "summary": "List Templates",
         "operationId": "list_templates_api_v1_notifications_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-templates": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "List Templates",
+        "operationId": "list_templates_api_v1_notification_templates_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -5113,6 +5619,119 @@
         }
       }
     },
+    "/api/v1/notification-policies/{scope}": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Get Policy",
+        "operationId": "get_policy_api_v1_notification_policies__scope__get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "global",
+                "signals",
+                "system-alerts"
+              ],
+              "type": "string",
+              "title": "Scope"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Update Policy",
+        "operationId": "update_policy_api_v1_notification_policies__scope__patch",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "enum": [
+                "global",
+                "signals",
+                "system-alerts"
+              ],
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingMutationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/channels": {
       "get": {
         "tags": [
@@ -5127,6 +5746,107 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-channels/{channel}": {
+      "get": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Get Channel",
+        "operationId": "get_channel_api_v1_notification_channels__channel__get",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryChannel"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Update Channel",
+        "operationId": "update_channel_api_v1_notification_channels__channel__patch",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryChannel"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingMutationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -5237,6 +5957,58 @@
         }
       }
     },
+    "/api/v1/notification-templates/{type}/preview": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Preview Template Type",
+        "operationId": "preview_template_type_api_v1_notification_templates__type__preview_post",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Type"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateTypePreviewRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/channels/{channel}/test": {
       "post": {
         "tags": [
@@ -5244,6 +6016,68 @@
         ],
         "summary": "Test Channel",
         "operationId": "test_channel_api_v1_notifications_channels__channel__test_post",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryChannel"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-channels/{channel}/test": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Test Channel",
+        "operationId": "test_channel_api_v1_notification_channels__channel__test_post",
         "parameters": [
           {
             "name": "channel",
@@ -10404,10 +11238,411 @@
           }
         }
       }
+    },
+    "/api/v1/system/health": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "System Health",
+        "operationId": "system_health_api_v1_system_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemHealthEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/components": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "System Components",
+        "operationId": "system_components_api_v1_system_components_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ComponentListEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/workers": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "Workers",
+        "operationId": "workers_api_v1_workers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerListEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/queues": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "Queues",
+        "operationId": "queues_api_v1_queues_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueueListEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/scheduler/status": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "Scheduler Status",
+        "operationId": "scheduler_status_api_v1_scheduler_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchedulerStatusEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/schedule-occurrences": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "Schedule Occurrences",
+        "operationId": "schedule_occurrences_api_v1_schedule_occurrences_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "occurrence_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Occurrence Type"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "from_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From Date"
+            }
+          },
+          {
+            "name": "through_date",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Through Date"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OccurrenceListEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system-clock/status": {
+      "get": {
+        "tags": [
+          "system-status"
+        ],
+        "summary": "System Clock Status",
+        "operationId": "system_clock_status_api_v1_system_clock_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemClockStatusEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard/summary": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Get Dashboard Summary",
+        "operationId": "get_dashboard_summary_api_v1_dashboard_summary_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardSummaryEnvelope"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/dashboard/timeline": {
+      "get": {
+        "tags": [
+          "dashboard"
+        ],
+        "summary": "Get Dashboard Timeline",
+        "operationId": "get_dashboard_timeline_api_v1_dashboard_timeline_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardTimelineEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/client-errors": {
+      "post": {
+        "tags": [
+          "client-errors"
+        ],
+        "summary": "Collect Client Error",
+        "operationId": "collect_client_error_api_v1_client_errors_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ClientErrorInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientErrorEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "ActionData": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "job_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Job Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "job_id",
+          "status"
+        ],
+        "title": "ActionData"
+      },
       "ActionRequest": {
         "properties": {
           "expected_version": {
@@ -10434,6 +11669,85 @@
           "confirm"
         ],
         "title": "ActionRequest"
+      },
+      "ActionResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ActionData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "ActionResponse"
+      },
+      "AlertData": {
+        "properties": {
+          "unresolved": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unresolved"
+          },
+          "critical": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Critical"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Errors"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "AlertData"
       },
       "AlertSeverity": {
         "type": "string",
@@ -12303,6 +13617,289 @@
         ],
         "title": "ChannelTestRequest"
       },
+      "ClientErrorEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ClientErrorReceipt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "ClientErrorEnvelope"
+      },
+      "ClientErrorInput": {
+        "properties": {
+          "route": {
+            "type": "string",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Route"
+          },
+          "frontend_version": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Frontend Version"
+          },
+          "error_type": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Error Type"
+          },
+          "message": {
+            "type": "string",
+            "maxLength": 4096,
+            "minLength": 1,
+            "title": "Message"
+          },
+          "browser_summary": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Browser Summary"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "route",
+          "frontend_version",
+          "error_type",
+          "message",
+          "browser_summary",
+          "occurred_at"
+        ],
+        "title": "ClientErrorInput"
+      },
+      "ClientErrorReceipt": {
+        "properties": {
+          "fingerprint": {
+            "type": "string",
+            "title": "Fingerprint"
+          },
+          "sampled": {
+            "type": "boolean",
+            "title": "Sampled"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "fingerprint",
+          "sampled"
+        ],
+        "title": "ClientErrorReceipt"
+      },
+      "ClockSourceStatus": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source"
+          },
+          "observed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Observed At"
+          },
+          "skew_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skew Seconds"
+          },
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "source",
+          "status"
+        ],
+        "title": "ClockSourceStatus"
+      },
+      "ComponentListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentStatus"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "ComponentListData"
+      },
+      "ComponentListEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ComponentListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "ComponentListEnvelope"
+      },
+      "ComponentStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "category": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Category"
+          },
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "critical": {
+            "type": "boolean",
+            "title": "Critical",
+            "default": false
+          },
+          "source": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Source"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "details": {
+            "items": {
+              "$ref": "#/components/schemas/StatusDetail"
+            },
+            "type": "array",
+            "title": "Details",
+            "default": []
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "category",
+          "status",
+          "source",
+          "updated_at"
+        ],
+        "title": "ComponentStatus"
+      },
       "ConfigureRequest": {
         "properties": {
           "schedule_id": {
@@ -13186,6 +14783,80 @@
         ],
         "title": "DailyBatchRecord"
       },
+      "DailyData": {
+        "properties": {
+          "trading_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trading Date"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "expected_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Count"
+          },
+          "committed_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Committed Count"
+          },
+          "missing_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Count"
+          },
+          "failed_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "DailyData"
+      },
       "DailyJobData": {
         "properties": {
           "job_id": {
@@ -13505,6 +15176,601 @@
         ],
         "title": "DailyRevisionRecord"
       },
+      "DashboardSectionResponse_AlertData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/AlertData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[AlertData]"
+      },
+      "DashboardSectionResponse_DailyData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DailyData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[DailyData]"
+      },
+      "DashboardSectionResponse_InfrastructureData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/InfrastructureData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[InfrastructureData]"
+      },
+      "DashboardSectionResponse_JobData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/JobData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[JobData]"
+      },
+      "DashboardSectionResponse_MonitoringData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MonitoringData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[MonitoringData]"
+      },
+      "DashboardSectionResponse_NotificationData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/NotificationData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[NotificationData]"
+      },
+      "DashboardSectionResponse_PositionData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/PositionData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[PositionData]"
+      },
+      "DashboardSectionResponse_ProviderData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ProviderData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[ProviderData]"
+      },
+      "DashboardSectionResponse_QuoteBatchData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/QuoteBatchData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[QuoteBatchData]"
+      },
+      "DashboardSectionResponse_SignalData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SignalData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[SignalData]"
+      },
+      "DashboardSectionResponse_SystemData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SystemData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[SystemData]"
+      },
+      "DashboardSectionResponse_TargetData_": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/SectionStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TargetData"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "data",
+          "error"
+        ],
+        "title": "DashboardSectionResponse[TargetData]"
+      },
+      "DashboardSectionsResponse": {
+        "properties": {
+          "system": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_SystemData_"
+          },
+          "quote_batches": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_QuoteBatchData_"
+          },
+          "monitoring": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_MonitoringData_"
+          },
+          "positions": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_PositionData_"
+          },
+          "signals": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_SignalData_"
+          },
+          "daily_data": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_DailyData_"
+          },
+          "targets": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_TargetData_"
+          },
+          "jobs": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_JobData_"
+          },
+          "notifications": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_NotificationData_"
+          },
+          "providers": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_ProviderData_"
+          },
+          "infrastructure": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_InfrastructureData_"
+          },
+          "alerts": {
+            "$ref": "#/components/schemas/DashboardSectionResponse_AlertData_"
+          }
+        },
+        "type": "object",
+        "required": [
+          "system",
+          "quote_batches",
+          "monitoring",
+          "positions",
+          "signals",
+          "daily_data",
+          "targets",
+          "jobs",
+          "notifications",
+          "providers",
+          "infrastructure",
+          "alerts"
+        ],
+        "title": "DashboardSectionsResponse"
+      },
+      "DashboardStatus": {
+        "type": "string",
+        "enum": [
+          "HEALTHY",
+          "DEGRADED",
+          "UNHEALTHY"
+        ],
+        "title": "DashboardStatus"
+      },
+      "DashboardSummaryEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DashboardSummaryResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "DashboardSummaryEnvelope"
+      },
+      "DashboardSummaryResponse": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/DashboardStatus"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          },
+          "sections": {
+            "$ref": "#/components/schemas/DashboardSectionsResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "generated_at",
+          "sections"
+        ],
+        "title": "DashboardSummaryResponse"
+      },
+      "DashboardTimelineEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/DashboardTimelineResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "DashboardTimelineEnvelope"
+      },
+      "DashboardTimelineResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineItemResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "generated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Generated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "generated_at"
+        ],
+        "title": "DashboardTimelineResponse"
+      },
       "DeliveryChannel": {
         "type": "string",
         "enum": [
@@ -13632,6 +15898,16 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HealthStatus": {
+        "type": "string",
+        "enum": [
+          "HEALTHY",
+          "DEGRADED",
+          "UNAVAILABLE",
+          "UNKNOWN"
+        ],
+        "title": "HealthStatus"
+      },
       "HistoryBackfillScope": {
         "type": "string",
         "enum": [
@@ -13703,6 +15979,46 @@
           "confirm"
         ],
         "title": "ImportRequest"
+      },
+      "InfrastructureData": {
+        "properties": {
+          "stale_workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale Workers"
+          },
+          "active_workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Workers"
+          },
+          "calendar_covers_today": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Calendar Covers Today"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "InfrastructureData"
       },
       "ItemBody": {
         "properties": {
@@ -13835,6 +16151,46 @@
           "data"
         ],
         "title": "JobControlResponse"
+      },
+      "JobData": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed"
+          },
+          "timed_out": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timed Out"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "JobData"
       },
       "JobItemPageData": {
         "properties": {
@@ -14147,6 +16503,46 @@
         ],
         "title": "ManualTargetRequest"
       },
+      "MonitoringData": {
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "with_current_state": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "With Current State"
+          },
+          "missing_state": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing State"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MonitoringData"
+      },
       "MutationRequest": {
         "properties": {
           "reason": {
@@ -14178,6 +16574,46 @@
         ],
         "title": "NotificationClass"
       },
+      "NotificationData": {
+        "properties": {
+          "pending": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending"
+          },
+          "sent": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent"
+          },
+          "failed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "NotificationData"
+      },
       "NotificationDeliveryStatus": {
         "type": "string",
         "enum": [
@@ -14205,6 +16641,65 @@
           "CANCELED"
         ],
         "title": "NotificationEventStatus"
+      },
+      "OccurrenceListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ScheduleOccurrence"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "pagination"
+        ],
+        "title": "OccurrenceListData"
+      },
+      "OccurrenceListEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/OccurrenceListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "OccurrenceListEnvelope"
       },
       "OverrideRequest": {
         "properties": {
@@ -14466,6 +16961,35 @@
           "data"
         ],
         "title": "PositionChangeResponse"
+      },
+      "PositionData": {
+        "properties": {
+          "held": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Held"
+          },
+          "high_zone": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High Zone"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "PositionData"
       },
       "PositionHistoryItems": {
         "properties": {
@@ -14780,6 +17304,46 @@
           "SINA"
         ],
         "title": "ProviderCode"
+      },
+      "ProviderData": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "healthy": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Healthy"
+          },
+          "open_circuits": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Circuits"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "ProviderData"
       },
       "PublishStrategyRequest": {
         "properties": {
@@ -15403,6 +17967,219 @@
           "CRITICAL"
         ],
         "title": "QualitySeverity"
+      },
+      "QueueListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/QueueStatus"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "QueueListData"
+      },
+      "QueueListEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/QueueListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "QueueListEnvelope"
+      },
+      "QueueStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name"
+          },
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "depth": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Depth"
+          },
+          "active_workers": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Active Workers"
+          },
+          "oldest_job_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Job At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "name",
+          "status",
+          "depth",
+          "active_workers",
+          "updated_at"
+        ],
+        "title": "QueueStatus"
+      },
+      "QuoteBatchData": {
+        "properties": {
+          "is_trading_day": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Trading Day"
+          },
+          "starts_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Starts At"
+          },
+          "local_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Local Time"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "expected_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Count"
+          },
+          "valid_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid Count"
+          },
+          "missing_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missing Count"
+          },
+          "conflict_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conflict Count"
+          },
+          "failed_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Failed Count"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "QuoteBatchData"
       },
       "QuoteCyclePageData": {
         "properties": {
@@ -16680,6 +19457,84 @@
         ],
         "title": "ScheduleMutationResponse"
       },
+      "ScheduleOccurrence": {
+        "properties": {
+          "occurrence_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Occurrence Id"
+          },
+          "occurrence_type": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Occurrence Type"
+          },
+          "definition_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Definition Id"
+          },
+          "scheduled_trade_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Scheduled Trade Date"
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled At"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Status"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "missed_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Reason"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "occurrence_id",
+          "occurrence_type",
+          "definition_id",
+          "scheduled_trade_date",
+          "scheduled_at",
+          "status",
+          "created_at"
+        ],
+        "title": "ScheduleOccurrence"
+      },
       "ScheduleRecord": {
         "properties": {
           "id": {
@@ -16834,6 +19689,111 @@
         ],
         "title": "ScheduleRevisionRecord"
       },
+      "SchedulerStatus": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "scan_interval_seconds": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Scan Interval Seconds"
+          },
+          "last_scan_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Scan At"
+          },
+          "database_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Time"
+          },
+          "automatic_scheduling_paused": {
+            "type": "boolean",
+            "title": "Automatic Scheduling Paused"
+          },
+          "pause_reason": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pause Reason"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "scan_interval_seconds",
+          "automatic_scheduling_paused",
+          "updated_at"
+        ],
+        "title": "SchedulerStatus"
+      },
+      "SchedulerStatusEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SchedulerStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SchedulerStatusEnvelope"
+      },
       "SecretUpdateRequest": {
         "properties": {
           "value": {
@@ -16877,6 +19837,19 @@
           "confirm"
         ],
         "title": "SecretUpdateRequest"
+      },
+      "SectionStatus": {
+        "type": "string",
+        "enum": [
+          "OK",
+          "EMPTY",
+          "WAITING",
+          "NON_TRADING_DAY",
+          "DEGRADED",
+          "ERROR",
+          "TIMEOUT"
+        ],
+        "title": "SectionStatus"
       },
       "SelectSourceBody": {
         "properties": {
@@ -17132,6 +20105,46 @@
           "expected_version"
         ],
         "title": "SignalActionRequest"
+      },
+      "SignalData": {
+        "properties": {
+          "today": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Today"
+          },
+          "low_zone": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Low Zone"
+          },
+          "high_zone": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "High Zone"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SignalData"
       },
       "SignalEvaluationPageData": {
         "properties": {
@@ -18112,6 +21125,55 @@
         ],
         "title": "SignalZone"
       },
+      "StatusDetail": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 24
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "StatusDetail"
+      },
       "SubscriptionRecord": {
         "properties": {
           "id": {
@@ -18207,6 +21269,203 @@
           "server_time"
         ],
         "title": "SuccessEnvelope"
+      },
+      "SystemClockStatus": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "application_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Application Time"
+          },
+          "database_time": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Time"
+          },
+          "max_skew_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Skew Seconds"
+          },
+          "automatic_scheduling_paused": {
+            "type": "boolean",
+            "title": "Automatic Scheduling Paused"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/ClockSourceStatus"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "application_time",
+          "database_time",
+          "max_skew_seconds",
+          "automatic_scheduling_paused",
+          "sources",
+          "updated_at"
+        ],
+        "title": "SystemClockStatus"
+      },
+      "SystemClockStatusEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SystemClockStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SystemClockStatusEnvelope"
+      },
+      "SystemData": {
+        "properties": {
+          "open_alerts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Alerts"
+          },
+          "critical_alerts": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Critical Alerts"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "SystemData"
+      },
+      "SystemHealth": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/HealthStatus"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "components": {
+            "items": {
+              "$ref": "#/components/schemas/ComponentStatus"
+            },
+            "type": "array",
+            "title": "Components"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "status",
+          "updated_at",
+          "components"
+        ],
+        "title": "SystemHealth"
+      },
+      "SystemHealthEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SystemHealth"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SystemHealthEnvelope"
       },
       "TargetBindingView": {
         "properties": {
@@ -18440,6 +21699,46 @@
           "FAILED"
         ],
         "title": "TargetCalculationStatus"
+      },
+      "TargetData": {
+        "properties": {
+          "total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
+          "active": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "attention": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attention"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "TargetData"
       },
       "TargetHistoryData": {
         "properties": {
@@ -19148,6 +22447,100 @@
         ],
         "title": "TemplatePreviewRequest"
       },
+      "TemplateTypePreviewRequest": {
+        "properties": {
+          "version": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version"
+          },
+          "variables": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Variables"
+          },
+          "test_message": {
+            "type": "boolean",
+            "title": "Test Message",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "version",
+          "variables"
+        ],
+        "title": "TemplateTypePreviewRequest"
+      },
+      "TimelineItemResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "event_type": {
+            "type": "string",
+            "title": "Event Type"
+          },
+          "object_type": {
+            "type": "string",
+            "title": "Object Type"
+          },
+          "object_id": {
+            "type": "string",
+            "title": "Object Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "occurred_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Occurred At"
+          },
+          "details": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "string",
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": "object",
+            "title": "Details"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "event_type",
+          "object_type",
+          "object_id",
+          "title",
+          "occurred_at",
+          "details"
+        ],
+        "title": "TimelineItemResponse"
+      },
       "TradingSessionInput": {
         "properties": {
           "starts_at": {
@@ -19807,6 +23200,139 @@
           "archived"
         ],
         "title": "WatchlistView"
+      },
+      "WorkerListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WorkerStatus"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "WorkerListData"
+      },
+      "WorkerListEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/WorkerListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "WorkerListEnvelope"
+      },
+      "WorkerStatus": {
+        "properties": {
+          "worker_id": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Worker Id"
+          },
+          "queue": {
+            "type": "string",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Queue"
+          },
+          "status": {
+            "type": "string",
+            "maxLength": 32,
+            "minLength": 1,
+            "title": "Status"
+          },
+          "current_job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Job Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "heartbeat_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat At"
+          },
+          "processed_jobs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Processed Jobs",
+            "default": 0
+          },
+          "failed_jobs": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed Jobs",
+            "default": 0
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "worker_id",
+          "queue",
+          "status"
+        ],
+        "title": "WorkerStatus"
       },
       "long_invest__modules__qfq__api__RefreshRequest": {
         "properties": {

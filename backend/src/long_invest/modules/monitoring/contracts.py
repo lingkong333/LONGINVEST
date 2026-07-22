@@ -118,6 +118,16 @@ class ScheduleOccurrenceView(StrictContract):
     subscriptions: tuple[FrozenSubscription, ...]
     job_id: UUID | None = None
     error_code: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class ScheduleOccurrencePageView(StrictContract):
+    items: tuple[ScheduleOccurrenceView, ...]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=200)
+    total: int = Field(ge=0)
+    latest_updated_at: datetime | None = None
 
 
 def _deep_freeze(value: Any) -> Any:

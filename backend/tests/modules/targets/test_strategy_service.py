@@ -10,6 +10,7 @@ from long_invest.modules.targets.contracts import TargetValues
 from long_invest.modules.targets.strategy_service import (
     ApplyStrategyTargetCommand,
     CalculateTargetCommand,
+    RecalculateReviewCommand,
     ReviewCommand,
     StrategyTargetService,
 )
@@ -267,6 +268,65 @@ async def test_large_change_keeps_baseline_and_creates_review(setup):
     )
     assert unchanged.code == "TARGET_CALCULATION_UNCHANGED"
     assert repository.binding.status == "READY"
+
+
+@pytest.mark.anyio
+async def test_recalculate_review_reuses_frozen_dates_without_mutating_review(setup):
+    service, repository, _, _, _, command = setup
+    first = await service.reserve(command)
+    await service.mark_running(first.run_id, data_version=7)
+    await service.complete(
+        first.run_id,
+        values=values("10"),
+        target_date=command.target_date,
+        source_code_hash="a" * 64,
+        current_data_version=7,
+    )
+    second = await service.reserve(
+        replace(command, expected_version=3, idempotency_key="calc-review")
+    )
+    await service.mark_running(second.run_id, data_version=8)
+    pending = await service.complete(
+        second.run_id,
+        values=values("20"),
+        target_date=command.target_date,
+        source_code_hash="a" * 64,
+        current_data_version=8,
+    )
+
+    reservation = await service.recalculate_review(
+        RecalculateReviewCommand(
+            review_id=pending.review_id,
+            reason="修复数据后重算",
+            expected_version=4,
+            idempotency_key="review-recalculate",
+            request_id="req-recalculate",
+            actor_user_id="user-1",
+            session_id="session-1",
+            trusted_ip="127.0.0.1",
+        )
+    )
+
+    run = repository.runs[reservation.run_id]
+    assert run.training_start_date == command.training_start_date
+    assert run.training_end_date == command.training_end_date
+    assert run.resource_usage["_target_date"] == command.target_date.isoformat()
+    assert repository.reviews[pending.review_id].status == "PENDING"
+
+    replay = await service.recalculate_review(
+        RecalculateReviewCommand(
+            review_id=pending.review_id,
+            reason="修复数据后重算",
+            expected_version=4,
+            idempotency_key="review-recalculate",
+            request_id="req-retry",
+            actor_user_id="user-1",
+            session_id="session-retry",
+            trusted_ip="127.0.0.2",
+        )
+    )
+    assert replay.run_id == reservation.run_id
+    assert replay.replayed is True
 
 
 @pytest.mark.anyio

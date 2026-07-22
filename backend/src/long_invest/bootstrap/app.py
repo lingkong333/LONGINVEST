@@ -22,7 +22,12 @@ from long_invest.modules.backtests.api import (
     router as backtests_router,
 )
 from long_invest.modules.calendar.api import router as calendar_router
+from long_invest.modules.client_errors.api import router as client_errors_router
 from long_invest.modules.daily_data.api import router as daily_data_router
+from long_invest.modules.dashboard.api import (
+    configure_dashboard_application,
+)
+from long_invest.modules.dashboard.api import router as dashboard_router
 from long_invest.modules.health.api import router as health_router
 from long_invest.modules.history_backfills.api import router as history_backfills_router
 from long_invest.modules.market_data.quality_api import router as quality_router
@@ -42,6 +47,10 @@ from long_invest.modules.securities.api import router as securities_router
 from long_invest.modules.settings.api import router as settings_router
 from long_invest.modules.signals.api import router as signals_router
 from long_invest.modules.strategies.api import router as strategies_router
+from long_invest.modules.system_status.api import (
+    configure_system_status_application,
+)
+from long_invest.modules.system_status.api import router as system_status_router
 from long_invest.modules.targets.api import router as targets_router
 from long_invest.modules.watchlists.api import router as watchlists_router
 from long_invest.platform.audit.api import router as audit_router
@@ -74,10 +83,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    from long_invest.bootstrap.dashboard import build_dashboard_application
     from long_invest.bootstrap.history_backfills import (
         build_history_backfill_application,
     )
     from long_invest.bootstrap.stage4_runtime import build_backtest_application
+    from long_invest.bootstrap.system_status import build_system_status_application
     from long_invest.modules.history_backfills.application import (
         configure_history_backfill_application,
     )
@@ -86,6 +97,8 @@ def create_app() -> FastAPI:
     configure_backtest_application(build_backtest_application)
     configure_history_backfill_application(build_history_backfill_application)
     configure_job_admin_application(lambda: JobAdminApplication(get_database()))
+    configure_system_status_application(build_system_status_application)
+    configure_dashboard_application(build_dashboard_application)
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
@@ -120,5 +133,8 @@ def create_app() -> FastAPI:
     app.include_router(alerts_router)
     app.include_router(history_backfills_router)
     app.include_router(events_router)
+    app.include_router(system_status_router)
+    app.include_router(dashboard_router)
+    app.include_router(client_errors_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

@@ -117,6 +117,11 @@ def _application():
                 "TARGET_CALCULATION_ACCEPTED", uuid4(), uuid4()
             )
         ),
+        recalculate_review=AsyncMock(
+            return_value=CalculationSubmission(
+                "TARGET_RECALCULATION_ACCEPTED", uuid4(), uuid4()
+            )
+        ),
         list_calculation_runs=AsyncMock(return_value=((), 0)),
         list_reviews=AsyncMock(return_value=((), 0)),
         decide_review=AsyncMock(),

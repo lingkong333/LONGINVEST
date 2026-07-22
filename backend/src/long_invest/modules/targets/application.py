@@ -66,6 +66,48 @@ class TargetApplication:
     async def calculate(self, command):
         return await self._schedule("reserve", command, calculation=command)
 
+    async def recalculate_review(self, command):
+        try:
+            async with self._database.transaction() as session:
+                service = self._strategy_service_factory(
+                    self._repository_factory(session),
+                    subscriptions=self._subscription_factory(session),
+                    audit=self._audit_factory(session),
+                    events=self._event_factory(session),
+                )
+                subscription_id = await service.review_subscription_id(
+                    command.review_id
+                )
+                scope = f"target-calculate:{subscription_id}"
+                jobs = self._job_service_factory(session)
+                await jobs.lock_submission(scope, command.idempotency_key)
+                reservation = await service.recalculate_review(command)
+                job = await jobs.submit(
+                    SubmitJob(
+                        job_type="TARGET_CALCULATE",
+                        queue="strategy-targets",
+                        idempotency_scope=scope,
+                        idempotency_key=command.idempotency_key,
+                        request_id=command.request_id,
+                        config_snapshot={"run_id": str(reservation.run_id)},
+                        business_object_type="target_calculation_run",
+                        business_object_id=str(reservation.run_id),
+                        created_by_user_id=command.actor_user_id,
+                        soft_timeout_seconds=300,
+                        hard_timeout_seconds=360,
+                    )
+                )
+                return CalculationSubmission(
+                    code="TARGET_RECALCULATION_ACCEPTED",
+                    run_id=reservation.run_id,
+                    job_id=job.id,
+                    replayed=reservation.replayed,
+                )
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
     async def execute(self, run_id):
         self._require_calculation_dependencies()
         try:

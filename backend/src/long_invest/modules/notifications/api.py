@@ -30,7 +30,7 @@ from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import SuccessEnvelope
 
-router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
+router = APIRouter(tags=["notifications"])
 Application = Annotated[
     NotificationAdminApplication, Depends(get_notification_admin_application)
 ]
@@ -64,6 +64,12 @@ class TemplatePreviewRequest(StrictRequest):
     test_message: bool = False
 
 
+class TemplateTypePreviewRequest(StrictRequest):
+    version: str = Field(min_length=1, max_length=100)
+    variables: dict[str, Any]
+    test_message: bool = False
+
+
 class ChannelTestRequest(MutationRequest):
     message: str = Field(min_length=1, max_length=1000)
 
@@ -83,9 +89,14 @@ _CHANNEL_KEYS = {
     DeliveryChannel.WECOM: "notification.channel.wecom",
     DeliveryChannel.EMAIL: "notification.channel.email",
 }
+_CHANNEL_SECRET_KEYS = {
+    DeliveryChannel.WECOM: "notification.wecom.webhook",
+    DeliveryChannel.EMAIL: "notification.email.password",
+}
 
 
-@router.get("/events", response_model=SuccessEnvelope)
+@router.get("/api/v1/notification-events", response_model=SuccessEnvelope)
+@router.get("/api/v1/notifications/events", response_model=SuccessEnvelope)
 async def list_events(
     application: Application,
     _identity: ReadIdentity,
@@ -104,7 +115,7 @@ async def list_events(
     return success_response(data=_page(result, _event))
 
 
-@router.get("/events/{event_id}", response_model=SuccessEnvelope)
+@router.get("/api/v1/notifications/events/{event_id}", response_model=SuccessEnvelope)
 async def get_event(event_id: UUID, application: Application, _identity: ReadIdentity):
     result = await application.read("get_event_detail", event_id)
     return success_response(
@@ -115,7 +126,13 @@ async def get_event(event_id: UUID, application: Application, _identity: ReadIde
     )
 
 
-@router.get("/deliveries", response_model=SuccessEnvelope)
+@router.get("/api/v1/notification-events/{id}", response_model=SuccessEnvelope)
+async def get_event_by_id(id: UUID, application: Application, identity: ReadIdentity):
+    return await get_event(id, application, identity)
+
+
+@router.get("/api/v1/notification-deliveries", response_model=SuccessEnvelope)
+@router.get("/api/v1/notifications/deliveries", response_model=SuccessEnvelope)
 async def list_deliveries(
     application: Application,
     _identity: ReadIdentity,
@@ -136,7 +153,10 @@ async def list_deliveries(
     return success_response(data=_page(result, _delivery))
 
 
-@router.get("/deliveries/{delivery_id}/attempts", response_model=SuccessEnvelope)
+@router.get(
+    "/api/v1/notifications/deliveries/{delivery_id}/attempts",
+    response_model=SuccessEnvelope,
+)
 async def list_attempts(
     delivery_id: UUID,
     application: Application,
@@ -150,7 +170,24 @@ async def list_attempts(
     return success_response(data=_page(result, _attempt))
 
 
-@router.post("/deliveries/{delivery_id}/retry", response_model=SuccessEnvelope)
+@router.get(
+    "/api/v1/notification-deliveries/{id}/attempts",
+    response_model=SuccessEnvelope,
+)
+async def list_attempts_by_id(
+    id: UUID,
+    application: Application,
+    identity: ReadIdentity,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
+):
+    return await list_attempts(id, application, identity, page, page_size)
+
+
+@router.post(
+    "/api/v1/notifications/deliveries/{delivery_id}/retry",
+    response_model=SuccessEnvelope,
+)
 async def retry_delivery(
     delivery_id: UUID,
     body: MutationRequest,
@@ -171,7 +208,24 @@ async def retry_delivery(
     )
 
 
-@router.post("/deliveries/{delivery_id}/cancel", response_model=SuccessEnvelope)
+@router.post(
+    "/api/v1/notification-deliveries/{id}/retry",
+    response_model=SuccessEnvelope,
+)
+async def retry_delivery_by_id(
+    id: UUID,
+    body: MutationRequest,
+    application: Application,
+    identity: WriteIdentity,
+    idempotency_key: IdempotencyKey,
+):
+    return await retry_delivery(id, body, application, identity, idempotency_key)
+
+
+@router.post(
+    "/api/v1/notifications/deliveries/{delivery_id}/cancel",
+    response_model=SuccessEnvelope,
+)
 async def cancel_delivery(
     delivery_id: UUID,
     body: MutationRequest,
@@ -192,7 +246,28 @@ async def cancel_delivery(
     )
 
 
-@router.post("/deliveries/retry-batch", response_model=SuccessEnvelope)
+@router.post(
+    "/api/v1/notification-deliveries/{id}/cancel",
+    response_model=SuccessEnvelope,
+)
+async def cancel_delivery_by_id(
+    id: UUID,
+    body: MutationRequest,
+    application: Application,
+    identity: WriteIdentity,
+    idempotency_key: IdempotencyKey,
+):
+    return await cancel_delivery(id, body, application, identity, idempotency_key)
+
+
+@router.post(
+    "/api/v1/notification-deliveries/retry-batch",
+    response_model=SuccessEnvelope,
+)
+@router.post(
+    "/api/v1/notifications/deliveries/retry-batch",
+    response_model=SuccessEnvelope,
+)
 async def retry_batch(
     body: RetryBatchRequest,
     application: Application,
@@ -218,7 +293,8 @@ async def retry_batch(
     )
 
 
-@router.get("/templates", response_model=SuccessEnvelope)
+@router.get("/api/v1/notification-templates", response_model=SuccessEnvelope)
+@router.get("/api/v1/notifications/templates", response_model=SuccessEnvelope)
 async def list_templates(_identity: ReadIdentity):
     items = [
         {"template_type": item.template_type, "version": item.version}
@@ -227,7 +303,8 @@ async def list_templates(_identity: ReadIdentity):
     return success_response(data={"items": items})
 
 
-@router.get("/policies/{scope}", response_model=SuccessEnvelope)
+@router.get("/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope)
+@router.get("/api/v1/notifications/policies/{scope}", response_model=SuccessEnvelope)
 async def get_policy(
     scope: PolicyScope,
     settings: SettingsApplicationDependency,
@@ -238,7 +315,12 @@ async def get_policy(
     )
 
 
-@router.patch("/policies/{scope}", response_model=SuccessEnvelope)
+@router.patch(
+    "/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope
+)
+@router.patch(
+    "/api/v1/notifications/policies/{scope}", response_model=SuccessEnvelope
+)
 async def update_policy(
     scope: PolicyScope,
     body: SettingMutationRequest,
@@ -259,7 +341,7 @@ async def update_policy(
     return success_response(data=result)
 
 
-@router.get("/channels", response_model=SuccessEnvelope)
+@router.get("/api/v1/notifications/channels", response_model=SuccessEnvelope)
 async def get_channels(
     settings: SettingsApplicationDependency,
     _identity: ReadIdentity,
@@ -272,7 +354,33 @@ async def get_channels(
     return success_response(data={"channels": channel_settings, "secrets": secrets})
 
 
-@router.patch("/channels/{channel}", response_model=SuccessEnvelope)
+@router.get("/api/v1/notification-channels/{channel}", response_model=SuccessEnvelope)
+async def get_channel(
+    channel: DeliveryChannel,
+    settings: SettingsApplicationDependency,
+    _identity: ReadIdentity,
+):
+    configured = await settings.read("get_setting", _CHANNEL_KEYS[channel])
+    secret_statuses = await settings.read("secret_statuses")
+    secret_status = next(
+        (
+            item
+            for item in secret_statuses
+            if item["key"] == _CHANNEL_SECRET_KEYS[channel]
+        ),
+        None,
+    )
+    return success_response(
+        data={"channel": channel, "setting": configured, "secret": secret_status}
+    )
+
+
+@router.patch(
+    "/api/v1/notification-channels/{channel}", response_model=SuccessEnvelope
+)
+@router.patch(
+    "/api/v1/notifications/channels/{channel}", response_model=SuccessEnvelope
+)
 async def update_channel(
     channel: DeliveryChannel,
     body: SettingMutationRequest,
@@ -293,12 +401,46 @@ async def update_channel(
     return success_response(data=result)
 
 
-@router.post("/templates/preview", response_model=SuccessEnvelope)
+@router.post(
+    "/api/v1/notifications/templates/preview", response_model=SuccessEnvelope
+)
 async def preview_template(body: TemplatePreviewRequest, _identity: WriteIdentity):
+    return _preview_template(
+        body.template_type,
+        body.version,
+        body.variables,
+        test_message=body.test_message,
+    )
+
+
+@router.post(
+    "/api/v1/notification-templates/{type}/preview",
+    response_model=SuccessEnvelope,
+)
+async def preview_template_type(
+    type: str,
+    body: TemplateTypePreviewRequest,
+    _identity: WriteIdentity,
+):
+    return _preview_template(
+        type,
+        body.version,
+        body.variables,
+        test_message=body.test_message,
+    )
+
+
+def _preview_template(
+    template_type: str,
+    version: str,
+    variables: dict[str, Any],
+    *,
+    test_message: bool,
+):
     try:
-        definition = GIT_TEMPLATE_REGISTRY.resolve(body.template_type, body.version)
+        definition = GIT_TEMPLATE_REGISTRY.resolve(template_type, version)
         rendered = StrictTemplateRenderer().render(
-            definition, body.variables, test_message=body.test_message
+            definition, variables, test_message=test_message
         )
     except (LookupError, ValueError) as exc:
         raise AppError(
@@ -317,7 +459,14 @@ async def preview_template(body: TemplatePreviewRequest, _identity: WriteIdentit
     )
 
 
-@router.post("/channels/{channel}/test", response_model=SuccessEnvelope)
+@router.post(
+    "/api/v1/notification-channels/{channel}/test",
+    response_model=SuccessEnvelope,
+)
+@router.post(
+    "/api/v1/notifications/channels/{channel}/test",
+    response_model=SuccessEnvelope,
+)
 async def test_channel(
     channel: DeliveryChannel,
     body: ChannelTestRequest,

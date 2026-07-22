@@ -208,6 +208,48 @@ async def test_calculate_only_reserves_and_submits_frozen_background_job() -> No
     jobs.lock_submission.assert_awaited_once_with(
         f"target-calculate:{command.subscription_id}", "calculate-1"
     )
+
+
+@pytest.mark.anyio
+async def test_recalculate_review_submits_reserved_calculation_atomically() -> None:
+    database = Database()
+    subscription_id, run_id, job_id = uuid4(), uuid4(), uuid4()
+    reservation = SimpleNamespace(
+        subscription_id=subscription_id, run_id=run_id, replayed=False
+    )
+    strategy_service = SimpleNamespace(
+        review_subscription_id=AsyncMock(return_value=subscription_id),
+        recalculate_review=AsyncMock(return_value=reservation),
+    )
+    jobs = SimpleNamespace(
+        lock_submission=AsyncMock(),
+        submit=AsyncMock(return_value=SimpleNamespace(id=job_id)),
+    )
+    command = SimpleNamespace(
+        review_id=uuid4(),
+        idempotency_key="review-recalculate",
+        request_id="request-1",
+        actor_user_id="user-1",
+    )
+    application = TargetApplication(
+        database,
+        subscription_factory=lambda _session: object(),
+        repository_factory=lambda _session: object(),
+        audit_factory=lambda _session: object(),
+        event_factory=lambda _session: object(),
+        strategy_service_factory=lambda _repository, **_ports: strategy_service,
+        job_service_factory=lambda _session: jobs,
+    )
+
+    result = await application.recalculate_review(command)
+
+    assert (result.run_id, result.job_id) == (run_id, job_id)
+    jobs.lock_submission.assert_awaited_once_with(
+        f"target-calculate:{subscription_id}", "review-recalculate"
+    )
+    submission = jobs.submit.await_args.args[0]
+    assert submission.config_snapshot == {"run_id": str(run_id)}
+    strategy_service.review_subscription_id.assert_awaited_once_with(command.review_id)
     assert application._forecast is None
     assert application._training_data is None
 

@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -160,6 +161,95 @@ async def test_create_rejects_non_a_share_before_transaction() -> None:
     with pytest.raises(AppError) as caught:
         await app.create(symbol="600000.SH", reason="创建", idempotency_key="invalid")
     assert caught.value.code == "MONITOR_SUBSCRIPTION_CONFLICT"
+
+
+@pytest.mark.anyio
+async def test_check_now_submits_one_symbol_formal_quote_job() -> None:
+    job = SimpleNamespace(id=uuid4(), status="PENDING_DISPATCH")
+    quotes = SimpleNamespace(submit_manual=AsyncMock(return_value=job))
+    owner = SimpleNamespace(id=uuid4(), symbol="600000.SH", status="ENABLED", version=3)
+    app = MonitorSubscriptionApplication(
+        Database(),
+        security_application=SecurityApp(),
+        schedule_application=ScheduleApp(),
+        quote_application=quotes,
+    )
+    app.get = AsyncMock(return_value=owner)
+
+    result = await app.check_now(
+        owner.id,
+        expected_version=3,
+        idempotency_key="check-1",
+        request_id="req-1",
+        actor_user_id="user-1",
+    )
+
+    assert result is job
+    quotes.submit_manual.assert_awaited_once_with(
+        symbols=("600000.SH",),
+        timeout_seconds=30,
+        idempotency_key=(
+            f"monitor-check:{owner.id}:"
+            "1b8f9a4c240cd7cd72dad55f6dd41eb1d81e4ceb902fcca7bd3b4d9456de6c9b"
+        ),
+        request_id="req-1",
+        created_by_user_id="user-1",
+    )
+
+
+@pytest.mark.anyio
+async def test_check_now_rejects_paused_subscription_without_submitting() -> None:
+    quotes = SimpleNamespace(submit_manual=AsyncMock())
+    owner = SimpleNamespace(id=uuid4(), symbol="600000.SH", status="PAUSED", version=3)
+    app = MonitorSubscriptionApplication(
+        Database(),
+        security_application=SecurityApp(),
+        schedule_application=ScheduleApp(),
+        quote_application=quotes,
+    )
+    app.get = AsyncMock(return_value=owner)
+
+    with pytest.raises(AppError) as caught:
+        await app.check_now(
+            owner.id,
+            expected_version=3,
+            idempotency_key="check-1",
+            request_id="req-1",
+            actor_user_id="user-1",
+        )
+
+    assert caught.value.code == "MONITOR_SUBSCRIPTION_NOT_ENABLED"
+    quotes.submit_manual.assert_not_awaited()
+
+
+@pytest.mark.anyio
+async def test_diagnostic_allows_paused_subscription_and_isolated_job() -> None:
+    job = SimpleNamespace(id=uuid4(), status="PENDING_DISPATCH")
+    quotes = SimpleNamespace(submit_diagnostic=AsyncMock(return_value=job))
+    owner = SimpleNamespace(id=uuid4(), symbol="600000.SH", status="PAUSED", version=3)
+    app = MonitorSubscriptionApplication(
+        Database(),
+        security_application=SecurityApp(),
+        schedule_application=ScheduleApp(),
+        quote_application=quotes,
+    )
+    app.get = AsyncMock(return_value=owner)
+
+    result = await app.diagnose(
+        owner.id,
+        expected_version=3,
+        idempotency_key="diagnose-1",
+        request_id="req-1",
+        actor_user_id="user-1",
+        session_id="session-1",
+        trusted_ip="127.0.0.1",
+    )
+
+    assert result is job
+    quotes.submit_diagnostic.assert_awaited_once()
+    assert quotes.submit_diagnostic.await_args.kwargs["idempotency_key"].startswith(
+        f"monitor-diagnose:{owner.id}:"
+    )
 
 
 @pytest.mark.anyio

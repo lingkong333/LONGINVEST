@@ -25,6 +25,7 @@ from long_invest.modules.targets.contracts import (
 )
 from long_invest.modules.targets.strategy_service import (
     CalculateTargetCommand,
+    RecalculateReviewCommand,
     ReviewCommand,
 )
 from long_invest.platform.errors import AppError
@@ -435,10 +436,30 @@ async def reject_target_review(
 async def recalculate_target_review(
     review_id: UUID,
     body: CapabilityWriteRequest,
-    _identity_value: WriteIdentity,
+    identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body, idempotency_key)
+    _require_confirmation(body.confirm)
+    result = await application.recalculate_review(
+        RecalculateReviewCommand(
+            review_id=review_id,
+            reason=body.reason,
+            expected_version=body.expected_version,
+            idempotency_key=_validated_idempotency_key(idempotency_key),
+            **_identity(identity),
+        )
+    )
+    return success_response(
+        data={
+            "code": result.code,
+            "accepted": True,
+            "run_id": str(result.run_id),
+            "job_id": str(result.job_id),
+            "replayed": result.replayed,
+        },
+        code=result.code,
+    )
 
 
 def _unavailable_write(

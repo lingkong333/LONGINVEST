@@ -1,15 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import UUID, uuid4
 
-from sqlalchemy import update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.monitoring.contracts import (
     FrozenSubscription,
     OccurrenceStatus,
+    ScheduleOccurrencePageView,
+    ScheduleOccurrenceView,
 )
 from long_invest.modules.monitoring.models import ScheduleOccurrence
 from long_invest.platform.database.engine import get_database
@@ -76,6 +78,43 @@ class OccurrenceStore:
         )
         return tuple(rows.all())
 
+    async def list(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        occurrence_type: str | None,
+        status: str | None,
+        scheduled_from: datetime | None,
+        scheduled_before: datetime | None,
+    ):
+        filters = []
+        if occurrence_type is not None:
+            filters.append(ScheduleOccurrence.occurrence_type == occurrence_type)
+        if status is not None:
+            filters.append(ScheduleOccurrence.status == status)
+        if scheduled_from is not None:
+            filters.append(ScheduleOccurrence.scheduled_at >= scheduled_from)
+        if scheduled_before is not None:
+            filters.append(ScheduleOccurrence.scheduled_at < scheduled_before)
+        total = await self.session.scalar(
+            select(func.count()).select_from(ScheduleOccurrence).where(*filters)
+        )
+        rows = await self.session.scalars(
+            select(ScheduleOccurrence)
+            .where(*filters)
+            .order_by(
+                ScheduleOccurrence.scheduled_at.desc(),
+                ScheduleOccurrence.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        latest_updated_at = await self.session.scalar(
+            select(func.max(ScheduleOccurrence.updated_at))
+        )
+        return tuple(rows.all()), int(total or 0), latest_updated_at
+
 
 class OccurrenceEventAdapter:
     def __init__(self, session, writer=None):
@@ -122,9 +161,69 @@ class MonitorOccurrenceApplication:
                 await events.append(occurrence, "missed")
             return len(occurrences)
 
+    async def list(
+        self,
+        *,
+        page: int,
+        page_size: int,
+        occurrence_type: str | None = None,
+        status: str | None = None,
+        from_date: date | None = None,
+        through_date: date | None = None,
+    ) -> ScheduleOccurrencePageView:
+        if page < 1 or not 1 <= page_size <= 200:
+            raise ValueError("invalid occurrence pagination")
+        if (
+            from_date is not None
+            and through_date is not None
+            and from_date > through_date
+        ):
+            raise ValueError("invalid occurrence date range")
+        scheduled_from = _beijing_day_start(from_date) if from_date else None
+        scheduled_before = (
+            _beijing_day_start(through_date + timedelta(days=1))
+            if through_date
+            else None
+        )
+        async with self.database.session() as session:
+            rows, total, latest = await self.store_factory(session).list(
+                page=page,
+                page_size=page_size,
+                occurrence_type=occurrence_type,
+                status=status,
+                scheduled_from=scheduled_from,
+                scheduled_before=scheduled_before,
+            )
+        return ScheduleOccurrencePageView(
+            items=tuple(_occurrence_view(row) for row in rows),
+            page=page,
+            page_size=page_size,
+            total=total,
+            latest_updated_at=latest,
+        )
+
 
 def get_monitor_occurrence_application() -> MonitorOccurrenceApplication:
     return MonitorOccurrenceApplication(get_database())
+
+
+def _beijing_day_start(value: date) -> datetime:
+    return datetime.combine(value, time.min, tzinfo=UTC) - timedelta(hours=8)
+
+
+def _occurrence_view(row) -> ScheduleOccurrenceView:
+    return ScheduleOccurrenceView(
+        id=row.id,
+        occurrence_type=row.occurrence_type,
+        schedule_id=row.schedule_id,
+        scheduled_at=row.scheduled_at,
+        status=OccurrenceStatus(row.status),
+        subscriptions=(),
+        job_id=row.job_id,
+        error_code=row.error_code,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 class MonitorScanner:

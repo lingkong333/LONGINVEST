@@ -49,7 +49,7 @@ def execute_runner_payload(payload: Mapping[str, object]) -> object:
 
 
 def read_runner_payload(input_stream: TextIO) -> Mapping[str, object]:
-    raw_payload = json.load(input_stream)
+    raw_payload = json.loads(input_stream.readline())
     if not isinstance(raw_payload, Mapping):
         raise ValueError("runner payload shape is invalid")
     return raw_payload

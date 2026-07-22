@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import socket
 import time
 from collections.abc import Mapping
 from contextlib import suppress
@@ -10,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from requests.exceptions import ReadTimeout
+from urllib3.exceptions import ReadTimeoutError
 
 from long_invest.modules.strategies.forecast import CONTEXT_FIELDS, HISTORY_COLUMNS
 from long_invest.modules.strategies.runner_execution import PAYLOAD_FIELDS
@@ -167,7 +167,9 @@ class DockerStrategyRunnerClient:
                 wait_result = self._call(
                     lambda: container.wait(timeout=wait_timeout), deadline
                 )
-            except (TimeoutError, ReadTimeout) as exc:
+            except Exception as exc:
+                if not _is_timeout_exception(exc):
+                    raise
                 self._best_effort_kill(container, self._new_cleanup_deadline())
                 raise StrategyRunnerFailure(
                     FORECAST_TIMEOUT, "strategy execution timed out"
@@ -250,7 +252,6 @@ class DockerStrategyRunnerClient:
         transport = getattr(attached_socket, "_sock", attached_socket)
         transport.settimeout(self._remaining(deadline))
         transport.sendall(encoded_payload)
-        transport.shutdown(socket.SHUT_WR)
 
     def _best_effort_remove(self, container: Any, deadline: float) -> None:
         try:
@@ -300,9 +301,21 @@ def _validate_payload(payload: Mapping[str, object]) -> None:
 
 
 def _encode_payload(payload: Mapping[str, object]) -> bytes:
-    return json.dumps(
-        payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")
+    return (
+        json.dumps(payload, ensure_ascii=False, allow_nan=False, separators=(",", ":"))
+        + "\n"
     ).encode("utf-8")
+
+
+def _is_timeout_exception(error: BaseException) -> bool:
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        if isinstance(current, (TimeoutError, ReadTimeout, ReadTimeoutError)):
+            return True
+        seen.add(id(current))
+        current = current.__cause__ or current.__context__
+    return False
 
 
 def _load_trusted_seccomp_profile() -> str:

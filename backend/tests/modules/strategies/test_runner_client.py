@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from requests.exceptions import ConnectionError as RequestsConnectionError
+from urllib3.exceptions import ReadTimeoutError
 
 import long_invest.modules.strategies.runner_client as runner_client_module
 from long_invest.modules.strategies.runner_client import (
@@ -104,7 +106,6 @@ class FakeSocketTransport:
         self.send_error = send_error
         self.payload = b""
         self.timeout: float | None = None
-        self.shutdown_direction: int | None = None
 
     def settimeout(self, timeout: float) -> None:
         self.timeout = timeout
@@ -113,9 +114,6 @@ class FakeSocketTransport:
         if self.send_error:
             raise self.send_error
         self.payload = payload
-
-    def shutdown(self, direction: int) -> None:
-        self.shutdown_direction = direction
 
 
 class FakeAttachedSocket:
@@ -252,10 +250,10 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
         "config": {"max-size": "128k", "max-file": "1", "compress": "false"},
     }
 
+    assert container.socket._sock.payload.endswith(b"\n")
     assert json.loads(container.socket._sock.payload) == _payload()
     assert container.socket._sock.timeout is not None
     assert 0 < container.socket._sock.timeout <= 10
-    assert container.socket._sock.shutdown_direction is not None
     assert container.socket.closed is True
 
 
@@ -269,6 +267,25 @@ def test_runner_timeout_is_clamped_to_ten_seconds_and_cleans_up() -> None:
     assert error.value.code == "STRATEGY_FORECAST_TIMEOUT"
     assert container.wait_timeout is not None
     assert 0 < container.wait_timeout <= 10
+    assert container.killed is True
+    assert container.removed is True
+
+
+def test_runner_recognizes_timeout_wrapped_as_connection_error() -> None:
+    try:
+        try:
+            raise ReadTimeoutError(None, None, "read timed out")
+        except ReadTimeoutError as cause:
+            raise RequestsConnectionError(cause) from cause
+    except RequestsConnectionError as error:
+        wrapped_timeout = error
+    container = FakeContainer(wait_error=wrapped_timeout)
+    client, _ = _client(container)
+
+    with pytest.raises(StrategyRunnerFailure) as error:
+        client.run(_payload())
+
+    assert error.value.code == "STRATEGY_FORECAST_TIMEOUT"
     assert container.killed is True
     assert container.removed is True
 

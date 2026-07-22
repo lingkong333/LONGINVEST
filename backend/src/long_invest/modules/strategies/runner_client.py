@@ -145,7 +145,11 @@ class DockerStrategyRunnerClient:
                     init=True,
                     log_config={
                         "type": "local",
-                        "config": {"max-size": "128k", "max-file": "1"},
+                        "config": {
+                            "max-size": "128k",
+                            "max-file": "1",
+                            "compress": "false",
+                        },
                     },
                 ),
                 deadline,

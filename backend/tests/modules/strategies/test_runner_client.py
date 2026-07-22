@@ -224,6 +224,10 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
     assert options["memswap_limit"] == "512m"
     assert options["pids_limit"] == 32
     assert options["tmpfs"] == {"/tmp": "rw,noexec,nosuid,nodev,size=64m"}
+    assert options["log_config"] == {
+        "type": "local",
+        "config": {"max-size": "128k", "max-file": "1", "compress": "false"},
+    }
 
     assert container.archive is not None
     with tarfile.open(fileobj=io.BytesIO(container.archive), mode="r:") as archive:

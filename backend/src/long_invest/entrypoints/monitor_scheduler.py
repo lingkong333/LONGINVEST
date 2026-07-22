@@ -1,5 +1,7 @@
 import asyncio
+import os
 import signal
+import socket
 from contextlib import suppress
 from datetime import UTC, datetime
 
@@ -13,6 +15,7 @@ from long_invest.modules.monitoring.scheduler import (
     OccurrenceEventAdapter,
 )
 from long_invest.modules.securities.application import SecurityApplication
+from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database
 from long_invest.platform.jobs.service import JobService
@@ -41,6 +44,8 @@ async def run() -> None:
         event_factory=OccurrenceEventAdapter,
         universe_freezer=security.freeze_symbols_in_transaction,
     )
+    runtime = SchedulerRuntimeApplication(database)
+    instance_id = f"{socket.gethostname()}:{os.getpid()}"
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for event in (signal.SIGTERM, signal.SIGINT):
@@ -48,8 +53,21 @@ async def run() -> None:
     try:
         while not stop.is_set():
             try:
-                report = await scanner.scan(now=datetime.now(UTC))
-                if report.dispatched or report.missed or report.failed:
+                decision = await runtime.begin_scan(
+                    instance_id=instance_id, application_time=datetime.now(UTC)
+                )
+                if decision.automatic_scheduling_paused:
+                    logger.warning(
+                        "monitor_scheduler_clock_skew",
+                        category="scheduler",
+                        clock_skew_seconds=decision.clock_skew_seconds,
+                    )
+                    await runtime.finish_scan(instance_id=instance_id, success=True)
+                    report = None
+                else:
+                    report = await scanner.scan(now=decision.database_time)
+                    await runtime.finish_scan(instance_id=instance_id, success=True)
+                if report and (report.dispatched or report.missed or report.failed):
                     logger.info(
                         "monitor_scheduler_scan",
                         category="maintenance",
@@ -59,8 +77,14 @@ async def run() -> None:
                         failed=report.failed,
                     )
             except Exception:
+                with suppress(Exception):
+                    await runtime.finish_scan(
+                        instance_id=instance_id,
+                        success=False,
+                        error_code="SCHEDULER_SCAN_FAILED",
+                    )
                 logger.exception(
-                    "monitor_scheduler_scan_failed", category="maintenance"
+                    "monitor_scheduler_scan_failed", category="scheduler"
                 )
             with suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=SCAN_INTERVAL_SECONDS)

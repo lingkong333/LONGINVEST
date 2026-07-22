@@ -25,6 +25,10 @@ _CANCELABLE_STATUSES = {
     NotificationDeliveryStatus.RETRY_WAIT,
 }
 _MANUALLY_RETRYABLE_STATUSES = {NotificationDeliveryStatus.FAILED}
+_DUPLICATE_RISK_STATUSES = {
+    NotificationDeliveryStatus.SENT,
+    NotificationDeliveryStatus.OUTCOME_UNKNOWN,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -272,7 +276,11 @@ class NotificationAdminService:
             page_size=page_size,
         )
 
-    async def retry_delivery(self, delivery_id: UUID) -> DeliveryMutation:
+    async def retry_delivery(
+        self,
+        delivery_id: UUID,
+        confirm_duplicate_risk: bool = False,
+    ) -> DeliveryMutation:
         delivery = await self._repository.lock_delivery(delivery_id)
         if delivery is None:
             raise _not_found("notification delivery")
@@ -287,12 +295,15 @@ class NotificationAdminService:
                 message="a newer delivery generation already exists",
             )
         status = NotificationDeliveryStatus(delivery.status)
-        if status is NotificationDeliveryStatus.OUTCOME_UNKNOWN:
+        if status in _DUPLICATE_RISK_STATUSES and not confirm_duplicate_risk:
             raise NotificationAdminError(
-                code="NOTIFICATION_DELIVERY_OUTCOME_UNKNOWN",
-                message="an outcome-unknown delivery cannot use ordinary manual retry",
+                code="NOTIFICATION_DUPLICATE_RISK_CONFIRMATION_REQUIRED",
+                message="resending this delivery may create a duplicate notification",
             )
-        if status not in _MANUALLY_RETRYABLE_STATUSES:
+        if (
+            status not in _MANUALLY_RETRYABLE_STATUSES
+            and status not in _DUPLICATE_RISK_STATUSES
+        ):
             raise NotificationAdminError(
                 code="NOTIFICATION_DELIVERY_NOT_RETRYABLE",
                 message=f"delivery status {status.value} cannot be retried",
@@ -326,10 +337,11 @@ class NotificationAdminService:
         old_event_status = event.status
         event.status = aggregate_current_event_status(deliveries)
         await self._repository.flush()
+        change = "resend" if status in _DUPLICATE_RISK_STATUSES else "retry"
         await self._repository.resource_events.delivery_changed(
             retried,
             request_id=event.request_id,
-            change="retry",
+            change=change,
             dedupe_token=f"generation-{generation}",
         )
         if event.status != old_event_status:
@@ -404,7 +416,13 @@ class NotificationAdminService:
             try:
                 mutation = await self.retry_delivery(delivery_id)
             except NotificationAdminError as exc:
-                failures.append(DeliveryRetryFailure(delivery_id, exc.code))
+                code = (
+                    "NOTIFICATION_DELIVERY_NOT_RETRYABLE"
+                    if exc.code
+                    == "NOTIFICATION_DUPLICATE_RISK_CONFIRMATION_REQUIRED"
+                    else exc.code
+                )
+                failures.append(DeliveryRetryFailure(delivery_id, code))
             else:
                 retried.append(mutation.delivery)
         return DeliveryRetryBatch(tuple(retried), tuple(failures))

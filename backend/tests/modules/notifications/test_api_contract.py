@@ -80,6 +80,20 @@ def test_all_notification_writes_require_idempotency_header() -> None:
         )
 
 
+def test_single_delivery_retry_exposes_duplicate_risk_confirmation() -> None:
+    document = create_app().openapi()
+    operation = document["paths"][
+        "/api/v1/notifications/deliveries/{delivery_id}/retry"
+    ]["post"]
+    reference = operation["requestBody"]["content"]["application/json"]["schema"][
+        "$ref"
+    ]
+    schema = document["components"]["schemas"][reference.rsplit("/", 1)[-1]]
+
+    assert "confirm_duplicate_risk" in schema["properties"]
+    assert schema["properties"]["confirm_duplicate_risk"]["default"] is False
+
+
 def test_spec_channel_read_returns_only_the_matching_secret_status() -> None:
     settings = SimpleNamespace(
         read=AsyncMock(

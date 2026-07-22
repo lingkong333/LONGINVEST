@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -7,6 +7,8 @@ from long_invest.modules.alerts.contracts import (
     AlertActionType,
     AlertCommand,
     AlertSeverity,
+    AutoResolveAlert,
+    RemindUnresolvedAlerts,
     ReportAlert,
 )
 from long_invest.modules.alerts.service import AlertService
@@ -39,6 +41,11 @@ class FakeRepository:
     async def action_by_idempotency(self, key):
         return self.actions_by_key.get(key)
 
+    async def unresolved(self):
+        return tuple(
+            alert for alert in self.alerts.values() if alert.status != "RESOLVED"
+        )
+
     def add_all(self, *items):
         for item in items:
             if hasattr(item, "aggregation_key"):
@@ -58,9 +65,13 @@ class FakeRepository:
 class Notifications:
     def __init__(self) -> None:
         self.calls = []
+        self.daily_calls = []
 
     async def publish(self, alert, **kwargs):
         self.calls.append((alert.id, kwargs))
+
+    async def publish_daily_unresolved(self, alert, **kwargs):
+        self.daily_calls.append((alert.id, kwargs))
 
 
 def report(*, source="source-1", severity=AlertSeverity.ERROR):
@@ -162,5 +173,90 @@ def test_notification_payload_rejects_sensitive_details() -> None:
         object.__setattr__(unsafe, "details", {"password": "secret"})
         with pytest.raises(ValueError):
             await service.report(unsafe)
+
+    asyncio.run(scenario())
+
+
+def test_objective_recovery_auto_resolves_and_is_idempotent() -> None:
+    async def scenario():
+        repository = FakeRepository()
+        notifications = Notifications()
+        service = subject(repository, notifications)
+        alert = await service.report(report())
+        recovered, replayed = await service.auto_resolve(
+            AutoResolveAlert(
+                aggregation_key=alert.aggregation_key,
+                source_event_id="quote-recovered-1",
+                reason="行情已经恢复",
+                request_id="request-recovered",
+            )
+        )
+        assert recovered.status == "RESOLVED"
+        assert recovered.resolved_by_user_id is None
+        assert replayed is False
+        assert repository.actions_by_key[
+            "alert-recovery:quote-recovered-1"
+        ].action == AlertActionType.AUTO_RESOLVED
+        replay, replayed = await service.auto_resolve(
+            AutoResolveAlert(
+                aggregation_key=alert.aggregation_key,
+                source_event_id="quote-recovered-1",
+                reason="行情已经恢复",
+                request_id="request-recovered",
+            )
+        )
+        assert replay.id == alert.id
+        assert replayed is True
+        assert len(notifications.calls) == 2
+
+    asyncio.run(scenario())
+
+
+def test_manual_judgment_alert_cannot_auto_resolve() -> None:
+    async def scenario():
+        repository = FakeRepository()
+        service = subject(repository)
+        command = report()
+        object.__setattr__(command, "alert_type", "QUOTE_CONFLICT")
+        alert = await service.report(command)
+        with pytest.raises(AppError) as error:
+            await service.auto_resolve(
+                AutoResolveAlert(
+                    aggregation_key=alert.aggregation_key,
+                    source_event_id="conflict-cleared-1",
+                    reason="来源恢复",
+                    request_id="request-recovered",
+                )
+            )
+        assert error.value.code == "ALERT_AUTO_RESOLVE_NOT_ALLOWED"
+        assert alert.status == "OPEN"
+
+    asyncio.run(scenario())
+
+
+def test_daily_unresolved_includes_acknowledged_and_uses_stable_date() -> None:
+    async def scenario():
+        repository = FakeRepository()
+        notifications = Notifications()
+        service = subject(repository, notifications)
+        opened = await service.report(report())
+        acknowledged, _ = await service.acknowledge(command(opened))
+        second = await service.report(report(source="source-2"))
+        assert second.id == acknowledged.id
+
+        reminder = RemindUnresolvedAlerts(
+            reminder_date=date(2026, 7, 22),
+            request_id="daily-reminder",
+        )
+        assert await service.remind_unresolved(reminder) == 1
+        assert notifications.daily_calls == [
+            (
+                acknowledged.id,
+                {
+                    "reminder_date": date(2026, 7, 22),
+                    "request_id": "daily-reminder",
+                },
+            )
+        ]
 
     asyncio.run(scenario())

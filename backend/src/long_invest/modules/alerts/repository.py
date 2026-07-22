@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from long_invest.modules.alerts.contracts import AlertStatus
 from long_invest.modules.alerts.models import (
     SystemAlert,
     SystemAlertAction,
@@ -46,6 +47,14 @@ class AlertRepository:
         return await self.session.scalar(
             select(SystemAlertAction).where(SystemAlertAction.idempotency_key == key)
         )
+
+    async def unresolved(self) -> tuple[SystemAlert, ...]:
+        rows = await self.session.scalars(
+            select(SystemAlert)
+            .where(SystemAlert.status != AlertStatus.RESOLVED)
+            .order_by(SystemAlert.last_seen_at, SystemAlert.id)
+        )
+        return tuple(rows.all())
 
     async def list_alerts(
         self, *, status=None, severity=None, alert_type=None, page=1, page_size=50

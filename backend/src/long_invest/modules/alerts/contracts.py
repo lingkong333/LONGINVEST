@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
@@ -57,3 +58,17 @@ class AlertCommand:
     actor_user_id: str
     session_id: str
     trusted_ip: str
+
+
+@dataclass(frozen=True, slots=True)
+class AutoResolveAlert:
+    aggregation_key: str
+    source_event_id: str
+    reason: str
+    request_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class RemindUnresolvedAlerts:
+    reminder_date: date
+    request_id: str

@@ -9,6 +9,8 @@ from long_invest.modules.alerts.contracts import (
     AlertCommand,
     AlertSeverity,
     AlertStatus,
+    AutoResolveAlert,
+    RemindUnresolvedAlerts,
     ReportAlert,
 )
 from long_invest.modules.alerts.models import (
@@ -26,6 +28,20 @@ from long_invest.platform.jobs.service import JobService
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 _RANK = {severity: rank for rank, severity in enumerate(AlertSeverity)}
+_AUTO_RESOLVABLE_ALERT_TYPES = frozenset(
+    {
+        "PROVIDER_UNAVAILABLE",
+        "PROVIDER_DEGRADED",
+        "QUOTE_MISSING",
+        "DAILY_DATA_INCOMPLETE",
+        "QFQ_REFRESH_FAILED",
+        "TARGET_CALCULATION_FAILED",
+        "WORKER_LOST",
+        "DISK_USAGE_HIGH",
+        "NOTIFICATION_CHANNEL_FAILED",
+        "NOTIFICATION_CHANNEL_DEGRADED",
+    }
+)
 
 
 class AlertService:
@@ -146,6 +162,72 @@ class AlertService:
 
     async def resolve(self, command: AlertCommand):
         return await self._transition(command, resolve=True)
+
+    async def auto_resolve(self, command: AutoResolveAlert):
+        idempotency_key = f"alert-recovery:{command.source_event_id}"
+        replay = await self._repository.action_by_idempotency(idempotency_key)
+        if replay is not None:
+            replayed_alert = await self.get(replay.alert_id)
+            if (
+                replay.action != AlertActionType.AUTO_RESOLVED
+                or replayed_alert.aggregation_key != command.aggregation_key
+            ):
+                raise _error(
+                    "ALERT_IDEMPOTENCY_CONFLICT",
+                    "恢复事件已用于其他告警操作",
+                    409,
+                )
+            return replayed_alert, True
+
+        await self._repository.lock_aggregation_key(command.aggregation_key)
+        alert = await self._repository.find_by_key(command.aggregation_key, lock=True)
+        if alert is None:
+            raise _error("ALERT_NOT_FOUND", "告警不存在", 404)
+        if alert.alert_type not in _AUTO_RESOLVABLE_ALERT_TYPES:
+            raise _error(
+                "ALERT_AUTO_RESOLVE_NOT_ALLOWED",
+                "该告警需要人工判断，不能自动解决",
+                409,
+            )
+        if AlertStatus(alert.status) is AlertStatus.RESOLVED:
+            return alert, True
+
+        now = datetime.now(UTC)
+        alert.status = AlertStatus.RESOLVED
+        alert.resolved_at = now
+        alert.resolved_by_user_id = None
+        alert.resolution_reason = command.reason
+        alert.version += 1
+        action = SystemAlertAction(
+            alert_id=alert.id,
+            action=AlertActionType.AUTO_RESOLVED,
+            reason=command.reason,
+            actor_user_id=None,
+            request_id=command.request_id,
+            idempotency_key=idempotency_key,
+        )
+        self._repository.add_all(action)
+        await self._event(
+            alert, AlertActionType.AUTO_RESOLVED.value, command.request_id
+        )
+        await self._repository.flush()
+        if self._notifications is not None:
+            await self._notifications.publish(
+                alert, recovered=True, request_id=command.request_id
+            )
+        return alert, False
+
+    async def remind_unresolved(self, command: RemindUnresolvedAlerts) -> int:
+        if self._notifications is None:
+            return 0
+        alerts = await self._repository.unresolved()
+        for alert in alerts:
+            await self._notifications.publish_daily_unresolved(
+                alert,
+                reminder_date=command.reminder_date,
+                request_id=command.request_id,
+            )
+        return len(alerts)
 
     async def retry(self, command: AlertCommand):
         replay = await self._repository.action_by_idempotency(command.idempotency_key)

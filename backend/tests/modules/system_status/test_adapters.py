@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -12,7 +12,8 @@ from long_invest.modules.system_status.contracts import HealthStatus
 
 @pytest.mark.anyio
 async def test_scheduler_does_not_infer_heartbeat_from_business_occurrence() -> None:
-    adapter = SchedulerStatusAdapter(SimpleNamespace(), SimpleNamespace())
+    runtime = SimpleNamespace(get=_async_value(None))
+    adapter = SchedulerStatusAdapter(SimpleNamespace(), SimpleNamespace(), runtime)
     now = datetime(2026, 7, 22, 10, tzinfo=UTC)
     adapter._database_time = _async_value(now)  # type: ignore[method-assign]
 
@@ -21,7 +22,56 @@ async def test_scheduler_does_not_infer_heartbeat_from_business_occurrence() -> 
     assert result.status is HealthStatus.UNKNOWN
     assert result.last_scan_at is None
     assert result.database_time == now
+    assert result.automatic_scheduling_paused is True
     assert result.pause_reason == "scheduler heartbeat is not available"
+
+
+@pytest.mark.anyio
+async def test_scheduler_reports_fresh_heartbeat_as_healthy() -> None:
+    now = datetime(2026, 7, 22, 10, tzinfo=UTC)
+    runtime = SimpleNamespace(
+        get=_async_value(
+            SimpleNamespace(
+                heartbeat_at=now,
+                last_scan_at=now,
+                consecutive_failures=0,
+                automatic_scheduling_paused=False,
+                pause_reason=None,
+            )
+        )
+    )
+    adapter = SchedulerStatusAdapter(SimpleNamespace(), SimpleNamespace(), runtime)
+    adapter._database_time = _async_value(now)  # type: ignore[method-assign]
+
+    result = await adapter.get_status()
+
+    assert result.status is HealthStatus.HEALTHY
+    assert result.last_scan_at == now
+    assert result.automatic_scheduling_paused is False
+
+
+@pytest.mark.anyio
+async def test_scheduler_reports_stale_heartbeat_as_unavailable() -> None:
+    now = datetime(2026, 7, 22, 10, tzinfo=UTC)
+    runtime = SimpleNamespace(
+        get=_async_value(
+            SimpleNamespace(
+                heartbeat_at=now - timedelta(seconds=31),
+                last_scan_at=now - timedelta(seconds=31),
+                consecutive_failures=0,
+                automatic_scheduling_paused=False,
+                pause_reason=None,
+            )
+        )
+    )
+    adapter = SchedulerStatusAdapter(SimpleNamespace(), SimpleNamespace(), runtime)
+    adapter._database_time = _async_value(now)  # type: ignore[method-assign]
+
+    result = await adapter.get_status()
+
+    assert result.status is HealthStatus.UNAVAILABLE
+    assert result.automatic_scheduling_paused is True
+    assert result.pause_reason == "scheduler heartbeat is stale"
 
 
 def test_rq_worker_state_uses_enum_value(monkeypatch) -> None:

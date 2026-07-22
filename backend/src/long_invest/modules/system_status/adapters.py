@@ -22,6 +22,7 @@ from long_invest.modules.system_status.contracts import (
     SystemClockStatus,
     WorkerStatus,
 )
+from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
 from long_invest.platform.cache.redis import RedisProbe
 from long_invest.platform.database.engine import Database
 
@@ -156,22 +157,52 @@ class SchedulerStatusAdapter:
         self,
         database: Database,
         occurrences: MonitorOccurrenceApplication,
+        runtime: SchedulerRuntimeApplication,
         *,
         scan_interval_seconds: int = 10,
+        stale_after_seconds: int = 30,
     ) -> None:
         self._database = database
         self._occurrences = occurrences
+        self._runtime = runtime
         self._scan_interval_seconds = scan_interval_seconds
+        self._stale_after_seconds = stale_after_seconds
 
     async def get_status(self) -> SchedulerStatus:
         now = await self._database_time()
+        runtime = await self._runtime.get()
+        if runtime is None:
+            return SchedulerStatus(
+                status=HealthStatus.UNKNOWN,
+                scan_interval_seconds=self._scan_interval_seconds,
+                last_scan_at=None,
+                database_time=now,
+                automatic_scheduling_paused=True,
+                pause_reason="scheduler heartbeat is not available",
+                updated_at=now,
+            )
+        stale = now - runtime.heartbeat_at > timedelta(
+            seconds=self._stale_after_seconds
+        )
+        if stale:
+            status = HealthStatus.UNAVAILABLE
+            paused = True
+            reason = "scheduler heartbeat is stale"
+        elif runtime.automatic_scheduling_paused or runtime.consecutive_failures:
+            status = HealthStatus.DEGRADED
+            paused = runtime.automatic_scheduling_paused
+            reason = runtime.pause_reason
+        else:
+            status = HealthStatus.HEALTHY
+            paused = False
+            reason = None
         return SchedulerStatus(
-            status=HealthStatus.UNKNOWN,
+            status=status,
             scan_interval_seconds=self._scan_interval_seconds,
-            last_scan_at=None,
+            last_scan_at=runtime.last_scan_at,
             database_time=now,
-            automatic_scheduling_paused=False,
-            pause_reason="scheduler heartbeat is not available",
+            automatic_scheduling_paused=paused,
+            pause_reason=reason,
             updated_at=now,
         )
 
@@ -208,9 +239,16 @@ class SchedulerStatusAdapter:
 
 
 class ClockStatusAdapter:
-    def __init__(self, database: Database, *, max_skew_seconds: float = 5) -> None:
+    def __init__(
+        self,
+        database: Database,
+        *,
+        warning_skew_seconds: float = 5,
+        pause_skew_seconds: float = 30,
+    ) -> None:
         self._database = database
-        self._max_skew_seconds = max_skew_seconds
+        self._warning_skew_seconds = warning_skew_seconds
+        self._pause_skew_seconds = pause_skew_seconds
 
     async def get_clock_status(self) -> SystemClockStatus:
         application_time = datetime.now(UTC)
@@ -223,7 +261,7 @@ class ClockStatusAdapter:
         )
         status = (
             HealthStatus.HEALTHY
-            if skew is not None and skew <= self._max_skew_seconds
+            if skew is not None and skew <= self._warning_skew_seconds
             else HealthStatus.DEGRADED
         )
         return SystemClockStatus(
@@ -232,7 +270,7 @@ class ClockStatusAdapter:
             database_time=database_time,
             max_skew_seconds=skew,
             automatic_scheduling_paused=bool(
-                skew is None or skew > self._max_skew_seconds
+                skew is None or skew > self._pause_skew_seconds
             ),
             sources=(
                 ClockSourceStatus(

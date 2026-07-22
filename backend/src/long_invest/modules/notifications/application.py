@@ -307,6 +307,14 @@ class NotificationAdminApplication:
                     message="重复请求内容不一致",
                     status_code=409,
                 )
+            if method == "retry_delivery" and bool(
+                summary.get("confirm_duplicate_risk", False)
+            ) != bool(args[1] if len(args) > 1 else False):
+                raise AppError(
+                    code="NOTIFICATION_IDEMPOTENCY_CONFLICT",
+                    message="重复请求内容不一致",
+                    status_code=409,
+                )
             delivery = await session.get(
                 NotificationDelivery, UUID(summary["delivery_id"])
             )
@@ -340,11 +348,16 @@ class NotificationAdminApplication:
 def _mutation_summary(method: str, result: Any, args: tuple[Any, ...]):
     if method in {"retry_delivery", "cancel_delivery"}:
         delivery_id = str(result.delivery.id)
-        return delivery_id, {
+        summary = {
             "method": method,
             "delivery_id": delivery_id,
             "source_delivery_id": str(args[0]),
         }
+        if method == "retry_delivery":
+            summary["confirm_duplicate_risk"] = bool(
+                args[1] if len(args) > 1 else False
+            )
+        return delivery_id, summary
     retried_ids = [str(item.id) for item in result.retried]
     object_id = str(args[0][0]) if args and args[0] else "batch"
     return object_id, {

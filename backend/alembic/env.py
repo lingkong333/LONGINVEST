@@ -90,6 +90,7 @@ from long_invest.modules.signals.models import (  # noqa: F401
     SignalEvent,
     SignalState,
 )
+from long_invest.modules.system_status.models import SchedulerRuntimeState  # noqa: F401
 from long_invest.modules.strategies.models import (  # noqa: F401
     Strategy,
     StrategyDraft,

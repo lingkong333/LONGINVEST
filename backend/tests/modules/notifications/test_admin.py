@@ -193,19 +193,60 @@ async def test_repeating_retry_on_old_generation_returns_explicit_conflict() -> 
 
 
 @pytest.mark.anyio
-async def test_outcome_unknown_cannot_use_ordinary_manual_retry() -> None:
+@pytest.mark.parametrize(
+    "status",
+    [
+        NotificationDeliveryStatus.SENT,
+        NotificationDeliveryStatus.OUTCOME_UNKNOWN,
+    ],
+)
+async def test_risky_delivery_requires_duplicate_risk_confirmation(status) -> None:
     event = make_event()
-    unknown = make_delivery(
+    delivery = make_delivery(
         event,
-        status=NotificationDeliveryStatus.OUTCOME_UNKNOWN,
+        status=status,
     )
-    repository = FakeRepository(event, [unknown])
+    repository = FakeRepository(event, [delivery])
 
     with pytest.raises(NotificationAdminError) as exc_info:
-        await NotificationAdminService(repository).retry_delivery(unknown.id)
+        await NotificationAdminService(repository).retry_delivery(delivery.id)
 
-    assert exc_info.value.code == "NOTIFICATION_DELIVERY_OUTCOME_UNKNOWN"
+    assert exc_info.value.code == "NOTIFICATION_DUPLICATE_RISK_CONFIRMATION_REQUIRED"
     assert repository.added == []
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    "status",
+    [
+        NotificationDeliveryStatus.SENT,
+        NotificationDeliveryStatus.OUTCOME_UNKNOWN,
+    ],
+)
+async def test_confirmed_risky_resend_creates_generation_without_mutating_old(
+    status,
+) -> None:
+    event = make_event()
+    original = make_delivery(event, status=status)
+    repository = FakeRepository(event, [original])
+
+    result = await NotificationAdminService(repository).retry_delivery(
+        original.id,
+        confirm_duplicate_risk=True,
+    )
+
+    assert result.changed is True
+    assert original.status == status
+    assert original.attempt_count == 2
+    assert result.delivery.generation == 2
+    assert result.delivery.status == NotificationDeliveryStatus.PENDING
+    assert result.delivery.attempt_count == 0
+    repository.resource_events.delivery_changed.assert_awaited_once_with(
+        result.delivery,
+        request_id=event.request_id,
+        change="resend",
+        dedupe_token="generation-2",
+    )
 
 
 @pytest.mark.anyio

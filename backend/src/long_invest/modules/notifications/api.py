@@ -54,6 +54,10 @@ class MutationRequest(StrictRequest):
     confirm: StrictBool
 
 
+class RetryDeliveryRequest(MutationRequest):
+    confirm_duplicate_risk: StrictBool = False
+
+
 class RetryBatchRequest(MutationRequest):
     delivery_ids: list[UUID] = Field(min_length=1, max_length=100)
 
@@ -249,7 +253,7 @@ async def list_attempts_by_id(
 )
 async def retry_delivery(
     delivery_id: UUID,
-    body: MutationRequest,
+    body: RetryDeliveryRequest,
     application: Application,
     identity: WriteIdentity,
     idempotency_key: IdempotencyKey,
@@ -258,6 +262,7 @@ async def retry_delivery(
     result = await application.mutate(
         "retry_delivery",
         delivery_id,
+        body.confirm_duplicate_risk,
         reason=body.reason,
         idempotency_key=idempotency_key,
         **_context(identity),
@@ -273,7 +278,7 @@ async def retry_delivery(
 )
 async def retry_delivery_by_id(
     id: UUID,
-    body: MutationRequest,
+    body: RetryDeliveryRequest,
     application: Application,
     identity: WriteIdentity,
     idempotency_key: IdempotencyKey,

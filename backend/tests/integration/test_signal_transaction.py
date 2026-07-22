@@ -101,9 +101,7 @@ class _BarrierSignalRepository(SignalRepository):
         self._barrier = barrier
         self._first_idempotency_read = True
 
-    async def find_evaluation_by_idempotency(
-        self, subscription_id, idempotency_key
-    ):
+    async def find_evaluation_by_idempotency(self, subscription_id, idempotency_key):
         evaluation = await super().find_evaluation_by_idempotency(
             subscription_id,
             idempotency_key,
@@ -196,7 +194,7 @@ async def _seed(database: Database):
         parameters={},
         hysteresis_ratio="0.02",
         hysteresis_min="0.02",
-        notification_mode="ALL",
+        notification_mode="INHERIT",
         reason="integration seed",
         created_by_user_id="integration-user",
         request_id=f"seed-{token}",

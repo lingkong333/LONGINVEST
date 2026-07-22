@@ -1186,6 +1186,24 @@ export interface paths {
         patch: operations["configure_subscription_api_v1_monitor_subscriptions__subscription_id__patch"];
         trace?: never;
     };
+    "/api/v1/monitor-subscriptions/{subscription_id}/notification-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Notification Policy */
+        get: operations["get_notification_policy_api_v1_monitor_subscriptions__subscription_id__notification_policy_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Notification Policy */
+        patch: operations["update_notification_policy_api_v1_monitor_subscriptions__subscription_id__notification_policy_patch"];
+        trace?: never;
+    };
     "/api/v1/monitor-subscriptions/{subscription_id}/enable": {
         parameters: {
             query?: never;
@@ -1682,6 +1700,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notification-templates/{type}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Activate Template */
+        post: operations["activate_template_api_v1_notification_templates__type__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/channels/{channel}/test": {
         parameters: {
             query?: never;
@@ -1710,6 +1745,40 @@ export interface paths {
         put?: never;
         /** Test Channel */
         post: operations["test_channel_api_v1_notification_channels__channel__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channel}/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Probe Channel */
+        post: operations["probe_channel_api_v1_notification_channels__channel__probe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notification-channels/{channel}/reset-circuit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reset Channel Circuit */
+        post: operations["reset_channel_circuit_api_v1_notification_channels__channel__reset_circuit_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2247,6 +2316,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategies/{strategy_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Strategy */
+        post: operations["test_strategy_api_v1_strategies__strategy_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/strategies/{strategy_id}/versions": {
         parameters: {
             query?: never;
@@ -2258,6 +2344,40 @@ export interface paths {
         get: operations["list_versions_api_v1_strategies__strategy_id__versions_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategies/{strategy_id}/versions/{version_id}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Strategy Version */
+        post: operations["apply_strategy_version_api_v1_strategies__strategy_id__versions__version_id__apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategies/{strategy_id}/versions/{version_id}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Strategy Version */
+        post: operations["rollback_strategy_version_api_v1_strategies__strategy_id__versions__version_id__rollback_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3965,6 +4085,45 @@ export interface components {
             /** Confirmation */
             confirmation: string;
         };
+        /** ChannelActionData */
+        ChannelActionData: {
+            /** Outcome */
+            outcome: string;
+            /** Code */
+            code: string;
+            /** Summary */
+            summary: string;
+            /** Retryable */
+            retryable: boolean;
+            /** Possibly Delivered */
+            possibly_delivered: boolean;
+            /** Details */
+            details: {
+                [key: string]: unknown;
+            };
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** ChannelActionResponse */
+        ChannelActionResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["ChannelActionData"];
+        };
         /** ChannelTestRequest */
         ChannelTestRequest: {
             /** Reason */
@@ -3973,6 +4132,40 @@ export interface components {
             confirm: boolean;
             /** Message */
             message: string;
+        };
+        /** CircuitResetData */
+        CircuitResetData: {
+            channel: components["schemas"]["DeliveryChannel"];
+            /** State */
+            state: string;
+            /** Consecutive Failures */
+            consecutive_failures: number;
+            /** Cooldown Level */
+            cooldown_level: number;
+            /** Retry At */
+            retry_at: string | null;
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** CircuitResetResponse */
+        CircuitResetResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["CircuitResetData"];
         };
         /** ClientErrorEnvelope */
         ClientErrorEnvelope: {
@@ -4113,11 +4306,13 @@ export interface components {
              * @default 0
              */
             hysteresis_min: number | string;
+            /** @default INHERIT */
+            notification_mode: components["schemas"]["SubscriptionNotificationMode"];
             /**
-             * Notification Mode
-             * @default DEFAULT
+             * Notification Channels
+             * @default []
              */
-            notification_mode: string;
+            notification_channels: components["schemas"]["SubscriptionNotificationChannel"][];
             /** Expected Version */
             expected_version: number;
             /** Reason */
@@ -4236,11 +4431,13 @@ export interface components {
              * @default 0
              */
             hysteresis_min: number | string;
+            /** @default INHERIT */
+            notification_mode: components["schemas"]["SubscriptionNotificationMode"];
             /**
-             * Notification Mode
-             * @default DEFAULT
+             * Notification Channels
+             * @default []
              */
-            notification_mode: string;
+            notification_channels: components["schemas"]["SubscriptionNotificationChannel"][];
             /** Symbol */
             symbol: string;
             /** Reason */
@@ -5140,6 +5337,87 @@ export interface components {
          * @enum {string}
          */
         NotificationEventStatus: "ELIGIBLE" | "SUPPRESSED" | "DISPATCHED" | "PARTIAL" | "DELIVERED" | "FAILED" | "CANCELED";
+        /** NotificationPolicyData */
+        NotificationPolicyData: {
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /** Subscription Version */
+            subscription_version: number;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Revision No */
+            revision_no: number;
+            mode: components["schemas"]["SubscriptionNotificationMode"];
+            /** Channels */
+            channels: components["schemas"]["SubscriptionNotificationChannel"][];
+        };
+        /** NotificationPolicyMutationData */
+        NotificationPolicyMutationData: {
+            policy: components["schemas"]["NotificationPolicyData"];
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** NotificationPolicyMutationResponse */
+        NotificationPolicyMutationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["NotificationPolicyMutationData"];
+        };
+        /** NotificationPolicyRequest */
+        NotificationPolicyRequest: {
+            mode: components["schemas"]["SubscriptionNotificationMode"];
+            /**
+             * Channels
+             * @default []
+             */
+            channels: components["schemas"]["SubscriptionNotificationChannel"][];
+            /** Expected Version */
+            expected_version: number;
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+        };
+        /** NotificationPolicyResponse */
+        NotificationPolicyResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["NotificationPolicyData"];
+        };
         /** OccurrenceListData */
         OccurrenceListData: {
             /** Items */
@@ -6124,8 +6402,9 @@ export interface components {
             hysteresis_ratio: string;
             /** Hysteresis Min */
             hysteresis_min: string;
-            /** Notification Mode */
-            notification_mode: string;
+            notification_mode: components["schemas"]["SubscriptionNotificationMode"];
+            /** Notification Channels */
+            notification_channels: components["schemas"]["SubscriptionNotificationChannel"][];
             /** Reason */
             reason: string;
         };
@@ -6856,6 +7135,144 @@ export interface components {
             /** Unit */
             unit?: string | null;
         };
+        /** StrategyOperationItemData */
+        StrategyOperationItemData: {
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            status: components["schemas"]["StrategyOperationItemStatus"];
+            /** Code */
+            code: string;
+            /** Run Id */
+            run_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+        };
+        /**
+         * StrategyOperationItemStatus
+         * @enum {string}
+         */
+        StrategyOperationItemStatus: "ACCEPTED" | "REUSED" | "REJECTED" | "FAILED";
+        /** StrategyStockTestData */
+        StrategyStockTestData: {
+            /**
+             * Task Id
+             * Format: uuid
+             */
+            task_id: string;
+            /** Status */
+            status: string;
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** StrategyStockTestResponse */
+        StrategyStockTestResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["StrategyStockTestData"];
+        };
+        /**
+         * StrategySubscriptionScope
+         * @enum {string}
+         */
+        StrategySubscriptionScope: "SELECTED" | "ALL_RELATED";
+        /**
+         * StrategyVersionOperation
+         * @enum {string}
+         */
+        StrategyVersionOperation: "APPLY" | "ROLLBACK";
+        /** StrategyVersionOperationData */
+        StrategyVersionOperationData: {
+            operation: components["schemas"]["StrategyVersionOperation"];
+            /**
+             * Strategy Id
+             * Format: uuid
+             */
+            strategy_id: string;
+            /**
+             * Strategy Version Id
+             * Format: uuid
+             */
+            strategy_version_id: string;
+            /** Replayed */
+            replayed: boolean;
+            /** Items */
+            items: components["schemas"]["StrategyOperationItemData"][];
+        };
+        /** StrategyVersionOperationRequest */
+        StrategyVersionOperationRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            scope: components["schemas"]["StrategySubscriptionScope"];
+            /**
+             * Subscription Ids
+             * @default []
+             */
+            subscription_ids: string[];
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            /**
+             * Training Start Date
+             * Format: date
+             */
+            training_start_date: string;
+            /**
+             * Training End Date
+             * Format: date
+             */
+            training_end_date: string;
+        };
+        /** StrategyVersionOperationResponse */
+        StrategyVersionOperationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["StrategyVersionOperationData"];
+        };
+        /**
+         * SubscriptionNotificationChannel
+         * @enum {string}
+         */
+        SubscriptionNotificationChannel: "WECOM" | "EMAIL";
+        /**
+         * SubscriptionNotificationMode
+         * @enum {string}
+         */
+        SubscriptionNotificationMode: "INHERIT" | "CUSTOM";
         /** SubscriptionRecord */
         SubscriptionRecord: {
             /**
@@ -7336,6 +7753,71 @@ export interface components {
             /** High Strong */
             high_strong: string;
         };
+        /** TemplateActivateRequest */
+        TemplateActivateRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Version */
+            version: string;
+        };
+        /** TemplateActivationData */
+        TemplateActivationData: {
+            /** Template Type */
+            template_type: string;
+            /** Version */
+            version: string;
+            /** Changed */
+            changed: boolean;
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** TemplateActivationResponse */
+        TemplateActivationResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["TemplateActivationData"];
+        };
+        /** TemplateListData */
+        TemplateListData: {
+            /** Items */
+            items: components["schemas"]["TemplateVersionData"][];
+        };
+        /** TemplateListResponse */
+        TemplateListResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["TemplateListData"];
+        };
         /** TemplatePreviewRequest */
         TemplatePreviewRequest: {
             /** Template Type */
@@ -7365,6 +7847,57 @@ export interface components {
              * @default false
              */
             test_message: boolean;
+        };
+        /** TemplateVersionData */
+        TemplateVersionData: {
+            /** Template Type */
+            template_type: string;
+            /** Version */
+            version: string;
+            /** Active */
+            active: boolean;
+            /** Source */
+            source: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** TestStrategyRequest */
+        TestStrategyRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            /** Symbol */
+            symbol: string;
+            /**
+             * Training Start Date
+             * Format: date
+             */
+            training_start_date: string;
+            /**
+             * Training End Date
+             * Format: date
+             */
+            training_end_date: string;
+            /**
+             * Test Start Date
+             * Format: date
+             */
+            test_start_date: string;
+            /**
+             * Test End Date
+             * Format: date
+             */
+            test_end_date: string;
+            /** Parameter Snapshot */
+            parameter_snapshot: {
+                [key: string]: unknown;
+            };
+            /** Initial Capital */
+            initial_capital: number | string;
         };
         /** TimelineItemResponse */
         TimelineItemResponse: {
@@ -10335,6 +10868,76 @@ export interface operations {
             };
         };
     };
+    get_notification_policy_api_v1_monitor_subscriptions__subscription_id__notification_policy_get: {
+        parameters: {
+            query?: {
+                revision_id?: string | null;
+            };
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_notification_policy_api_v1_monitor_subscriptions__subscription_id__notification_policy_patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NotificationPolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NotificationPolicyMutationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     enable_api_v1_monitor_subscriptions__subscription_id__enable_post: {
         parameters: {
             query?: never;
@@ -11058,7 +11661,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["TemplateListResponse"];
                 };
             };
         };
@@ -11078,7 +11681,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["TemplateListResponse"];
                 };
             };
         };
@@ -11412,6 +12015,43 @@ export interface operations {
             };
         };
     };
+    activate_template_api_v1_notification_templates__type__activate_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TemplateActivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TemplateActivationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     test_channel_api_v1_notifications_channels__channel__test_post: {
         parameters: {
             query?: never;
@@ -11473,6 +12113,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    probe_channel_api_v1_notification_channels__channel__probe_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                channel: components["schemas"]["DeliveryChannel"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChannelTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChannelActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_channel_circuit_api_v1_notification_channels__channel__reset_circuit_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                channel: components["schemas"]["DeliveryChannel"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MutationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CircuitResetResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12708,6 +13422,41 @@ export interface operations {
             };
         };
     };
+    test_strategy_api_v1_strategies__strategy_id__test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TestStrategyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyStockTestResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_versions_api_v1_strategies__strategy_id__versions_get: {
         parameters: {
             query?: {
@@ -12731,6 +13480,78 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_strategy_version_api_v1_strategies__strategy_id__versions__version_id__apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyVersionOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOperationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_strategy_version_api_v1_strategies__strategy_id__versions__version_id__rollback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                strategy_id: string;
+                version_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StrategyVersionOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StrategyVersionOperationResponse"];
                 };
             };
             /** @description Validation Error */

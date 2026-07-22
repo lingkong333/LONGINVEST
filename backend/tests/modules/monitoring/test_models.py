@@ -1,4 +1,4 @@
-from sqlalchemy import Index, UniqueConstraint, event
+from sqlalchemy import CheckConstraint, Index, UniqueConstraint, event
 
 from long_invest.modules.monitoring.models import (
     MonitorSubscription,
@@ -63,4 +63,19 @@ def test_subscription_revision_and_occurrence_scope_are_unique() -> None:
     assert MonitorSubscriptionRevision.__table__.c.hysteresis_ratio.type.precision == 10
     assert MonitorSubscriptionRevision.__table__.c.hysteresis_ratio.type.scale == 6
     assert MonitorSubscriptionRevision.__table__.c.notification_mode.nullable is False
+    assert (
+        MonitorSubscriptionRevision.__table__.c.notification_channels.type.__class__.__name__
+        == "JSONB"
+    )
+    check_names = {
+        item.name
+        for item in MonitorSubscriptionRevision.__table__.constraints
+        if isinstance(item, CheckConstraint)
+    }
+    for suffix in (
+        "notification_mode_valid",
+        "notification_channels_valid",
+        "notification_inherit_channels_empty",
+    ):
+        assert any(name.endswith(suffix) for name in check_names)
     assert "notification_policy_id" not in MonitorSubscriptionRevision.__table__.c

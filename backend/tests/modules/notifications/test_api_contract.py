@@ -44,8 +44,11 @@ def test_notification_and_dynamic_setting_routes_are_published() -> None:
         "/api/v1/notification-policies/{scope}",
         "/api/v1/notification-channels/{channel}",
         "/api/v1/notification-channels/{channel}/test",
+        "/api/v1/notification-channels/{channel}/probe",
+        "/api/v1/notification-channels/{channel}/reset-circuit",
         "/api/v1/notification-templates",
         "/api/v1/notification-templates/{type}/preview",
+        "/api/v1/notification-templates/{type}/activate",
     }
     assert expected <= paths.keys()
 
@@ -65,6 +68,9 @@ def test_all_notification_writes_require_idempotency_header() -> None:
         ("/api/v1/notification-policies/{scope}", "patch"),
         ("/api/v1/notification-channels/{channel}", "patch"),
         ("/api/v1/notification-channels/{channel}/test", "post"),
+        ("/api/v1/notification-channels/{channel}/probe", "post"),
+        ("/api/v1/notification-channels/{channel}/reset-circuit", "post"),
+        ("/api/v1/notification-templates/{type}/activate", "post"),
     ]
     for path, method in writes:
         parameters = paths[path][method]["parameters"]

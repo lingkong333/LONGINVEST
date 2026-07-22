@@ -89,9 +89,7 @@ class StrategyRepository:
     async def get_draft_by_id(self, draft_id: UUID) -> StrategyDraft | None:
         return await self.session.get(StrategyDraft, draft_id)
 
-    async def create_strategy(
-        self, strategy: Strategy, draft: StrategyDraft
-    ) -> None:
+    async def create_strategy(self, strategy: Strategy, draft: StrategyDraft) -> None:
         self.session.add_all((strategy, draft))
         await self.session.flush()
 

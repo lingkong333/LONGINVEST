@@ -88,13 +88,20 @@ def create_app() -> FastAPI:
         build_history_backfill_application,
     )
     from long_invest.bootstrap.stage4_runtime import build_backtest_application
+    from long_invest.bootstrap.strategy_operations import (
+        build_strategy_operation_ports,
+    )
     from long_invest.bootstrap.system_status import build_system_status_application
     from long_invest.modules.history_backfills.application import (
         configure_history_backfill_application,
     )
+    from long_invest.modules.strategies.application import (
+        configure_strategy_operation_ports,
+    )
 
     settings = get_settings()
     configure_backtest_application(build_backtest_application)
+    configure_strategy_operation_ports(build_strategy_operation_ports)
     configure_history_backfill_application(build_history_backfill_application)
     configure_job_admin_application(lambda: JobAdminApplication(get_database()))
     configure_system_status_application(build_system_status_application)

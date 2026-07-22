@@ -285,7 +285,8 @@ async def test_transactional_port_locks_and_returns_frozen_signal_snapshot() -> 
                 target_mode="STRATEGY",
                 hysteresis_ratio=Decimal("0.010000"),
                 hysteresis_min=Decimal("0.020000"),
-                notification_mode="DEFAULT",
+                notification_mode="INHERIT",
+                notification_channels=[],
             )
 
     port = transactional_monitor_subscription_port(
@@ -303,7 +304,8 @@ async def test_transactional_port_locks_and_returns_frozen_signal_snapshot() -> 
         target_mode="STRATEGY",
         hysteresis_ratio=Decimal("0.010000"),
         hysteresis_min=Decimal("0.020000"),
-        notification_mode="DEFAULT",
+        notification_mode="INHERIT",
+        notification_channels=(),
     )
     with pytest.raises(ValidationError):
         snapshot.version = 4
@@ -347,7 +349,8 @@ async def test_transactional_port_switches_to_manual_without_committing() -> Non
                 parameters={"lookback": 20},
                 hysteresis_ratio=Decimal("0.01"),
                 hysteresis_min=Decimal("0.02"),
-                notification_mode="DEFAULT",
+                notification_mode="INHERIT",
+                notification_channels=[],
             )
 
     class Service:

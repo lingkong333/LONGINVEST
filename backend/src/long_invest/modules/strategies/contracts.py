@@ -86,6 +86,23 @@ class StrategyRunStatus(StrEnum):
     CANCELED = "CANCELED"
 
 
+class StrategyVersionOperation(StrEnum):
+    APPLY = "APPLY"
+    ROLLBACK = "ROLLBACK"
+
+
+class StrategySubscriptionScope(StrEnum):
+    SELECTED = "SELECTED"
+    ALL_RELATED = "ALL_RELATED"
+
+
+class StrategyOperationItemStatus(StrEnum):
+    ACCEPTED = "ACCEPTED"
+    REUSED = "REUSED"
+    REJECTED = "REJECTED"
+    FAILED = "FAILED"
+
+
 class StrategyLifecycleErrorCode(StrEnum):
     STRATEGY_VERSION_CONFLICT = "STRATEGY_VERSION_CONFLICT"
     STRATEGY_NOT_READY = "STRATEGY_NOT_READY"
@@ -336,6 +353,118 @@ class StrategyRunView(StrictContract):
     status: StrategyRunStatus
 
 
+class StrategyStockTestRequest(FrozenMappingContract):
+    strategy_id: UUID
+    symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+    initial_capital: Decimal = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> StrategyStockTestRequest:
+        if not (
+            self.training_start_date
+            <= self.training_end_date
+            < self.test_start_date
+            <= self.test_end_date
+        ):
+            raise ValueError("training and test ranges must not overlap")
+        return self
+
+
+class StrategyStockTestSubmission(StrictContract):
+    task_id: UUID
+    status: str = Field(min_length=1, max_length=32)
+    replayed: bool = False
+
+
+class StrategySubscriptionCandidate(FrozenMappingContract):
+    subscription_id: UUID
+    subscription_version: int = Field(ge=1)
+    target_version: int = Field(ge=1)
+
+
+class StrategyVersionTargetRequest(FrozenMappingContract):
+    operation: StrategyVersionOperation
+    strategy_id: UUID
+    strategy_version_id: UUID
+    subscription_id: UUID
+    subscription_version: int = Field(ge=1)
+    target_version: int = Field(ge=1)
+    target_date: date
+    training_start_date: date
+    training_end_date: date
+    reason: str = Field(min_length=1, max_length=500)
+    idempotency_key: str = Field(min_length=1, max_length=200)
+    request_id: str = Field(min_length=1, max_length=64)
+    actor_user_id: str = Field(min_length=1, max_length=64)
+    session_id: str = Field(min_length=1, max_length=64)
+    trusted_ip: str = Field(min_length=1, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_training_range(self) -> StrategyVersionTargetRequest:
+        if self.training_start_date > self.training_end_date:
+            raise ValueError("training range is invalid")
+        return self
+
+
+class StrategyVersionTargetSubmission(StrictContract):
+    code: str = Field(min_length=1, max_length=100)
+    run_id: UUID
+    job_id: UUID
+    replayed: bool = False
+
+
+class StrategyOperationItemResult(StrictContract):
+    subscription_id: UUID
+    status: StrategyOperationItemStatus
+    code: str = Field(min_length=1, max_length=100)
+    run_id: UUID | None = None
+    job_id: UUID | None = None
+
+
+class StrategyOperationBatchResult(StrictContract):
+    operation: StrategyVersionOperation
+    strategy_id: UUID
+    strategy_version_id: UUID
+    replayed: bool
+    items: tuple[StrategyOperationItemResult, ...]
+
+
+class StrategyStockTestPort(Protocol):
+    async def submit_strategy_test(
+        self,
+        *,
+        task_id: UUID,
+        draft: StrategyDraftView,
+        metadata: Mapping[str, Any],
+        parameter_schema: Mapping[str, Any],
+        request: StrategyStockTestRequest,
+        idempotency_key: str,
+        request_id: str,
+        actor_user_id: str,
+        reason: str,
+    ) -> StrategyStockTestSubmission: ...
+
+
+class StrategySubscriptionScopePort(Protocol):
+    async def resolve_strategy_subscriptions(
+        self,
+        *,
+        strategy_id: UUID,
+        scope: StrategySubscriptionScope,
+        subscription_ids: tuple[UUID, ...],
+    ) -> tuple[StrategySubscriptionCandidate, ...]: ...
+
+
+class StrategyVersionTargetPort(Protocol):
+    async def submit_strategy_version_target(
+        self, request: StrategyVersionTargetRequest
+    ) -> StrategyVersionTargetSubmission: ...
+
+
 class StrategyForecastPort(Protocol):
     async def forecast(
         self, request: StrategyForecastRequest
@@ -375,5 +504,6 @@ class StrategyExecutionSnapshotPort(Protocol):
 
 
 class StrategyForecastRequestVerifier(Protocol):
-    async def verify_forecast_request(self, request: StrategyForecastRequest) -> bool:
-        ...
+    async def verify_forecast_request(
+        self, request: StrategyForecastRequest
+    ) -> bool: ...

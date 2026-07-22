@@ -2,6 +2,7 @@ import importlib
 import importlib.util
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
@@ -43,6 +44,14 @@ class FakeRepository:
         self.operations: list[str] = []
         self.concurrent_conflict: str | None = None
         self.conflict_raised = False
+        self.active_template_version = "v1"
+        self.circuit = SimpleNamespace(
+            state="CLOSED",
+            consecutive_failures=0,
+            cooldown_level=0,
+            retry_at=None,
+            probe_token=None,
+        )
         self.resource_events = type(
             "ResourceEvents",
             (),
@@ -58,6 +67,23 @@ class FakeRepository:
             return None
         if self.event.idempotency_key == idempotency_key:
             return self.event
+        return None
+
+    async def resolve_active_template(self, template_type, registry):
+        if self.active_template_version is None:
+            return None
+        return registry.resolve(template_type, self.active_template_version)
+
+    async def lock_channel_circuit(self, _channel, _instance):
+        return self.circuit
+
+    async def read_channel_circuit(self, _channel, _instance):
+        return self.circuit
+
+    async def defer_channel_deliveries(self, **_kwargs):
+        return None
+
+    async def release_channel_deliveries(self, **_kwargs):
         return None
 
     def add_event(self, event):
@@ -422,7 +448,7 @@ async def test_publish_freezes_resolvable_template_and_creates_channel_delivery(
 
 
 @pytest.mark.anyio
-async def test_publish_rejects_unknown_frozen_template_version() -> None:
+async def test_publish_uses_active_template_instead_of_caller_version() -> None:
     service = load_service()
     placeholder, _, _ = event_and_delivery()
     placeholder.idempotency_key = "other-event"
@@ -430,8 +456,22 @@ async def test_publish_rejects_unknown_frozen_template_version() -> None:
     command = publish_command(service)
     command = replace(command, template_version="missing")
 
+    event = await service.NotificationService(repository).publish(command)
+
+    assert event.template_version == "v1"
+    assert len(repository.deliveries) == 1
+
+
+@pytest.mark.anyio
+async def test_publish_rejects_event_type_without_active_template() -> None:
+    service = load_service()
+    placeholder, _, _ = event_and_delivery()
+    placeholder.idempotency_key = "other-event"
+    repository = FakeRepository(placeholder, [])
+    repository.active_template_version = None
+
     with pytest.raises(service.NotificationPublishError) as exc_info:
-        await service.NotificationService(repository).publish(command)
+        await service.NotificationService(repository).publish(publish_command(service))
 
     assert exc_info.value.code == "NOTIFICATION_TEMPLATE_VERSION_NOT_FOUND"
     assert repository.deliveries == []

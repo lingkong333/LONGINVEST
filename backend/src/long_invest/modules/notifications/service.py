@@ -1,7 +1,7 @@
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.notifications.admin import aggregate_current_event_status
 from long_invest.modules.notifications.channels import ChannelResult
+from long_invest.modules.notifications.circuit import NotificationCircuitService
 from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
     DeliveryOutcome,
@@ -82,23 +83,28 @@ class NotificationService:
         self._retry_policy = RetryPolicy()
 
     async def publish(self, command: PublishNotification) -> NotificationEvent:
-        content_hash = _publish_content_hash(command)
         existing = await self._repository.find_event_by_idempotency(
             command.idempotency_key
         )
         if existing is not None:
-            return _resolve_publish_replay(existing, content_hash)
-
-        try:
-            definition = self._templates.resolve(
-                command.event_type,
-                command.template_version,
+            return _resolve_publish_replay(
+                existing,
+                _publish_content_hash(command, existing.template_version),
             )
-        except TemplateVersionNotFoundError as exc:
+
+        definition = await self._repository.resolve_active_template(
+            command.event_type,
+            self._templates,
+        )
+        if definition is None:
+            exc = TemplateVersionNotFoundError(
+                f"notification template version not found: {command.event_type}"
+            )
             raise NotificationPublishError(
                 code=exc.code,
                 message=str(exc),
-            ) from exc
+            )
+        content_hash = _publish_content_hash(command, definition.version)
 
         event_id = uuid4()
         template_variables = dict(command.template_variables)
@@ -123,29 +129,42 @@ class NotificationService:
             eligibility_status=command.eligibility_status,
             suppression_reason=command.suppression_reason,
             effective_channels=[target.channel for target in command.targets],
-            template_version=command.template_version,
+            template_version=definition.version,
             idempotency_key=command.idempotency_key,
             content_hash=content_hash,
             request_id=command.request_id,
         )
-        deliveries = [
-            NotificationDelivery(
-                id=uuid4(),
-                event_id=event_id,
-                generation=1,
-                channel=target.channel,
-                config_version=target.config_version,
-                target_fingerprint=target.target_fingerprint,
-                status=NotificationDeliveryStatus.PENDING,
-                attempt_count=0,
-                unknown_compensation_count=0,
-                deterministic_message_id=(
-                    f"notification:{event_id}:{target.channel.value}:1"
-                ),
-            )
-            for target in command.targets
+        now = datetime.now(UTC)
+        delivery_states = {
+            target.channel: await NotificationCircuitService(
+                self._repository
+            ).new_delivery_state(target.channel, now=now)
+            for target in sorted(command.targets, key=lambda item: item.channel.value)
             if is_eligible
-        ]
+        }
+        deliveries = []
+        for target in command.targets:
+            if not is_eligible:
+                continue
+            state = delivery_states[target.channel]
+            deliveries.append(
+                NotificationDelivery(
+                    id=uuid4(),
+                    event_id=event_id,
+                    generation=1,
+                    channel=target.channel,
+                    config_version=target.config_version,
+                    target_fingerprint=target.target_fingerprint,
+                    status=state.status,
+                    attempt_count=0,
+                    unknown_compensation_count=0,
+                    next_retry_at=state.next_retry_at,
+                    circuit_deferred_until=state.circuit_deferred_until,
+                    deterministic_message_id=(
+                        f"notification:{event_id}:{target.channel.value}:1"
+                    ),
+                )
+            )
         try:
             await self._repository.persist_event_and_deliveries(event, deliveries)
         except IntegrityError:
@@ -388,7 +407,7 @@ def _delivery_result_change(status: object) -> str:
     return "failed"
 
 
-def _publish_content_hash(command: PublishNotification) -> str:
+def _publish_content_hash(command: PublishNotification, template_version: str) -> str:
     content = {
         "event_type": command.event_type,
         "business_event_type": command.business_event_type,
@@ -397,7 +416,7 @@ def _publish_content_hash(command: PublishNotification) -> str:
         "business_object_id": command.business_object_id,
         "severity": command.severity,
         "template_variables": validate_notification_payload(command.template_variables),
-        "template_version": command.template_version,
+        "template_version": template_version,
         "targets": sorted(
             (
                 target.channel.value,

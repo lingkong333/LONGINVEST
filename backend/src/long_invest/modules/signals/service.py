@@ -536,6 +536,7 @@ class SignalService:
                     position_version=position_version,
                     reason=command.reason,
                     notification_mode=subscription.notification_mode,
+                    notification_channels=subscription.notification_channels,
                     eligible=notification_eligible,
                     suppression_reason=suppression_reason,
                     idempotency_key=notification_key,

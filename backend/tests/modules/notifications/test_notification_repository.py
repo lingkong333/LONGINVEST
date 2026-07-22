@@ -15,6 +15,7 @@ from long_invest.modules.notifications.models import (
     NotificationDelivery,
     NotificationEvent,
 )
+from long_invest.modules.notifications.template_catalog import GIT_TEMPLATE_REGISTRY
 
 
 def load_repository():
@@ -38,6 +39,26 @@ def pending_delivery() -> NotificationDelivery:
         unknown_compensation_count=0,
         deterministic_message_id=f"message-{uuid4()}",
     )
+
+
+@pytest.mark.anyio
+async def test_active_template_read_falls_back_without_writing_in_publish_transaction(
+    monkeypatch,
+) -> None:
+    repository_module = load_repository()
+    repository = repository_module.NotificationRepository(object())
+    active_read = AsyncMock(return_value=None)
+    sync = AsyncMock()
+    monkeypatch.setattr(repository, "_read_active_template", active_read)
+    monkeypatch.setattr(repository, "sync_templates", sync)
+
+    definition = await repository.resolve_active_template(
+        "notification.test", GIT_TEMPLATE_REGISTRY
+    )
+
+    assert definition is not None
+    assert definition.version == "v1"
+    sync.assert_not_awaited()
 
 
 @pytest.mark.anyio

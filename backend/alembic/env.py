@@ -47,9 +47,12 @@ from long_invest.modules.monitoring.models import (  # noqa: F401
     ScheduleOccurrence,
 )
 from long_invest.modules.notifications.models import (  # noqa: F401
+    NotificationChannelCircuit,
     NotificationDelivery,
     NotificationDeliveryAttempt,
     NotificationEvent,
+    NotificationTemplateActivation,
+    NotificationTemplateVersion,
 )
 from long_invest.modules.positions.models import (  # noqa: F401
     UserPosition,

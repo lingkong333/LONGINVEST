@@ -192,9 +192,7 @@ def _normalize_context(
     expected = {
         "symbol": request.training_data.symbol,
         "exchange": request.training_data.symbol.rsplit(".", maxsplit=1)[1],
-        "strategy_version_id": str(
-            request.strategy_version_id or request.draft_id
-        ),
+        "strategy_version_id": str(request.strategy_version_id or request.draft_id),
         "data_version": request.training_data.data_version,
     }
     if any(context[key] != value for key, value in expected.items()):
@@ -214,9 +212,7 @@ def _normalize_context(
         not isinstance(context["calculation_reason"], str)
         or not context["calculation_reason"].strip()
     ):
-        raise StrategyForecastFailure(
-            CONTEXT_INVALID, "calculation reason is required"
-        )
+        raise StrategyForecastFailure(CONTEXT_INVALID, "calculation reason is required")
     normalized = dict(context)
     normalized["as_of_date"] = as_of_date.isoformat()
     return _normalize_json_value(normalized)

@@ -4110,6 +4110,128 @@
         }
       }
     },
+    "/api/v1/monitor-subscriptions/{subscription_id}/notification-policy": {
+      "get": {
+        "tags": [
+          "monitor-subscriptions"
+        ],
+        "summary": "Get Notification Policy",
+        "operationId": "get_notification_policy_api_v1_monitor_subscriptions__subscription_id__notification_policy_get",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Subscription Id"
+            }
+          },
+          {
+            "name": "revision_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Revision Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPolicyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "monitor-subscriptions"
+        ],
+        "summary": "Update Notification Policy",
+        "operationId": "update_notification_policy_api_v1_monitor_subscriptions__subscription_id__notification_policy_patch",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Subscription Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPolicyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPolicyMutationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/monitor-subscriptions/{subscription_id}/enable": {
       "post": {
         "tags": [
@@ -5477,7 +5599,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/TemplateListResponse"
                 }
               }
             }
@@ -5498,7 +5620,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/TemplateListResponse"
                 }
               }
             }
@@ -6009,6 +6131,69 @@
         }
       }
     },
+    "/api/v1/notification-templates/{type}/activate": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Activate Template",
+        "operationId": "activate_template_api_v1_notification_templates__type__activate_post",
+        "parameters": [
+          {
+            "name": "type",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Type"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TemplateActivateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TemplateActivationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/channels/{channel}/test": {
       "post": {
         "tags": [
@@ -6116,6 +6301,130 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SuccessEnvelope"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-channels/{channel}/probe": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Probe Channel",
+        "operationId": "probe_channel_api_v1_notification_channels__channel__probe_post",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryChannel"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChannelTestRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChannelActionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/notification-channels/{channel}/reset-circuit": {
+      "post": {
+        "tags": [
+          "notifications"
+        ],
+        "summary": "Reset Channel Circuit",
+        "operationId": "reset_channel_circuit_api_v1_notification_channels__channel__reset_circuit_post",
+        "parameters": [
+          {
+            "name": "channel",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/DeliveryChannel"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MutationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CircuitResetResponse"
                 }
               }
             }
@@ -8103,6 +8412,59 @@
         }
       }
     },
+    "/api/v1/strategies/{strategy_id}/test": {
+      "post": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "Test Strategy",
+        "operationId": "test_strategy_api_v1_strategies__strategy_id__test_post",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Strategy Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestStrategyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyStockTestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/strategies/{strategy_id}/versions": {
       "get": {
         "tags": [
@@ -8154,6 +8516,132 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response List Versions Api V1 Strategies  Strategy Id  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/versions/{version_id}/apply": {
+      "post": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "Apply Strategy Version",
+        "operationId": "apply_strategy_version_api_v1_strategies__strategy_id__versions__version_id__apply_post",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyVersionOperationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOperationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategies/{strategy_id}/versions/{version_id}/rollback": {
+      "post": {
+        "tags": [
+          "strategies"
+        ],
+        "summary": "Rollback Strategy Version",
+        "operationId": "rollback_strategy_version_api_v1_strategies__strategy_id__versions__version_id__rollback_post",
+        "parameters": [
+          {
+            "name": "strategy_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Strategy Id"
+            }
+          },
+          {
+            "name": "version_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Version Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StrategyVersionOperationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StrategyVersionOperationResponse"
                 }
               }
             }
@@ -13589,6 +14077,89 @@
         ],
         "title": "ChangePasswordRequest"
       },
+      "ChannelActionData": {
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "title": "Outcome"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "retryable": {
+            "type": "boolean",
+            "title": "Retryable"
+          },
+          "possibly_delivered": {
+            "type": "boolean",
+            "title": "Possibly Delivered"
+          },
+          "details": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Details"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "outcome",
+          "code",
+          "summary",
+          "retryable",
+          "possibly_delivered",
+          "details",
+          "replayed"
+        ],
+        "title": "ChannelActionData"
+      },
+      "ChannelActionResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/ChannelActionData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "ChannelActionResponse"
+      },
       "ChannelTestRequest": {
         "properties": {
           "reason": {
@@ -13616,6 +14187,90 @@
           "message"
         ],
         "title": "ChannelTestRequest"
+      },
+      "CircuitResetData": {
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/DeliveryChannel"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "consecutive_failures": {
+            "type": "integer",
+            "title": "Consecutive Failures"
+          },
+          "cooldown_level": {
+            "type": "integer",
+            "title": "Cooldown Level"
+          },
+          "retry_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retry At"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "channel",
+          "state",
+          "consecutive_failures",
+          "cooldown_level",
+          "retry_at",
+          "replayed"
+        ],
+        "title": "CircuitResetData"
+      },
+      "CircuitResetResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/CircuitResetData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "CircuitResetResponse"
       },
       "ClientErrorEnvelope": {
         "properties": {
@@ -13978,11 +14633,16 @@
             "default": "0"
           },
           "notification_mode": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Notification Mode",
-            "default": "DEFAULT"
+            "$ref": "#/components/schemas/SubscriptionNotificationMode",
+            "default": "INHERIT"
+          },
+          "notification_channels": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionNotificationChannel"
+            },
+            "type": "array",
+            "title": "Notification Channels",
+            "default": []
           },
           "expected_version": {
             "type": "integer",
@@ -14324,11 +14984,16 @@
             "default": "0"
           },
           "notification_mode": {
-            "type": "string",
-            "maxLength": 64,
-            "minLength": 1,
-            "title": "Notification Mode",
-            "default": "DEFAULT"
+            "$ref": "#/components/schemas/SubscriptionNotificationMode",
+            "default": "INHERIT"
+          },
+          "notification_channels": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionNotificationChannel"
+            },
+            "type": "array",
+            "title": "Notification Channels",
+            "default": []
           },
           "symbol": {
             "type": "string",
@@ -16641,6 +17306,183 @@
           "CANCELED"
         ],
         "title": "NotificationEventStatus"
+      },
+      "NotificationPolicyData": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "subscription_version": {
+            "type": "integer",
+            "title": "Subscription Version"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Revision Id"
+          },
+          "revision_no": {
+            "type": "integer",
+            "title": "Revision No"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/SubscriptionNotificationMode"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionNotificationChannel"
+            },
+            "type": "array",
+            "title": "Channels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "subscription_version",
+          "revision_id",
+          "revision_no",
+          "mode",
+          "channels"
+        ],
+        "title": "NotificationPolicyData"
+      },
+      "NotificationPolicyMutationData": {
+        "properties": {
+          "policy": {
+            "$ref": "#/components/schemas/NotificationPolicyData"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "policy",
+          "replayed"
+        ],
+        "title": "NotificationPolicyMutationData"
+      },
+      "NotificationPolicyMutationResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/NotificationPolicyMutationData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "NotificationPolicyMutationResponse"
+      },
+      "NotificationPolicyRequest": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SubscriptionNotificationMode"
+          },
+          "channels": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionNotificationChannel"
+            },
+            "type": "array",
+            "title": "Channels",
+            "default": []
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "pattern": ".*\\S.*",
+            "title": "Reason"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "mode",
+          "expected_version",
+          "reason",
+          "confirm"
+        ],
+        "title": "NotificationPolicyRequest"
+      },
+      "NotificationPolicyResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/NotificationPolicyData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "NotificationPolicyResponse"
       },
       "OccurrenceListData": {
         "properties": {
@@ -19209,8 +20051,14 @@
             "title": "Hysteresis Min"
           },
           "notification_mode": {
-            "type": "string",
-            "title": "Notification Mode"
+            "$ref": "#/components/schemas/SubscriptionNotificationMode"
+          },
+          "notification_channels": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionNotificationChannel"
+            },
+            "type": "array",
+            "title": "Notification Channels"
           },
           "reason": {
             "type": "string",
@@ -19231,6 +20079,7 @@
           "hysteresis_ratio",
           "hysteresis_min",
           "notification_mode",
+          "notification_channels",
           "reason"
         ],
         "title": "RevisionRecord"
@@ -21174,6 +22023,286 @@
         ],
         "title": "StatusDetail"
       },
+      "StrategyOperationItemData": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/StrategyOperationItemStatus"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "status",
+          "code"
+        ],
+        "title": "StrategyOperationItemData"
+      },
+      "StrategyOperationItemStatus": {
+        "type": "string",
+        "enum": [
+          "ACCEPTED",
+          "REUSED",
+          "REJECTED",
+          "FAILED"
+        ],
+        "title": "StrategyOperationItemStatus"
+      },
+      "StrategyStockTestData": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Task Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status",
+          "replayed"
+        ],
+        "title": "StrategyStockTestData"
+      },
+      "StrategyStockTestResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StrategyStockTestData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "StrategyStockTestResponse"
+      },
+      "StrategySubscriptionScope": {
+        "type": "string",
+        "enum": [
+          "SELECTED",
+          "ALL_RELATED"
+        ],
+        "title": "StrategySubscriptionScope"
+      },
+      "StrategyVersionOperation": {
+        "type": "string",
+        "enum": [
+          "APPLY",
+          "ROLLBACK"
+        ],
+        "title": "StrategyVersionOperation"
+      },
+      "StrategyVersionOperationData": {
+        "properties": {
+          "operation": {
+            "$ref": "#/components/schemas/StrategyVersionOperation"
+          },
+          "strategy_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Strategy Id"
+          },
+          "strategy_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Strategy Version Id"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyOperationItemData"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "operation",
+          "strategy_id",
+          "strategy_version_id",
+          "replayed",
+          "items"
+        ],
+        "title": "StrategyVersionOperationData"
+      },
+      "StrategyVersionOperationRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/StrategySubscriptionScope"
+          },
+          "subscription_ids": {
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            },
+            "type": "array",
+            "title": "Subscription Ids",
+            "default": []
+          },
+          "target_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Target Date"
+          },
+          "training_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training Start Date"
+          },
+          "training_end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training End Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason",
+          "scope",
+          "target_date",
+          "training_start_date",
+          "training_end_date"
+        ],
+        "title": "StrategyVersionOperationRequest"
+      },
+      "StrategyVersionOperationResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/StrategyVersionOperationData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "StrategyVersionOperationResponse"
+      },
+      "SubscriptionNotificationChannel": {
+        "type": "string",
+        "enum": [
+          "WECOM",
+          "EMAIL"
+        ],
+        "title": "SubscriptionNotificationChannel"
+      },
+      "SubscriptionNotificationMode": {
+        "type": "string",
+        "enum": [
+          "INHERIT",
+          "CUSTOM"
+        ],
+        "title": "SubscriptionNotificationMode"
+      },
       "SubscriptionRecord": {
         "properties": {
           "id": {
@@ -22413,6 +23542,156 @@
         ],
         "title": "TargetValues"
       },
+      "TemplateActivateRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "version": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "confirm",
+          "version"
+        ],
+        "title": "TemplateActivateRequest"
+      },
+      "TemplateActivationData": {
+        "properties": {
+          "template_type": {
+            "type": "string",
+            "title": "Template Type"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_type",
+          "version",
+          "changed",
+          "replayed"
+        ],
+        "title": "TemplateActivationData"
+      },
+      "TemplateActivationResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TemplateActivationData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "TemplateActivationResponse"
+      },
+      "TemplateListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TemplateVersionData"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "TemplateListData"
+      },
+      "TemplateListResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/TemplateListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "TemplateListResponse"
+      },
       "TemplatePreviewRequest": {
         "properties": {
           "template_type": {
@@ -22473,6 +23752,111 @@
           "variables"
         ],
         "title": "TemplateTypePreviewRequest"
+      },
+      "TemplateVersionData": {
+        "properties": {
+          "template_type": {
+            "type": "string",
+            "title": "Template Type"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "active": {
+            "type": "boolean",
+            "title": "Active"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "template_type",
+          "version",
+          "active",
+          "source",
+          "created_at"
+        ],
+        "title": "TemplateVersionData"
+      },
+      "TestStrategyRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "symbol": {
+            "type": "string",
+            "pattern": "^[0-9]{6}\\.(SH|SZ|BJ)$",
+            "title": "Symbol"
+          },
+          "training_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training Start Date"
+          },
+          "training_end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training End Date"
+          },
+          "test_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Test Start Date"
+          },
+          "test_end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Test End Date"
+          },
+          "parameter_snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameter Snapshot"
+          },
+          "initial_capital": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              }
+            ],
+            "title": "Initial Capital"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason",
+          "symbol",
+          "training_start_date",
+          "training_end_date",
+          "test_start_date",
+          "test_end_date",
+          "parameter_snapshot",
+          "initial_capital"
+        ],
+        "title": "TestStrategyRequest"
       },
       "TimelineItemResponse": {
         "properties": {

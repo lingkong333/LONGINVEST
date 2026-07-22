@@ -11,6 +11,9 @@ from uuid import UUID, uuid4
 from long_invest.modules.monitoring.contracts import (
     FrozenScheduleSubscriptions,
     FrozenSubscription,
+    SubscriptionNotificationChannel,
+    SubscriptionNotificationMode,
+    SubscriptionNotificationPolicyView,
     SubscriptionStatus,
 )
 from long_invest.modules.monitoring.models import (
@@ -30,7 +33,8 @@ class SubscriptionConfig:
     parameters: dict[str, Any] | None = None
     hysteresis_ratio: Decimal = Decimal("0")
     hysteresis_min: Decimal = Decimal("0")
-    notification_mode: str = "DEFAULT"
+    notification_mode: str = SubscriptionNotificationMode.INHERIT
+    notification_channels: tuple[str, ...] = ()
     reason: str = ""
     idempotency_key: str = ""
     expected_version: int | None = None
@@ -107,6 +111,62 @@ class MonitorSubscriptionService:
         await self.get(subscription_id)
         return await self.repo.list_revisions(subscription_id)
 
+    async def notification_policy(
+        self, subscription_id: UUID, *, revision_id: UUID | None = None
+    ) -> SubscriptionNotificationPolicyView:
+        owner = await self.get(subscription_id)
+        selected_revision_id = revision_id or owner.current_revision_id
+        if selected_revision_id is None:
+            raise _error("MONITOR_SUBSCRIPTION_CONFLICT", "订阅缺少当前修订", 409)
+        revision = await self.repo.get_revision(subscription_id, selected_revision_id)
+        if revision is None:
+            raise _error(
+                "MONITOR_SUBSCRIPTION_REVISION_NOT_FOUND", "订阅修订不存在", 404
+            )
+        return _notification_policy(owner, revision)
+
+    async def configure_notification_policy(
+        self,
+        subscription_id: UUID,
+        *,
+        mode: SubscriptionNotificationMode | str,
+        channels: tuple[SubscriptionNotificationChannel | str, ...],
+        expected_version: int,
+        reason: str,
+        idempotency_key: str,
+        audit_context: SubscriptionAuditContext | None = None,
+    ) -> SubscriptionResult:
+        owner = await self._lock(subscription_id)
+        current = await self._revision(owner)
+        normalized_mode, normalized_channels = _notification_selection(mode, channels)
+        return await self.configure(
+            subscription_id,
+            SubscriptionConfig(
+                schedule_id=current.schedule_id,
+                schedule_revision_id=current.schedule_revision_id,
+                target_mode=current.target_mode,
+                target_version_id=current.target_version_id,
+                strategy_version_id=current.strategy_version_id,
+                parameters=dict(current.parameters),
+                hysteresis_ratio=current.hysteresis_ratio,
+                hysteresis_min=current.hysteresis_min,
+                notification_mode=normalized_mode,
+                notification_channels=normalized_channels,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                expected_version=expected_version,
+            ),
+            audit_context=audit_context,
+            action="notification_policy_changed",
+            validate_strategy=False,
+            request_payload={
+                "mode": normalized_mode,
+                "channels": list(normalized_channels),
+                "expected_version": expected_version,
+                "reason": reason.strip(),
+            },
+        )
+
     async def enabled_schedule_snapshots(self):
         grouped: dict[UUID, list[FrozenSubscription]] = {}
         for owner, revision in await self.repo.enabled_schedule_rows():
@@ -181,28 +241,40 @@ class MonitorSubscriptionService:
         return SubscriptionResult(owner, revision)
 
     async def configure(
-        self, subscription_id, config: SubscriptionConfig, audit_context=None
+        self,
+        subscription_id,
+        config: SubscriptionConfig,
+        audit_context=None,
+        *,
+        action: str = "changed",
+        validate_strategy: bool = True,
+        request_payload: dict[str, Any] | None = None,
     ):
         context = _audit_context(audit_context)
         _validate_config(config)
         if config.expected_version is None:
             raise _version_conflict()
         owner = await self._lock(subscription_id)
-        digest = _digest(
-            "changed",
-            subscription_id=str(subscription_id),
-            config=_config_payload(config),
+        digest_payload = (
+            {"config": _config_payload(config)}
+            if request_payload is None
+            else {"request": request_payload}
         )
+        digest = _digest(action, subscription_id=str(subscription_id), **digest_payload)
         replay = await self.audit.find_replay(
             subscription_id=subscription_id, idempotency_key=config.idempotency_key
         )
         if replay is not None:
             _verify(replay, digest)
             return await self._current(owner, True)
-        if config.target_mode == "STRATEGY" and (
-            config.strategy_version_id is None
-            or not await self.strategies.published_version(
-                config.strategy_version_id
+        if (
+            validate_strategy
+            and config.target_mode == "STRATEGY"
+            and (
+                config.strategy_version_id is None
+                or not await self.strategies.published_version(
+                    config.strategy_version_id
+                )
             )
         ):
             raise _error(
@@ -235,7 +307,7 @@ class MonitorSubscriptionService:
         await self._emit(
             owner,
             revision,
-            "changed",
+            action,
             config.reason,
             config.idempotency_key,
             digest,
@@ -489,6 +561,9 @@ class MonitorSubscriptionService:
 
 
 def _revision(subscription_id, no, cfg, digest, context):
+    notification_mode, notification_channels = _notification_selection(
+        cfg.notification_mode, cfg.notification_channels
+    )
     return MonitorSubscriptionRevision(
         id=uuid4(),
         subscription_id=subscription_id,
@@ -501,7 +576,8 @@ def _revision(subscription_id, no, cfg, digest, context):
         parameters=cfg.parameters or {},
         hysteresis_ratio=cfg.hysteresis_ratio,
         hysteresis_min=cfg.hysteresis_min,
-        notification_mode=cfg.notification_mode,
+        notification_mode=notification_mode,
+        notification_channels=list(notification_channels),
         reason=_reason(cfg.reason),
         created_by_user_id=context.get("actor_user_id", "unknown"),
         request_id=context.get("request_id", "unknown"),
@@ -511,6 +587,9 @@ def _revision(subscription_id, no, cfg, digest, context):
 
 
 def _config_payload(c):
+    notification_mode, notification_channels = _notification_selection(
+        c.notification_mode, c.notification_channels
+    )
     return {
         "schedule_id": str(c.schedule_id) if c.schedule_id else None,
         "schedule_revision_id": str(c.schedule_revision_id)
@@ -524,7 +603,8 @@ def _config_payload(c):
         "parameters": c.parameters or {},
         "hysteresis_ratio": str(c.hysteresis_ratio),
         "hysteresis_min": str(c.hysteresis_min),
-        "notification_mode": c.notification_mode,
+        "notification_mode": notification_mode,
+        "notification_channels": list(notification_channels),
         "reason": c.reason.strip(),
         "expected_version": c.expected_version,
     }
@@ -540,6 +620,8 @@ def _summary(o, r):
         if r.schedule_revision_id
         else None,
         "archived": o.archived_at is not None,
+        "notification_mode": r.notification_mode,
+        "notification_channels": list(r.notification_channels),
     }
 
 
@@ -565,6 +647,7 @@ def _reason(v):
 
 def _validate_config(c):
     _reason(c.reason)
+    _notification_selection(c.notification_mode, c.notification_channels)
     if (
         not c.idempotency_key.strip()
         or c.target_mode not in {"MANUAL", "STRATEGY"}
@@ -573,6 +656,46 @@ def _validate_config(c):
         or (c.schedule_id is None) != (c.schedule_revision_id is None)
     ):
         raise _error("MONITOR_SUBSCRIPTION_CONFLICT", "订阅配置无效", 422)
+
+
+def _notification_selection(mode, channels):
+    try:
+        normalized_mode = SubscriptionNotificationMode(str(mode))
+        normalized = {
+            SubscriptionNotificationChannel(str(channel)) for channel in channels
+        }
+    except ValueError as exc:
+        raise _error(
+            "MONITOR_SUBSCRIPTION_NOTIFICATION_POLICY_INVALID",
+            "订阅通知策略无效",
+            422,
+        ) from exc
+    if normalized_mode is SubscriptionNotificationMode.INHERIT and normalized:
+        raise _error(
+            "MONITOR_SUBSCRIPTION_NOTIFICATION_POLICY_INVALID",
+            "继承通知策略时不能指定渠道",
+            422,
+        )
+    ordered = tuple(
+        channel.value
+        for channel in SubscriptionNotificationChannel
+        if channel in normalized
+    )
+    return normalized_mode.value, ordered
+
+
+def _notification_policy(owner, revision):
+    mode, channels = _notification_selection(
+        revision.notification_mode, tuple(revision.notification_channels)
+    )
+    return SubscriptionNotificationPolicyView(
+        subscription_id=owner.id,
+        subscription_version=owner.version,
+        revision_id=revision.id,
+        revision_no=revision.revision_no,
+        mode=mode,
+        channels=channels,
+    )
 
 
 def _verify(r, d):

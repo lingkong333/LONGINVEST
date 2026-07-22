@@ -16,7 +16,7 @@ from long_invest.modules.strategies.forecast_service import (
     SandboxedStrategyForecastService,
 )
 
-SOURCE = '''
+SOURCE = """
 STRATEGY_API_VERSION = "1.0"
 STRATEGY_META = {
     "name": "test",
@@ -25,7 +25,7 @@ STRATEGY_META = {
 }
 def calculate_targets(history, params, context):
     return {}
-'''
+"""
 
 
 class Runner:
@@ -182,9 +182,7 @@ def test_training_content_hash_does_not_depend_on_fetch_time() -> None:
             },
         ),
     }
-    first = TrainingDataSnapshot(
-        **values, fetched_at=datetime(2026, 7, 21, tzinfo=UTC)
-    )
+    first = TrainingDataSnapshot(**values, fetched_at=datetime(2026, 7, 21, tzinfo=UTC))
     second = TrainingDataSnapshot(
         **values, fetched_at=datetime(2026, 7, 22, tzinfo=UTC)
     )

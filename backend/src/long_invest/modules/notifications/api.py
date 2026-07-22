@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -70,6 +71,10 @@ class TemplateTypePreviewRequest(StrictRequest):
     test_message: bool = False
 
 
+class TemplateActivateRequest(MutationRequest):
+    version: str = Field(min_length=1, max_length=100)
+
+
 class ChannelTestRequest(MutationRequest):
     message: str = Field(min_length=1, max_length=1000)
 
@@ -77,6 +82,60 @@ class ChannelTestRequest(MutationRequest):
 class SettingMutationRequest(MutationRequest):
     value: dict[str, Any]
     expected_version: int = Field(ge=1)
+
+
+class TemplateVersionData(BaseModel):
+    template_type: str
+    version: str
+    active: bool
+    source: str
+    created_at: datetime
+
+
+class TemplateListData(BaseModel):
+    items: list[TemplateVersionData]
+
+
+class TemplateListResponse(SuccessEnvelope):
+    data: TemplateListData
+
+
+class TemplateActivationData(BaseModel):
+    template_type: str
+    version: str
+    changed: bool
+    replayed: bool
+
+
+class TemplateActivationResponse(SuccessEnvelope):
+    data: TemplateActivationData
+
+
+class ChannelActionData(BaseModel):
+    outcome: str
+    code: str
+    summary: str
+    retryable: bool
+    possibly_delivered: bool
+    details: dict[str, Any]
+    replayed: bool
+
+
+class ChannelActionResponse(SuccessEnvelope):
+    data: ChannelActionData
+
+
+class CircuitResetData(BaseModel):
+    channel: DeliveryChannel
+    state: str
+    consecutive_failures: int
+    cooldown_level: int
+    retry_at: datetime | None
+    replayed: bool
+
+
+class CircuitResetResponse(SuccessEnvelope):
+    data: CircuitResetData
 
 
 PolicyScope = Literal["global", "signals", "system-alerts"]
@@ -293,14 +352,10 @@ async def retry_batch(
     )
 
 
-@router.get("/api/v1/notification-templates", response_model=SuccessEnvelope)
-@router.get("/api/v1/notifications/templates", response_model=SuccessEnvelope)
-async def list_templates(_identity: ReadIdentity):
-    items = [
-        {"template_type": item.template_type, "version": item.version}
-        for item in GIT_TEMPLATE_REGISTRY.definitions.values()
-    ]
-    return success_response(data={"items": items})
+@router.get("/api/v1/notification-templates", response_model=TemplateListResponse)
+@router.get("/api/v1/notifications/templates", response_model=TemplateListResponse)
+async def list_templates(application: Application, _identity: ReadIdentity):
+    return success_response(data={"items": await application.list_templates()})
 
 
 @router.get("/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope)
@@ -315,12 +370,8 @@ async def get_policy(
     )
 
 
-@router.patch(
-    "/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope
-)
-@router.patch(
-    "/api/v1/notifications/policies/{scope}", response_model=SuccessEnvelope
-)
+@router.patch("/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope)
+@router.patch("/api/v1/notifications/policies/{scope}", response_model=SuccessEnvelope)
 async def update_policy(
     scope: PolicyScope,
     body: SettingMutationRequest,
@@ -375,9 +426,7 @@ async def get_channel(
     )
 
 
-@router.patch(
-    "/api/v1/notification-channels/{channel}", response_model=SuccessEnvelope
-)
+@router.patch("/api/v1/notification-channels/{channel}", response_model=SuccessEnvelope)
 @router.patch(
     "/api/v1/notifications/channels/{channel}", response_model=SuccessEnvelope
 )
@@ -401,9 +450,7 @@ async def update_channel(
     return success_response(data=result)
 
 
-@router.post(
-    "/api/v1/notifications/templates/preview", response_model=SuccessEnvelope
-)
+@router.post("/api/v1/notifications/templates/preview", response_model=SuccessEnvelope)
 async def preview_template(body: TemplatePreviewRequest, _identity: WriteIdentity):
     return _preview_template(
         body.template_type,
@@ -428,6 +475,28 @@ async def preview_template_type(
         body.variables,
         test_message=body.test_message,
     )
+
+
+@router.post(
+    "/api/v1/notification-templates/{type}/activate",
+    response_model=TemplateActivationResponse,
+)
+async def activate_template(
+    type: str,
+    body: TemplateActivateRequest,
+    application: Application,
+    identity: WriteIdentity,
+    idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    result = await application.activate_template(
+        type,
+        body.version,
+        reason=body.reason,
+        idempotency_key=idempotency_key,
+        **_context(identity),
+    )
+    return success_response(data=result, code="NOTIFICATION_TEMPLATE_ACTIVATED")
 
 
 def _preview_template(
@@ -483,6 +552,49 @@ async def test_channel(
         **_context(identity),
     )
     return success_response(data=result)
+
+
+@router.post(
+    "/api/v1/notification-channels/{channel}/probe",
+    response_model=ChannelActionResponse,
+)
+async def probe_channel(
+    channel: DeliveryChannel,
+    body: ChannelTestRequest,
+    application: Application,
+    identity: WriteIdentity,
+    idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    result = await application.probe_channel(
+        channel,
+        message=body.message,
+        reason=body.reason,
+        idempotency_key=idempotency_key,
+        **_context(identity),
+    )
+    return success_response(data=result, code="NOTIFICATION_CHANNEL_PROBED")
+
+
+@router.post(
+    "/api/v1/notification-channels/{channel}/reset-circuit",
+    response_model=CircuitResetResponse,
+)
+async def reset_channel_circuit(
+    channel: DeliveryChannel,
+    body: MutationRequest,
+    application: Application,
+    identity: WriteIdentity,
+    idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    result = await application.reset_circuit(
+        channel,
+        reason=body.reason,
+        idempotency_key=idempotency_key,
+        **_context(identity),
+    )
+    return success_response(data=result, code="NOTIFICATION_CIRCUIT_RESET")
 
 
 def _page(value, serializer):

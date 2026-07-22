@@ -105,7 +105,8 @@ def test_subscription_revision_rejects_invalid_hysteresis() -> None:
         "parameter_snapshot": {},
         "hysteresis_ratio": "0.020000",
         "hysteresis_min": "0.020000",
-        "notification_mode": "DEFAULT",
+        "notification_mode": "INHERIT",
+        "notification_channels": [],
     }
     for field in ("hysteresis_ratio", "hysteresis_min"):
         with pytest.raises(ValidationError):
@@ -126,7 +127,8 @@ def test_parameter_snapshot_is_deeply_immutable_and_copied() -> None:
         parameter_snapshot=nested,
         hysteresis_ratio="0.020000",
         hysteresis_min="0.020000",
-        notification_mode="DEFAULT",
+        notification_mode="INHERIT",
+        notification_channels=(),
     )
     nested["windows"].append(20)
     nested["flags"]["confirmed"] = False

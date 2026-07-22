@@ -154,7 +154,7 @@ def setup_case(
         target_mode="MANUAL",
         hysteresis_ratio="0.02",
         hysteresis_min="0.02",
-        notification_mode="DEFAULT",
+        notification_mode="INHERIT",
     )
     targets = TargetValues(
         low_strong="8", low_watch="9", high_watch="11", high_strong="12"
@@ -543,9 +543,7 @@ async def test_reset_replay_does_not_repeat_state_audit_event_or_job():
 async def test_reset_rejects_stale_version_and_idempotency_content_change():
     case, service, *_ = _mutation_service()
     with pytest.raises(AppError) as stale:
-        await service.reset(
-            _command(SignalStateResetCommand, case, expected_version=2)
-        )
+        await service.reset(_command(SignalStateResetCommand, case, expected_version=2))
     assert stale.value.code == "SIGNAL_STATE_VERSION_CONFLICT"
 
     command = _command(SignalStateResetCommand, case)
@@ -614,6 +612,4 @@ async def test_skipped_evaluation_writes_a_traceable_fact():
     result = await service.evaluate(signal_input(case))
 
     assert result.result is EvaluationResult.SKIPPED
-    assert [event.event_type for event in events.items] == [
-        "signal.evaluation_skipped"
-    ]
+    assert [event.event_type for event in events.items] == ["signal.evaluation_skipped"]

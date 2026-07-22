@@ -110,29 +110,22 @@ class StrategyGitStore:
     ) -> str | None:
         if self._repo.head.is_valid() is False:
             return None
-        commits = list(
-            self._repo.iter_commits(paths=relative_source, max_count=1)
-        )
+        commits = list(self._repo.iter_commits(paths=relative_source, max_count=1))
         if not commits:
             return None
         commit = commits[0].hexsha
         if self._path_has_hash(
             commit, relative_source, source_code_hash
-        ) and self._path_has_text(
-            commit, relative_manifest, serialized_manifest
-        ):
+        ) and self._path_has_text(commit, relative_manifest, serialized_manifest):
             return commit
         raise ValueError(
             "strategy version was already committed with different content"
         )
 
-    def _assert_only_controlled_paths_staged(
-        self, allowed_paths: set[str]
-    ) -> None:
+    def _assert_only_controlled_paths_staged(self, allowed_paths: set[str]) -> None:
         if self._repo.head.is_valid():
             staged = {
-                item.a_path or item.b_path
-                for item in self._repo.index.diff("HEAD")
+                item.a_path or item.b_path for item in self._repo.index.diff("HEAD")
             }
         else:
             staged = {path for path, _stage in self._repo.index.entries}
@@ -161,9 +154,7 @@ class StrategyGitStore:
             commit,
             (relative / "strategy.py").as_posix(),
             source_code_hash,
-        ) and self.commit_contains(
-            commit, (relative / "manifest.json").as_posix()
-        )
+        ) and self.commit_contains(commit, (relative / "manifest.json").as_posix())
 
     def commit_contains(self, commit: str, path: str) -> bool:
         try:

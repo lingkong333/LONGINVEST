@@ -143,7 +143,7 @@ async def _seed(database):
         parameters={},
         hysteresis_ratio="0.02",
         hysteresis_min="0.02",
-        notification_mode="ALL",
+        notification_mode="INHERIT",
         reason="seed",
         created_by_user_id="integration-user",
         request_id=f"seed-{token}",

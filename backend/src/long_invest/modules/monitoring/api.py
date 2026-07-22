@@ -15,6 +15,10 @@ from long_invest.modules.monitoring.application import (
     MonitorSubscriptionApplication,
     get_monitor_subscription_application,
 )
+from long_invest.modules.monitoring.contracts import (
+    SubscriptionNotificationChannel,
+    SubscriptionNotificationMode,
+)
 from long_invest.modules.monitoring.service import SubscriptionAuditContext
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
@@ -45,7 +49,10 @@ class ConfigFields(StrictRequest):
     parameters: dict[str, Any] = {}
     hysteresis_ratio: Decimal = Field(default=Decimal("0"), ge=0)
     hysteresis_min: Decimal = Field(default=Decimal("0"), ge=0)
-    notification_mode: str = Field(default="DEFAULT", min_length=1, max_length=64)
+    notification_mode: SubscriptionNotificationMode = (
+        SubscriptionNotificationMode.INHERIT
+    )
+    notification_channels: tuple[SubscriptionNotificationChannel, ...] = ()
 
 
 class CreateRequest(ConfigFields):
@@ -61,6 +68,14 @@ class ConfigureRequest(ConfigFields):
 
 
 class TransitionRequest(StrictRequest):
+    expected_version: int = Field(ge=1)
+    reason: str = Field(min_length=1, max_length=500, pattern=r".*\S.*")
+    confirm: StrictBool
+
+
+class NotificationPolicyRequest(StrictRequest):
+    mode: SubscriptionNotificationMode
+    channels: tuple[SubscriptionNotificationChannel, ...] = ()
     expected_version: int = Field(ge=1)
     reason: str = Field(min_length=1, max_length=500, pattern=r".*\S.*")
     confirm: StrictBool
@@ -88,8 +103,31 @@ class RevisionRecord(BaseModel):
     parameters: dict[str, Any]
     hysteresis_ratio: Decimal
     hysteresis_min: Decimal
-    notification_mode: str
+    notification_mode: SubscriptionNotificationMode
+    notification_channels: list[SubscriptionNotificationChannel]
     reason: str
+
+
+class NotificationPolicyData(BaseModel):
+    subscription_id: UUID
+    subscription_version: int
+    revision_id: UUID
+    revision_no: int
+    mode: SubscriptionNotificationMode
+    channels: list[SubscriptionNotificationChannel]
+
+
+class NotificationPolicyResponse(SuccessEnvelope):
+    data: NotificationPolicyData
+
+
+class NotificationPolicyMutationData(BaseModel):
+    policy: NotificationPolicyData
+    replayed: bool
+
+
+class NotificationPolicyMutationResponse(SuccessEnvelope):
+    data: NotificationPolicyMutationData
 
 
 class ResultData(BaseModel):
@@ -156,6 +194,55 @@ async def get_subscription(
                 _revision(x) for x in await application.revisions(subscription_id)
             ],
         }
+    )
+
+
+@router.get(
+    "/{subscription_id}/notification-policy",
+    response_model=NotificationPolicyResponse,
+)
+async def get_notification_policy(
+    subscription_id: UUID,
+    application: Application,
+    _identity: ReadIdentity,
+    revision_id: UUID | None = None,
+):
+    policy = await application.notification_policy(
+        subscription_id, revision_id=revision_id
+    )
+    return success_response(data=policy.model_dump(mode="json"))
+
+
+@router.patch(
+    "/{subscription_id}/notification-policy",
+    response_model=NotificationPolicyMutationResponse,
+)
+async def update_notification_policy(
+    subscription_id: UUID,
+    body: NotificationPolicyRequest,
+    application: Application,
+    identity: WriteIdentity,
+    idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    result = await application.configure_notification_policy(
+        subscription_id,
+        mode=body.mode,
+        channels=body.channels,
+        expected_version=body.expected_version,
+        reason=body.reason,
+        idempotency_key=idempotency_key,
+        **_context(identity),
+    )
+    policy = await application.notification_policy(
+        subscription_id, revision_id=result.revision.id
+    )
+    return success_response(
+        data={
+            "policy": policy.model_dump(mode="json"),
+            "replayed": result.replayed,
+        },
+        code="MONITOR_NOTIFICATION_POLICY_UPDATED",
     )
 
 
@@ -358,6 +445,7 @@ def _revision(x):
             "hysteresis_ratio",
             "hysteresis_min",
             "notification_mode",
+            "notification_channels",
             "reason",
         )
     }

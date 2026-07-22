@@ -247,8 +247,7 @@ def _validate_imports_and_capabilities(tree: ast.AST) -> None:
         if isinstance(node, ast.Attribute) and (
             node.attr.startswith("__")
             or any(
-                is_dangerous_library_segment(item)
-                for item in _attribute_chain(node)
+                is_dangerous_library_segment(item) for item in _attribute_chain(node)
             )
         ):
             raise StrategyStaticAnalysisError(

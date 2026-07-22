@@ -12,6 +12,7 @@ from long_invest.modules.notifications.channels import (
     EmailChannelConfig,
     WeComChannelConfig,
 )
+from long_invest.modules.notifications.circuit import NotificationCircuitService
 from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
     NotificationDeliveryStatus,
@@ -64,7 +65,22 @@ class NotificationDeliveryRuntime:
         async with self._database.transaction() as session:
             repository = NotificationRepository(session)
             service = NotificationService(repository)
-            await service.recover_expired_leases(channel=channel, now=now, limit=20)
+            circuit = NotificationCircuitService(repository)
+            recovered = await service.recover_expired_leases(
+                channel=channel, now=now, limit=20
+            )
+            for _ in range(recovered):
+                await circuit.record_result(
+                    channel,
+                    ChannelResult.outcome_unknown(
+                        code="DELIVERY_LEASE_EXPIRED",
+                        summary="delivery worker lease expired during send",
+                    ),
+                    now=now,
+                )
+            permission = await circuit.prepare_delivery(channel, now=now)
+            if not permission.allowed:
+                return False
             claimed = await repository.claim_next(
                 channel=channel,
                 worker_id=self._worker_id,
@@ -157,6 +173,11 @@ class NotificationDeliveryRuntime:
                     started_at=execution.started_at,
                     finished_at=execution.finished_at,
                 )
+                await NotificationCircuitService(repository).record_result(
+                    channel,
+                    execution.result,
+                    now=execution.finished_at,
+                )
         return True
 
     async def test_channel(
@@ -185,14 +206,61 @@ class NotificationDeliveryRuntime:
                 )
             )
 
+    async def probe_channel(
+        self,
+        channel: DeliveryChannel,
+        *,
+        message: str,
+    ) -> ChannelResult:
+        now = datetime.now(UTC)
+        async with self._database.transaction() as session:
+            permission = await NotificationCircuitService(
+                NotificationRepository(session)
+            ).grant_probe(channel, now=now)
+        if not permission.allowed or permission.probe_token is None:
+            return ChannelResult.permanent_failure(
+                code="NOTIFICATION_CIRCUIT_PROBE_NOT_ALLOWED",
+                summary="channel circuit is not ready for a half-open probe",
+            )
+        try:
+            result = await self.test_channel(channel, message=message)
+        except Exception as exc:
+            result = ChannelResult.temporary_failure(
+                code="NOTIFICATION_CHANNEL_PROBE_FAILED",
+                summary="notification channel probe failed",
+                details={"error_type": type(exc).__name__},
+            )
+        async with self._database.transaction() as session:
+            await NotificationCircuitService(
+                NotificationRepository(session)
+            ).record_result(
+                channel,
+                result,
+                now=datetime.now(UTC),
+                probe_token=permission.probe_token,
+            )
+        return result
+
+    async def reset_circuit(self, channel: DeliveryChannel):
+        async with self._database.transaction() as session:
+            return await NotificationCircuitService(
+                NotificationRepository(session)
+            ).reset(channel)
+
     async def _record_build_failure(self, claimed, started_at, result) -> None:
         async with self._database.transaction() as session:
-            service = NotificationService(NotificationRepository(session))
+            repository = NotificationRepository(session)
+            service = NotificationService(repository)
             await service.record_result(
                 _lease(claimed),
                 result=result,
                 started_at=started_at,
                 finished_at=datetime.now(UTC),
+            )
+            await NotificationCircuitService(repository).record_result(
+                DeliveryChannel(claimed.delivery.channel),
+                result,
+                now=datetime.now(UTC),
             )
 
     async def _load_channel(self, channel: DeliveryChannel):

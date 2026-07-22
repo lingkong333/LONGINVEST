@@ -9,6 +9,10 @@ from difflib import unified_diff
 from typing import Any, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
+from long_invest.modules.strategies.contracts import (
+    StrategySubscriptionScope,
+    StrategyVersionOperation,
+)
 from long_invest.modules.strategies.models import (
     Strategy,
     StrategyDraft,
@@ -50,6 +54,13 @@ class StrategyCreated:
 class FrozenPublication:
     version: StrategyVersion
     run: StrategyRun | None = None
+    replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenVersionOperation:
+    strategy_version_id: UUID
+    subscription_ids: tuple[UUID, ...]
     replayed: bool = False
 
 
@@ -154,6 +165,93 @@ class StrategyService:
                 status_code=404,
             )
         return run
+
+    async def request_version_operation(
+        self,
+        strategy_id: UUID,
+        *,
+        strategy_version_id: UUID,
+        operation: StrategyVersionOperation,
+        scope: StrategySubscriptionScope,
+        subscription_ids: tuple[UUID, ...],
+        target_date: date,
+        training_start_date: date,
+        training_end_date: date,
+        context: StrategyCommandContext,
+    ) -> FrozenVersionOperation:
+        _require_context(context)
+        if len(set(subscription_ids)) != len(subscription_ids):
+            raise AppError(
+                code="STRATEGY_SUBSCRIPTION_SCOPE_INVALID",
+                message="策略操作必须包含不重复的订阅",
+                status_code=422,
+            )
+        strategy = await self.get(strategy_id)
+        version = await self._repository.get_version(
+            strategy_id, strategy_version_id, for_update=False
+        )
+        if version is None:
+            raise _not_found()
+        if str(version.status) != "PUBLISHED":
+            raise AppError(
+                code="STRATEGY_VERSION_NOT_PUBLISHED",
+                message="只能应用或回滚到已发布的策略版本",
+                status_code=409,
+            )
+        ordered_ids = tuple(sorted(subscription_ids, key=str))
+        topic = (
+            "strategy.version_apply_requested"
+            if operation is StrategyVersionOperation.APPLY
+            else "strategy.version_rollback_requested"
+        )
+        audit_key = _audit_key(topic, strategy.id, context.idempotency_key)
+        replay = await self._audit.find_by_idempotency(audit_key)
+        if replay is not None:
+            after = replay.after_summary or {}
+            try:
+                replay_version_id = UUID(str(after["strategy_version_id"]))
+                replay_subscription_ids = tuple(
+                    UUID(str(value)) for value in after["subscription_ids"]
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise _idempotency_conflict() from exc
+            if (
+                replay_version_id != strategy_version_id
+                or after.get("operation") != operation.value
+                or after.get("scope") != scope.value
+                or (
+                    scope is StrategySubscriptionScope.SELECTED
+                    and replay_subscription_ids != ordered_ids
+                )
+                or after.get("target_date") != target_date.isoformat()
+                or after.get("training_start_date") != training_start_date.isoformat()
+                or after.get("training_end_date") != training_end_date.isoformat()
+            ):
+                raise _idempotency_conflict()
+            return FrozenVersionOperation(
+                strategy_version_id=replay_version_id,
+                subscription_ids=replay_subscription_ids,
+                replayed=True,
+            )
+        await self._record(
+            topic,
+            strategy,
+            context,
+            before=None,
+            after={
+                "operation": operation.value,
+                "scope": scope.value,
+                "strategy_version_id": str(strategy_version_id),
+                "subscription_ids": [str(value) for value in ordered_ids],
+                "target_date": target_date.isoformat(),
+                "training_start_date": training_start_date.isoformat(),
+                "training_end_date": training_end_date.isoformat(),
+            },
+        )
+        return FrozenVersionOperation(
+            strategy_version_id=strategy_version_id,
+            subscription_ids=ordered_ids,
+        )
 
     async def list_recoverable_publish_runs(self) -> list[StrategyRun]:
         return await self._repository.list_recoverable_publish_runs()
@@ -526,9 +624,7 @@ class StrategyService:
         strategy_status = str(strategy.status)
         if is_current:
             strategy_status = "VALIDATED" if succeeded else "DRAFT"
-            await self._repository.set_strategy_status(
-                run.strategy_id, strategy_status
-            )
+            await self._repository.set_strategy_status(run.strategy_id, strategy_status)
             strategy.status = strategy_status
         topic = (
             "strategy.validation_completed"
@@ -627,15 +723,11 @@ class StrategyService:
                     context.idempotency_key,
                 )
                 if await self._audit.find_by_idempotency(retry_audit_key) is not None:
-                    return FrozenPublication(
-                        version=existing, run=run, replayed=True
-                    )
+                    return FrozenPublication(version=existing, run=run, replayed=True)
                 existing.status = "PUBLISHING"
                 run.status = "PENDING"
                 await self._repository.set_strategy_run_status(run.id, "PENDING")
-                await self._repository.set_strategy_status(
-                    strategy_id, "PUBLISHING"
-                )
+                await self._repository.set_strategy_status(strategy_id, "PUBLISHING")
                 strategy.status = "PUBLISHING"
                 await self._record(
                     "strategy.publish_requested",
@@ -655,9 +747,7 @@ class StrategyService:
                     },
                 )
             if existing.status in {"PUBLISHING", "PUBLISHED"}:
-                return FrozenPublication(
-                    version=existing, run=run, replayed=True
-                )
+                return FrozenPublication(version=existing, run=run, replayed=True)
             raise AppError(
                 code="STRATEGY_VERSION_IMMUTABLE",
                 message="验证证据已绑定不可重用的发布版本",
@@ -1172,8 +1262,7 @@ def _validated_release_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
         raise _invalid("验证证据缺少发布所需的冻结事实")
     if (
         value["metadata_hash"] != _json_hash(value["metadata"])
-        or value["parameter_schema_hash"]
-        != _json_hash(value["parameter_schema"])
+        or value["parameter_schema_hash"] != _json_hash(value["parameter_schema"])
         or value["parameter_hash"] != _json_hash(value["params"])
         or value["environment_hash"]
         != hashlib.sha256(value["environment_version"].encode()).hexdigest()
@@ -1183,9 +1272,7 @@ def _validated_release_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
             message="验证证据不完整或内容哈希不一致",
             status_code=409,
         )
-    _validate_environment(
-        value["environment_version"], value["runner_image_digest"]
-    )
+    _validate_environment(value["environment_version"], value["runner_image_digest"])
     _validate_completed_checks(value)
     return value
 

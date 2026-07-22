@@ -192,7 +192,7 @@ def test_signal_owns_its_notification_request_contract() -> None:
         position_status="NOT_HOLDING",
         position_version=0,
         reason=EvaluationReason.SCHEDULED_QUOTE,
-        notification_mode="DEFAULT",
+        notification_mode="INHERIT",
         eligible=True,
         idempotency_key="signal-event:1",
         request_id="request-1",

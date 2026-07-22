@@ -26,6 +26,14 @@ def test_api_exposes_concrete_authenticated_lifecycle() -> None:
         ("/api/v1/monitor-subscriptions/{subscription_id}/restore", "POST"),
         ("/api/v1/monitor-subscriptions/{subscription_id}/check-now", "POST"),
         ("/api/v1/monitor-subscriptions/{subscription_id}/diagnose", "POST"),
+        (
+            "/api/v1/monitor-subscriptions/{subscription_id}/notification-policy",
+            "GET",
+        ),
+        (
+            "/api/v1/monitor-subscriptions/{subscription_id}/notification-policy",
+            "PATCH",
+        ),
     }
     assert expected <= paths
     for route in (r for r in router.routes if isinstance(r, APIRoute)):

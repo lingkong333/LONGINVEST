@@ -1,15 +1,28 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
 from pathlib import Path
 from typing import Any
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.strategies.contracts import (
+    StrategyDraftView,
     StrategyForecastRequest,
     StrategyLifecycleStatus,
+    StrategyOperationBatchResult,
+    StrategyOperationItemResult,
+    StrategyOperationItemStatus,
+    StrategyStockTestPort,
+    StrategyStockTestRequest,
+    StrategyStockTestSubmission,
+    StrategySubscriptionScope,
+    StrategySubscriptionScopePort,
+    StrategyVersionOperation,
+    StrategyVersionTargetPort,
+    StrategyVersionTargetRequest,
     StrategyVersionView,
     ValidationEvidenceClaim,
     ValidationEvidenceVerifier,
@@ -44,6 +57,17 @@ class ConfiguredValidationEvidenceVerifier:
 _validation_evidence_verifier_factory: (
     Callable[[], ValidationEvidenceVerifier] | None
 ) = None
+_operation_ports_factory: (
+    Callable[
+        [],
+        tuple[
+            StrategyStockTestPort,
+            StrategySubscriptionScopePort,
+            StrategyVersionTargetPort,
+        ],
+    ]
+    | None
+) = None
 
 
 def configure_strategy_validation_evidence_verifier(
@@ -51,6 +75,20 @@ def configure_strategy_validation_evidence_verifier(
 ) -> None:
     global _validation_evidence_verifier_factory
     _validation_evidence_verifier_factory = factory
+
+
+def configure_strategy_operation_ports(
+    factory: Callable[
+        [],
+        tuple[
+            StrategyStockTestPort,
+            StrategySubscriptionScopePort,
+            StrategyVersionTargetPort,
+        ],
+    ],
+) -> None:
+    global _operation_ports_factory
+    _operation_ports_factory = factory
 
 
 def get_configured_validation_evidence_verifier() -> ValidationEvidenceVerifier:
@@ -72,6 +110,9 @@ class StrategyApplication:
         environment_version: str = "python-3.12",
         runner_image_digest: str = "",
         evidence_verifier: ValidationEvidenceVerifier,
+        stock_tests: StrategyStockTestPort | None = None,
+        subscription_scope: StrategySubscriptionScopePort | None = None,
+        version_targets: StrategyVersionTargetPort | None = None,
     ) -> None:
         self._database = database
         self._git = git_store
@@ -82,6 +123,9 @@ class StrategyApplication:
         self._environment_version = environment_version
         self._runner_image_digest = runner_image_digest
         self._evidence_verifier = evidence_verifier
+        self._stock_tests = stock_tests
+        self._subscription_scope = subscription_scope
+        self._version_targets = version_targets
 
     async def list(self, **kwargs: Any):
         return await self._read("list", **kwargs)
@@ -163,14 +207,233 @@ class StrategyApplication:
         ):
             return False
         analysis = analyze_strategy_source(draft.source_code)
-        return (
-            thaw_json_value(request.metadata) == thaw_json_value(analysis.metadata)
-            and thaw_json_value(request.parameter_schema)
-            == thaw_json_value(analysis.parameter_schema)
+        return thaw_json_value(request.metadata) == thaw_json_value(
+            analysis.metadata
+        ) and thaw_json_value(request.parameter_schema) == thaw_json_value(
+            analysis.parameter_schema
         )
 
     async def diff(self, strategy_id: UUID, *, revision_id: UUID):
         return await self._read("diff", strategy_id, revision_id=revision_id)
+
+    async def test_stock(
+        self,
+        request: StrategyStockTestRequest,
+        *,
+        idempotency_key: str,
+        request_id: str,
+        actor_user_id: str,
+        reason: str,
+    ) -> StrategyStockTestSubmission:
+        stock_tests = self._required_operation_port(self._stock_tests)
+        draft = await self.get_draft(request.strategy_id)
+        try:
+            analysis = analyze_strategy_source(draft.source_code)
+        except ValueError as exc:
+            raise AppError(
+                code=str(getattr(exc, "code", "STRATEGY_INPUT_INVALID")),
+                message="策略草稿未通过语法和契约检查",
+                status_code=422,
+            ) from exc
+        task_id = uuid5(
+            NAMESPACE_URL,
+            f"longinvest:strategy-test:{request.strategy_id}:{idempotency_key}",
+        )
+        return await stock_tests.submit_strategy_test(
+            task_id=task_id,
+            draft=StrategyDraftView(
+                id=draft.id,
+                strategy_id=draft.strategy_id,
+                draft_version=draft.draft_version,
+                source_code=draft.source_code,
+            ),
+            metadata=analysis.metadata,
+            parameter_schema=analysis.parameter_schema,
+            request=request,
+            idempotency_key=idempotency_key,
+            request_id=request_id,
+            actor_user_id=actor_user_id,
+            reason=reason,
+        )
+
+    async def apply_version(
+        self,
+        strategy_id: UUID,
+        strategy_version_id: UUID,
+        **kwargs: Any,
+    ) -> StrategyOperationBatchResult:
+        return await self._operate_version(
+            strategy_id,
+            strategy_version_id,
+            operation=StrategyVersionOperation.APPLY,
+            **kwargs,
+        )
+
+    async def rollback_version(
+        self,
+        strategy_id: UUID,
+        strategy_version_id: UUID,
+        **kwargs: Any,
+    ) -> StrategyOperationBatchResult:
+        return await self._operate_version(
+            strategy_id,
+            strategy_version_id,
+            operation=StrategyVersionOperation.ROLLBACK,
+            **kwargs,
+        )
+
+    async def _operate_version(
+        self,
+        strategy_id: UUID,
+        strategy_version_id: UUID,
+        *,
+        operation: StrategyVersionOperation,
+        scope: StrategySubscriptionScope,
+        subscription_ids: tuple[UUID, ...],
+        target_date: date,
+        training_start_date: date,
+        training_end_date: date,
+        reason: str,
+        idempotency_key: str,
+        request_id: str,
+        actor_user_id: str,
+        session_id: str,
+        trusted_ip: str,
+    ) -> StrategyOperationBatchResult:
+        subscriptions = self._required_operation_port(self._subscription_scope)
+        version_targets = self._required_operation_port(self._version_targets)
+        if scope is StrategySubscriptionScope.SELECTED and not subscription_ids:
+            raise AppError(
+                code="STRATEGY_SUBSCRIPTION_SCOPE_INVALID",
+                message="选择指定范围时至少需要一个订阅",
+                status_code=422,
+            )
+        if len(set(subscription_ids)) != len(subscription_ids):
+            raise AppError(
+                code="STRATEGY_SUBSCRIPTION_SCOPE_INVALID",
+                message="订阅列表不能包含重复项",
+                status_code=422,
+            )
+        candidates = await subscriptions.resolve_strategy_subscriptions(
+            strategy_id=strategy_id,
+            scope=scope,
+            subscription_ids=subscription_ids,
+        )
+        resolved_subscription_ids = (
+            subscription_ids
+            if scope is StrategySubscriptionScope.SELECTED
+            else tuple(item.subscription_id for item in candidates)
+        )
+        frozen = await self._write(
+            "request_version_operation",
+            strategy_id,
+            strategy_version_id=strategy_version_id,
+            operation=operation,
+            scope=scope,
+            subscription_ids=resolved_subscription_ids,
+            target_date=target_date,
+            training_start_date=training_start_date,
+            training_end_date=training_end_date,
+            context=self._context(
+                {
+                    "reason": reason,
+                    "idempotency_key": idempotency_key,
+                    "request_id": request_id,
+                    "actor_user_id": actor_user_id,
+                    "session_id": session_id,
+                    "trusted_ip": trusted_ip,
+                }
+            ),
+            conflict_code="STRATEGY_VERSION_OPERATION_CONFLICT",
+        )
+        if resolved_subscription_ids != frozen.subscription_ids:
+            candidates = await subscriptions.resolve_strategy_subscriptions(
+                strategy_id=strategy_id,
+                scope=StrategySubscriptionScope.SELECTED,
+                subscription_ids=frozen.subscription_ids,
+            )
+        candidate_by_id = {item.subscription_id: item for item in candidates}
+        results: list[StrategyOperationItemResult] = []
+        for subscription_id in frozen.subscription_ids:
+            candidate = candidate_by_id.get(subscription_id)
+            if candidate is None:
+                results.append(
+                    StrategyOperationItemResult(
+                        subscription_id=subscription_id,
+                        status=StrategyOperationItemStatus.REJECTED,
+                        code="STRATEGY_SUBSCRIPTION_NOT_FOUND",
+                    )
+                )
+                continue
+            item_key = f"{idempotency_key}:{operation.value.lower()}:{subscription_id}"
+            try:
+                submission = await version_targets.submit_strategy_version_target(
+                    StrategyVersionTargetRequest(
+                        operation=operation,
+                        strategy_id=strategy_id,
+                        strategy_version_id=frozen.strategy_version_id,
+                        subscription_id=subscription_id,
+                        subscription_version=candidate.subscription_version,
+                        target_version=candidate.target_version,
+                        parameter_snapshot=candidate.parameter_snapshot,
+                        target_date=target_date,
+                        training_start_date=training_start_date,
+                        training_end_date=training_end_date,
+                        reason=reason,
+                        idempotency_key=item_key,
+                        request_id=request_id,
+                        actor_user_id=actor_user_id,
+                        session_id=session_id,
+                        trusted_ip=trusted_ip,
+                    )
+                )
+            except AppError as exc:
+                results.append(
+                    StrategyOperationItemResult(
+                        subscription_id=subscription_id,
+                        status=StrategyOperationItemStatus.REJECTED,
+                        code=exc.code,
+                    )
+                )
+            except (TimeoutError, RuntimeError):
+                results.append(
+                    StrategyOperationItemResult(
+                        subscription_id=subscription_id,
+                        status=StrategyOperationItemStatus.FAILED,
+                        code="STRATEGY_TARGET_SUBMISSION_FAILED",
+                    )
+                )
+            else:
+                results.append(
+                    StrategyOperationItemResult(
+                        subscription_id=subscription_id,
+                        status=(
+                            StrategyOperationItemStatus.REUSED
+                            if submission.replayed
+                            else StrategyOperationItemStatus.ACCEPTED
+                        ),
+                        code=submission.code,
+                        run_id=submission.run_id,
+                        job_id=submission.job_id,
+                    )
+                )
+        return StrategyOperationBatchResult(
+            operation=operation,
+            strategy_id=strategy_id,
+            strategy_version_id=frozen.strategy_version_id,
+            replayed=frozen.replayed,
+            items=tuple(results),
+        )
+
+    @staticmethod
+    def _required_operation_port(value: Any) -> Any:
+        if value is None:
+            raise AppError(
+                code="STRATEGY_CAPABILITY_NOT_READY",
+                message="策略操作依赖尚未接入",
+                status_code=503,
+            )
+        return value
 
     async def create(self, *, name: str, **context: str):
         return await self._write(
@@ -303,13 +566,9 @@ class StrategyApplication:
         **context: str,
     ):
         command_context = self._context(context)
-        validation = await self._read(
-            "get_validation_evidence", validation_run_id
-        )
+        validation = await self._read("get_validation_evidence", validation_run_id)
         snapshot = validation.evidence_snapshot
-        evidence_hash = StrategyService.hash_snapshot(
-            snapshot
-        )
+        evidence_hash = StrategyService.hash_snapshot(snapshot)
         claim = ValidationEvidenceClaim(
             validation_run_id=validation.id,
             strategy_id=validation.strategy_id,
@@ -508,6 +767,7 @@ def get_strategy_application() -> StrategyApplication:
         getattr(settings, "strategy_git_path", "/var/lib/long-invest/strategies")
     )
     database = get_database()
+    operation_ports = _operation_ports_factory() if _operation_ports_factory else None
     return StrategyApplication(
         database,
         git_store=StrategyGitStore(root),
@@ -520,6 +780,9 @@ def get_strategy_application() -> StrategyApplication:
             "",
         ),
         evidence_verifier=ConfiguredValidationEvidenceVerifier(),
+        stock_tests=operation_ports[0] if operation_ports else None,
+        subscription_scope=operation_ports[1] if operation_ports else None,
+        version_targets=operation_ports[2] if operation_ports else None,
     )
 
 

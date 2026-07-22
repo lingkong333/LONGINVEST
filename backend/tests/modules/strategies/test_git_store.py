@@ -84,9 +84,7 @@ def test_retry_continues_after_git_commit_failed_with_files_already_written(
     assert len(commit) == 40
 
 
-def test_retry_rebuilds_controlled_file_after_interrupted_write(
-    tmp_path, monkeypatch
-):
+def test_retry_rebuilds_controlled_file_after_interrupted_write(tmp_path, monkeypatch):
     store = StrategyGitStore(tmp_path / "strategies")
     original_write = Path.write_text
     calls = 0
@@ -241,10 +239,9 @@ def test_process_lock_wait_uses_same_repository_deadline(tmp_path, monkeypatch):
     lock = BusyLock()
     monkeypatch.setattr(git_store, "_PROCESS_GIT_LOCK", lock)
 
-    with pytest.raises(
-        TimeoutError, match="repository is busy"
-    ), git_store._repository_lock(
-        tmp_path / "repo.lock", timeout_seconds=0.01
+    with (
+        pytest.raises(TimeoutError, match="repository is busy"),
+        git_store._repository_lock(tmp_path / "repo.lock", timeout_seconds=0.01),
     ):
         raise AssertionError("busy lock must not enter critical section")
 

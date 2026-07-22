@@ -12,6 +12,8 @@ from long_invest.modules.monitor_schedules.application import (
     get_monitor_schedule_application,
 )
 from long_invest.modules.monitoring.contracts import (
+    SubscriptionNotificationChannel,
+    SubscriptionNotificationMode,
     SubscriptionSignalSnapshot,
     SubscriptionStatus,
 )
@@ -141,6 +143,33 @@ class MonitorSubscriptionApplication:
 
     async def revisions(self, subscription_id):
         return await self._read("revisions", subscription_id)
+
+    async def notification_policy(self, subscription_id, *, revision_id=None):
+        return await self._read(
+            "notification_policy", subscription_id, revision_id=revision_id
+        )
+
+    async def configure_notification_policy(
+        self,
+        subscription_id: UUID,
+        *,
+        mode: SubscriptionNotificationMode | str,
+        channels: tuple[SubscriptionNotificationChannel | str, ...],
+        expected_version: int,
+        reason: str,
+        idempotency_key: str,
+        audit_context: SubscriptionAuditContext | None = None,
+    ):
+        return await self._write(
+            "configure_notification_policy",
+            subscription_id,
+            mode=mode,
+            channels=channels,
+            expected_version=expected_version,
+            reason=reason,
+            idempotency_key=idempotency_key,
+            audit_context=audit_context,
+        )
 
     async def enabled_schedule_snapshots(self):
         return await self._read("enabled_schedule_snapshots")
@@ -396,6 +425,7 @@ class TransactionalMonitorSubscriptionPort:
             hysteresis_ratio=revision.hysteresis_ratio,
             hysteresis_min=revision.hysteresis_min,
             notification_mode=revision.notification_mode,
+            notification_channels=tuple(revision.notification_channels),
         )
 
     async def get_subscription_snapshot(self, subscription_id):
@@ -406,6 +436,18 @@ class TransactionalMonitorSubscriptionPort:
         if owner is None or owner.current_revision_id is None:
             return None
         return await self.get_subscription_snapshot(owner.id)
+
+    async def get_notification_policy(self, subscription_id, *, revision_id=None):
+        service = self._service_factory(
+            self._repository,
+            audit=self._audit_factory(self._session),
+            events=self._event_factory(self._session),
+            target_readiness=UnavailableTargetReadiness(),
+            strategy_readiness=UnavailableStrategyReadiness(),
+        )
+        return await service.notification_policy(
+            subscription_id, revision_id=revision_id
+        )
 
     async def switch_to_manual(
         self,
@@ -446,6 +488,7 @@ class TransactionalMonitorSubscriptionPort:
                 hysteresis_ratio=revision.hysteresis_ratio,
                 hysteresis_min=revision.hysteresis_min,
                 notification_mode=revision.notification_mode,
+                notification_channels=tuple(revision.notification_channels),
                 reason=reason,
                 idempotency_key=idempotency_key,
                 expected_version=expected_version,
@@ -518,6 +561,7 @@ class TransactionalMonitorSubscriptionPort:
                 hysteresis_ratio=revision.hysteresis_ratio,
                 hysteresis_min=revision.hysteresis_min,
                 notification_mode=revision.notification_mode,
+                notification_channels=tuple(revision.notification_channels),
                 reason=reason,
                 idempotency_key=idempotency_key,
                 expected_version=expected_version,

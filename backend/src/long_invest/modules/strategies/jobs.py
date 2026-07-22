@@ -147,9 +147,7 @@ async def strategy_publish(context: JobExecutionContext) -> JobResult:
     )
 
 
-def _worker_context(
-    context: JobExecutionContext, reason: str
-) -> dict[str, str]:
+def _worker_context(context: JobExecutionContext, reason: str) -> dict[str, str]:
     identity = f"strategy-job:{context.job_id}"
     return {
         "request_id": str(context.job_id),

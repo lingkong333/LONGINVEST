@@ -22,6 +22,16 @@ class SubscriptionStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class SubscriptionNotificationMode(StrEnum):
+    INHERIT = "INHERIT"
+    CUSTOM = "CUSTOM"
+
+
+class SubscriptionNotificationChannel(StrEnum):
+    WECOM = "WECOM"
+    EMAIL = "EMAIL"
+
+
 class OccurrenceStatus(StrEnum):
     PENDING = "PENDING"
     CLAIMED = "CLAIMED"
@@ -58,7 +68,8 @@ class SubscriptionSignalSnapshot(StrictContract):
     parameter_snapshot: Mapping[str, Any] = Field(default_factory=dict)
     hysteresis_ratio: Decimal = Field(ge=0)
     hysteresis_min: Decimal = Field(ge=0)
-    notification_mode: str
+    notification_mode: SubscriptionNotificationMode
+    notification_channels: tuple[SubscriptionNotificationChannel, ...] = ()
 
     @field_validator("parameter_snapshot", mode="after")
     @classmethod
@@ -97,7 +108,8 @@ class MonitorSubscriptionRevisionView(StrictContract):
     parameter_snapshot: Mapping[str, Any]
     hysteresis_ratio: Decimal = Field(ge=0)
     hysteresis_min: Decimal = Field(ge=0)
-    notification_mode: str = Field(min_length=1, max_length=64)
+    notification_mode: SubscriptionNotificationMode
+    notification_channels: tuple[SubscriptionNotificationChannel, ...] = ()
 
     @field_validator("parameter_snapshot", mode="after")
     @classmethod
@@ -107,6 +119,15 @@ class MonitorSubscriptionRevisionView(StrictContract):
     @field_serializer("parameter_snapshot")
     def serialize_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
         return _deep_thaw(value)
+
+
+class SubscriptionNotificationPolicyView(StrictContract):
+    subscription_id: UUID
+    subscription_version: int = Field(ge=1)
+    revision_id: UUID
+    revision_no: int = Field(ge=1)
+    mode: SubscriptionNotificationMode
+    channels: tuple[SubscriptionNotificationChannel, ...]
 
 
 class ScheduleOccurrenceView(StrictContract):

@@ -23,7 +23,7 @@ class DynamicNotificationTargetResolver:
         self._settings = transactional_settings_service(session)
 
     async def resolve_targets(
-        self, _notification: Any
+        self, notification: Any
     ) -> tuple[ChannelDeliveryTarget, ...]:
         global_policy = await self._settings.get_setting("notification.policy.global")
         signal_policy = await self._settings.get_setting("notification.policy.signals")
@@ -32,9 +32,12 @@ class DynamicNotificationTargetResolver:
             or not signal_policy["value"]["enabled"]
         ):
             return ()
-        selected = (
-            signal_policy["value"]["channels"] or global_policy["value"]["channels"]
-        )
+        if notification.notification_mode == "CUSTOM":
+            selected = notification.notification_channels
+        else:
+            selected = (
+                signal_policy["value"]["channels"] or global_policy["value"]["channels"]
+            )
         secret_statuses = {
             item["key"]: item for item in await self._settings.secret_statuses()
         }

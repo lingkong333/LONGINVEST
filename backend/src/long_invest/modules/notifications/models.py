@@ -7,6 +7,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -22,6 +23,7 @@ from long_invest.modules.notifications.contracts import (
     NotificationDeliveryStatus,
     NotificationEventStatus,
 )
+from long_invest.modules.notifications.delivery import CircuitState
 from long_invest.modules.notifications.security import validate_notification_payload
 from long_invest.platform.database.base import Base
 
@@ -103,6 +105,99 @@ class NotificationEvent(Base):
         return validate_notification_payload(value)
 
 
+class NotificationTemplateVersion(Base):
+    __tablename__ = "notification_template_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "template_type", "version", name="uq_notification_template_type_version"
+        ),
+        UniqueConstraint(
+            "template_type",
+            "content_hash",
+            name="uq_notification_template_type_content_hash",
+        ),
+        CheckConstraint("length(content_hash) = 64", name="content_hash_sha256"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    template_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    version: Mapped[str] = mapped_column(String(100), nullable=False)
+    subject: Mapped[str | None] = mapped_column(String(500))
+    text: Mapped[str] = mapped_column(String, nullable=False)
+    html: Mapped[str | None] = mapped_column(String)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    source: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="GIT", server_default="GIT"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class NotificationTemplateActivation(Base):
+    __tablename__ = "notification_template_activation"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["template_type", "active_version"],
+            [
+                "notification_template_version.template_type",
+                "notification_template_version.version",
+            ],
+            ondelete="RESTRICT",
+        ),
+    )
+
+    template_type: Mapped[str] = mapped_column(String(100), primary_key=True)
+    active_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class NotificationChannelCircuit(Base):
+    __tablename__ = "notification_channel_circuit"
+    __table_args__ = (
+        UniqueConstraint("channel", "instance"),
+        CheckConstraint("channel IN ('WECOM','EMAIL')", name="channel_valid"),
+        CheckConstraint(
+            "state IN ('CLOSED','OPEN','HALF_OPEN','DISABLED')",
+            name="state_valid",
+        ),
+        CheckConstraint("consecutive_failures >= 0", name="failures_nonnegative"),
+        CheckConstraint("cooldown_level BETWEEN 0 AND 2", name="cooldown_level_range"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    instance: Mapped[str] = mapped_column(String(100), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default=CircuitState.CLOSED
+    )
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    cooldown_level: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    probe_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
 class NotificationDelivery(Base):
     __tablename__ = "notification_delivery"
     __table_args__ = (
@@ -175,6 +270,9 @@ class NotificationDelivery(Base):
         server_default="0",
     )
     next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    circuit_deferred_until: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_code: Mapped[str | None] = mapped_column(String(100))
     deterministic_message_id: Mapped[str] = mapped_column(

@@ -15,7 +15,11 @@ from pydantic import (
     model_validator,
 )
 
-from long_invest.modules.monitoring.contracts import SubscriptionSignalSnapshot
+from long_invest.modules.monitoring.contracts import (
+    SubscriptionNotificationChannel,
+    SubscriptionNotificationMode,
+    SubscriptionSignalSnapshot,
+)
 from long_invest.modules.positions.contracts import PositionSnapshot, PositionStatus
 from long_invest.modules.quotes.contracts import SignalQuoteSnapshot
 from long_invest.modules.targets.contracts import TargetSnapshot, TargetValues
@@ -274,7 +278,8 @@ class SignalNotificationRequest(StrictContract):
     position_status: PositionStatus
     position_version: int = Field(ge=0)
     reason: EvaluationReason
-    notification_mode: str = Field(min_length=1, max_length=64)
+    notification_mode: SubscriptionNotificationMode
+    notification_channels: tuple[SubscriptionNotificationChannel, ...] = ()
     eligible: bool
     suppression_reason: str | None = None
     idempotency_key: str = Field(min_length=1, max_length=200)

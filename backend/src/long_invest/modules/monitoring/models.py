@@ -99,6 +99,20 @@ class MonitorSubscriptionRevision(ImmutableMonitoringFact, Base):
             "target_mode IN ('MANUAL','STRATEGY')", name="target_mode_valid"
         ),
         CheckConstraint(
+            "notification_mode IN ('INHERIT','CUSTOM')",
+            name="notification_mode_valid",
+        ),
+        CheckConstraint(
+            "notification_channels IN "
+            "('[]'::jsonb, '[\"WECOM\"]'::jsonb, '[\"EMAIL\"]'::jsonb, "
+            '\'["WECOM", "EMAIL"]\'::jsonb)',
+            name="notification_channels_valid",
+        ),
+        CheckConstraint(
+            "notification_mode = 'CUSTOM' OR notification_channels = '[]'::jsonb",
+            name="notification_inherit_channels_empty",
+        ),
+        CheckConstraint(
             "hysteresis_ratio >= 0 AND hysteresis_min >= 0",
             name="hysteresis_nonnegative",
         ),
@@ -129,7 +143,10 @@ class MonitorSubscriptionRevision(ImmutableMonitoringFact, Base):
     )
     hysteresis_ratio: Mapped[Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     hysteresis_min: Mapped[Decimal] = mapped_column(Numeric(18, 6), nullable=False)
-    notification_mode: Mapped[str] = mapped_column(String(64), nullable=False)
+    notification_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    notification_channels: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     reason: Mapped[str] = mapped_column(String(500), nullable=False)
     created_by_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
     request_id: Mapped[str] = mapped_column(String(64), nullable=False)

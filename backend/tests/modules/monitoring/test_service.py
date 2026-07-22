@@ -6,6 +6,8 @@ import pytest
 
 from long_invest.modules.monitoring.contracts import (
     FrozenSubscription,
+    SubscriptionNotificationChannel,
+    SubscriptionNotificationMode,
     SubscriptionStatus,
 )
 from long_invest.modules.monitoring.service import (
@@ -134,7 +136,7 @@ def config(**changes):
         parameters={},
         hysteresis_ratio=Decimal("0.010000"),
         hysteresis_min=Decimal("0.050000"),
-        notification_mode="DEFAULT",
+        notification_mode="INHERIT",
         reason="创建订阅",
         idempotency_key="sub-1",
     )
@@ -207,9 +209,101 @@ async def test_same_key_different_content_conflicts() -> None:
         await svc.create(
             security_id=security_id,
             symbol="600000.SH",
-            config=config(notification_mode="CUSTOM"),
+            config=config(notification_mode="CUSTOM", notification_channels=("EMAIL",)),
         )
     assert caught.value.code == "MONITOR_SUBSCRIPTION_CONFLICT"
+
+
+@pytest.mark.anyio
+async def test_notification_policy_creates_revision_and_is_replayable() -> None:
+    svc, repo, audit, events = service()
+    created = await svc.create(security_id=uuid4(), symbol="600000.SH", config=config())
+
+    changed = await svc.configure_notification_policy(
+        created.subscription.id,
+        mode=SubscriptionNotificationMode.CUSTOM,
+        channels=(
+            SubscriptionNotificationChannel.EMAIL,
+            SubscriptionNotificationChannel.WECOM,
+            SubscriptionNotificationChannel.EMAIL,
+        ),
+        expected_version=1,
+        reason="单股使用两个渠道",
+        idempotency_key="policy-1",
+    )
+    replay = await svc.configure_notification_policy(
+        created.subscription.id,
+        mode="CUSTOM",
+        channels=("WECOM", "EMAIL"),
+        expected_version=1,
+        reason="单股使用两个渠道",
+        idempotency_key="policy-1",
+    )
+
+    assert changed.revision.id != created.revision.id
+    assert created.revision.notification_mode == "INHERIT"
+    assert created.revision.notification_channels == []
+    assert changed.revision.notification_mode == "CUSTOM"
+    assert changed.revision.notification_channels == ["WECOM", "EMAIL"]
+    assert replay.replayed is True
+    assert len(repo.revisions) == 2
+    assert audit.items[-1].action == "notification_policy_changed"
+    assert events.items[-1].after_summary["notification_channels"] == [
+        "WECOM",
+        "EMAIL",
+    ]
+
+
+@pytest.mark.anyio
+async def test_notification_policy_supports_web_only_and_historical_reads() -> None:
+    svc, _, _, _ = service()
+    created = await svc.create(security_id=uuid4(), symbol="600000.SH", config=config())
+    changed = await svc.configure_notification_policy(
+        created.subscription.id,
+        mode="CUSTOM",
+        channels=(),
+        expected_version=1,
+        reason="仅网页记录",
+        idempotency_key="policy-web",
+    )
+
+    current = await svc.notification_policy(created.subscription.id)
+    historical = await svc.notification_policy(
+        created.subscription.id, revision_id=created.revision.id
+    )
+
+    assert current.revision_id == changed.revision.id
+    assert current.mode is SubscriptionNotificationMode.CUSTOM
+    assert current.channels == ()
+    assert historical.mode is SubscriptionNotificationMode.INHERIT
+    assert historical.subscription_version == 2
+
+
+@pytest.mark.anyio
+async def test_notification_policy_rejects_invalid_and_stale_update() -> None:
+    svc, _, _, _ = service()
+    created = await svc.create(security_id=uuid4(), symbol="600000.SH", config=config())
+    with pytest.raises(AppError) as invalid:
+        await svc.configure_notification_policy(
+            created.subscription.id,
+            mode="INHERIT",
+            channels=("EMAIL",),
+            expected_version=1,
+            reason="无效继承",
+            idempotency_key="policy-invalid",
+        )
+    assert invalid.value.code == "MONITOR_SUBSCRIPTION_NOTIFICATION_POLICY_INVALID"
+
+    with pytest.raises(AppError) as stale:
+        await svc.configure_notification_policy(
+            created.subscription.id,
+            mode="CUSTOM",
+            channels=("EMAIL",),
+            expected_version=99,
+            reason="并发旧版本",
+            idempotency_key="policy-stale",
+        )
+    assert stale.value.code == "MONITOR_SUBSCRIPTION_VERSION_CONFLICT"
 
 
 @pytest.mark.anyio

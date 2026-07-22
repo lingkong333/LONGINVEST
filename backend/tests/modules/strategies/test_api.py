@@ -116,6 +116,25 @@ def test_every_strategy_write_route_uses_verified_write_dependency():
         assert require_verified_write_request in calls, route.path
 
 
+def test_strategy_operation_routes_are_published():
+    paths = {
+        (route.path, method)
+        for route in router.routes
+        for method in (route.methods or set())
+    }
+    assert {
+        ("/api/v1/strategies/{strategy_id}/test", "POST"),
+        (
+            "/api/v1/strategies/{strategy_id}/versions/{version_id}/apply",
+            "POST",
+        ),
+        (
+            "/api/v1/strategies/{strategy_id}/versions/{version_id}/rollback",
+            "POST",
+        ),
+    } <= paths
+
+
 def test_publish_request_cannot_replace_validated_metadata_or_schema():
     strategy_id = uuid4()
     response = client(Application()).post(

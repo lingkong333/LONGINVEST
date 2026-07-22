@@ -118,7 +118,7 @@ def idempotency_key(
 IdempotencyKey = Annotated[str, Depends(idempotency_key)]
 
 
-@router.post("")
+@router.post("", status_code=202)
 async def create_backtest(
     body: CreateBacktestBody,
     application: Application,
@@ -138,7 +138,9 @@ async def create_backtest(
             status_code=422,
         )
     request = BacktestCreateRequest(
+        mode=body.mode,
         symbol=body.symbol,
+        watchlist_id=body.watchlist_id,
         date_range=body.date_range,
         strategy_version_id=body.strategy_version_id,
         draft_id=body.draft_id,
@@ -168,8 +170,8 @@ async def create_backtest(
     )
     return success_response(
         data=_execution(state),
-        code="BACKTEST_CREATED",
-        message="回测任务已创建",
+        code="JOB_ACCEPTED",
+        message="回测任务已受理",
     )
 
 
@@ -371,7 +373,9 @@ async def get_metric(
 
 
 def _execution(state) -> dict[str, Any]:
+    job_id = getattr(state, "job_id", None)
     return {
+        "job_id": str(job_id) if job_id is not None else None,
         "task": state.task.model_dump(mode="json"),
         "item_id": str(state.item_id),
         "item_status": state.item_status.value,

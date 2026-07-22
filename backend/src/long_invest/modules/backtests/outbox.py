@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from typing import Any, Protocol
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,7 +37,7 @@ class BacktestOutboxAdapter:
     async def find_by_idempotency(self, key: str) -> Any | None:
         return await self._audit.find_by_idempotency(key)
 
-    async def emit(self, event: BacktestEvent) -> None:
+    async def emit(self, event: BacktestEvent) -> UUID | None:
         await self._writer.append(
             session=self._session,
             topic=event.topic,
@@ -48,7 +49,13 @@ class BacktestOutboxAdapter:
         )
         command = _job_for_event(event)
         if command is not None:
-            await self._job_service_factory(self._session).submit(command)
+            jobs = self._job_service_factory(self._session)
+            job = await jobs.submit(command)
+            if event.payload.get("mode") in {"WATCHLIST", "MARKET"}:
+                item_keys = tuple(str(value) for value in event.payload["item_keys"])
+                await jobs.initialize_items(job.id, item_keys)
+            return job.id
+        return None
 
 
 def _job_for_event(event: BacktestEvent) -> SubmitJob | None:
@@ -64,17 +71,25 @@ def _job_for_event(event: BacktestEvent) -> SubmitJob | None:
         event.payload.get("generation", event.payload.get("execution_generation", 1))
     )
     recover = bool(event.payload.get("recover", False))
+    mode = str(event.payload.get("mode", "SINGLE"))
+    is_bulk = mode in {"WATCHLIST", "MARKET"}
+    config_snapshot = {
+        "backtest_task_id": str(event.task_id),
+        "generation": generation,
+        "recover": recover,
+    }
+    if is_bulk:
+        config_snapshot["mode"] = mode
+        config_snapshot["item_keys"] = [
+            str(value) for value in event.payload["item_keys"]
+        ]
     return SubmitJob(
-        job_type="BACKTEST_SINGLE",
-        queue="backtest-single",
+        job_type="BACKTEST_BULK" if is_bulk else "BACKTEST_SINGLE",
+        queue="bulk-backtest" if is_bulk else "backtest-single",
         idempotency_scope="backtest-execution",
         idempotency_key=event.dedupe_key,
         request_id=request_id,
-        config_snapshot={
-            "backtest_task_id": str(event.task_id),
-            "generation": generation,
-            "recover": recover,
-        },
+        config_snapshot=config_snapshot,
         business_object_type="backtest_task",
         business_object_id=str(event.task_id),
         created_by_user_id=actor_user_id,

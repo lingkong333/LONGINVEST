@@ -6840,7 +6840,7 @@
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -6888,18 +6888,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/CapabilityWriteRequest"
+                "$ref": "#/components/schemas/BatchCalculateTargetRequest"
               }
             }
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CapabilityResponse"
+                  "$ref": "#/components/schemas/BatchCapabilityResponse"
                 }
               }
             }
@@ -8690,7 +8690,7 @@
           }
         },
         "responses": {
-          "200": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -12948,6 +12948,105 @@
         ],
         "title": "BacktestAction"
       },
+      "BacktestBatchSummary": {
+        "properties": {
+          "total_items": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Total Items"
+          },
+          "succeeded_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Succeeded Items"
+          },
+          "failed_items": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed Items"
+          },
+          "success_rate": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Success Rate"
+          },
+          "positive_return_ratio": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Positive Return Ratio"
+          },
+          "return_distribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BacktestReturnDistribution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "median_max_drawdown": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Max Drawdown"
+          },
+          "trade_count_distribution": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BacktestTradeCountDistribution"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "best_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Symbol"
+          },
+          "worst_symbol": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Worst Symbol"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "total_items",
+          "succeeded_items",
+          "failed_items",
+          "success_rate"
+        ],
+        "title": "BacktestBatchSummary"
+      },
       "BacktestCommandBody": {
         "properties": {
           "confirm": {
@@ -13401,6 +13500,45 @@
         ],
         "title": "BacktestMode"
       },
+      "BacktestReturnDistribution": {
+        "properties": {
+          "minimum": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Minimum"
+          },
+          "percentile_25": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Percentile 25"
+          },
+          "median": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Median"
+          },
+          "percentile_75": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Percentile 75"
+          },
+          "maximum": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Maximum"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "minimum",
+          "percentile_25",
+          "median",
+          "percentile_75",
+          "maximum"
+        ],
+        "title": "BacktestReturnDistribution"
+      },
       "BacktestSummaryResponse": {
         "properties": {
           "success": {
@@ -13450,6 +13588,11 @@
           "status": {
             "$ref": "#/components/schemas/BacktestTaskStatus"
           },
+          "survivor_bias_disclosed": {
+            "type": "boolean",
+            "title": "Survivor Bias Disclosed",
+            "default": false
+          },
           "total_items": {
             "type": "integer",
             "minimum": 0.0,
@@ -13498,6 +13641,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/BacktestMetricView"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "batch_metric": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BacktestBatchSummary"
               },
               {
                 "type": "null"
@@ -13670,6 +13823,33 @@
         ],
         "title": "BacktestTaskStatus"
       },
+      "BacktestTradeCountDistribution": {
+        "properties": {
+          "minimum": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Minimum"
+          },
+          "median": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Median"
+          },
+          "maximum": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Maximum"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "minimum",
+          "median",
+          "maximum"
+        ],
+        "title": "BacktestTradeCountDistribution"
+      },
       "BatchBody": {
         "properties": {
           "reason": {
@@ -13708,6 +13888,199 @@
           "symbols"
         ],
         "title": "BatchBody"
+      },
+      "BatchCalculateTargetItem": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "target_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Target Date"
+          },
+          "training_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training Start Date"
+          },
+          "training_end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training End Date"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "target_date",
+          "training_start_date",
+          "training_end_date",
+          "expected_version"
+        ],
+        "title": "BatchCalculateTargetItem"
+      },
+      "BatchCalculateTargetRequest": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchCalculateTargetItem"
+            },
+            "type": "array",
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason",
+          "items"
+        ],
+        "title": "BatchCalculateTargetRequest"
+      },
+      "BatchCapabilityItem": {
+        "properties": {
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "subscription_id",
+          "code",
+          "accepted"
+        ],
+        "title": "BatchCapabilityItem"
+      },
+      "BatchCapabilityResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/BatchCapabilityResult"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "BatchCapabilityResponse"
+      },
+      "BatchCapabilityResult": {
+        "properties": {
+          "requested": {
+            "type": "integer",
+            "title": "Requested"
+          },
+          "accepted": {
+            "type": "integer",
+            "title": "Accepted"
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BatchCapabilityItem"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "requested",
+          "accepted",
+          "failed",
+          "items"
+        ],
+        "title": "BatchCapabilityResult"
       },
       "BatchPositionItem": {
         "properties": {
@@ -14797,10 +15170,33 @@
       },
       "CreateBacktestBody": {
         "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/BacktestMode",
+            "default": "SINGLE"
+          },
           "symbol": {
-            "type": "string",
-            "pattern": "^[0-9]{6}\\.(SH|SZ|BJ)$",
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9]{6}\\.(SH|SZ|BJ)$"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Symbol"
+          },
+          "watchlist_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watchlist Id"
           },
           "date_range": {
             "$ref": "#/components/schemas/BacktestDateRange"
@@ -14897,7 +15293,6 @@
         "additionalProperties": false,
         "type": "object",
         "required": [
-          "symbol",
           "date_range",
           "parameter_snapshot",
           "initial_capital",

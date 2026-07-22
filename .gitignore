@@ -14,6 +14,9 @@ build/
 node_modules/
 frontend/dist/
 data/
+!deploy/data/
+!deploy/data/trading-calendar/
+!deploy/data/trading-calendar/*.json
 logs/
 run/
 LongInvest.bundle

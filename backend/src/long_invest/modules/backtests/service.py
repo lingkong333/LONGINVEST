@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid5
 
+from long_invest.modules.backtests.batch import (
+    BacktestBatchItemResult,
+    summarize_batch,
+)
 from long_invest.modules.backtests.contracts import (
     BacktestAction,
     BacktestErrorCode,
@@ -75,7 +79,7 @@ class BacktestEvent:
 
 
 class BacktestEventPort(Protocol):
-    async def emit(self, event: BacktestEvent) -> None: ...
+    async def emit(self, event: BacktestEvent) -> UUID | None: ...
 
 
 class BacktestAuditPort(Protocol):
@@ -91,6 +95,7 @@ class BacktestExecutionState:
     item_status: BacktestItemStatus
     forecast: BacktestForecastSnapshotView | None
     adjustment_snapshot: AdjustmentTimelineSnapshot | None = None
+    job_id: UUID | None = None
 
 
 _TERMINAL_ITEM_STATUSES = {
@@ -124,8 +129,6 @@ class BacktestService:
     async def create(
         self, snapshot: BacktestTaskSnapshot, context: BacktestCommandContext
     ) -> BacktestExecutionState:
-        if snapshot.mode is not BacktestMode.SINGLE:
-            raise _error("BACKTEST_MODE_NOT_SUPPORTED", "当前阶段只支持单股回测")
         if not context.idempotency_key.strip() or len(context.idempotency_key) > 160:
             raise _error("IDEMPOTENCY_KEY_REQUIRED", "回测需要有效的幂等键")
         request_digest = _request_digest(snapshot)
@@ -135,12 +138,22 @@ class BacktestService:
         if replay is not None:
             if replay.request_digest != request_digest:
                 raise _error("IDEMPOTENCY_KEY_REUSED", "幂等键已用于不同回测")
-            return await self.get_execution(replay.id)
+            state = await self.get_execution(replay.id)
+            job_id = await self._emit_created(
+                state.task, context, execution_generation=state.execution_generation
+            )
+            return replace(state, job_id=job_id)
         existing = await self._repository.get_task(snapshot.id, for_update=True)
         if existing is not None:
             raise _error("BACKTEST_TASK_ID_REUSED", "回测编号已被使用")
-        entry = snapshot.universe_snapshot[0]
-        item_id = uuid5(snapshot.id, f"item:{entry.security_id}")
+        if (
+            snapshot.mode is BacktestMode.MARKET
+            and await self._repository.lock_market_creation()
+        ):
+            raise _error(
+                BacktestErrorCode.BACKTEST_MARKET_ALREADY_RUNNING.value,
+                "同一时间只能运行一个全市场回测",
+            )
         now = self._clock()
         task = BacktestTask(
             id=snapshot.id,
@@ -177,42 +190,64 @@ class BacktestService:
         )
         universe = BacktestUniverseSnapshot(
             task_id=snapshot.id,
-            scope_snapshot=[entry.model_dump(mode="json")],
+            scope_snapshot=[
+                entry.model_dump(mode="json")
+                for entry in snapshot.universe_snapshot
+            ],
             content_hash=snapshot.universe_hash,
         )
-        item = BacktestItem(
-            id=item_id,
-            task_id=snapshot.id,
-            security_id=entry.security_id,
-            status=BacktestItemStatus.PENDING.value,
-            attempt_count=0,
+        items = tuple(
+            BacktestItem(
+                id=uuid5(snapshot.id, f"item:{entry.security_id}"),
+                task_id=snapshot.id,
+                security_id=entry.security_id,
+                status=BacktestItemStatus.PENDING.value,
+                attempt_count=0,
+            )
+            for entry in snapshot.universe_snapshot
         )
-        await self._repository.add_task(task, universe, item)
-        await self._emit(
-            "backtest.created",
-            snapshot.id,
-            {
-                "item_id": str(item_id),
-                "request_id": context.request_id,
-                "actor_user_id": context.actor_user_id,
-                "execution_generation": 1,
-                "generation": 1,
-                "recover": False,
-            },
-            f"backtest-created:{snapshot.id}",
+        await self._repository.add_task(task, universe, items)
+        job_id = await self._emit_created(
+            snapshot, context, execution_generation=1
         )
+        first = items[0]
         return BacktestExecutionState(
             task=snapshot,
             task_status=BacktestTaskStatus.PENDING,
             execution_generation=1,
-            item_id=item_id,
+            item_id=first.id,
             item_status=BacktestItemStatus.PENDING,
             forecast=None,
+            job_id=job_id,
         )
 
-    async def get_execution(self, task_id: UUID) -> BacktestExecutionState:
+    async def _emit_created(
+        self,
+        snapshot: BacktestTaskSnapshot,
+        context: BacktestCommandContext,
+        *,
+        execution_generation: int,
+    ) -> UUID | None:
+        return await self._emit(
+            "backtest.created",
+            snapshot.id,
+            {
+                "mode": snapshot.mode.value,
+                "item_keys": [entry.symbol for entry in snapshot.universe_snapshot],
+                "request_id": context.request_id,
+                "actor_user_id": context.actor_user_id,
+                "execution_generation": execution_generation,
+                "generation": execution_generation,
+                "recover": False,
+            },
+            f"backtest-created:{snapshot.id}",
+        )
+
+    async def get_execution(
+        self, task_id: UUID, item_id: UUID | None = None
+    ) -> BacktestExecutionState:
         task = await self._repository.get_task(task_id)
-        item = await self._repository.get_item(task_id)
+        item = await self._repository.get_item(task_id, item_id)
         universe = await self._repository.get_universe(task_id)
         if task is None or item is None or universe is None:
             raise _not_found()
@@ -236,11 +271,21 @@ class BacktestService:
         rows, total = await self._repository.list_tasks(
             page=page, page_size=page_size
         )
+        items = []
+        for task, item, universe, _ in rows:
+            task_items = await self._repository.list_items(task.id)
+            forecast_item_ids = {
+                row.id
+                for row in task_items
+                if await self._repository.get_forecast(row.id) is not None
+            }
+            items.append(
+                _task_list_item(
+                    task, item, universe, task_items, forecast_item_ids
+                )
+            )
         return BacktestTaskPage(
-            items=tuple(
-                _task_list_item(task, item, universe, bool(has_forecast))
-                for task, item, universe, has_forecast in rows
-            ),
+            items=tuple(items),
             page=page,
             page_size=page_size,
             total=total,
@@ -274,10 +319,38 @@ class BacktestService:
                     failure_codes.get(row.failure_code, 0) + 1
                 )
         metric = await self._repository.get_metric(rows[0].id)
-        has_forecast = await self._repository.get_forecast(rows[0].id) is not None
+        batch_metric = None
+        if task.mode != BacktestMode.SINGLE.value and completed == len(rows):
+            universe = await self._repository.get_universe(task_id)
+            if universe is None:
+                raise _not_found()
+            entries = _universe_entries(universe)
+            batch_results = []
+            for row in rows:
+                row_metric = await self._repository.get_metric(row.id)
+                batch_results.append(
+                    BacktestBatchItemResult(
+                        entry=entries[row.security_id],
+                        metric=(
+                            metric_view(row_metric) if row_metric is not None else None
+                        ),
+                        failure_code=(
+                            None
+                            if row_metric is not None
+                            else row.failure_code or "BACKTEST_ITEM_CANCELED"
+                        ),
+                    )
+                )
+            batch_metric = summarize_batch(tuple(batch_results))
+        forecast_item_ids = {
+            row.id
+            for row in rows
+            if await self._repository.get_forecast(row.id) is not None
+        }
         return BacktestSummaryView(
             task_id=task.id,
             status=task.status,
+            survivor_bias_disclosed=(task.mode == BacktestMode.MARKET.value),
             total_items=len(rows),
             completed_items=completed,
             succeeded_items=succeeded,
@@ -285,8 +358,13 @@ class BacktestService:
             canceled_items=canceled,
             pending_items=len(rows) - completed,
             failure_codes=failure_codes,
-            allowed_actions=_allowed_actions(task, rows[0], has_forecast),
-            metric=metric_view(metric) if metric is not None else None,
+            allowed_actions=_allowed_actions(task, rows, forecast_item_ids),
+            metric=(
+                metric_view(metric)
+                if metric is not None and task.mode == BacktestMode.SINGLE.value
+                else None
+            ),
+            batch_metric=batch_metric,
         )
 
     async def pause(
@@ -295,9 +373,11 @@ class BacktestService:
         replay = await self._control_replay(task_id, BacktestAction.PAUSE, context)
         if replay is not None:
             return replay
-        task, item, universe = await self._locked(task_id)
+        task, items, universe = await self._locked_items(task_id)
+        item = items[0]
         completed_immediately = False
-        if task.status == BacktestTaskStatus.PENDING.value:
+        has_active_items = any(row.execution_token is not None for row in items)
+        if task.status == BacktestTaskStatus.PENDING.value or not has_active_items:
             task.status = BacktestTaskStatus.PAUSED.value
             completed_immediately = True
         elif task.status == BacktestTaskStatus.RUNNING.value:
@@ -319,16 +399,28 @@ class BacktestService:
         replay = await self._control_replay(task_id, BacktestAction.RESUME, context)
         if replay is not None:
             return replay
-        task, item, universe = await self._locked(task_id)
+        task, items, universe = await self._locked_items(task_id)
+        item = items[0]
         if task.status != BacktestTaskStatus.PAUSED.value:
             raise _state_conflict()
         task.status = BacktestTaskStatus.PENDING.value
         task.execution_generation += 1
         task.updated_at = self._clock()
-        item.execution_token = None
-        item.ended_at = None
+        unfinished = [
+            row for row in items if row.status not in _TERMINAL_ITEM_STATUSES
+        ]
+        for row in unfinished:
+            row.execution_token = None
+            row.ended_at = None
         await self._record_control(task_id, BacktestAction.RESUME, context, task_id)
-        await self._emit_control("backtest.resumed", task, item, context)
+        await self._emit_control(
+            "backtest.resumed",
+            task,
+            item,
+            context,
+            items=unfinished,
+            universe=universe,
+        )
         return await self._state(task, item, universe)
 
     async def cancel(
@@ -337,14 +429,18 @@ class BacktestService:
         replay = await self._control_replay(task_id, BacktestAction.CANCEL, context)
         if replay is not None:
             return replay
-        task, item, universe = await self._locked(task_id)
+        task, items, universe = await self._locked_items(task_id)
+        item = items[0]
         now = self._clock()
         completed_immediately = False
         if task.status in {
             BacktestTaskStatus.PENDING.value,
             BacktestTaskStatus.PAUSED.value,
         }:
-            _finish_canceled(task, item, now)
+            for row in items:
+                if row.status not in _TERMINAL_ITEM_STATUSES:
+                    _cancel_item(row, now)
+            _finish_canceled_task(task, now)
             completed_immediately = True
         elif task.status in {
             BacktestTaskStatus.RUNNING.value,
@@ -352,6 +448,15 @@ class BacktestService:
         }:
             task.status = BacktestTaskStatus.CANCELING.value
             task.updated_at = now
+            for row in items:
+                if (
+                    row.status not in _TERMINAL_ITEM_STATUSES
+                    and row.execution_token is None
+                ):
+                    _cancel_item(row, now)
+            if all(row.status in _TERMINAL_ITEM_STATUSES for row in items):
+                _finish_canceled_task(task, now)
+                completed_immediately = True
         elif task.status != BacktestTaskStatus.CANCELED.value:
             raise _state_conflict()
         await self._record_control(task_id, BacktestAction.CANCEL, context, task_id)
@@ -367,14 +472,25 @@ class BacktestService:
         )
         if replay is not None:
             return replay
-        task, item, universe = await self._locked(task_id)
-        if (
-            task.status != BacktestTaskStatus.FAILED.value
-            or item.status != BacktestItemStatus.FAILED.value
-        ):
+        task, items, universe = await self._locked_items(task_id)
+        if task.status not in {
+            BacktestTaskStatus.FAILED.value,
+            BacktestTaskStatus.PARTIAL.value,
+        }:
             raise _state_conflict()
-        forecast = await self._repository.get_forecast(item.id)
-        if forecast is None and item.training_data_hash is not None:
+        failed_items = [
+            row for row in items if row.status == BacktestItemStatus.FAILED.value
+        ]
+        if not failed_items:
+            raise _state_conflict()
+        forecasts = {
+            row.id: await self._repository.get_forecast(row.id)
+            for row in failed_items
+        }
+        if any(
+            forecasts[row.id] is None and row.training_data_hash is not None
+            for row in failed_items
+        ):
             raise _error(
                 "BACKTEST_NOT_RECOVERABLE", "策略执行结果未知，当前回测不能重试"
             )
@@ -383,19 +499,27 @@ class BacktestService:
         task.execution_generation += 1
         task.updated_at = now
         task.terminal_at = None
-        item.status = (
-            BacktestItemStatus.FROZEN.value
-            if forecast is not None
-            else BacktestItemStatus.PENDING.value
-        )
-        item.failure_code = None
-        item.execution_token = None
-        item.ended_at = None
+        for row in failed_items:
+            row.status = (
+                BacktestItemStatus.FROZEN.value
+                if forecasts[row.id] is not None
+                else BacktestItemStatus.PENDING.value
+            )
+            row.failure_code = None
+            row.execution_token = None
+            row.ended_at = None
         await self._record_control(
             task_id, BacktestAction.RETRY_FAILED, context, task_id
         )
-        await self._emit_control("backtest.resumed", task, item, context)
-        return await self._state(task, item, universe)
+        await self._emit_control(
+            "backtest.resumed",
+            task,
+            failed_items[0],
+            context,
+            items=failed_items,
+            universe=universe,
+        )
+        return await self._state(task, failed_items[0], universe)
 
     async def rerun(
         self,
@@ -406,7 +530,7 @@ class BacktestService:
         replay = await self._control_replay(task_id, BacktestAction.RERUN, context)
         if replay is not None:
             return replay
-        source, source_item, source_universe = await self._locked(task_id)
+        source, _, source_universe = await self._locked(task_id)
         if source.status not in _TERMINAL_TASK_STATUSES:
             raise _state_conflict()
         if await self._repository.get_task(new_task_id, for_update=True) is not None:
@@ -416,26 +540,29 @@ class BacktestService:
         )
         now = self._clock()
         task = _rerun_task(source, new_task_id, context, now)
-        entry = snapshot.universe_snapshot[0]
-        item = BacktestItem(
-            id=uuid5(new_task_id, f"item:{entry.security_id}"),
-            task_id=new_task_id,
-            security_id=source_item.security_id,
-            status=BacktestItemStatus.PENDING.value,
-            attempt_count=0,
+        items = tuple(
+            BacktestItem(
+                id=uuid5(new_task_id, f"item:{entry.security_id}"),
+                task_id=new_task_id,
+                security_id=entry.security_id,
+                status=BacktestItemStatus.PENDING.value,
+                attempt_count=0,
+            )
+            for entry in snapshot.universe_snapshot
         )
         universe = BacktestUniverseSnapshot(
             task_id=new_task_id,
             scope_snapshot=list(source_universe.scope_snapshot),
             content_hash=source_universe.content_hash,
         )
-        await self._repository.add_task(task, universe, item)
+        await self._repository.add_task(task, universe, items)
         await self._record_control(task_id, BacktestAction.RERUN, context, new_task_id)
         await self._emit(
             "backtest.created",
             new_task_id,
             {
-                "item_id": str(item.id),
+                "mode": snapshot.mode.value,
+                "item_keys": [entry.symbol for entry in snapshot.universe_snapshot],
                 "request_id": context.request_id,
                 "actor_user_id": context.actor_user_id,
                 "execution_generation": 1,
@@ -449,7 +576,7 @@ class BacktestService:
             task=snapshot,
             task_status=BacktestTaskStatus.PENDING,
             execution_generation=1,
-            item_id=item.id,
+            item_id=items[0].id,
             item_status=BacktestItemStatus.PENDING,
             forecast=None,
         )
@@ -484,9 +611,14 @@ class BacktestService:
         )
 
     async def start(
-        self, task_id: UUID, execution_token: UUID, *, expected_generation: int
+        self,
+        task_id: UUID,
+        execution_token: UUID,
+        *,
+        expected_generation: int,
+        item_id: UUID | None = None,
     ) -> BacktestExecutionState:
-        task, item, universe = await self._locked(task_id)
+        task, item, universe = await self._locked(task_id, item_id)
         _require_generation(task, expected_generation)
         forecast = await self._repository.get_forecast(item.id)
         adjustment_snapshot = await self._repository.get_adjustment_snapshot(item.id)
@@ -550,8 +682,9 @@ class BacktestService:
         training: TrainingDataSnapshot,
         *,
         execution_token: UUID,
+        item_id: UUID | None = None,
     ) -> BacktestExecutionState:
-        task, item, universe = await self._locked(task_id)
+        task, item, universe = await self._locked(task_id, item_id)
         _require_execution_owner(item, execution_token)
         _validate_data_snapshot(task, item, training, training_period=True)
         existing = await self._repository.get_forecast(item.id)
@@ -593,8 +726,9 @@ class BacktestService:
         *,
         execution_token: UUID,
         frozen_at: datetime,
+        item_id: UUID | None = None,
     ) -> BacktestForecastSnapshotView:
-        task, item, _ = await self._locked(task_id)
+        task, item, _ = await self._locked(task_id, item_id)
         _require_execution_owner(item, execution_token)
         existing = await self._repository.get_forecast(item.id)
         if existing is not None:
@@ -642,8 +776,9 @@ class BacktestService:
         test_data: TrainingDataSnapshot,
         *,
         execution_token: UUID,
+        item_id: UUID | None = None,
     ) -> BacktestExecutionState:
-        task, item, universe = await self._locked(task_id)
+        task, item, universe = await self._locked(task_id, item_id)
         _require_execution_owner(item, execution_token)
         forecast = await self._repository.get_forecast(item.id)
         if forecast is None:
@@ -674,8 +809,9 @@ class BacktestService:
         timeline: AdjustmentTimelineSnapshot,
         *,
         execution_token: UUID,
+        item_id: UUID | None = None,
     ) -> AdjustmentTimelineSnapshot:
-        task, item, _ = await self._locked(task_id)
+        task, item, _ = await self._locked(task_id, item_id)
         _require_execution_owner(item, execution_token)
         existing = await self._repository.get_adjustment_snapshot(item.id)
         if existing is not None:
@@ -732,32 +868,29 @@ class BacktestService:
         result: BacktestEngineResult,
         *,
         execution_token: UUID,
+        item_id: UUID | None = None,
     ) -> BacktestExecutionState:
-        task, item, universe = await self._locked(task_id)
+        task, item, universe = await self._locked(task_id, item_id)
         _require_execution_owner(item, execution_token)
         if task.status == BacktestTaskStatus.PAUSING.value:
-            _finish_paused(task, item, self._clock())
-            await self._emit(
-                "backtest.paused",
-                task_id,
-                {
-                    "item_id": str(item.id),
-                    "execution_generation": task.execution_generation,
-                },
-                f"backtest-paused:{task_id}:{task.execution_generation}",
-            )
+            completed = await self._pause_item(task, item, self._clock())
+            if completed:
+                await self._emit(
+                    "backtest.paused",
+                    task_id,
+                    {"execution_generation": task.execution_generation},
+                    f"backtest-paused:{task_id}:{task.execution_generation}",
+                )
             return await self._state(task, item, universe)
         if task.status == BacktestTaskStatus.CANCELING.value:
-            _finish_canceled(task, item, self._clock())
-            await self._emit(
-                "backtest.canceled",
-                task_id,
-                {
-                    "item_id": str(item.id),
-                    "execution_generation": task.execution_generation,
-                },
-                f"backtest-canceled:{task_id}:{task.execution_generation}",
-            )
+            completed = await self._cancel_item(task, item, self._clock())
+            if completed:
+                await self._emit(
+                    "backtest.canceled",
+                    task_id,
+                    {"execution_generation": task.execution_generation},
+                    f"backtest-canceled:{task_id}:{task.execution_generation}",
+                )
             return await self._state(task, item, universe)
         existing_metric = await self._repository.get_metric(item.id)
         if item.status == BacktestItemStatus.SUCCEEDED.value and existing_metric:
@@ -780,9 +913,7 @@ class BacktestService:
         item.failure_code = None
         item.execution_token = None
         item.ended_at = self._clock()
-        task.status = BacktestTaskStatus.SUCCEEDED.value
-        task.updated_at = self._clock()
-        task.terminal_at = self._clock()
+        await self._refresh_parent_status(task)
         await self._emit_result_events(task, item, result)
         forecast = await self._repository.get_forecast(item.id)
         return BacktestExecutionState(
@@ -795,9 +926,14 @@ class BacktestService:
         )
 
     async def fail(
-        self, task_id: UUID, code: str, *, execution_token: UUID
+        self,
+        task_id: UUID,
+        code: str,
+        *,
+        execution_token: UUID,
+        item_id: UUID | None = None,
     ) -> None:
-        task, item, _ = await self._locked(task_id)
+        task, item, _ = await self._locked(task_id, item_id)
         if item.status in _TERMINAL_ITEM_STATUSES:
             return
         if item.execution_token != execution_token:
@@ -806,21 +942,20 @@ class BacktestService:
         item.failure_code = code
         item.execution_token = None
         item.ended_at = self._clock()
-        task.status = BacktestTaskStatus.FAILED.value
-        task.updated_at = self._clock()
-        task.terminal_at = self._clock()
+        await self._refresh_parent_status(task)
         await self._emit(
             "backtest.item_failed",
             task_id,
             {"item_id": str(item.id), "error_code": code},
             f"backtest-item-failed:{item.id}:{code}",
         )
-        await self._emit(
-            "backtest.completed",
-            task_id,
-            {"status": BacktestTaskStatus.FAILED.value},
-            f"backtest-completed:{task_id}:FAILED",
-        )
+        if task.status in _TERMINAL_TASK_STATUSES:
+            await self._emit(
+                "backtest.completed",
+                task_id,
+                {"status": task.status},
+                f"backtest-completed:{task_id}:{task.status}",
+            )
 
     async def recover(
         self,
@@ -828,8 +963,9 @@ class BacktestService:
         *,
         execution_token: UUID,
         expected_generation: int,
+        item_id: UUID | None = None,
     ) -> BacktestExecutionState:
-        task, item, universe = await self._locked(task_id)
+        task, item, universe = await self._locked(task_id, item_id)
         _require_generation(task, expected_generation)
         if task.status != BacktestTaskStatus.PENDING.value:
             if item.execution_token == execution_token:
@@ -877,27 +1013,30 @@ class BacktestService:
         execution_token: UUID,
         *,
         expected_generation: int,
+        item_id: UUID | None = None,
     ) -> BacktestExecutionState:
-        task, item, universe = await self._locked(task_id)
+        task, item, universe = await self._locked(task_id, item_id)
         _require_generation(task, expected_generation)
         _require_execution_owner(item, execution_token)
         now = self._clock()
         if task.status == BacktestTaskStatus.PAUSING.value:
-            _finish_paused(task, item, now)
-            await self._emit(
-                "backtest.paused",
-                task_id,
-                {"item_id": str(item.id), "execution_generation": expected_generation},
-                f"backtest-paused:{task_id}:{expected_generation}",
-            )
+            completed = await self._pause_item(task, item, now)
+            if completed:
+                await self._emit(
+                    "backtest.paused",
+                    task_id,
+                    {"execution_generation": expected_generation},
+                    f"backtest-paused:{task_id}:{expected_generation}",
+                )
         elif task.status == BacktestTaskStatus.CANCELING.value:
-            _finish_canceled(task, item, now)
-            await self._emit(
-                "backtest.canceled",
-                task_id,
-                {"item_id": str(item.id), "execution_generation": expected_generation},
-                f"backtest-canceled:{task_id}:{expected_generation}",
-            )
+            completed = await self._cancel_item(task, item, now)
+            if completed:
+                await self._emit(
+                    "backtest.canceled",
+                    task_id,
+                    {"execution_generation": expected_generation},
+                    f"backtest-canceled:{task_id}:{expected_generation}",
+                )
         return await self._state(task, item, universe)
 
     async def _control_replay(
@@ -967,20 +1106,33 @@ class BacktestService:
         task,
         item,
         context: BacktestCommandContext,
+        *,
+        items=None,
+        universe=None,
     ) -> None:
+        payload = {
+            "item_id": str(item.id),
+            "status": task.status,
+            "execution_generation": task.execution_generation,
+            "generation": task.execution_generation,
+            "recover": item.status != BacktestItemStatus.PENDING.value,
+            "request_id": context.request_id,
+            "actor_user_id": context.actor_user_id,
+            "reason": context.reason,
+        }
+        if task.mode != BacktestMode.SINGLE.value and items is not None:
+            entries = _universe_entries(universe)
+            payload.update(
+                {
+                    "mode": task.mode,
+                    "item_keys": [entries[row.security_id].symbol for row in items],
+                    "recover": True,
+                }
+            )
         await self._emit(
             topic,
             task.id,
-            {
-                "item_id": str(item.id),
-                "status": task.status,
-                "execution_generation": task.execution_generation,
-                "generation": task.execution_generation,
-                "recover": item.status != BacktestItemStatus.PENDING.value,
-                "request_id": context.request_id,
-                "actor_user_id": context.actor_user_id,
-                "reason": context.reason,
-            },
+            payload,
             f"{topic}:{task.id}:{context.idempotency_key}",
         )
 
@@ -1001,13 +1153,69 @@ class BacktestService:
             ),
         )
 
-    async def _locked(self, task_id: UUID):
+    async def _locked(self, task_id: UUID, item_id: UUID | None = None):
         task = await self._repository.get_task(task_id, for_update=True)
-        item = await self._repository.get_item(task_id, for_update=True)
+        item = await self._repository.get_item(
+            task_id, item_id, for_update=True
+        )
         universe = await self._repository.get_universe(task_id)
         if task is None or item is None or universe is None:
             raise _not_found()
         return task, item, universe
+
+    async def _locked_items(self, task_id: UUID):
+        task = await self._repository.get_task(task_id, for_update=True)
+        items = await self._repository.list_items(task_id, for_update=True)
+        universe = await self._repository.get_universe(task_id)
+        if task is None or not items or universe is None:
+            raise _not_found()
+        return task, items, universe
+
+    async def _pause_item(self, task, item, now: datetime) -> bool:
+        item.execution_token = None
+        items = await self._repository.list_items(task.id, for_update=True)
+        if any(row.execution_token is not None for row in items):
+            task.updated_at = now
+            return False
+        task.status = BacktestTaskStatus.PAUSED.value
+        task.updated_at = now
+        return True
+
+    async def _cancel_item(self, task, item, now: datetime) -> bool:
+        _cancel_item(item, now)
+        items = await self._repository.list_items(task.id, for_update=True)
+        if any(row.status not in _TERMINAL_ITEM_STATUSES for row in items):
+            task.updated_at = now
+            return False
+        _finish_canceled_task(task, now)
+        return True
+
+    async def _refresh_parent_status(self, task) -> None:
+        items = await self._repository.list_items(task.id)
+        statuses = {BacktestItemStatus(item.status) for item in items}
+        terminal = statuses <= _TERMINAL_ITEM_STATUSES
+        now = self._clock()
+        task.updated_at = now
+        if not terminal:
+            task.status = BacktestTaskStatus.RUNNING.value
+            task.terminal_at = None
+            return
+        succeeded = BacktestItemStatus.SUCCEEDED in statuses
+        failed = bool(
+            statuses
+            & {
+                BacktestItemStatus.FAILED,
+                BacktestItemStatus.SKIPPED,
+                BacktestItemStatus.CANCELED,
+            }
+        )
+        if succeeded and failed:
+            task.status = BacktestTaskStatus.PARTIAL.value
+        elif succeeded:
+            task.status = BacktestTaskStatus.SUCCEEDED.value
+        else:
+            task.status = BacktestTaskStatus.FAILED.value
+        task.terminal_at = now
 
     async def _emit_result_events(self, task, item, result) -> None:
         for adjustment in result.adjustments:
@@ -1027,31 +1235,36 @@ class BacktestService:
             {"item_id": str(item.id)},
             f"backtest-item-succeeded:{item.id}",
         )
-        await self._emit(
-            "backtest.completed",
-            task.id,
-            {"status": BacktestTaskStatus.SUCCEEDED.value},
-            f"backtest-completed:{task.id}:SUCCEEDED",
-        )
-        await self._emit(
-            "strategy.publish_requirement_satisfied",
-            task.id,
-            {
-                "backtest_task_id": str(task.id),
-                "backtest_item_id": str(item.id),
-                "source_code_hash": task.source_code_hash,
-                "parameter_hash": task.parameter_hash,
-                "training_data_hash": item.training_data_hash,
-                "test_data_hash": item.test_data_hash,
-            },
-            f"strategy-publish-requirement:{task.id}",
-        )
+        if task.status in _TERMINAL_TASK_STATUSES:
+            await self._emit(
+                "backtest.completed",
+                task.id,
+                {"status": task.status},
+                f"backtest-completed:{task.id}:{task.status}",
+            )
+        if task.mode == BacktestMode.SINGLE.value:
+            await self._emit(
+                "strategy.publish_requirement_satisfied",
+                task.id,
+                {
+                    "backtest_task_id": str(task.id),
+                    "backtest_item_id": str(item.id),
+                    "source_code_hash": task.source_code_hash,
+                    "parameter_hash": task.parameter_hash,
+                    "training_data_hash": item.training_data_hash,
+                    "test_data_hash": item.test_data_hash,
+                },
+                f"strategy-publish-requirement:{task.id}",
+            )
 
     async def _emit(
         self, topic: str, task_id: UUID, payload: dict[str, Any], dedupe_key: str
-    ) -> None:
+    ) -> UUID | None:
         if self._events is not None:
-            await self._events.emit(BacktestEvent(topic, task_id, payload, dedupe_key))
+            return await self._events.emit(
+                BacktestEvent(topic, task_id, payload, dedupe_key)
+            )
+        return None
 
 
 def _task_snapshot(task, universe) -> BacktestTaskSnapshot:
@@ -1065,6 +1278,7 @@ def _task_snapshot(task, universe) -> BacktestTaskSnapshot:
             for value in universe.scope_snapshot
         ),
         universe_hash=task.universe_hash,
+        survivor_bias_disclosed=(task.mode == BacktestMode.MARKET.value),
         date_range=BacktestDateRange(
             training_start_date=task.training_start_date,
             training_end_date=task.training_end_date,
@@ -1104,7 +1318,7 @@ def _execution_state(task, item, universe, forecast) -> BacktestExecutionState:
 
 
 def _task_list_item(
-    task, item, universe, has_forecast: bool
+    task, item, universe, items, forecast_item_ids: set[UUID]
 ) -> BacktestTaskListItemView:
     entries = _universe_entries(universe)
     return BacktestTaskListItemView(
@@ -1119,7 +1333,7 @@ def _task_list_item(
             "test_end_date": task.test_end_date,
         },
         item=_item_summary(item, entries[item.security_id]),
-        allowed_actions=_allowed_actions(task, item, has_forecast),
+        allowed_actions=_allowed_actions(task, items, forecast_item_ids),
         created_at=task.created_at,
         updated_at=task.updated_at,
         terminal_at=task.terminal_at,
@@ -1147,7 +1361,9 @@ def _universe_entries(universe) -> dict[UUID, BacktestUniverseEntry]:
     return {entry.security_id: entry for entry in entries}
 
 
-def _allowed_actions(task, item, has_forecast: bool) -> tuple[BacktestAction, ...]:
+def _allowed_actions(
+    task, items, forecast_item_ids: set[UUID]
+) -> tuple[BacktestAction, ...]:
     status = BacktestTaskStatus(task.status)
     if status is BacktestTaskStatus.PENDING:
         return (BacktestAction.PAUSE, BacktestAction.CANCEL)
@@ -1157,8 +1373,14 @@ def _allowed_actions(task, item, has_forecast: bool) -> tuple[BacktestAction, ..
         return (BacktestAction.CANCEL,)
     if status is BacktestTaskStatus.PAUSED:
         return (BacktestAction.RESUME, BacktestAction.CANCEL)
-    if status is BacktestTaskStatus.FAILED:
-        retryable = has_forecast or item.training_data_hash is None
+    if status in {BacktestTaskStatus.FAILED, BacktestTaskStatus.PARTIAL}:
+        failed = [
+            item for item in items if item.status == BacktestItemStatus.FAILED.value
+        ]
+        retryable = bool(failed) and all(
+            item.id in forecast_item_ids or item.training_data_hash is None
+            for item in failed
+        )
         return (
             (BacktestAction.RETRY_FAILED, BacktestAction.RERUN)
             if retryable
@@ -1166,7 +1388,6 @@ def _allowed_actions(task, item, has_forecast: bool) -> tuple[BacktestAction, ..
         )
     if status in {
         BacktestTaskStatus.SUCCEEDED,
-        BacktestTaskStatus.PARTIAL,
         BacktestTaskStatus.CANCELED,
     }:
         return (BacktestAction.RERUN,)
@@ -1178,16 +1399,13 @@ def _require_generation(task, expected_generation: int) -> None:
         raise _error("BACKTEST_EXECUTION_SUPERSEDED", "回测执行代数已经失效")
 
 
-def _finish_paused(task, item, now: datetime) -> None:
-    task.status = BacktestTaskStatus.PAUSED.value
-    task.updated_at = now
-    item.execution_token = None
-
-
-def _finish_canceled(task, item, now: datetime) -> None:
+def _finish_canceled_task(task, now: datetime) -> None:
     task.status = BacktestTaskStatus.CANCELED.value
     task.updated_at = now
     task.terminal_at = now
+
+
+def _cancel_item(item, now: datetime) -> None:
     item.status = BacktestItemStatus.CANCELED.value
     item.failure_code = None
     item.execution_token = None

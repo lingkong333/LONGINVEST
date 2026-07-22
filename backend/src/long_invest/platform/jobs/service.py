@@ -400,7 +400,11 @@ class JobService:
         job = await self._jobs.lock(job_id)
         if job is None:
             return False
-        if job.job_type not in {"DAILY_DATA_COORDINATE", "DAILY_DATA_RETRY"}:
+        if job.job_type not in {
+            "DAILY_DATA_COORDINATE",
+            "DAILY_DATA_RETRY",
+            "BACKTEST_BULK",
+        }:
             raise AppError(
                 code="JOB_PARENT_TYPE_INVALID",
                 message="任务不是可汇总的日线父任务",
@@ -409,15 +413,18 @@ class JobService:
         if JobStatus(job.status) in TERMINAL_JOB_STATUSES:
             return True
         now = datetime.now(UTC)
-        job.status = (
-            JobStatus.PARTIAL
-            if result.success and result.code == "PARTIAL"
-            else JobStatus.SUCCEEDED
-            if result.success
-            else JobStatus.FAILED
-        )
+        if result.code == "BACKTEST_BATCH_PAUSED":
+            job.status = JobStatus.PAUSED
+        elif result.code == "BACKTEST_BATCH_CANCELED":
+            job.status = JobStatus.CANCELED
+        elif result.success and result.code == "PARTIAL":
+            job.status = JobStatus.PARTIAL
+        elif result.success:
+            job.status = JobStatus.SUCCEEDED
+        else:
+            job.status = JobStatus.FAILED
         job.result_summary = result.as_dict()
-        job.terminal_at = now
+        job.terminal_at = None if job.status is JobStatus.PAUSED else now
         job.updated_at = now
         job.version += 1
         await self._session.flush()

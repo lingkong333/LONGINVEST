@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from long_invest.modules.backtests.contracts import (
     BacktestAction,
+    BacktestCreateRequest,
     BacktestDailyResultView,
     BacktestDateRange,
     BacktestErrorCode,
@@ -202,6 +203,31 @@ def test_backtest_modes_are_exact_and_single_scope_contains_one_security() -> No
     }
     with pytest.raises(ValidationError):
         BacktestTaskSnapshot(**values)
+
+
+def test_backtest_create_scope_requires_the_matching_selector() -> None:
+    common = {
+        "date_range": BacktestDateRange(
+            training_start_date=date(2024, 1, 1),
+            training_end_date=date(2024, 12, 31),
+            test_start_date=date(2025, 1, 1),
+            test_end_date=date(2025, 12, 31),
+        ),
+        "strategy_version_id": uuid4(),
+        "parameter_snapshot": {},
+        "initial_capital": "100000",
+    }
+    watchlist = BacktestCreateRequest(
+        mode=BacktestMode.WATCHLIST,
+        watchlist_id=uuid4(),
+        **common,
+    )
+    market = BacktestCreateRequest(mode=BacktestMode.MARKET, **common)
+
+    assert watchlist.symbol is None
+    assert market.watchlist_id is None
+    with pytest.raises(ValidationError):
+        BacktestCreateRequest(mode=BacktestMode.MARKET, symbol="600000.SH", **common)
 
 
 def test_backtest_task_requires_published_version_or_frozen_draft_source() -> None:

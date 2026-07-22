@@ -3646,6 +3646,27 @@ export interface components {
          * @enum {string}
          */
         BacktestAction: "PAUSE" | "RESUME" | "CANCEL" | "RETRY_FAILED" | "RERUN";
+        /** BacktestBatchSummary */
+        BacktestBatchSummary: {
+            /** Total Items */
+            total_items: number;
+            /** Succeeded Items */
+            succeeded_items: number;
+            /** Failed Items */
+            failed_items: number;
+            /** Success Rate */
+            success_rate: string;
+            /** Positive Return Ratio */
+            positive_return_ratio?: string | null;
+            return_distribution?: components["schemas"]["BacktestReturnDistribution"] | null;
+            /** Median Max Drawdown */
+            median_max_drawdown?: string | null;
+            trade_count_distribution?: components["schemas"]["BacktestTradeCountDistribution"] | null;
+            /** Best Symbol */
+            best_symbol?: string | null;
+            /** Worst Symbol */
+            worst_symbol?: string | null;
+        };
         /** BacktestCommandBody */
         BacktestCommandBody: {
             /** Confirm */
@@ -3817,6 +3838,19 @@ export interface components {
          * @enum {string}
          */
         BacktestMode: "SINGLE" | "WATCHLIST" | "MARKET";
+        /** BacktestReturnDistribution */
+        BacktestReturnDistribution: {
+            /** Minimum */
+            minimum: string;
+            /** Percentile 25 */
+            percentile_25: string;
+            /** Median */
+            median: string;
+            /** Percentile 75 */
+            percentile_75: string;
+            /** Maximum */
+            maximum: string;
+        };
         /** BacktestSummaryResponse */
         BacktestSummaryResponse: {
             /**
@@ -3845,6 +3879,11 @@ export interface components {
              */
             task_id: string;
             status: components["schemas"]["BacktestTaskStatus"];
+            /**
+             * Survivor Bias Disclosed
+             * @default false
+             */
+            survivor_bias_disclosed: boolean;
             /** Total Items */
             total_items: number;
             /** Completed Items */
@@ -3864,6 +3903,7 @@ export interface components {
             /** Allowed Actions */
             allowed_actions: components["schemas"]["BacktestAction"][];
             metric?: components["schemas"]["BacktestMetricView"] | null;
+            batch_metric?: components["schemas"]["BacktestBatchSummary"] | null;
         };
         /** BacktestTaskListItemView */
         BacktestTaskListItemView: {
@@ -3924,6 +3964,15 @@ export interface components {
          * @enum {string}
          */
         BacktestTaskStatus: "PENDING" | "RUNNING" | "PAUSING" | "PAUSED" | "SUCCEEDED" | "PARTIAL" | "FAILED" | "CANCELING" | "CANCELED";
+        /** BacktestTradeCountDistribution */
+        BacktestTradeCountDistribution: {
+            /** Minimum */
+            minimum: number;
+            /** Median */
+            median: string;
+            /** Maximum */
+            maximum: number;
+        };
         /** BatchBody */
         BatchBody: {
             /** Reason */
@@ -3937,6 +3986,92 @@ export interface components {
              * @default manual
              */
             source: string;
+        };
+        /** BatchCalculateTargetItem */
+        BatchCalculateTargetItem: {
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            /**
+             * Training Start Date
+             * Format: date
+             */
+            training_start_date: string;
+            /**
+             * Training End Date
+             * Format: date
+             */
+            training_end_date: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** BatchCalculateTargetRequest */
+        BatchCalculateTargetRequest: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+            /** Items */
+            items: components["schemas"]["BatchCalculateTargetItem"][];
+        };
+        /** BatchCapabilityItem */
+        BatchCapabilityItem: {
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /** Code */
+            code: string;
+            /** Accepted */
+            accepted: boolean;
+            /** Run Id */
+            run_id?: string | null;
+            /** Job Id */
+            job_id?: string | null;
+            /**
+             * Replayed
+             * @default false
+             */
+            replayed: boolean;
+        };
+        /** BatchCapabilityResponse */
+        BatchCapabilityResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["BatchCapabilityResult"];
+        };
+        /** BatchCapabilityResult */
+        BatchCapabilityResult: {
+            /** Requested */
+            requested: number;
+            /** Accepted */
+            accepted: number;
+            /** Failed */
+            failed: number;
+            /** Items */
+            items: components["schemas"]["BatchCapabilityItem"][];
         };
         /** BatchPositionItem */
         BatchPositionItem: {
@@ -4373,8 +4508,12 @@ export interface components {
         };
         /** CreateBacktestBody */
         CreateBacktestBody: {
+            /** @default SINGLE */
+            mode: components["schemas"]["BacktestMode"];
             /** Symbol */
-            symbol: string;
+            symbol?: string | null;
+            /** Watchlist Id */
+            watchlist_id?: string | null;
             date_range: components["schemas"]["BacktestDateRange"];
             /** Strategy Version Id */
             strategy_version_id?: string | null;
@@ -6325,6 +6464,18 @@ export interface components {
             confirm: boolean;
             /** Delivery Ids */
             delivery_ids: string[];
+        };
+        /** RetryDeliveryRequest */
+        RetryDeliveryRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /**
+             * Confirm Duplicate Risk
+             * @default false
+             */
+            confirm_duplicate_risk: boolean;
         };
         /** RetryRequest */
         RetryRequest: {
@@ -11441,7 +11592,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MutationRequest"];
+                "application/json": components["schemas"]["RetryDeliveryRequest"];
             };
         };
         responses: {
@@ -11478,7 +11629,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MutationRequest"];
+                "application/json": components["schemas"]["RetryDeliveryRequest"];
             };
         };
         responses: {
@@ -12426,7 +12577,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -12456,17 +12607,17 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CapabilityWriteRequest"];
+                "application/json": components["schemas"]["BatchCalculateTargetRequest"];
             };
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["CapabilityResponse"];
+                    "application/json": components["schemas"]["BatchCapabilityResponse"];
                 };
             };
             /** @description Validation Error */
@@ -13613,7 +13764,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

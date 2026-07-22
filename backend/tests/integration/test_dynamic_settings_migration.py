@@ -19,7 +19,7 @@ def test_dynamic_settings_migration_is_the_single_head() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["20260722_0020"]
+    assert scripts.get_heads() == ["20260722_0021"]
     assert scripts.get_revision("20260722_0015").down_revision == "20260722_0014"
 
 

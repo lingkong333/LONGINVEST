@@ -102,6 +102,18 @@ class RecalculateReviewCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class RetryTargetCommand:
+    subscription_id: UUID
+    reason: str
+    expected_version: int
+    idempotency_key: str
+    request_id: str
+    actor_user_id: str
+    session_id: str
+    trusted_ip: str
+
+
+@dataclass(frozen=True, slots=True)
 class ApplyStrategyTargetCommand:
     calculation: CalculateTargetCommand
     strategy_version_id: UUID
@@ -205,6 +217,79 @@ class StrategyTargetService:
         if changed is None:
             raise _error("TARGET_SUBSCRIPTION_NOT_FOUND", "监控订阅不存在", 404)
         return await self.reserve(calculation)
+
+    async def retry(self, command: RetryTargetCommand) -> CalculationReservation:
+        existing = await self._repository.get_calculation_by_idempotency(
+            command.subscription_id, command.idempotency_key
+        )
+        source = existing
+        retry_of_run_id = None
+        if source is not None:
+            retry_of_run_id = dict(source.resource_usage or {}).get("_retry_of_run_id")
+            if retry_of_run_id is None:
+                raise _error(
+                    "TARGET_IDEMPOTENCY_CONFLICT",
+                    "幂等键已被其他目标计算请求占用",
+                    409,
+                )
+        else:
+            source = await self._repository.get_latest_calculation(
+                command.subscription_id, for_update=True
+            )
+            if source is None:
+                raise _error(
+                    "TARGET_CALCULATION_NOT_FOUND", "没有可重试的目标计算", 404
+                )
+            if source.status != "FAILED":
+                raise _error(
+                    "TARGET_CALCULATION_NOT_RETRYABLE",
+                    "最新目标计算尚未失败，不能重试",
+                    409,
+                )
+        target_date_value = dict(source.resource_usage or {}).get("_target_date")
+        if (
+            source.training_start_date is None
+            or source.training_end_date is None
+            or target_date_value is None
+        ):
+            raise _error(
+                "TARGET_CALCULATION_NOT_RETRYABLE",
+                "目标计算缺少完整快照，不能重试",
+                409,
+            )
+        try:
+            target_date = date.fromisoformat(str(target_date_value))
+        except ValueError as exc:
+            raise _error(
+                "TARGET_CALCULATION_NOT_RETRYABLE",
+                "目标计算日期快照无效，不能重试",
+                409,
+            ) from exc
+        reservation = await self.reserve(
+            CalculateTargetCommand(
+                subscription_id=command.subscription_id,
+                target_date=target_date,
+                training_start_date=source.training_start_date,
+                training_end_date=source.training_end_date,
+                reason=command.reason,
+                expected_version=command.expected_version,
+                idempotency_key=command.idempotency_key,
+                request_id=command.request_id,
+                actor_user_id=command.actor_user_id,
+                session_id=command.session_id,
+                trusted_ip=command.trusted_ip,
+            )
+        )
+        if existing is None:
+            retry_run = await self._repository.get_calculation(
+                reservation.run_id, for_update=True
+            )
+            retry_run.resource_usage = {
+                **dict(retry_run.resource_usage or {}),
+                "_retry_of_run_id": str(source.id),
+            }
+            await self._repository.flush()
+        return reservation
 
     async def mark_running(self, run_id: UUID, *, data_version: int) -> None:
         run = await self._required_run(run_id, lock=True)

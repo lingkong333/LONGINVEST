@@ -18,6 +18,7 @@ from long_invest.modules.securities.contracts import (
     SignalSecuritySnapshot,
     SnapshotResult,
     SymbolUniverseQuery,
+    UniverseQuery,
     validate_symbol,
 )
 from long_invest.modules.securities.integrations import (
@@ -189,6 +190,16 @@ class SecurityApplication:
         ).freeze_symbols(
             SymbolUniverseQuery(symbols=symbols)
         )
+        stored = await repository.get_universe_snapshot(snapshot.id)
+        if stored is None:
+            raise RuntimeError("saved universe snapshot cannot be reloaded")
+        return _frozen_universe(stored)
+
+    async def freeze_universe_in_transaction(self, session):
+        repository = SecurityRepository(session)
+        snapshot = await SecurityMasterService(
+            session, repository=repository
+        ).freeze_universe(UniverseQuery())
         stored = await repository.get_universe_snapshot(snapshot.id)
         if stored is None:
             raise RuntimeError("saved universe snapshot cannot be reloaded")

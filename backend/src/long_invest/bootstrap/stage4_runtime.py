@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import socket
 from collections.abc import Callable
 from datetime import UTC, datetime
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import docker
 
@@ -23,14 +22,15 @@ from long_invest.bootstrap.strategy_validation import (
 from long_invest.modules.backtests.application import BacktestApplication
 from long_invest.modules.backtests.contracts import (
     BacktestCreateRequest,
-    BacktestMode,
     BacktestStrategyExecution,
     BacktestTaskSnapshot,
     BacktestUniverseEntry,
+    BacktestUniverseSelection,
 )
 from long_invest.modules.backtests.engine import FixedTargetBacktestEngine
 from long_invest.modules.backtests.outbox import BacktestOutboxAdapter
 from long_invest.modules.backtests.signal_rule import BacktestProductionSignalRule
+from long_invest.modules.backtests.universe import BacktestUniverseFreezer
 from long_invest.modules.daily_data.application import get_daily_data_application
 from long_invest.modules.market_data.application import (
     CorporateActionCollectionApplication,
@@ -57,22 +57,35 @@ from long_invest.modules.targets.application import TargetApplication
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.json_snapshot import thaw_json_value
 
 
 class BacktestSnapshotResolver:
-    def __init__(self, *, securities: Any, strategies: Any) -> None:
+    def __init__(
+        self, *, securities: Any, strategies: Any, watchlists: Any | None = None
+    ) -> None:
         self._securities = securities
         self._strategies = strategies
+        self._watchlists = watchlists
 
     async def resolve_creation_snapshot(
-        self, *, task_id, request: BacktestCreateRequest
+        self,
+        *,
+        task_id,
+        request: BacktestCreateRequest,
+        actor_user_id: str | None = None,
     ) -> BacktestTaskSnapshot:
-        security = await self._securities.get(request.symbol)
-        entry = BacktestUniverseEntry(
-            security_id=security.id,
-            symbol=security.symbol,
-            name=security.name,
+        universe = await BacktestUniverseFreezer(
+            _BacktestUniverseSource(
+                securities=self._securities,
+                watchlists=self._watchlists,
+                actor_user_id=actor_user_id,
+            )
+        ).freeze(
+            BacktestUniverseSelection(
+                mode=request.mode,
+                symbol=request.symbol,
+                watchlist_id=request.watchlist_id,
+            )
         )
         settings = get_settings()
         if request.strategy_version_id is not None:
@@ -121,9 +134,10 @@ class BacktestSnapshotResolver:
             )
         return BacktestTaskSnapshot(
             id=task_id,
-            mode=BacktestMode.SINGLE,
-            universe_snapshot=(entry,),
-            universe_hash=_hash_json(entry.model_dump(mode="json")),
+            mode=universe.mode,
+            universe_snapshot=universe.entries,
+            universe_hash=universe.content_hash,
+            survivor_bias_disclosed=universe.survivor_bias_disclosed,
             date_range=request.date_range,
             strategy_version_id=strategy_version_id,
             draft_id=draft_id,
@@ -144,6 +158,75 @@ class BacktestSnapshotResolver:
             price_basis=PointInTimeBacktestDataPort.price_basis,
             data_source="EASTMONEY",
         )
+
+
+class _BacktestUniverseSource:
+    def __init__(
+        self, *, securities: Any, watchlists: Any, actor_user_id: str | None
+    ) -> None:
+        self._securities = securities
+        self._watchlists = watchlists
+        self._actor_user_id = actor_user_id
+
+    async def get_single(self, symbol: str) -> BacktestUniverseEntry:
+        return _backtest_entry(await self._securities.get(symbol))
+
+    async def list_watchlist(
+        self, watchlist_id: UUID
+    ) -> tuple[BacktestUniverseEntry, ...]:
+        if self._actor_user_id is None:
+            raise _error(
+                "BACKTEST_WATCHLIST_OWNER_REQUIRED",
+                "watchlist backtest requires an authenticated owner",
+                403,
+            )
+        if self._watchlists is None:
+            raise _error(
+                "BACKTEST_WATCHLIST_UNAVAILABLE",
+                "watchlist service is unavailable",
+                503,
+            )
+        watchlist = await self._watchlists.get(
+            watchlist_id, owner_user_id=UUID(self._actor_user_id)
+        )
+        if watchlist.archived:
+            raise _error(
+                "BACKTEST_WATCHLIST_ARCHIVED",
+                "archived watchlist cannot start a new backtest",
+            )
+        entries = []
+        for item in watchlist.items:
+            entries.append(_backtest_entry(await self._securities.get(item.symbol)))
+        return tuple(entries)
+
+    async def list_market(self) -> tuple[BacktestUniverseEntry, ...]:
+        entries: list[BacktestUniverseEntry] = []
+        page = 1
+        while True:
+            rows, total = await self._securities.list(page=page, page_size=200)
+            entries.extend(
+                _backtest_entry(row) for row in rows if _is_backtest_security(row)
+            )
+            if page * 200 >= total:
+                break
+            page += 1
+        return tuple(entries)
+
+
+def _backtest_entry(security: Any) -> BacktestUniverseEntry:
+    return BacktestUniverseEntry(
+        security_id=security.id,
+        symbol=security.symbol,
+        name=security.name,
+    )
+
+
+def _is_backtest_security(security: Any) -> bool:
+    return (
+        str(security.market) in {"SH", "SZ", "BJ"}
+        and str(security.security_type) == "A_SHARE"
+        and str(security.listing_status) != "DATA_MISSING"
+    )
 
 
 class BacktestStrategyResolver:
@@ -258,6 +341,7 @@ def build_target_application() -> TargetApplication:
 
 def build_backtest_application() -> BacktestApplication:
     from long_invest.modules.securities.application import get_security_application
+    from long_invest.modules.watchlists.application import get_watchlist_application
 
     database = get_database()
     strategies = get_strategy_application()
@@ -268,7 +352,9 @@ def build_backtest_application() -> BacktestApplication:
     return BacktestApplication(
         database,
         creation_snapshots=BacktestSnapshotResolver(
-            securities=get_security_application(), strategies=strategies
+            securities=get_security_application(),
+            strategies=strategies,
+            watchlists=get_watchlist_application(),
         ),
         strategy_executions=BacktestStrategyResolver(strategies),
         training_data=data,
@@ -310,17 +396,6 @@ def _forecast_service() -> SandboxedStrategyForecastService:
 def _worker_id(hostname: str) -> str:
     digest = hashlib.sha256(hostname.encode()).hexdigest()[:16]
     return f"stage4-{digest}"
-
-
-def _hash_json(value: Any) -> str:
-    payload = json.dumps(
-        thaw_json_value(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        default=str,
-    ).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 def _error(code: str, message: str, status_code: int = 409) -> AppError:

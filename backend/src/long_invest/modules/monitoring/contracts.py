@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
 from types import MappingProxyType
@@ -133,7 +133,10 @@ class SubscriptionNotificationPolicyView(StrictContract):
 class ScheduleOccurrenceView(StrictContract):
     id: UUID
     occurrence_type: str
-    schedule_id: UUID
+    schedule_id: UUID | None = None
+    definition_key: str | None = None
+    scheduled_trade_date: date | None = None
+    calendar_version_id: UUID | None = None
     scheduled_at: datetime
     status: OccurrenceStatus
     subscriptions: tuple[FrozenSubscription, ...]

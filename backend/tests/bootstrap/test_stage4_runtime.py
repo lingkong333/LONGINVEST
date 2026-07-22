@@ -13,6 +13,7 @@ import long_invest.bootstrap.stage4_runtime as runtime
 from long_invest.modules.backtests.contracts import (
     BacktestCreateRequest,
     BacktestDateRange,
+    BacktestMode,
 )
 from long_invest.platform.errors import AppError
 
@@ -119,6 +120,57 @@ def test_draft_backtest_rejects_a_changed_version(monkeypatch) -> None:
     assert raised.value.code == "BACKTEST_DRAFT_VERSION_CONFLICT"
 
 
+def test_watchlist_backtest_freezes_only_the_authenticated_owners_scope(
+    monkeypatch,
+) -> None:
+    owner_id = uuid4()
+    watchlist_id = uuid4()
+    draft = SimpleNamespace(
+        id=uuid4(), strategy_id=uuid4(), draft_version=1, source_code=VALID_SOURCE
+    )
+    securities = Securities()
+
+    class Watchlists:
+        async def get(self, requested_id, *, owner_user_id):
+            assert requested_id == watchlist_id
+            assert owner_user_id == owner_id
+            return SimpleNamespace(
+                archived=False,
+                items=(SimpleNamespace(symbol=securities.security.symbol),),
+            )
+
+    resolver = runtime.BacktestSnapshotResolver(
+        securities=securities,
+        strategies=Strategies(draft),
+        watchlists=Watchlists(),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "get_settings",
+        lambda: SimpleNamespace(
+            strategy_environment_version="python-3.12",
+            strategy_runner_image_digest=RUNNER_DIGEST,
+        ),
+    )
+    request = _draft_request(
+        draft,
+        mode=BacktestMode.WATCHLIST,
+        symbol=None,
+        watchlist_id=watchlist_id,
+    )
+
+    snapshot = asyncio.run(
+        resolver.resolve_creation_snapshot(
+            task_id=uuid4(), request=request, actor_user_id=str(owner_id)
+        )
+    )
+
+    assert snapshot.mode is BacktestMode.WATCHLIST
+    assert tuple(item.symbol for item in snapshot.universe_snapshot) == (
+        "600000.SH",
+    )
+
+
 def test_runner_identity_is_stable_per_worker_host() -> None:
     assert runtime._worker_id("worker-a") == runtime._worker_id("worker-a")
     assert runtime._worker_id("worker-a") != runtime._worker_id("worker-b")
@@ -190,9 +242,18 @@ def test_adjustment_timeline_is_collected_before_it_is_frozen(monkeypatch) -> No
     )
 
 
-def _draft_request(draft, *, draft_version: int | None = None):
+def _draft_request(
+    draft,
+    *,
+    draft_version: int | None = None,
+    mode: BacktestMode = BacktestMode.SINGLE,
+    symbol: str | None = "600000.SH",
+    watchlist_id=None,
+):
     return BacktestCreateRequest(
-        symbol="600000.SH",
+        mode=mode,
+        symbol=symbol,
+        watchlist_id=watchlist_id,
         date_range=BacktestDateRange(
             training_start_date=date(2020, 1, 1),
             training_end_date=date(2020, 12, 31),

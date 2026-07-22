@@ -641,6 +641,47 @@ services:
         max-size: 10m
         max-file: "7"
 
+  worker-backtest-bulk:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["python", "-m", "long_invest.entrypoints.bulk_backtest_worker"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_REDIS_URL: redis://redis:6379/0
+      LONGINVEST_LOG_FILE: /var/log/longinvest/worker-backtest-bulk.jsonl
+      LONGINVEST_WORKER_QUEUES: bulk-backtest
+      LONGINVEST_BACKTEST_CONCURRENCY: ${LONGINVEST_BACKTEST_CONCURRENCY:-4}
+      LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - application_logs:/var/log/longinvest
+      - strategy_git_data:/var/lib/long-invest/strategies
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
+    group_add:
+      - ${LONGINVEST_DOCKER_GID:-999}
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    mem_limit: 1g
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
+
   worker-bulk-history:
     build:
       context: ..

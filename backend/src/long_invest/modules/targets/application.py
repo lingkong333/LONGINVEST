@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -27,6 +28,13 @@ class CalculationSubmission:
     run_id: Any
     job_id: Any
     replayed: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class BatchCalculationOutcome:
+    subscription_id: UUID
+    code: str
+    submission: CalculationSubmission | None = None
 
 
 class TargetApplication:
@@ -65,6 +73,26 @@ class TargetApplication:
 
     async def calculate(self, command):
         return await self._schedule("reserve", command, calculation=command)
+
+    async def retry(self, command):
+        return await self._schedule("retry", command, calculation=command)
+
+    async def calculate_batch(self, commands):
+        results = []
+        for command in commands:
+            try:
+                submission = await self.calculate(command)
+            except AppError as exc:
+                results.append(
+                    BatchCalculationOutcome(command.subscription_id, exc.code)
+                )
+            else:
+                results.append(
+                    BatchCalculationOutcome(
+                        command.subscription_id, submission.code, submission
+                    )
+                )
+        return tuple(results)
 
     async def recalculate_review(self, command):
         try:

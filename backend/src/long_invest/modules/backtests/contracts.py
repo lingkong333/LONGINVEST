@@ -80,6 +80,8 @@ class BacktestErrorCode(StrEnum):
     ADJUSTMENT_DATA_UNAVAILABLE = "ADJUSTMENT_DATA_UNAVAILABLE"
     PRICE_BASIS_MISMATCH = "PRICE_BASIS_MISMATCH"
     BACKTEST_RESULT_SAVE_FAILED = "BACKTEST_RESULT_SAVE_FAILED"
+    BACKTEST_UNIVERSE_EMPTY = "BACKTEST_UNIVERSE_EMPTY"
+    BACKTEST_MARKET_ALREADY_RUNNING = "BACKTEST_MARKET_ALREADY_RUNNING"
 
 
 class BacktestDateRange(StrictContract):
@@ -144,8 +146,49 @@ class BacktestUniverseEntry(StrictContract):
     name: str = Field(min_length=1, max_length=100)
 
 
+class BacktestUniverseSelection(StrictContract):
+    mode: BacktestMode = BacktestMode.SINGLE
+    symbol: str | None = Field(
+        default=None, pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$"
+    )
+    watchlist_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_scope(self) -> BacktestUniverseSelection:
+        if self.mode is BacktestMode.SINGLE:
+            if self.symbol is None or self.watchlist_id is not None:
+                raise ValueError("single scope requires one symbol")
+        elif self.mode is BacktestMode.WATCHLIST:
+            if self.watchlist_id is None or self.symbol is not None:
+                raise ValueError("watchlist scope requires one watchlist")
+        elif self.symbol is not None or self.watchlist_id is not None:
+            raise ValueError("market scope does not accept a symbol or watchlist")
+        return self
+
+
+class BacktestUniverseSourcePort(Protocol):
+    async def get_single(self, symbol: str) -> BacktestUniverseEntry: ...
+
+    async def list_watchlist(
+        self, watchlist_id: UUID
+    ) -> tuple[BacktestUniverseEntry, ...]: ...
+
+    async def list_market(self) -> tuple[BacktestUniverseEntry, ...]: ...
+
+
+class FrozenBacktestUniverse(StrictContract):
+    mode: BacktestMode
+    entries: tuple[BacktestUniverseEntry, ...]
+    content_hash: Sha256Hex
+    survivor_bias_disclosed: bool = False
+
+
 class BacktestCreateRequest(StrictContract):
-    symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    mode: BacktestMode = BacktestMode.SINGLE
+    symbol: str | None = Field(
+        default=None, pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$"
+    )
+    watchlist_id: UUID | None = None
     date_range: BacktestDateRange
     strategy_version_id: UUID | None = None
     draft_id: UUID | None = None
@@ -166,6 +209,11 @@ class BacktestCreateRequest(StrictContract):
 
     @model_validator(mode="after")
     def validate_strategy_choice(self) -> BacktestCreateRequest:
+        BacktestUniverseSelection(
+            mode=self.mode,
+            symbol=self.symbol,
+            watchlist_id=self.watchlist_id,
+        )
         has_version = self.strategy_version_id is not None
         has_draft = self.draft_id is not None or self.draft_version is not None
         if has_version == has_draft:
@@ -184,7 +232,11 @@ class BacktestCreateRequest(StrictContract):
 
 class BacktestCreationSnapshotPort(Protocol):
     async def resolve_creation_snapshot(
-        self, *, task_id: UUID, request: BacktestCreateRequest
+        self,
+        *,
+        task_id: UUID,
+        request: BacktestCreateRequest,
+        actor_user_id: str | None = None,
     ) -> BacktestTaskSnapshot: ...
 
 
@@ -204,6 +256,7 @@ class BacktestTaskSnapshot(StrictContract):
     mode: BacktestMode
     universe_snapshot: tuple[BacktestUniverseEntry, ...]
     universe_hash: Sha256Hex
+    survivor_bias_disclosed: bool = False
     date_range: BacktestDateRange
     strategy_version_id: UUID | None
     draft_id: UUID | None
@@ -521,6 +574,7 @@ class BacktestTaskPage(StrictContract):
 class BacktestSummaryView(StrictContract):
     task_id: UUID
     status: BacktestTaskStatus
+    survivor_bias_disclosed: bool = False
     total_items: int = Field(ge=0)
     completed_items: int = Field(ge=0)
     succeeded_items: int = Field(ge=0)
@@ -530,6 +584,7 @@ class BacktestSummaryView(StrictContract):
     failure_codes: Mapping[str, int]
     allowed_actions: tuple[BacktestAction, ...]
     metric: BacktestMetricView | None = None
+    batch_metric: BacktestBatchSummary | None = None
 
     @model_validator(mode="after")
     def validate_counts(self) -> BacktestSummaryView:
@@ -542,4 +597,49 @@ class BacktestSummaryView(StrictContract):
             raise ValueError("terminal item counts must equal completed count")
         if self.completed_items + self.pending_items != self.total_items:
             raise ValueError("completed and pending counts must equal total")
+        return self
+
+
+class BacktestReturnDistribution(StrictContract):
+    minimum: Decimal
+    percentile_25: Decimal
+    median: Decimal
+    percentile_75: Decimal
+    maximum: Decimal
+
+
+class BacktestTradeCountDistribution(StrictContract):
+    minimum: int = Field(ge=0)
+    median: Decimal = Field(ge=0)
+    maximum: int = Field(ge=0)
+
+
+class BacktestBatchSummary(StrictContract):
+    total_items: int = Field(gt=0)
+    succeeded_items: int = Field(ge=0)
+    failed_items: int = Field(ge=0)
+    success_rate: Decimal = Field(ge=0, le=1)
+    positive_return_ratio: Decimal | None = Field(default=None, ge=0, le=1)
+    return_distribution: BacktestReturnDistribution | None = None
+    median_max_drawdown: Decimal | None = Field(default=None, ge=0)
+    trade_count_distribution: BacktestTradeCountDistribution | None = None
+    best_symbol: str | None = None
+    worst_symbol: str | None = None
+
+    @model_validator(mode="after")
+    def validate_counts_and_metrics(self) -> BacktestBatchSummary:
+        if self.succeeded_items + self.failed_items != self.total_items:
+            raise ValueError("batch terminal counts must equal total")
+        metrics = (
+            self.positive_return_ratio,
+            self.return_distribution,
+            self.median_max_drawdown,
+            self.trade_count_distribution,
+            self.best_symbol,
+            self.worst_symbol,
+        )
+        if self.succeeded_items == 0 and any(value is not None for value in metrics):
+            raise ValueError("failed batch cannot expose metric distribution")
+        if self.succeeded_items > 0 and any(value is None for value in metrics):
+            raise ValueError("successful batch requires metric distribution")
         return self

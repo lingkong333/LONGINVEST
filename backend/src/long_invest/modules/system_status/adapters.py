@@ -213,10 +213,11 @@ class SchedulerStatusAdapter:
                 ScheduleOccurrence(
                     occurrence_id=item.id,
                     occurrence_type=item.occurrence_type,
-                    definition_id=str(item.schedule_id),
+                    definition_id=str(item.schedule_id or item.definition_key),
                     scheduled_trade_date=(
-                        item.scheduled_at + timedelta(hours=8)
-                    ).date(),
+                        item.scheduled_trade_date
+                        or (item.scheduled_at + timedelta(hours=8)).date()
+                    ),
                     scheduled_at=item.scheduled_at,
                     status=item.status.value,
                     job_id=item.job_id,

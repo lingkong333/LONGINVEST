@@ -16,6 +16,7 @@ from long_invest.modules.auth.dependencies import (
     require_verified_write_request,
 )
 from long_invest.modules.targets.api import (
+    BatchCalculateTargetRequest,
     CalculateTargetRequest,
     CapabilityWriteRequest,
     ManualTargetRequest,
@@ -24,6 +25,7 @@ from long_invest.modules.targets.api import (
     router,
 )
 from long_invest.modules.targets.application import (
+    BatchCalculationOutcome,
     CalculationSubmission,
     TargetApplication,
 )
@@ -117,6 +119,12 @@ def _application():
                 "TARGET_CALCULATION_ACCEPTED", uuid4(), uuid4()
             )
         ),
+        retry=AsyncMock(
+            return_value=CalculationSubmission(
+                "TARGET_CALCULATION_ACCEPTED", uuid4(), uuid4()
+            )
+        ),
+        calculate_batch=AsyncMock(return_value=()),
         recalculate_review=AsyncMock(
             return_value=CalculationSubmission(
                 "TARGET_RECALCULATION_ACCEPTED", uuid4(), uuid4()
@@ -350,6 +358,114 @@ def test_calculation_capability_is_formally_available() -> None:
     assert read.status_code == 200
     assert response.json()["code"] == "TARGET_CALCULATION_ACCEPTED"
     assert read.json()["data"]["items"] == []
+
+
+def test_retry_capability_schedules_failed_calculation() -> None:
+    application = _application()
+    client = TestClient(_app(application))
+
+    response = client.post(
+        f"/api/v1/targets/{SUBSCRIPTION_ID}/retry",
+        json={"confirm": True, "reason": "retry", "expected_version": 2},
+        headers={"Idempotency-Key": "retry-1"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["code"] == "TARGET_CALCULATION_ACCEPTED"
+    command = application.retry.await_args.args[0]
+    assert command.subscription_id == SUBSCRIPTION_ID
+    assert command.expected_version == 2
+    assert command.idempotency_key == "retry-1"
+
+
+def test_batch_calculation_returns_each_subscription_result() -> None:
+    application = _application()
+    accepted = CalculationSubmission(
+        "TARGET_CALCULATION_ACCEPTED", uuid4(), uuid4(), replayed=True
+    )
+    failed_id, accepted_id = uuid4(), uuid4()
+    application.calculate_batch.return_value = (
+        BatchCalculationOutcome(failed_id, "TARGET_VERSION_CONFLICT"),
+        BatchCalculationOutcome(
+            accepted_id, "TARGET_CALCULATION_ACCEPTED", accepted
+        ),
+    )
+    client = TestClient(_app(application))
+    body = {
+        "confirm": True,
+        "reason": "batch",
+        "items": [
+            {
+                "subscription_id": str(failed_id),
+                "target_date": "2026-07-17",
+                "training_start_date": "2020-01-01",
+                "training_end_date": "2025-12-31",
+                "expected_version": 1,
+            },
+            {
+                "subscription_id": str(accepted_id),
+                "target_date": "2026-07-17",
+                "training_start_date": "2020-01-01",
+                "training_end_date": "2025-12-31",
+                "expected_version": 2,
+            },
+        ],
+    }
+
+    response = client.post(
+        "/api/v1/targets/calculate-batch",
+        json=body,
+        headers={"Idempotency-Key": "batch-1"},
+    )
+
+    assert response.status_code == 202
+    assert response.json()["code"] == "TARGET_BATCH_PARTIAL"
+    assert response.json()["data"]["requested"] == 2
+    assert response.json()["data"]["accepted"] == 1
+    assert response.json()["data"]["failed"] == 1
+    assert response.json()["data"]["items"][0]["accepted"] is False
+    assert response.json()["data"]["items"][1]["replayed"] is True
+    commands = application.calculate_batch.await_args.args[0]
+    assert commands[0].idempotency_key.startswith("batch:")
+    assert commands[0].idempotency_key != commands[1].idempotency_key
+
+
+@pytest.mark.parametrize(
+    "items",
+    [
+        [],
+        [
+            {
+                "subscription_id": str(SUBSCRIPTION_ID),
+                "target_date": "2026-07-17",
+                "training_start_date": "2025-12-31",
+                "training_end_date": "2020-01-01",
+                "expected_version": 1,
+            }
+        ],
+        [
+            {
+                "subscription_id": str(SUBSCRIPTION_ID),
+                "target_date": "2026-07-17",
+                "training_start_date": "2020-01-01",
+                "training_end_date": "2025-12-31",
+                "expected_version": 1,
+            },
+            {
+                "subscription_id": str(SUBSCRIPTION_ID),
+                "target_date": "2026-07-17",
+                "training_start_date": "2020-01-01",
+                "training_end_date": "2025-12-31",
+                "expected_version": 1,
+            },
+        ],
+    ],
+)
+def test_batch_calculation_rejects_empty_invalid_or_duplicate_items(items) -> None:
+    with pytest.raises(ValidationError):
+        BatchCalculateTargetRequest.model_validate(
+            {"confirm": True, "reason": "batch", "items": items}
+        )
 
 
 def test_capability_write_requires_expected_version() -> None:

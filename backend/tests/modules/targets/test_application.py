@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.targets.application import (
+    CalculationSubmission,
     TargetApplication,
     transactional_target_snapshot_port,
 )
@@ -286,3 +287,63 @@ async def test_calculate_replay_uses_same_job_identity_without_new_config() -> N
     submission = jobs.submit.await_args.args[0]
     assert submission.idempotency_scope == f"target-calculate:{command.subscription_id}"
     assert submission.config_snapshot == {"run_id": str(run_id)}
+
+
+@pytest.mark.anyio
+async def test_retry_reserves_new_calculation_and_submits_background_job() -> None:
+    database = Database()
+    run_id, job_id = uuid4(), uuid4()
+    reservation = SimpleNamespace(run_id=run_id, replayed=False)
+    strategy_service = SimpleNamespace(retry=AsyncMock(return_value=reservation))
+    jobs = SimpleNamespace(
+        lock_submission=AsyncMock(),
+        submit=AsyncMock(return_value=SimpleNamespace(id=job_id)),
+    )
+    command = SimpleNamespace(
+        subscription_id=uuid4(),
+        idempotency_key="retry-1",
+        request_id="request-1",
+        actor_user_id="user-1",
+    )
+    application = TargetApplication(
+        database,
+        subscription_factory=lambda _session: object(),
+        repository_factory=lambda _session: object(),
+        audit_factory=lambda _session: object(),
+        event_factory=lambda _session: object(),
+        strategy_service_factory=lambda _repository, **_ports: strategy_service,
+        job_service_factory=lambda _session: jobs,
+    )
+
+    result = await application.retry(command)
+
+    assert (result.run_id, result.job_id) == (run_id, job_id)
+    strategy_service.retry.assert_awaited_once_with(command)
+    assert jobs.submit.await_args.args[0].config_snapshot == {"run_id": str(run_id)}
+
+
+@pytest.mark.anyio
+async def test_calculate_batch_isolates_each_subscription_failure() -> None:
+    application = object.__new__(TargetApplication)
+    first_id, second_id = uuid4(), uuid4()
+    succeeded = CalculationSubmission(
+        "TARGET_CALCULATION_ACCEPTED", uuid4(), uuid4()
+    )
+    application.calculate = AsyncMock(
+        side_effect=[
+            AppError(code="TARGET_VERSION_CONFLICT", message="failed", status_code=409),
+            succeeded,
+        ]
+    )
+    commands = (
+        SimpleNamespace(subscription_id=first_id),
+        SimpleNamespace(subscription_id=second_id),
+    )
+
+    results = await application.calculate_batch(commands)
+
+    assert results[0].subscription_id == first_id
+    assert results[0].code == "TARGET_VERSION_CONFLICT"
+    assert results[0].submission is None
+    assert results[1].subscription_id == second_id
+    assert results[1].submission is succeeded

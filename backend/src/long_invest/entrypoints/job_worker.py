@@ -1,5 +1,10 @@
 from typing import Any
 
+from long_invest.bootstrap.backtest_jobs import (
+    backtest_bulk_coordinate,
+    backtest_bulk_finalize,
+    finish_linked_backtest_item,
+)
 from long_invest.bootstrap.history_backfills import build_history_backfill_job_handler
 from long_invest.bootstrap.jobs import (
     daily_data_coordinate,
@@ -57,10 +62,12 @@ HANDLERS["TARGET_CALCULATE"] = target_calculate
 
 async def backtest_single(context):
     handler = build_backtest_job_handler(build_backtest_application())
-    return await handler(context)
+    return await finish_linked_backtest_item(context, await handler(context))
 
 
 HANDLERS["BACKTEST_SINGLE"] = backtest_single
+HANDLERS["BACKTEST_BULK"] = backtest_bulk_coordinate
+HANDLERS["BACKTEST_BULK_FINALIZE"] = backtest_bulk_finalize
 HANDLERS["MARKET_HISTORY_BACKFILL"] = build_history_backfill_job_handler()
 
 

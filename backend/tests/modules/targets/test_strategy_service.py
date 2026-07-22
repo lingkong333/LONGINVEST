@@ -11,6 +11,7 @@ from long_invest.modules.targets.strategy_service import (
     ApplyStrategyTargetCommand,
     CalculateTargetCommand,
     RecalculateReviewCommand,
+    RetryTargetCommand,
     ReviewCommand,
     StrategyTargetService,
 )
@@ -53,6 +54,14 @@ class Repository:
 
     async def get_calculation(self, run_id, *, for_update=False):
         return self.runs.get(run_id)
+
+    async def get_latest_calculation(self, subscription_id, *, for_update=False):
+        matching = [
+            run
+            for run in self.runs.values()
+            if run.subscription_id == subscription_id
+        ]
+        return matching[-1] if matching else None
 
     async def get_revision(self, revision_id):
         return self.revisions.get(revision_id)
@@ -415,6 +424,80 @@ async def test_same_idempotency_key_replays_and_changed_request_conflicts(setup)
     with pytest.raises(AppError) as error:
         await service.reserve(changed)
     assert error.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
+
+
+@pytest.mark.anyio
+async def test_failed_calculation_retry_creates_new_run_and_same_key_replays(setup):
+    service, repository, _, _, _, command = setup
+    failed = await service.reserve(command)
+    await service.fail(failed.run_id, code="TIMEOUT", summary="timeout")
+    retry = RetryTargetCommand(
+        subscription_id=command.subscription_id,
+        reason="修复后重试",
+        expected_version=2,
+        idempotency_key="retry-1",
+        request_id="req-retry",
+        actor_user_id="user-1",
+        session_id="session-1",
+        trusted_ip="127.0.0.1",
+    )
+
+    reserved = await service.retry(retry)
+    replayed = await service.retry(retry)
+
+    assert reserved.run_id != failed.run_id
+    assert replayed.run_id == reserved.run_id
+    assert replayed.replayed is True
+    run = repository.runs[reserved.run_id]
+    assert run.training_start_date == command.training_start_date
+    assert run.training_end_date == command.training_end_date
+    assert run.resource_usage["_target_date"] == command.target_date.isoformat()
+
+
+@pytest.mark.anyio
+async def test_retry_rejects_latest_non_failed_calculation(setup):
+    service, _, _, _, _, command = setup
+    await service.reserve(command)
+
+    with pytest.raises(AppError) as caught:
+        await service.retry(
+            RetryTargetCommand(
+                subscription_id=command.subscription_id,
+                reason="重复重试",
+                expected_version=2,
+                idempotency_key="retry-pending",
+                request_id="req-retry",
+                actor_user_id="user-1",
+                session_id="session-1",
+                trusted_ip="127.0.0.1",
+            )
+        )
+
+    assert caught.value.code == "TARGET_CALCULATION_NOT_RETRYABLE"
+    assert caught.value.status_code == 409
+
+
+@pytest.mark.anyio
+async def test_retry_rejects_idempotency_key_owned_by_normal_calculation(setup):
+    service, _, _, _, _, command = setup
+    await service.reserve(command)
+
+    with pytest.raises(AppError) as caught:
+        await service.retry(
+            RetryTargetCommand(
+                subscription_id=command.subscription_id,
+                reason=command.reason,
+                expected_version=command.expected_version,
+                idempotency_key=command.idempotency_key,
+                request_id="req-retry",
+                actor_user_id=command.actor_user_id,
+                session_id=command.session_id,
+                trusted_ip=command.trusted_ip,
+            )
+        )
+
+    assert caught.value.code == "TARGET_IDEMPOTENCY_CONFLICT"
+    assert caught.value.status_code == 409
 
 
 @pytest.mark.anyio

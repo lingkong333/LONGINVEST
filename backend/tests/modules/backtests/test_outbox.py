@@ -1,4 +1,5 @@
 import asyncio
+from types import SimpleNamespace
 from uuid import uuid4
 
 from long_invest.modules.backtests.outbox import BacktestOutboxAdapter
@@ -19,6 +20,10 @@ class Jobs:
 
     async def submit(self, command):
         self.values.append(command)
+        return SimpleNamespace(id=uuid4())
+
+    async def initialize_items(self, job_id, item_keys):
+        self.initialized = (job_id, item_keys)
 
 
 def test_created_event_uses_an_isolated_single_backtest_queue() -> None:
@@ -85,6 +90,42 @@ def test_resumed_event_submits_the_requested_recovery_generation() -> None:
             "generation": 4,
             "recover": True,
         }
+
+    asyncio.run(scenario())
+
+
+def test_market_event_uses_bulk_queue_and_initializes_frozen_items() -> None:
+    async def scenario() -> None:
+        jobs = Jobs()
+        adapter = BacktestOutboxAdapter(
+            object(),
+            writer=Writer(),
+            job_service_factory=lambda _session: jobs,
+        )
+
+        job_id = await adapter.emit(
+            BacktestEvent(
+                topic="backtest.created",
+                task_id=uuid4(),
+                payload={
+                    "mode": "MARKET",
+                    "item_keys": ["000001.SZ", "600000.SH"],
+                },
+                dedupe_key="market-backtest",
+            )
+        )
+
+        assert job_id is not None
+        assert jobs.values[0].job_type == "BACKTEST_BULK"
+        assert jobs.values[0].queue == "bulk-backtest"
+        assert jobs.values[0].config_snapshot["item_keys"] == [
+            "000001.SZ",
+            "600000.SH",
+        ]
+        assert jobs.initialized == (
+            job_id,
+            ("000001.SZ", "600000.SH"),
+        )
 
     asyncio.run(scenario())
 

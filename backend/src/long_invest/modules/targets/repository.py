@@ -152,6 +152,21 @@ class TargetRepository:
             query = query.with_for_update()
         return await self._session.scalar(query)
 
+    async def get_latest_calculation(
+        self, subscription_id: UUID, *, for_update: bool = False
+    ) -> TargetCalculationRun | None:
+        query = (
+            select(TargetCalculationRun)
+            .where(TargetCalculationRun.subscription_id == subscription_id)
+            .order_by(
+                TargetCalculationRun.created_at.desc(), TargetCalculationRun.id.desc()
+            )
+            .limit(1)
+        )
+        if for_update:
+            query = query.with_for_update()
+        return await self._session.scalar(query)
+
     async def persist_calculation(self, run: TargetCalculationRun) -> None:
         self._session.add(run)
 

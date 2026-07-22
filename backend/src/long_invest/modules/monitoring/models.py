@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     Index,
@@ -170,21 +171,40 @@ class ScheduleOccurrence(Base):
             "status IN ('PENDING','CLAIMED','DISPATCHED','MISSED','FAILED')",
             name="status_valid",
         ),
+        CheckConstraint(
+            "(schedule_id IS NOT NULL AND schedule_revision_id IS NOT NULL "
+            "AND definition_key IS NULL) OR "
+            "(schedule_id IS NULL AND schedule_revision_id IS NULL "
+            "AND definition_key IS NOT NULL)",
+            name="definition_scope_valid",
+        ),
+        Index(
+            "uq_schedule_occurrence_system_scope",
+            "occurrence_type",
+            "definition_key",
+            "scheduled_at",
+            unique=True,
+            postgresql_where=text("definition_key IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
     occurrence_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    schedule_id: Mapped[UUID] = mapped_column(
+    schedule_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("monitor_schedule.id", ondelete="RESTRICT"),
-        nullable=False,
     )
-    schedule_revision_id: Mapped[UUID] = mapped_column(
+    schedule_revision_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("monitor_schedule_revision.id", ondelete="RESTRICT"),
-        nullable=False,
+    )
+    definition_key: Mapped[str | None] = mapped_column(String(128))
+    scheduled_trade_date: Mapped[date | None] = mapped_column(Date)
+    calendar_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("trading_calendar_version.id", ondelete="RESTRICT"),
     )
     scheduled_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False

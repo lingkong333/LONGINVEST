@@ -55,8 +55,21 @@ class BacktestRepository:
             statement = statement.with_for_update()
         return await self._session.scalar(statement)
 
-    async def get_item(self, task_id: UUID, *, for_update: bool = False):
-        statement = select(BacktestItem).where(BacktestItem.task_id == task_id)
+    async def get_item(
+        self,
+        task_id: UUID,
+        item_id: UUID | None = None,
+        *,
+        for_update: bool = False,
+    ):
+        statement = (
+            select(BacktestItem)
+            .where(BacktestItem.task_id == task_id)
+            .order_by(BacktestItem.id)
+            .limit(1)
+        )
+        if item_id is not None:
+            statement = statement.where(BacktestItem.id == item_id)
         if for_update:
             statement = statement.with_for_update()
         return await self._session.scalar(statement)
@@ -108,10 +121,28 @@ class BacktestRepository:
         self,
         task: BacktestTask,
         universe: BacktestUniverseSnapshot,
-        item: BacktestItem,
+        items: Sequence[BacktestItem],
     ) -> None:
-        self._session.add_all((task, universe, item))
+        if not items:
+            raise ValueError("backtest task must contain at least one item")
+        self._session.add_all((task, universe, *items))
         await self._session.flush()
+
+    async def lock_market_creation(self) -> bool:
+        await self._session.scalar(
+            select(func.pg_advisory_xact_lock(4_812_024_071_401))
+        )
+        active = await self._session.scalar(
+            select(
+                exists().where(
+                    BacktestTask.mode == "MARKET",
+                    BacktestTask.status.in_(
+                        ("PENDING", "RUNNING", "PAUSING", "PAUSED", "CANCELING")
+                    ),
+                )
+            )
+        )
+        return bool(active)
 
     async def add_forecast(self, forecast: BacktestForecastSnapshot) -> None:
         self._session.add(forecast)
@@ -142,6 +173,14 @@ class BacktestRepository:
         await self._session.flush()
 
     async def list_tasks(self, *, page: int, page_size: int):
+        first_item_id = (
+            select(BacktestItem.id)
+            .where(BacktestItem.task_id == BacktestTask.id)
+            .order_by(BacktestItem.id)
+            .limit(1)
+            .correlate(BacktestTask)
+            .scalar_subquery()
+        )
         has_forecast = exists(
             select(BacktestForecastSnapshot.id).where(
                 BacktestForecastSnapshot.item_id == BacktestItem.id
@@ -154,7 +193,7 @@ class BacktestRepository:
                 BacktestUniverseSnapshot,
                 has_forecast.label("has_forecast"),
             )
-            .join(BacktestItem, BacktestItem.task_id == BacktestTask.id)
+            .join(BacktestItem, BacktestItem.id == first_item_id)
             .join(
                 BacktestUniverseSnapshot,
                 BacktestUniverseSnapshot.task_id == BacktestTask.id,
@@ -167,12 +206,15 @@ class BacktestRepository:
         total = await self._session.scalar(select(func.count(BacktestTask.id)))
         return list(rows.all()), int(total or 0)
 
-    async def list_items(self, task_id: UUID):
-        rows = await self._session.scalars(
+    async def list_items(self, task_id: UUID, *, for_update: bool = False):
+        statement = (
             select(BacktestItem)
             .where(BacktestItem.task_id == task_id)
             .order_by(BacktestItem.id)
         )
+        if for_update:
+            statement = statement.with_for_update()
+        rows = await self._session.scalars(statement)
         return list(rows.all())
 
     async def list_orders(self, item_id: UUID):

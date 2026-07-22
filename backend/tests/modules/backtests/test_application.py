@@ -170,6 +170,49 @@ def test_holdout_workflow_freezes_forecast_before_loading_test_data() -> None:
     asyncio.run(_run_holdout_workflow())
 
 
+def test_run_item_claims_the_explicit_bulk_item() -> None:
+    async def scenario() -> None:
+        task = _task(uuid4())
+        requested_item_id = uuid4()
+
+        class CompletedItemService(FakeService):
+            async def start(self, _task_id, _execution_token, **kwargs):
+                self.claimed_item_id = kwargs["item_id"]
+                return BacktestExecutionState(
+                    task=self.task,
+                    task_status=BacktestTaskStatus.RUNNING,
+                    execution_generation=1,
+                    item_id=requested_item_id,
+                    item_status=BacktestItemStatus.SUCCEEDED,
+                    forecast=None,
+                )
+
+        service = CompletedItemService(task)
+        application = BacktestApplication(
+            FakeDatabase(),
+            creation_snapshots=SimpleNamespace(),
+            strategy_executions=SimpleNamespace(),
+            training_data=SimpleNamespace(),
+            test_data=SimpleNamespace(),
+            forecasts=SimpleNamespace(),
+            adjustments=SimpleNamespace(),
+            engine=SimpleNamespace(rule_version=task.rule_version),
+            repository_factory=lambda session: session,
+            service_factory=lambda _repository, **_kwargs: service,
+        )
+
+        state = await application.run_item(
+            task.id,
+            requested_item_id,
+            execution_token=uuid4(),
+        )
+
+        assert service.claimed_item_id == requested_item_id
+        assert state.item_id == requested_item_id
+
+    asyncio.run(scenario())
+
+
 def test_job_handler_is_a_public_single_backtest_entrypoint() -> None:
     async def scenario() -> None:
         task_id = uuid4()
@@ -181,7 +224,10 @@ def test_job_handler_is_a_public_single_backtest_entrypoint() -> None:
 
             async def run(self, value, *, execution_token, generation):
                 self.called = (value, execution_token, generation)
-                return SimpleNamespace(item_status=BacktestItemStatus.SUCCEEDED)
+                return SimpleNamespace(
+                    item_status=BacktestItemStatus.SUCCEEDED,
+                    task_status=BacktestTaskStatus.SUCCEEDED,
+                )
 
         application = Application()
         handler = build_backtest_job_handler(application)
@@ -195,6 +241,43 @@ def test_job_handler_is_a_public_single_backtest_entrypoint() -> None:
 
         assert result.success is True
         assert application.called == (task_id, fence_token, 3)
+
+    asyncio.run(scenario())
+
+
+def test_job_handler_routes_bulk_child_to_the_frozen_item() -> None:
+    async def scenario() -> None:
+        task_id = uuid4()
+        item_id = uuid4()
+        fence_token = uuid4()
+
+        class Application:
+            called = None
+
+            async def run_item(
+                self, value, *, item_id, execution_token, generation
+            ):
+                self.called = (value, item_id, execution_token, generation)
+                return SimpleNamespace(
+                    item_status=BacktestItemStatus.SUCCEEDED,
+                    task_status=BacktestTaskStatus.SUCCEEDED,
+                )
+
+        application = Application()
+        result = await build_backtest_job_handler(application)(
+            JobExecutionContext(
+                job_id=uuid4(),
+                fence_token=fence_token,
+                config={
+                    "backtest_task_id": str(task_id),
+                    "backtest_item_id": str(item_id),
+                    "generation": 2,
+                },
+            )
+        )
+
+        assert result.success is True
+        assert application.called == (task_id, item_id, fence_token, 2)
 
     asyncio.run(scenario())
 

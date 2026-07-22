@@ -43,6 +43,7 @@ async def run() -> None:
         job_factory=JobService,
         event_factory=OccurrenceEventAdapter,
         universe_freezer=security.freeze_symbols_in_transaction,
+        universe_all_freezer=security.freeze_universe_in_transaction,
     )
     runtime = SchedulerRuntimeApplication(database)
     instance_id = f"{socket.gethostname()}:{os.getpid()}"

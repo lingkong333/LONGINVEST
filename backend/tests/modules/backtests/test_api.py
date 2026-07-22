@@ -34,7 +34,10 @@ class Application:
 
     async def create(self, **kwargs):
         self.created = kwargs
+        job_id = uuid4()
+        self.job_id = job_id
         return SimpleNamespace(
+            job_id=job_id,
             task=TaskValue(),
             item_id=uuid4(),
             item_status=BacktestItemStatus.PENDING,
@@ -91,7 +94,8 @@ def test_create_api_uses_stable_task_id_and_command_context() -> None:
 
         response = await create_backtest(body, application, identity, "key-1")
 
-        assert response["code"] == "BACKTEST_CREATED"
+        assert response["code"] == "JOB_ACCEPTED"
+        assert response["data"]["job_id"] == str(application.job_id)
         assert application.created["context"].idempotency_key == "key-1"
         first_id = application.created["task_id"]
         await create_backtest(body, application, identity, "key-1")

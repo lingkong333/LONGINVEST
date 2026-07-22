@@ -40,6 +40,13 @@ class PlannedBatch:
 
 
 @dataclass(frozen=True, slots=True)
+class PlannedDailyMarketData:
+    trade_date: date
+    calendar_version_id: UUID
+    scheduled_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
 class ClaimResult:
     status: str
     created: bool = True
@@ -122,23 +129,46 @@ class OccurrenceEventAdapter:
         self.writer = writer or TransactionalOutboxWriter()
 
     async def append(self, occurrence, action):
+        topic = f"scheduler.occurrence_{action}"
+        payload = {
+            "event_type": topic,
+            "occurrence_id": str(occurrence.id),
+            "schedule_id": (
+                str(occurrence.schedule_id) if occurrence.schedule_id else None
+            ),
+            "schedule_revision_id": (
+                str(occurrence.schedule_revision_id)
+                if occurrence.schedule_revision_id
+                else None
+            ),
+            "definition_key": occurrence.definition_key,
+            "scheduled_at": occurrence.scheduled_at.isoformat(),
+            "status": str(occurrence.status),
+            "job_id": str(occurrence.job_id) if occurrence.job_id else None,
+        }
         await self.writer.append(
             session=self.session,
-            topic=f"schedule_occurrence.{action}",
+            topic=topic,
             aggregate_type="schedule_occurrence",
             aggregate_id=str(occurrence.id),
             queue="domain-events",
-            payload={
-                "event_type": f"schedule_occurrence.{action}",
-                "occurrence_id": str(occurrence.id),
-                "schedule_id": str(occurrence.schedule_id),
-                "schedule_revision_id": str(occurrence.schedule_revision_id),
-                "scheduled_at": occurrence.scheduled_at.isoformat(),
-                "status": str(occurrence.status),
-                "job_id": str(occurrence.job_id) if occurrence.job_id else None,
-            },
-            dedupe_key=f"schedule-occurrence:{occurrence.schedule_id}:{occurrence.scheduled_at.isoformat()}:{action}",
+            payload=payload,
+            dedupe_key=(
+                "schedule-occurrence:"
+                f"{occurrence.schedule_id or occurrence.definition_key}:"
+                f"{occurrence.scheduled_at.isoformat()}:{action}"
+            ),
         )
+        if occurrence.occurrence_type == "DAILY_MARKET_DATA" and action == "created":
+            await self.writer.append(
+                session=self.session,
+                topic="daily_market_data.requested",
+                aggregate_type="daily_market_data",
+                aggregate_id=str(occurrence.id),
+                queue="domain-events",
+                payload={**payload, "event_type": "daily_market_data.requested"},
+                dedupe_key=f"daily-market-data-requested:{occurrence.id}",
+            )
 
 
 class MonitorOccurrenceApplication:
@@ -216,6 +246,9 @@ def _occurrence_view(row) -> ScheduleOccurrenceView:
         id=row.id,
         occurrence_type=row.occurrence_type,
         schedule_id=row.schedule_id,
+        definition_key=row.definition_key,
+        scheduled_trade_date=row.scheduled_trade_date,
+        calendar_version_id=row.calendar_version_id,
         scheduled_at=row.scheduled_at,
         status=OccurrenceStatus(row.status),
         subscriptions=(),
@@ -237,6 +270,7 @@ class MonitorScanner:
         job_factory,
         event_factory,
         universe_freezer,
+        universe_all_freezer=None,
         store_factory=OccurrenceStore,
     ):
         self.database = database
@@ -246,6 +280,7 @@ class MonitorScanner:
         self.job_factory = job_factory
         self.event_factory = event_factory
         self.universe_freezer = universe_freezer
+        self.universe_all_freezer = universe_all_freezer
         self.store_factory = store_factory
 
     async def claim(self, plan: PlannedOccurrence, *, now: datetime) -> ClaimResult:
@@ -363,6 +398,95 @@ class MonitorScanner:
                 ] += 1
             except Exception:
                 failed += 1
+        try:
+            daily = await self._scan_daily_market_data(
+                now=now,
+                trade_date=local_date,
+                calendar_version_id=window.version_id,
+            )
+        except Exception:
+            failed += 1
+            daily = ClaimResult("FAILED", False)
         return ScanResult(
-            counts["DISPATCHED"], counts["MISSED"], counts["DUPLICATE"], failed
+            counts["DISPATCHED"] + (daily.status == "DISPATCHED"),
+            counts["MISSED"] + (daily.status == "MISSED"),
+            counts["DUPLICATE"] + (daily.status == "DUPLICATE"),
+            failed,
         )
+
+    async def _scan_daily_market_data(
+        self,
+        *,
+        now: datetime,
+        trade_date: date,
+        calendar_version_id: UUID,
+    ) -> ClaimResult:
+        scheduled_at = datetime.combine(trade_date, time(17), tzinfo=UTC) - timedelta(
+            hours=8
+        )
+        if now < scheduled_at:
+            return ClaimResult("FUTURE", False)
+        return await self.claim_daily_market_data(
+            PlannedDailyMarketData(
+                trade_date=trade_date,
+                calendar_version_id=calendar_version_id,
+                scheduled_at=scheduled_at,
+            ),
+            now=now,
+        )
+
+    async def claim_daily_market_data(
+        self, plan: PlannedDailyMarketData, *, now: datetime
+    ) -> ClaimResult:
+        if self.universe_all_freezer is None:
+            raise RuntimeError("daily market universe freezer is not configured")
+        late = now > plan.scheduled_at + timedelta(seconds=60)
+        async with self.database.transaction() as session:
+            occurrence = ScheduleOccurrence(
+                id=uuid4(),
+                occurrence_type="DAILY_MARKET_DATA",
+                definition_key="daily-market-data",
+                scheduled_trade_date=plan.trade_date,
+                calendar_version_id=plan.calendar_version_id,
+                scheduled_at=plan.scheduled_at,
+                subscription_snapshot=[],
+                status=(OccurrenceStatus.MISSED if late else OccurrenceStatus.PENDING),
+                error_code="SCHEDULE_OCCURRENCE_MISSED" if late else None,
+            )
+            try:
+                async with session.begin_nested():
+                    await self.store_factory(session).add_many((occurrence,))
+            except IntegrityError:
+                return ClaimResult("DUPLICATE", False)
+            events = self.event_factory(session)
+            if late:
+                await events.append(occurrence, "missed")
+                return ClaimResult("MISSED")
+            universe = await self.universe_all_freezer(session)
+            if not universe.items:
+                raise RuntimeError("daily market universe is empty")
+            command = SubmitJob(
+                job_type="DAILY_DATA_COORDINATE",
+                queue="daily-market-data",
+                idempotency_scope="daily-market-data:schedule",
+                idempotency_key=plan.trade_date.isoformat(),
+                request_id=f"daily-{occurrence.id}",
+                config_snapshot={
+                    "trading_date": plan.trade_date.isoformat(),
+                    "scheduled_at": plan.scheduled_at.isoformat(),
+                    "universe_snapshot_id": str(universe.id),
+                    "universe_snapshot_version": universe.master_version,
+                    "symbols": [item.symbol for item in universe.items],
+                },
+                business_object_type="daily_market_data",
+                business_object_id=plan.trade_date.isoformat(),
+                soft_timeout_seconds=60,
+                hard_timeout_seconds=120,
+            )
+            job = await self.job_factory(session).submit(command)
+            occurrence.job_id = job.id
+            occurrence.status = OccurrenceStatus.DISPATCHED
+            occurrence.claimed_at = now
+            occurrence.dispatched_at = now
+            await events.append(occurrence, "created")
+            return ClaimResult("DISPATCHED", job_id=job.id)

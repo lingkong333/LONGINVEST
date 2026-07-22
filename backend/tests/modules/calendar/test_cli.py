@@ -1,11 +1,14 @@
 import io
 import json
+from pathlib import Path
 
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.calendar.cli import read_calendar_import, run_calendar_import
 from long_invest.platform.errors import AppError
+
+PROJECT_ROOT = Path(__file__).parents[4]
 
 
 def valid_payload() -> dict:
@@ -32,6 +35,22 @@ def test_cli_reads_utf8_json_from_stdin_or_file(tmp_path) -> None:
 
     assert read_calendar_import(source=source).market == "CN_A"
     assert read_calendar_import(stdin=io.BytesIO(encoded)).days[0].is_trading_day
+
+
+def test_bundled_2026_calendar_matches_official_closures() -> None:
+    command = read_calendar_import(
+        source=PROJECT_ROOT / "deploy/data/trading-calendar/CN_A-2026.json"
+    )
+    days = {day.trade_date.isoformat(): day for day in command.days}
+
+    assert command.market == "CN_A"
+    assert command.source == "SSE_OFFICIAL"
+    assert len(days) == 365
+    assert days["2026-02-14"].is_trading_day is False
+    assert days["2026-02-23"].is_trading_day is False
+    assert days["2026-02-24"].is_trading_day is True
+    assert days["2026-10-07"].is_trading_day is False
+    assert days["2026-10-08"].is_trading_day is True
 
 
 @pytest.mark.parametrize(

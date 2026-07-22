@@ -245,9 +245,12 @@ async def test_defer_keeps_parent_running_and_ends_run_successfully() -> None:
 
 
 @pytest.mark.anyio
-async def test_finalize_parent_reflects_partial_business_batch() -> None:
+@pytest.mark.parametrize(
+    "job_type", ["DAILY_DATA_COORDINATE", "BACKTEST_BULK"]
+)
+async def test_finalize_parent_reflects_partial_business_batch(job_type) -> None:
     parent = SimpleNamespace(
-        job_type="DAILY_DATA_COORDINATE",
+        job_type=job_type,
         status=JobStatus.RUNNING,
         result_summary=None,
         terminal_at=None,
@@ -265,6 +268,35 @@ async def test_finalize_parent_reflects_partial_business_batch() -> None:
     assert parent.status is JobStatus.PARTIAL
     assert parent.result_summary["code"] == "PARTIAL"
     assert parent.terminal_at is not None
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize(
+    ("code", "expected"),
+    [
+        ("BACKTEST_BATCH_PAUSED", JobStatus.PAUSED),
+        ("BACKTEST_BATCH_CANCELED", JobStatus.CANCELED),
+    ],
+)
+async def test_finalize_backtest_parent_preserves_control_state(code, expected) -> None:
+    parent = SimpleNamespace(
+        job_type="BACKTEST_BULK",
+        status=JobStatus.RUNNING,
+        result_summary=None,
+        terminal_at=None,
+        updated_at=None,
+        version=1,
+    )
+    result = JobResult(
+        success=True,
+        code=code,
+        message="controlled",
+        retryable=False,
+    )
+
+    assert await Service(Repository(parent)).finalize_parent(uuid4(), result) is True
+    assert parent.status is expected
+    assert (parent.terminal_at is None) is (expected is JobStatus.PAUSED)
 
 
 @pytest.mark.anyio

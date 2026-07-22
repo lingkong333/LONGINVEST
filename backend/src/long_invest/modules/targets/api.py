@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel, ConfigDict, Field, StrictBool, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    field_validator,
+    model_validator,
+)
 
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -26,6 +34,7 @@ from long_invest.modules.targets.contracts import (
 from long_invest.modules.targets.strategy_service import (
     CalculateTargetCommand,
     RecalculateReviewCommand,
+    RetryTargetCommand,
     ReviewCommand,
 )
 from long_invest.platform.errors import AppError
@@ -97,6 +106,38 @@ class CalculateTargetRequest(CapabilityWriteRequest):
     target_date: date
     training_start_date: date
     training_end_date: date
+
+
+class BatchCalculateTargetItem(StrictRequest):
+    subscription_id: UUID
+    target_date: date
+    training_start_date: date
+    training_end_date: date
+    expected_version: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def validate_training_range(self) -> BatchCalculateTargetItem:
+        if self.training_start_date > self.training_end_date:
+            raise ValueError("training start date must not be after end date")
+        return self
+
+
+class BatchCalculateTargetRequest(StrictRequest):
+    confirm: StrictBool
+    reason: str = Field(min_length=1, max_length=500)
+    items: list[BatchCalculateTargetItem] = Field(min_length=1, max_length=200)
+
+    @field_validator("reason", mode="before")
+    @classmethod
+    def strip_reason(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
+
+    @model_validator(mode="after")
+    def validate_unique_subscriptions(self) -> BatchCalculateTargetRequest:
+        subscription_ids = [item.subscription_id for item in self.items]
+        if len(subscription_ids) != len(set(subscription_ids)):
+            raise ValueError("batch subscriptions must be unique")
+        return self
 
 
 class ReviewTargetRequest(CapabilityWriteRequest):
@@ -177,6 +218,26 @@ class CapabilityResult(BaseModel):
 
 class CapabilityResponse(SuccessEnvelope):
     data: CapabilityResult
+
+
+class BatchCapabilityItem(BaseModel):
+    subscription_id: UUID
+    code: str
+    accepted: bool
+    run_id: UUID | None = None
+    job_id: UUID | None = None
+    replayed: bool = False
+
+
+class BatchCapabilityResult(BaseModel):
+    requested: int
+    accepted: int
+    failed: int
+    items: list[BatchCapabilityItem]
+
+
+class BatchCapabilityResponse(SuccessEnvelope):
+    data: BatchCapabilityResult
 
 
 @router.get(
@@ -335,26 +396,93 @@ async def calculate_target(
 @router.post(
     "/api/v1/targets/{subscription_id}/retry",
     response_model=CapabilityResponse,
+    status_code=202,
 )
 async def retry_target(
     subscription_id: UUID,
     body: CapabilityWriteRequest,
-    _identity_value: WriteIdentity,
+    identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body, idempotency_key)
+    _require_confirmation(body.confirm)
+    result = await application.retry(
+        RetryTargetCommand(
+            subscription_id=subscription_id,
+            reason=body.reason,
+            expected_version=body.expected_version,
+            idempotency_key=_validated_idempotency_key(idempotency_key),
+            **_identity(identity),
+        )
+    )
+    return success_response(
+        data={
+            "code": result.code,
+            "accepted": True,
+            "run_id": str(result.run_id),
+            "job_id": str(result.job_id),
+            "replayed": result.replayed,
+        },
+        code=result.code,
+    )
 
 
 @router.post(
     "/api/v1/targets/calculate-batch",
-    response_model=CapabilityResponse,
+    response_model=BatchCapabilityResponse,
+    status_code=202,
 )
 async def calculate_targets_batch(
-    body: CapabilityWriteRequest,
-    _identity_value: WriteIdentity,
+    body: BatchCalculateTargetRequest,
+    identity: WriteIdentity,
+    application: Application,
     idempotency_key: IdempotencyKey,
 ) -> dict[str, Any]:
-    return _unavailable_write(body, idempotency_key)
+    _require_confirmation(body.confirm)
+    batch_key = _validated_idempotency_key(idempotency_key)
+    identity_fields = _identity(identity)
+    commands = tuple(
+        CalculateTargetCommand(
+            subscription_id=item.subscription_id,
+            target_date=item.target_date,
+            training_start_date=item.training_start_date,
+            training_end_date=item.training_end_date,
+            reason=body.reason,
+            expected_version=item.expected_version,
+            idempotency_key=_batch_item_key(batch_key, item.subscription_id),
+            **identity_fields,
+        )
+        for item in body.items
+    )
+    results = await application.calculate_batch(commands)
+    items = [
+        {
+            "subscription_id": str(result.subscription_id),
+            "code": result.code,
+            "accepted": result.submission is not None,
+            "run_id": (
+                str(result.submission.run_id) if result.submission is not None else None
+            ),
+            "job_id": (
+                str(result.submission.job_id) if result.submission is not None else None
+            ),
+            "replayed": (
+                result.submission.replayed if result.submission is not None else False
+            ),
+        }
+        for result in results
+    ]
+    accepted = sum(item["accepted"] for item in items)
+    code = "TARGET_BATCH_ACCEPTED" if accepted == len(items) else "TARGET_BATCH_PARTIAL"
+    return success_response(
+        data={
+            "requested": len(items),
+            "accepted": accepted,
+            "failed": len(items) - accepted,
+            "items": items,
+        },
+        code=code,
+    )
 
 
 @router.get(
@@ -462,14 +590,6 @@ async def recalculate_target_review(
     )
 
 
-def _unavailable_write(
-    body: CapabilityWriteRequest, idempotency_key: str
-) -> dict[str, Any]:
-    _require_confirmation(body.confirm)
-    idempotency_key = _validated_idempotency_key(idempotency_key)
-    raise _capability_not_ready()
-
-
 async def _decide_review(
     review_id,
     body,
@@ -516,12 +636,9 @@ def _validated_idempotency_key(value: str) -> str:
     return key
 
 
-def _capability_not_ready() -> AppError:
-    return AppError(
-        code="TARGET_CAPABILITY_NOT_READY",
-        message="目标策略计算与复核能力尚未开放",
-        status_code=409,
-    )
+def _batch_item_key(batch_key: str, subscription_id: UUID) -> str:
+    digest = hashlib.sha256(f"{batch_key}:{subscription_id}".encode()).hexdigest()
+    return f"batch:{digest}"
 
 
 def _identity(identity: AuthenticatedRequest) -> dict[str, str]:

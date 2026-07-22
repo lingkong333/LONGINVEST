@@ -4,7 +4,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid5
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -93,7 +93,9 @@ class BacktestApplication:
         context: BacktestCommandContext,
     ):
         snapshot = await self._creation_snapshots.resolve_creation_snapshot(
-            task_id=task_id, request=request
+            task_id=task_id,
+            request=request,
+            actor_user_id=context.actor_user_id,
         )
         try:
             return await self._write("create", snapshot, context)
@@ -140,9 +142,28 @@ class BacktestApplication:
     async def run(
         self, task_id: UUID, *, execution_token: UUID, generation: int = 1
     ):
+        return await self.run_item(
+            task_id,
+            item_id=None,
+            execution_token=execution_token,
+            generation=generation,
+        )
+
+    async def run_item(
+        self,
+        task_id: UUID,
+        item_id: UUID | None,
+        *,
+        execution_token: UUID,
+        generation: int = 1,
+    ):
         try:
             state = await self._write(
-                "start", task_id, execution_token, expected_generation=generation
+                "start",
+                task_id,
+                execution_token,
+                expected_generation=generation,
+                item_id=item_id,
             )
             if state.item_status in _TERMINAL_ITEM_STATUSES:
                 return state
@@ -154,7 +175,7 @@ class BacktestApplication:
                     "BACKTEST_RULE_VERSION_MISMATCH",
                     "回测规则版本与冻结任务不一致",
                 )
-            entry = task.universe_snapshot[0]
+            entry = _entry_for_item(task, state.item_id)
             forecast = state.forecast
             if forecast is None:
                 training = await self._training_data.get_training_data(
@@ -175,6 +196,7 @@ class BacktestApplication:
                     task_id,
                     training,
                     execution_token=execution_token,
+                    item_id=state.item_id,
                 )
                 forecast = claimed.forecast
                 if forecast is None:
@@ -204,11 +226,15 @@ class BacktestApplication:
                         result,
                         execution_token=execution_token,
                         frozen_at=self._clock(),
+                        item_id=state.item_id,
                     )
                     del request, result, execution
                 del training
                 state = await self._checkpoint(
-                    task_id, execution_token=execution_token, generation=generation
+                    task_id,
+                    execution_token=execution_token,
+                    generation=generation,
+                    item_id=state.item_id,
                 )
                 if _stopped(state):
                     return state
@@ -230,9 +256,13 @@ class BacktestApplication:
                 task_id,
                 test_data,
                 execution_token=execution_token,
+                item_id=state.item_id,
             )
             state = await self._checkpoint(
-                task_id, execution_token=execution_token, generation=generation
+                task_id,
+                execution_token=execution_token,
+                generation=generation,
+                item_id=state.item_id,
             )
             if _stopped(state):
                 return state
@@ -251,9 +281,13 @@ class BacktestApplication:
                     task_id,
                     timeline,
                     execution_token=execution_token,
+                    item_id=state.item_id,
                 )
                 state = await self._checkpoint(
-                    task_id, execution_token=execution_token, generation=generation
+                    task_id,
+                    execution_token=execution_token,
+                    generation=generation,
+                    item_id=state.item_id,
                 )
                 if _stopped(state):
                     return state
@@ -268,7 +302,10 @@ class BacktestApplication:
                 minimum_hysteresis=task.minimum_hysteresis,
             )
             state = await self._checkpoint(
-                task_id, execution_token=execution_token, generation=generation
+                task_id,
+                execution_token=execution_token,
+                generation=generation,
+                item_id=state.item_id,
             )
             if _stopped(state):
                 return state
@@ -278,53 +315,86 @@ class BacktestApplication:
                 test_data,
                 result,
                 execution_token=execution_token,
+                item_id=state.item_id,
             )
         except AppError as exc:
             if exc.code not in _NON_FATAL_CONFLICTS:
-                await self._record_failure(task_id, exc.code, execution_token)
+                await self._record_failure(
+                    task_id, exc.code, execution_token, item_id=item_id
+                )
             raise
         except RuntimeError as exc:
             code = _forecast_failure_code(exc)
-            await self._record_failure(task_id, code, execution_token)
+            await self._record_failure(
+                task_id, code, execution_token, item_id=item_id
+            )
             raise _failure(code, "策略预测失败") from exc
         except TimeoutError as exc:
             code = BacktestErrorCode.STRATEGY_FORECAST_TIMEOUT.value
-            await self._record_failure(task_id, code, execution_token)
+            await self._record_failure(
+                task_id, code, execution_token, item_id=item_id
+            )
             raise _failure(code, "策略预测超时") from exc
         except (SQLAlchemyError, ValueError) as exc:
             code = BacktestErrorCode.BACKTEST_RESULT_SAVE_FAILED.value
-            await self._record_failure(task_id, code, execution_token)
+            await self._record_failure(
+                task_id, code, execution_token, item_id=item_id
+            )
             raise _failure(code, "回测执行或结果保存失败") from exc
 
     async def recover(
-        self, task_id: UUID, *, execution_token: UUID, generation: int = 1
+        self,
+        task_id: UUID,
+        *,
+        execution_token: UUID,
+        generation: int = 1,
+        item_id: UUID | None = None,
     ):
         await self._write(
             "recover",
             task_id,
             execution_token=execution_token,
             expected_generation=generation,
+            item_id=item_id,
         )
-        return await self.run(
-            task_id, execution_token=execution_token, generation=generation
+        return await self.run_item(
+            task_id,
+            item_id=item_id,
+            execution_token=execution_token,
+            generation=generation,
         )
 
     async def _checkpoint(
-        self, task_id: UUID, *, execution_token: UUID, generation: int
+        self,
+        task_id: UUID,
+        *,
+        execution_token: UUID,
+        generation: int,
+        item_id: UUID | None = None,
     ):
         return await self._write(
             "checkpoint",
             task_id,
             execution_token=execution_token,
             expected_generation=generation,
+            item_id=item_id,
         )
 
     async def _record_failure(
-        self, task_id: UUID, code: str, execution_token: UUID
+        self,
+        task_id: UUID,
+        code: str,
+        execution_token: UUID,
+        *,
+        item_id: UUID | None = None,
     ) -> None:
         try:
             await self._write(
-                "fail", task_id, code, execution_token=execution_token
+                "fail",
+                task_id,
+                code,
+                execution_token=execution_token,
+                item_id=item_id,
             )
         except (AppError, SQLAlchemyError):
             return
@@ -350,6 +420,15 @@ class BacktestApplication:
 def _verify_security_snapshot(entry, data, code: BacktestErrorCode) -> None:
     if data.security_id != entry.security_id or data.symbol != entry.symbol:
         raise _failure(code, "行情数据与冻结股票不一致")
+
+
+def _entry_for_item(task, item_id: UUID):
+    if len(task.universe_snapshot) == 1:
+        return task.universe_snapshot[0]
+    for entry in task.universe_snapshot:
+        if uuid5(task.id, f"item:{entry.security_id}") == item_id:
+            return entry
+    raise _failure("BACKTEST_ITEM_NOT_FOUND", "回测子项不存在")
 
 
 def _bar(row) -> BacktestBar:
@@ -382,6 +461,8 @@ def build_backtest_job_handler(application: BacktestApplication):
     async def handle(context: JobExecutionContext) -> JobResult:
         try:
             task_id = UUID(str(context.config["backtest_task_id"]))
+            item_id_value = context.config.get("backtest_item_id")
+            item_id = UUID(str(item_id_value)) if item_id_value is not None else None
             generation = int(context.config["generation"])
             if generation < 1:
                 raise ValueError
@@ -397,13 +478,22 @@ def build_backtest_job_handler(application: BacktestApplication):
                     task_id,
                     execution_token=context.fence_token,
                     generation=generation,
+                    item_id=item_id,
                 )
             else:
-                state = await application.run(
-                    task_id,
-                    execution_token=context.fence_token,
-                    generation=generation,
-                )
+                if item_id is None:
+                    state = await application.run(
+                        task_id,
+                        execution_token=context.fence_token,
+                        generation=generation,
+                    )
+                else:
+                    state = await application.run_item(
+                        task_id,
+                        item_id=item_id,
+                        execution_token=context.fence_token,
+                        generation=generation,
+                    )
         except AppError as exc:
             if exc.code in _COOPERATIVE_STOP_CODES:
                 return JobResult.success_result(
@@ -419,7 +509,11 @@ def build_backtest_job_handler(application: BacktestApplication):
                 retryable=exc.code in _NON_FATAL_CONFLICTS,
             )
         return JobResult.success_result(
-            data={"backtest_task_id": str(task_id), "status": state.item_status.value}
+            data={
+                "backtest_task_id": str(task_id),
+                "status": state.item_status.value,
+                "task_status": state.task_status.value,
+            }
         )
 
     return handle

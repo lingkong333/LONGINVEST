@@ -9,9 +9,40 @@ from long_invest.modules.monitoring.contracts import FrozenSubscription
 from long_invest.modules.monitoring.scheduler import (
     MonitorOccurrenceApplication,
     MonitorScanner,
+    OccurrenceEventAdapter,
     PlannedBatch,
+    PlannedDailyMarketData,
     PlannedOccurrence,
 )
+
+
+@pytest.mark.anyio
+async def test_daily_occurrence_emits_scheduler_and_data_request_events() -> None:
+    calls = []
+
+    class Writer:
+        async def append(self, **kwargs):
+            calls.append(kwargs)
+
+    occurrence = SimpleNamespace(
+        id=uuid4(),
+        occurrence_type="DAILY_MARKET_DATA",
+        schedule_id=None,
+        schedule_revision_id=None,
+        definition_key="daily-market-data",
+        scheduled_at=datetime(2026, 7, 17, 9, tzinfo=UTC),
+        status="DISPATCHED",
+        job_id=uuid4(),
+    )
+
+    await OccurrenceEventAdapter(object(), writer=Writer()).append(
+        occurrence, "created"
+    )
+
+    assert [call["topic"] for call in calls] == [
+        "scheduler.occurrence_created",
+        "daily_market_data.requested",
+    ]
 
 
 @pytest.mark.anyio
@@ -258,7 +289,7 @@ async def test_scan_uses_public_windows_and_merges_frozen_subscriptions() -> Non
 
     class Calendar:
         async def trading_dates(self, start, end):
-            return SimpleNamespace(dates=(day,))
+            return SimpleNamespace(dates=(day,), version_id=uuid4())
 
     class Schedules:
         async def list(self):
@@ -323,7 +354,7 @@ async def test_future_and_schedule_without_enabled_subscriptions_are_skipped() -
 
     class Calendar:
         async def trading_dates(self, start, end):
-            return SimpleNamespace(dates=(day,))
+            return SimpleNamespace(dates=(day,), version_id=uuid4())
 
     class Schedules:
         async def list(self):
@@ -364,7 +395,7 @@ async def test_one_schedule_failure_does_not_block_another() -> None:
 
     class Calendar:
         async def trading_dates(self, start, end):
-            return SimpleNamespace(dates=(day,))
+            return SimpleNamespace(dates=(day,), version_id=uuid4())
 
     class Schedules:
         async def list(self):
@@ -401,6 +432,174 @@ async def test_one_schedule_failure_does_not_block_another() -> None:
     result = await scanner.scan(now=datetime(2026, 7, 17, 2, 15, tzinfo=UTC))
     assert result.failed == 1 and result.dispatched == 1
     assert calls[0].schedule_id == healthy
+
+
+@pytest.mark.anyio
+async def test_daily_market_data_failure_is_isolated_from_scan_loop() -> None:
+    day = date(2026, 7, 17)
+
+    class Calendar:
+        async def trading_dates(self, start, end):
+            return SimpleNamespace(dates=(day,), version_id=uuid4())
+
+    class Schedules:
+        async def list(self):
+            return ()
+
+    class Subs:
+        async def enabled_schedule_snapshots(self):
+            return ()
+
+    scanner = MonitorScanner(
+        None,
+        Calendar(),
+        Schedules(),
+        Subs(),
+        job_factory=None,
+        event_factory=None,
+        universe_freezer=None,
+    )
+
+    async def fail_daily(**_kwargs):
+        raise RuntimeError("daily dispatcher unavailable")
+
+    scanner._scan_daily_market_data = fail_daily
+
+    result = await scanner.scan(now=datetime(2026, 7, 17, 9, tzinfo=UTC))
+
+    assert result.failed == 1
+    assert result.dispatched == result.missed == result.duplicates == 0
+
+
+@pytest.mark.anyio
+async def test_daily_market_data_claim_freezes_market_and_submits_once() -> None:
+    scheduled = datetime(2026, 7, 17, 9, tzinfo=UTC)
+    calendar_version_id = uuid4()
+
+    class Session:
+        @asynccontextmanager
+        async def begin_nested(self):
+            yield
+
+    class Database:
+        @asynccontextmanager
+        async def transaction(self):
+            yield Session()
+
+    stored = []
+
+    class Store:
+        def __init__(self, session):
+            pass
+
+        async def add_many(self, items):
+            stored.extend(items)
+
+    class Events:
+        def __init__(self, session):
+            pass
+
+        async def append(self, occurrence, action):
+            pass
+
+    class Jobs:
+        command = None
+
+        def __init__(self, session):
+            pass
+
+        async def submit(self, command):
+            type(self).command = command
+            return SimpleNamespace(id=uuid4())
+
+    async def freeze_all(session):
+        return SimpleNamespace(
+            id=uuid4(),
+            master_version=9,
+            items=(SimpleNamespace(symbol="600000.SH"),),
+        )
+
+    scanner = MonitorScanner(
+        Database(),
+        None,
+        None,
+        None,
+        job_factory=Jobs,
+        event_factory=Events,
+        universe_freezer=None,
+        universe_all_freezer=freeze_all,
+        store_factory=Store,
+    )
+
+    result = await scanner.claim_daily_market_data(
+        PlannedDailyMarketData(
+            trade_date=date(2026, 7, 17),
+            calendar_version_id=calendar_version_id,
+            scheduled_at=scheduled,
+        ),
+        now=scheduled,
+    )
+
+    assert result.status == "DISPATCHED"
+    assert stored[0].occurrence_type == "DAILY_MARKET_DATA"
+    assert stored[0].definition_key == "daily-market-data"
+    assert Jobs.command.job_type == "DAILY_DATA_COORDINATE"
+    assert Jobs.command.config_snapshot["symbols"] == ["600000.SH"]
+
+
+@pytest.mark.anyio
+async def test_late_daily_market_data_occurrence_is_missed_without_job() -> None:
+    scheduled = datetime(2026, 7, 17, 9, tzinfo=UTC)
+
+    class Session:
+        @asynccontextmanager
+        async def begin_nested(self):
+            yield
+
+    class Database:
+        @asynccontextmanager
+        async def transaction(self):
+            yield Session()
+
+    class Store:
+        def __init__(self, session):
+            pass
+
+        async def add_many(self, items):
+            pass
+
+    class Events:
+        def __init__(self, session):
+            pass
+
+        async def append(self, occurrence, action):
+            pass
+
+    class Jobs:
+        def __init__(self, session):
+            pass
+
+        async def submit(self, command):
+            raise AssertionError("late occurrence must not submit a job")
+
+    scanner = MonitorScanner(
+        Database(),
+        None,
+        None,
+        None,
+        job_factory=Jobs,
+        event_factory=Events,
+        universe_freezer=None,
+        universe_all_freezer=lambda session: None,
+        store_factory=Store,
+    )
+
+    result = await scanner.claim_daily_market_data(
+        PlannedDailyMarketData(date(2026, 7, 17), uuid4(), scheduled),
+        now=scheduled + timedelta(seconds=61),
+    )
+
+    assert result.status == "MISSED"
 
 
 @pytest.mark.anyio

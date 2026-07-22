@@ -21,7 +21,7 @@ def test_notification_policy_migration_is_the_single_head() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["20260722_0019"]
+    assert scripts.get_heads() == ["20260722_0020"]
     assert scripts.get_revision("20260722_0019").down_revision == "20260722_0018"
 
 

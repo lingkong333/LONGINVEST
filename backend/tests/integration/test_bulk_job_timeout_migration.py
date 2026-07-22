@@ -10,5 +10,5 @@ def test_bulk_job_timeout_migration_is_the_single_head() -> None:
     config.set_main_option("script_location", str(backend_root / "alembic"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["20260722_0019"]
+    assert scripts.get_heads() == ["20260722_0020"]
     assert scripts.get_revision("20260722_0018").down_revision == "20260722_0017"

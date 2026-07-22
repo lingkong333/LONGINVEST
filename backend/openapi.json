@@ -5257,7 +5257,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MutationRequest"
+                "$ref": "#/components/schemas/RetryDeliveryRequest"
               }
             }
           }
@@ -5321,7 +5321,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MutationRequest"
+                "$ref": "#/components/schemas/RetryDeliveryRequest"
               }
             }
           }
@@ -19852,6 +19852,32 @@
           "delivery_ids"
         ],
         "title": "RetryBatchRequest"
+      },
+      "RetryDeliveryRequest": {
+        "properties": {
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "confirm_duplicate_risk": {
+            "type": "boolean",
+            "title": "Confirm Duplicate Risk",
+            "default": false
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "reason",
+          "confirm"
+        ],
+        "title": "RetryDeliveryRequest"
       },
       "RetryRequest": {
         "properties": {

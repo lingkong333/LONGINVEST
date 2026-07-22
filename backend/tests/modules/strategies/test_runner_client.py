@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import io
 import json
-import tarfile
 from pathlib import Path
 from typing import Any
 
@@ -16,8 +14,7 @@ from long_invest.modules.strategies.runner_client import (
 
 IMAGE = "long-invest-strategy-runner@sha256:" + "a" * 64
 SUCCESS_OUTPUT = (
-    b'{"low_strong":"1","low_watch":"2",'
-    b'"high_watch":"3","high_strong":"4"}'
+    b'{"low_strong":"1","low_watch":"2","high_watch":"3","high_strong":"4"}'
 )
 SECCOMP_FIXTURE = Path(__file__).parent / "fixtures" / "seccomp.json"
 
@@ -38,7 +35,7 @@ class FakeContainer:
         status_code: int = 0,
         oom_killed: bool = False,
         wait_error: Exception | None = None,
-        archive_error: Exception | None = None,
+        send_error: Exception | None = None,
         remove_error: Exception | None = None,
         remove_succeeds_then_times_out: bool = False,
         scan_error: Exception | None = None,
@@ -47,7 +44,7 @@ class FakeContainer:
         self.stderr = stderr
         self.status_code = status_code
         self.wait_error = wait_error
-        self.archive_error = archive_error
+        self.socket = FakeAttachedSocket(send_error=send_error)
         self.remove_error = remove_error
         self.remove_succeeds_then_times_out = remove_succeeds_then_times_out
         self.scan_error = scan_error
@@ -55,18 +52,15 @@ class FakeContainer:
         self.id = "container-1"
         self.managed = False
         self.events: list[str] = []
-        self.archive: bytes | None = None
         self.started = False
         self.killed = False
         self.removed = False
         self.wait_timeout: float | None = None
 
-    def put_archive(self, path: str, data: bytes) -> None:
-        assert path == "/tmp"
-        self.events.append("put_archive")
-        if self.archive_error:
-            raise self.archive_error
-        self.archive = data
+    def attach_socket(self, *, params: dict[str, bool]) -> FakeAttachedSocket:
+        assert params == {"stdin": True, "stream": True}
+        self.events.append("attach_socket")
+        return self.socket
 
     def start(self) -> None:
         self.events.append("start")
@@ -103,6 +97,34 @@ class FakeContainer:
             raise error
         self.removed = True
         self.managed = False
+
+
+class FakeSocketTransport:
+    def __init__(self, *, send_error: Exception | None = None) -> None:
+        self.send_error = send_error
+        self.payload = b""
+        self.timeout: float | None = None
+        self.shutdown_direction: int | None = None
+
+    def settimeout(self, timeout: float) -> None:
+        self.timeout = timeout
+
+    def sendall(self, payload: bytes) -> None:
+        if self.send_error:
+            raise self.send_error
+        self.payload = payload
+
+    def shutdown(self, direction: int) -> None:
+        self.shutdown_direction = direction
+
+
+class FakeAttachedSocket:
+    def __init__(self, *, send_error: Exception | None = None) -> None:
+        self._sock = FakeSocketTransport(send_error=send_error)
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
 
 
 class FakeContainers:
@@ -189,12 +211,13 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
     assert result["low_strong"] == "1"
     assert container.started is True
     assert container.removed is True
-    assert container.events[:3] == ["start", "put_archive", "wait"]
+    assert container.events[:3] == ["attach_socket", "start", "wait"]
     assert docker_client.api.timeout <= 1
     assert docker_client.containers.list_calls >= 2
     options = docker_client.containers.create_kwargs
     assert options is not None
     assert options["image"] == IMAGE
+    assert options["stdin_open"] is True
     assert options["network_disabled"] is True
     assert options["network_mode"] == "none"
     assert options["read_only"] is True
@@ -229,14 +252,11 @@ def test_runner_uses_one_shot_hardened_container_and_always_removes_it() -> None
         "config": {"max-size": "128k", "max-file": "1", "compress": "false"},
     }
 
-    assert container.archive is not None
-    with tarfile.open(fileobj=io.BytesIO(container.archive), mode="r:") as archive:
-        member = archive.getmember("input.json")
-        archived_payload = json.load(archive.extractfile(member))
-    assert archived_payload == _payload()
-    assert member.uid == 65532
-    assert member.gid == 65532
-    assert member.mode == 0o400
+    assert json.loads(container.socket._sock.payload) == _payload()
+    assert container.socket._sock.timeout is not None
+    assert 0 < container.socket._sock.timeout <= 10
+    assert container.socket._sock.shutdown_direction is not None
+    assert container.socket.closed is True
 
 
 def test_runner_timeout_is_clamped_to_ten_seconds_and_cleans_up() -> None:
@@ -301,8 +321,8 @@ def test_runner_does_not_guess_leakage_from_nested_parameter_names() -> None:
     assert result["low_strong"] == "1"
 
 
-def test_runner_removes_container_when_input_copy_fails() -> None:
-    container = FakeContainer(archive_error=RuntimeError("copy failed"))
+def test_runner_removes_container_when_input_send_fails() -> None:
+    container = FakeContainer(send_error=RuntimeError("send failed"))
     client, _ = _client(container)
 
     with pytest.raises(StrategyRunnerFailure) as error:
@@ -386,7 +406,7 @@ def test_failed_label_scan_keeps_known_pending_cleanup() -> None:
     assert client.recover_pending_cleanup() == (container.id,)
 
 
-@pytest.mark.parametrize("content", [b"[]", b"not-json", b"{\"x\": NaN}"])
+@pytest.mark.parametrize("content", [b"[]", b"not-json", b'{"x": NaN}'])
 def test_runner_rejects_invalid_trusted_seccomp_profile(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

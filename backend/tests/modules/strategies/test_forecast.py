@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, date, datetime, timedelta
+from io import StringIO
 from uuid import uuid4
 
 import pytest
@@ -19,7 +20,7 @@ from long_invest.modules.strategies.forecast import (
 )
 from long_invest.modules.strategies.runner_execution import (
     execute_runner_payload,
-    wait_for_runner_payload,
+    read_runner_payload,
 )
 from long_invest.modules.strategies.runner_execution import (
     main as runner_main,
@@ -75,36 +76,36 @@ PARAMETER_SCHEMA = {
 
 def _request() -> StrategyForecastRequest:
     training_data = TrainingDataSnapshot(
-            security_id=uuid4(),
-            symbol="600000.SH",
-            start_date=date(2025, 1, 2),
-            end_date=date(2025, 1, 3),
-            data_version=7,
-            fetched_at=datetime(2026, 7, 21, tzinfo=UTC),
-            source="EASTMONEY",
-            price_basis="QFQ_AS_OF",
-            content_hash="c" * 64,
-            rows=(
-                {
-                    "trade_date": date(2025, 1, 2),
-                    "open": "9.00",
-                    "high": "10.00",
-                    "low": "8.50",
-                    "close": "9.50",
-                    "volume": "1000",
-                    "amount": "9500",
-                },
-                {
-                    "trade_date": date(2025, 1, 3),
-                    "open": "9.50",
-                    "high": "10.50",
-                    "low": "9.00",
-                    "close": "10.00",
-                    "volume": "1200",
-                    "amount": "12000",
-                },
-            ),
-        )
+        security_id=uuid4(),
+        symbol="600000.SH",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 3),
+        data_version=7,
+        fetched_at=datetime(2026, 7, 21, tzinfo=UTC),
+        source="EASTMONEY",
+        price_basis="QFQ_AS_OF",
+        content_hash="c" * 64,
+        rows=(
+            {
+                "trade_date": date(2025, 1, 2),
+                "open": "9.00",
+                "high": "10.00",
+                "low": "8.50",
+                "close": "9.50",
+                "volume": "1000",
+                "amount": "9500",
+            },
+            {
+                "trade_date": date(2025, 1, 3),
+                "open": "9.50",
+                "high": "10.50",
+                "low": "9.00",
+                "close": "10.00",
+                "volume": "1200",
+                "amount": "12000",
+            },
+        ),
+    )
     training_data = training_data.model_copy(
         update={"content_hash": hash_training_data_snapshot(training_data)}
     )
@@ -178,7 +179,7 @@ def test_runner_payload_rejects_parameters_that_do_not_match_schema() -> None:
             source_code=SOURCE,
             request=request,
             context=_context(request),
-                schema=PARAMETER_SCHEMA,
+            schema=PARAMETER_SCHEMA,
         )
 
     assert error.value.code == "STRATEGY_PARAMETER_INVALID"
@@ -404,21 +405,8 @@ def test_runner_result_turns_hostile_diagnostic_object_into_stable_failure() -> 
     assert error.value.code is StrategyForecastErrorCode.STRATEGY_TARGET_INVALID
 
 
-def test_runner_process_waits_until_tmpfs_input_is_available(tmp_path) -> None:
-    input_path = tmp_path / "input.json"
-    payload = {"ready": True}
-
-    def create_input(_: float) -> None:
-        input_path.write_text('{"ready":true}', encoding="utf-8")
-
-    loaded = wait_for_runner_payload(
-        input_path,
-        timeout_seconds=1,
-        poll_interval_seconds=0.01,
-        sleep=create_input,
-    )
-
-    assert loaded == payload
+def test_runner_process_reads_payload_from_standard_input() -> None:
+    assert read_runner_payload(StringIO('{"ready":true}')) == {"ready": True}
 
 
 @pytest.mark.parametrize(
@@ -495,9 +483,7 @@ def test_trusted_runner_repeats_file_capability_checks(
     assert error.value.code == "DANGEROUS_CAPABILITY"
 
 
-def test_executable_runner_waits_for_input_and_writes_json_result(
-    tmp_path, capsys
-) -> None:
+def test_executable_runner_reads_input_and_writes_json_result(capsys) -> None:
     request = _request()
     payload = build_runner_payload(
         source_code=SOURCE,
@@ -505,10 +491,7 @@ def test_executable_runner_waits_for_input_and_writes_json_result(
         context=_context(request),
         schema=PARAMETER_SCHEMA,
     )
-    input_path = tmp_path / "input.json"
-    input_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    assert runner_main(input_path=input_path, timeout_seconds=1) == 0
+    assert runner_main(input_stream=StringIO(json.dumps(payload))) == 0
 
     output = json.loads(capsys.readouterr().out)
     assert output["low_strong"] == 8.0

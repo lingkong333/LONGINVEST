@@ -4,13 +4,10 @@ import builtins
 import json
 import math
 import sys
-import time
 from collections.abc import Mapping
 from datetime import date
 from decimal import Decimal
-from os import PathLike
-from pathlib import Path
-from typing import Any
+from typing import Any, TextIO
 
 import numpy as np
 import pandas as pd
@@ -23,8 +20,6 @@ from long_invest.modules.strategies.static_analysis import (
 )
 
 PAYLOAD_FIELDS = frozenset({"source_code", "parameters", "context", "history"})
-RUNNER_INPUT_PATH = Path("/tmp/input.json")
-RUNNER_INPUT_TIMEOUT_SECONDS = 10.0
 
 
 def execute_runner_payload(payload: Mapping[str, object]) -> object:
@@ -44,9 +39,7 @@ def execute_runner_payload(payload: Mapping[str, object]) -> object:
     analysis = analyze_strategy_source(source_code)
     frame = _validated_history_frame(history)
     requirements = analysis.metadata["data_requirements"]
-    if not int(requirements["min_bars"]) <= len(frame) <= int(
-        requirements["max_bars"]
-    ):
+    if not int(requirements["min_bars"]) <= len(frame) <= int(requirements["max_bars"]):
         raise ValueError("training history does not satisfy strategy bar limits")
 
     namespace: dict[str, Any] = {"__builtins__": _safe_builtins()}
@@ -55,37 +48,18 @@ def execute_runner_payload(payload: Mapping[str, object]) -> object:
     return calculate_targets(frame, dict(parameters), dict(context))
 
 
-def wait_for_runner_payload(
-    input_path: str | PathLike[str],
-    *,
-    timeout_seconds: float,
-    poll_interval_seconds: float = 0.01,
-    sleep: Any = time.sleep,
-) -> Mapping[str, object]:
-    path = Path(input_path)
-    deadline = time.monotonic() + timeout_seconds
-    while True:
-        try:
-            raw_payload = json.loads(path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError):
-            if time.monotonic() >= deadline:
-                raise TimeoutError("runner input was not provided") from None
-            sleep(poll_interval_seconds)
-            continue
-        if not isinstance(raw_payload, Mapping):
-            raise ValueError("runner payload shape is invalid")
-        return raw_payload
+def read_runner_payload(input_stream: TextIO) -> Mapping[str, object]:
+    raw_payload = json.load(input_stream)
+    if not isinstance(raw_payload, Mapping):
+        raise ValueError("runner payload shape is invalid")
+    return raw_payload
 
 
 def main(
     *,
-    input_path: str | PathLike[str] = RUNNER_INPUT_PATH,
-    timeout_seconds: float = RUNNER_INPUT_TIMEOUT_SECONDS,
+    input_stream: TextIO | None = None,
 ) -> int:
-    payload = wait_for_runner_payload(
-        input_path,
-        timeout_seconds=timeout_seconds,
-    )
+    payload = read_runner_payload(input_stream or sys.stdin)
     result = execute_runner_payload(payload)
     output = json.dumps(
         result,
@@ -196,9 +170,7 @@ def _safe_import(
     if (
         level != 0
         or module_segments[0] not in ALLOWED_IMPORTS
-        or any(
-            is_dangerous_library_segment(segment) for segment in module_segments
-        )
+        or any(is_dangerous_library_segment(segment) for segment in module_segments)
         or any(
             item == "*" or is_dangerous_library_segment(item)
             for item in (fromlist or ())

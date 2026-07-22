@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import io
 import json
 import re
-import tarfile
+import socket
 import time
 from collections.abc import Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +18,7 @@ MAX_TIMEOUT_SECONDS = 10.0
 MAX_OUTPUT_BYTES = 128 * 1024
 MAX_SECCOMP_PROFILE_BYTES = 64 * 1024
 TRUSTED_SECCOMP_PROFILE_PATH = Path("/etc/long-invest/seccomp.json")
-_DIGEST_PINNED_IMAGE = re.compile(
-    r"^(?:sha256:[0-9a-f]{64}|.+@sha256:[0-9a-f]{64})$"
-)
+_DIGEST_PINNED_IMAGE = re.compile(r"^(?:sha256:[0-9a-f]{64}|.+@sha256:[0-9a-f]{64})$")
 _WORKER_ID = re.compile(r"^[A-Za-z0-9_.-]{1,63}$")
 FORECAST_TIMEOUT = "STRATEGY_FORECAST_TIMEOUT"
 RUNNER_FAILED = "STRATEGY_RUNNER_FAILED"
@@ -94,9 +92,7 @@ class DockerStrategyRunnerClient:
         for container in containers:
             container_id = getattr(container, "id", None)
             try:
-                self._call(
-                    lambda value=container: value.remove(force=True), deadline
-                )
+                self._call(lambda value=container: value.remove(force=True), deadline)
             except Exception:
                 if isinstance(container_id, str) and container_id:
                     remaining_ids.add(container_id)
@@ -107,14 +103,16 @@ class DockerStrategyRunnerClient:
     def run(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         self.recover_pending_cleanup()
         _validate_payload(payload)
-        archive = _build_input_archive(payload)
+        encoded_payload = _encode_payload(payload)
         container = None
+        attached_socket = None
         deadline = time.monotonic() + self._timeout_seconds
         try:
             container = self._call(
                 lambda: self._docker_client.containers.create(
                     image=self._image,
                     detach=True,
+                    stdin_open=True,
                     network_disabled=True,
                     network_mode="none",
                     read_only=True,
@@ -154,10 +152,14 @@ class DockerStrategyRunnerClient:
                 ),
                 deadline,
             )
-            # The entrypoint waits for input; /tmp must be mounted before the
-            # archive is copied or Docker would hide it behind the tmpfs.
+            attached_socket = self._call(
+                lambda: container.attach_socket(params={"stdin": True, "stream": True}),
+                deadline,
+            )
             self._call(container.start, deadline)
-            self._call(lambda: container.put_archive("/tmp", archive), deadline)
+            self._send_payload(attached_socket, encoded_payload, deadline)
+            attached_socket.close()
+            attached_socket = None
             try:
                 wait_timeout = max(
                     0.001, self._remaining(deadline) - _CLEANUP_RESERVE_SECONDS
@@ -218,6 +220,9 @@ class DockerStrategyRunnerClient:
                 RUNNER_FAILED, "strategy runner could not be executed"
             ) from exc
         finally:
+            if attached_socket is not None:
+                with suppress(Exception):
+                    attached_socket.close()
             if container is not None:
                 self._best_effort_remove(container, self._new_cleanup_deadline())
 
@@ -238,6 +243,14 @@ class DockerStrategyRunnerClient:
             self._call(container.kill, deadline)
         except Exception:
             self._record_pending_cleanup(container)
+
+    def _send_payload(
+        self, attached_socket: Any, encoded_payload: bytes, deadline: float
+    ) -> None:
+        transport = getattr(attached_socket, "_sock", attached_socket)
+        transport.settimeout(self._remaining(deadline))
+        transport.sendall(encoded_payload)
+        transport.shutdown(socket.SHUT_WR)
 
     def _best_effort_remove(self, container: Any, deadline: float) -> None:
         try:
@@ -286,22 +299,10 @@ def _validate_payload(payload: Mapping[str, object]) -> None:
         )
 
 
-def _build_input_archive(payload: Mapping[str, object]) -> bytes:
-    encoded = json.dumps(
+def _encode_payload(payload: Mapping[str, object]) -> bytes:
+    return json.dumps(
         payload, ensure_ascii=False, allow_nan=False, separators=(",", ":")
     ).encode("utf-8")
-    stream = io.BytesIO()
-    with tarfile.open(fileobj=stream, mode="w") as archive:
-        info = tarfile.TarInfo("input.json")
-        info.size = len(encoded)
-        info.mode = 0o400
-        info.uid = 65532
-        info.gid = 65532
-        info.uname = "nonroot"
-        info.gname = "nonroot"
-        info.mtime = 0
-        archive.addfile(info, io.BytesIO(encoded))
-    return stream.getvalue()
 
 
 def _load_trusted_seccomp_profile() -> str:

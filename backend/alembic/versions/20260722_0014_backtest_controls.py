@@ -56,12 +56,12 @@ def upgrade() -> None:
         sa.Column("terminal_at", sa.DateTime(timezone=True)),
     )
     op.create_check_constraint(
-        "ck_backtest_task_generation_positive",
+        op.f("ck_backtest_task_generation_positive"),
         "backtest_task",
         "execution_generation > 0",
     )
     op.create_foreign_key(
-        "fk_backtest_task_rerun_from_task_id_backtest_task",
+        op.f("fk_backtest_task_rerun_from_task_id_backtest_task"),
         "backtest_task",
         "backtest_task",
         ["rerun_from_task_id"],
@@ -87,7 +87,7 @@ def upgrade() -> None:
         sa.Column("ended_at", sa.DateTime(timezone=True)),
     )
     op.create_check_constraint(
-        "ck_backtest_item_attempt_count_nonnegative",
+        op.f("ck_backtest_item_attempt_count_nonnegative"),
         "backtest_item",
         "attempt_count >= 0",
     )
@@ -108,26 +108,36 @@ def upgrade() -> None:
         ),
         sa.CheckConstraint(
             "action IN ('PAUSE','RESUME','CANCEL','RETRY_FAILED','RERUN')",
-            name="ck_backtest_control_command_action_valid",
+            name=op.f("ck_backtest_control_command_action_valid"),
         ),
         sa.CheckConstraint(
             "request_digest ~ '^[0-9a-f]{64}$'",
-            name="ck_backtest_control_command_request_digest_sha256",
+            name=op.f("ck_backtest_control_command_request_digest_sha256"),
         ),
         sa.ForeignKeyConstraint(
-            ["result_task_id"], ["backtest_task.id"], ondelete="RESTRICT"
+            ["result_task_id"],
+            ["backtest_task.id"],
+            name=op.f(
+                "fk_backtest_control_command_result_task_id_backtest_task"
+            ),
+            ondelete="RESTRICT",
         ),
         sa.ForeignKeyConstraint(
-            ["task_id"], ["backtest_task.id"], ondelete="RESTRICT"
+            ["task_id"],
+            ["backtest_task.id"],
+            name=op.f("fk_backtest_control_command_task_id_backtest_task"),
+            ondelete="RESTRICT",
         ),
-        sa.PrimaryKeyConstraint("id"),
+        sa.PrimaryKeyConstraint(
+            "id", name=op.f("pk_backtest_control_command")
+        ),
         sa.UniqueConstraint(
             "idempotency_key",
-            name="uq_backtest_control_command_idempotency_key",
+            name=op.f("uq_backtest_control_command_idempotency_key"),
         ),
     )
     op.create_index(
-        "ix_backtest_control_command_task_created",
+        op.f("ix_backtest_control_command_task_created"),
         "backtest_control_command",
         ["task_id", "created_at"],
     )
@@ -139,12 +149,12 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(
-        "ix_backtest_control_command_task_created",
+        op.f("ix_backtest_control_command_task_created"),
         table_name="backtest_control_command",
     )
     op.drop_table("backtest_control_command")
     op.drop_constraint(
-        "ck_backtest_item_attempt_count_nonnegative",
+        op.f("ck_backtest_item_attempt_count_nonnegative"),
         "backtest_item",
         type_="check",
     )
@@ -152,12 +162,12 @@ def downgrade() -> None:
     op.drop_column("backtest_item", "started_at")
     op.drop_column("backtest_item", "attempt_count")
     op.drop_constraint(
-        "fk_backtest_task_rerun_from_task_id_backtest_task",
+        op.f("fk_backtest_task_rerun_from_task_id_backtest_task"),
         "backtest_task",
         type_="foreignkey",
     )
     op.drop_constraint(
-        "ck_backtest_task_generation_positive",
+        op.f("ck_backtest_task_generation_positive"),
         "backtest_task",
         type_="check",
     )

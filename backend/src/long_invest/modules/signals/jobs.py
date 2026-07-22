@@ -17,8 +17,8 @@ from long_invest.modules.signals.contracts import (
     SignalInput,
 )
 from long_invest.modules.signals.integrations import (
-    TransactionalNotificationPublisher,
     TransactionalPositionPort,
+    transactional_signal_notification_publisher,
 )
 from long_invest.modules.signals.outbox import SignalOutbox
 from long_invest.modules.signals.repository import SignalRepository
@@ -266,7 +266,7 @@ def _service(session: Any) -> SignalService:
         targets=TransactionalTargetSnapshotPort(session),
         quotes=TransactionalQuoteSignalPort(session),
         positions=TransactionalPositionPort(session),
-        notifications=TransactionalNotificationPublisher(session),
+        notifications=transactional_signal_notification_publisher(session),
         events=SignalOutbox(session),
     )
 

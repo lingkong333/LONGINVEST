@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy.exc import IntegrityError
 
+from long_invest.modules.notifications.admin import aggregate_current_event_status
 from long_invest.modules.notifications.channels import ChannelResult
 from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
@@ -18,7 +19,6 @@ from long_invest.modules.notifications.delivery import (
     DeliveryAction,
     DeliveryDecision,
     RetryPolicy,
-    aggregate_event_status,
 )
 from long_invest.modules.notifications.models import (
     NotificationDelivery,
@@ -206,9 +206,7 @@ class NotificationService:
         event = await self._repository.lock_event(delivery.event_id)
         if event is not None:
             deliveries = await self._repository.list_deliveries(event.id)
-            event.status = aggregate_event_status(
-                NotificationDeliveryStatus(item.status) for item in deliveries
-            )
+            event.status = aggregate_current_event_status(deliveries)
         await self._repository.flush()
         return True
 
@@ -295,9 +293,7 @@ class NotificationService:
 
         if event is not None:
             deliveries = await self._repository.list_deliveries(event.id)
-            event.status = aggregate_event_status(
-                NotificationDeliveryStatus(item.status) for item in deliveries
-            )
+            event.status = aggregate_current_event_status(deliveries)
 
     @staticmethod
     def _apply_decision(

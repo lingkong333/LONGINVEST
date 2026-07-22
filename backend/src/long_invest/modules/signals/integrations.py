@@ -9,6 +9,7 @@ from long_invest.modules.notifications.service import (
     PublishNotification,
     transactional_notification_service,
 )
+from long_invest.modules.notifications.targets import DynamicNotificationTargetResolver
 from long_invest.modules.positions.application import get_position_snapshot
 from long_invest.modules.positions.contracts import PositionStatus
 from long_invest.modules.quotes.application import transactional_quote_signal_port
@@ -99,9 +100,7 @@ class TransactionalNotificationPublisher:
         if notification.eligible:
             if self._target_resolver is None:
                 raise SignalNotificationPolicyUnavailable()
-            targets = tuple(
-                await self._target_resolver.resolve_targets(notification)
-            )
+            targets = tuple(await self._target_resolver.resolve_targets(notification))
 
         command = PublishNotification(
             event_type=_TEMPLATE_TYPES[notification.notification_class],
@@ -123,6 +122,13 @@ class TransactionalNotificationPublisher:
             suppression_reason=notification.suppression_reason,
         )
         return await self._service.publish(command)
+
+
+def transactional_signal_notification_publisher(session):
+    return TransactionalNotificationPublisher(
+        session,
+        target_resolver=DynamicNotificationTargetResolver(session),
+    )
 
 
 def _template_variables(notification: SignalNotificationRequest) -> dict[str, object]:

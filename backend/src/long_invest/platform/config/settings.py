@@ -45,6 +45,11 @@ class AppSettings(BaseSettings):
     strategy_git_path: str = "/var/lib/long-invest/strategies"
     strategy_environment_version: str = "python-3.12"
     strategy_runner_image_digest: str = ""
+    master_key: str = ""
+    notification_allowed_smtp_hosts: str = ""
+    notification_worker_poll_seconds: float = Field(default=1.0, ge=0.1, le=30)
+    notification_worker_lease_seconds: int = Field(default=60, ge=15, le=600)
+    notification_channel: Literal["WECOM", "EMAIL"] = "WECOM"
 
 
 @lru_cache

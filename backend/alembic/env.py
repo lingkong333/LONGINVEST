@@ -72,6 +72,11 @@ from long_invest.modules.securities.models import (  # noqa: F401
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
 )
+from long_invest.modules.settings.models import (  # noqa: F401
+    SecretValue,
+    SystemSetting,
+    SystemSettingHistory,
+)
 from long_invest.modules.signals.models import (  # noqa: F401
     SignalEvaluation,
     SignalEvent,

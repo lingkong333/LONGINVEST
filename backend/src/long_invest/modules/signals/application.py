@@ -4,11 +4,11 @@ from typing import Any
 from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.signals.integrations import (
-    TransactionalNotificationPublisher,
     TransactionalPositionPort,
     TransactionalQuotePort,
     TransactionalSubscriptionPort,
     TransactionalTargetPort,
+    transactional_signal_notification_publisher,
 )
 from long_invest.modules.signals.outbox import SignalOutbox
 from long_invest.modules.signals.repository import SignalRepository
@@ -29,7 +29,9 @@ class SignalApplication:
         target_factory: Callable[[Any], Any] = TransactionalTargetPort,
         quote_factory: Callable[[Any], Any] = TransactionalQuotePort,
         position_factory: Callable[[Any], Any] = TransactionalPositionPort,
-        notification_factory: Callable[[Any], Any] = TransactionalNotificationPublisher,
+        notification_factory: Callable[
+            [Any], Any
+        ] = transactional_signal_notification_publisher,
         audit_factory: Callable[[Any], Any] = AuditService,
         event_factory: Callable[[Any], Any] = SignalOutbox,
         job_factory: Callable[[Any], Any] = JobService,

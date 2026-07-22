@@ -95,6 +95,8 @@ services:
       LONGINVEST_REDIS_URL: redis://redis:6379/0
       LONGINVEST_LOG_FILE: /var/log/longinvest/application.jsonl
       LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
+      LONGINVEST_MASTER_KEY: ${LONGINVEST_MASTER_KEY:-}
+      LONGINVEST_NOTIFICATION_ALLOWED_SMTP_HOSTS: ${LONGINVEST_NOTIFICATION_ALLOWED_SMTP_HOSTS:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -400,6 +402,71 @@ services:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_LOG_FILE: /var/log/longinvest/signal-projector.jsonl
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    volumes:
+      - application_logs:/var/log/longinvest
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    mem_limit: 128m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
+
+  notification-wecom:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["python", "-m", "long_invest.entrypoints.notification_worker"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_LOG_FILE: /var/log/longinvest/notification-wecom.jsonl
+      LONGINVEST_MASTER_KEY: ${LONGINVEST_MASTER_KEY:-}
+      LONGINVEST_NOTIFICATION_CHANNEL: WECOM
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    volumes:
+      - application_logs:/var/log/longinvest
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    mem_limit: 128m
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: local
+      options:
+        max-size: 10m
+        max-file: "7"
+
+  notification-email:
+    build:
+      context: ..
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: runtime
+    command: ["python", "-m", "long_invest.entrypoints.notification_worker"]
+    environment:
+      LONGINVEST_ENVIRONMENT: development
+      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
+      LONGINVEST_LOG_FILE: /var/log/longinvest/notification-email.jsonl
+      LONGINVEST_MASTER_KEY: ${LONGINVEST_MASTER_KEY:-}
+      LONGINVEST_NOTIFICATION_ALLOWED_SMTP_HOSTS: ${LONGINVEST_NOTIFICATION_ALLOWED_SMTP_HOSTS:-}
+      LONGINVEST_NOTIFICATION_CHANNEL: EMAIL
     depends_on:
       migrate:
         condition: service_completed_successfully

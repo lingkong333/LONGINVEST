@@ -25,6 +25,7 @@ from long_invest.modules.daily_data.api import router as daily_data_router
 from long_invest.modules.health.api import router as health_router
 from long_invest.modules.monitor_schedules.api import router as monitor_schedules_router
 from long_invest.modules.monitoring.api import router as monitoring_router
+from long_invest.modules.notifications.api import router as notifications_router
 from long_invest.modules.positions.api import router as positions_router
 from long_invest.modules.providers.api import (
     get_provider_service,
@@ -35,6 +36,7 @@ from long_invest.modules.providers.api import (
 from long_invest.modules.qfq.api import router as qfq_router
 from long_invest.modules.quotes.api import router as quotes_router
 from long_invest.modules.securities.api import router as securities_router
+from long_invest.modules.settings.api import router as settings_router
 from long_invest.modules.signals.api import router as signals_router
 from long_invest.modules.strategies.api import router as strategies_router
 from long_invest.modules.targets.api import router as targets_router
@@ -76,6 +78,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(auth_router)
     app.include_router(securities_router)
+    app.include_router(settings_router)
     app.include_router(calendar_router)
     app.include_router(providers_router)
     app.include_router(quotes_router)
@@ -85,6 +88,7 @@ def create_app() -> FastAPI:
     app.include_router(monitor_schedules_router)
     app.include_router(positions_router)
     app.include_router(monitoring_router)
+    app.include_router(notifications_router)
     app.include_router(targets_router)
     app.include_router(signals_router)
     app.include_router(strategies_router)

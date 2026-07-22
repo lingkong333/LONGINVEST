@@ -50,7 +50,11 @@ async def test_claim_next_uses_skip_locked_and_sets_a_fenced_lease() -> None:
     result.scalars.return_value.first.return_value = delivery
     session.execute.return_value = result
 
-    claimed = await repository.NotificationRepository(session).claim_next(
+    resource_events = Mock()
+    resource_events.delivery_changed = AsyncMock()
+    claimed = await repository.NotificationRepository(
+        session, resource_events
+    ).claim_next(
         channel=DeliveryChannel.WECOM,
         worker_id="notify-wecom-1",
         now=now,
@@ -67,6 +71,35 @@ async def test_claim_next_uses_skip_locked_and_sets_a_fenced_lease() -> None:
     assert delivery.lease_owner == "notify-wecom-1"
     assert delivery.lease_expires_at == now + timedelta(seconds=30)
     session.flush.assert_awaited_once()
+    resource_events.delivery_changed.assert_awaited_once_with(
+        delivery,
+        request_id=None,
+        change="started",
+        dedupe_token="generation-1-attempt-1",
+    )
+
+
+@pytest.mark.anyio
+async def test_empty_poll_does_not_emit_a_resource_event() -> None:
+    repository = load_repository()
+    session = AsyncMock()
+    result = Mock()
+    result.scalars.return_value.first.return_value = None
+    session.execute.return_value = result
+    resource_events = Mock()
+    resource_events.delivery_changed = AsyncMock()
+
+    claimed = await repository.NotificationRepository(
+        session, resource_events
+    ).claim_next(
+        channel=DeliveryChannel.EMAIL,
+        worker_id="notify-email-1",
+        now=datetime(2026, 7, 15, 1, 0, tzinfo=UTC),
+        lease_for=timedelta(seconds=30),
+    )
+
+    assert claimed is None
+    resource_events.delivery_changed.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -125,10 +158,14 @@ async def test_persist_event_and_deliveries_runs_inside_savepoint() -> None:
     event = Mock(spec=NotificationEvent)
     delivery = pending_delivery()
 
-    await repository.NotificationRepository(session).persist_event_and_deliveries(
-        event,
-        [delivery],
-    )
+    event.status = "DISPATCHED"
+    event.request_id = "request-1"
+    resource_events = Mock()
+    resource_events.event_changed = AsyncMock()
+    resource_events.delivery_changed = AsyncMock()
+    await repository.NotificationRepository(
+        session, resource_events
+    ).persist_event_and_deliveries(event, [delivery])
 
     session.begin_nested.assert_called_once_with()
     nested.__aenter__.assert_awaited_once()
@@ -136,6 +173,42 @@ async def test_persist_event_and_deliveries_runs_inside_savepoint() -> None:
     session.add.assert_called_once_with(event)
     session.add_all.assert_called_once_with([delivery])
     assert session.flush.await_args_list == [call([event]), call([delivery])]
+    resource_events.event_changed.assert_awaited_once_with(
+        event,
+        change="requested",
+        dedupe_token="created",
+    )
+    resource_events.delivery_changed.assert_awaited_once_with(
+        delivery,
+        request_id="request-1",
+        change="created",
+        dedupe_token="generation-1",
+    )
+
+
+@pytest.mark.anyio
+async def test_suppressed_event_emits_no_delivery_created_events() -> None:
+    repository = load_repository()
+    session = Mock()
+    session.flush = AsyncMock()
+    session.begin_nested.return_value = AsyncMock()
+    event = Mock(spec=NotificationEvent)
+    event.status = "SUPPRESSED"
+    event.request_id = "request-suppressed"
+    resource_events = Mock()
+    resource_events.event_changed = AsyncMock()
+    resource_events.delivery_changed = AsyncMock()
+
+    await repository.NotificationRepository(
+        session, resource_events
+    ).persist_event_and_deliveries(event, [])
+
+    resource_events.event_changed.assert_awaited_once_with(
+        event,
+        change="suppressed",
+        dedupe_token="created",
+    )
+    resource_events.delivery_changed.assert_not_awaited()
 
 
 @pytest.mark.anyio

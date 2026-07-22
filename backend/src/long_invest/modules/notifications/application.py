@@ -20,7 +20,6 @@ from long_invest.platform.audit.service import AuditService
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 
 class NotificationAdminApplication:
@@ -75,15 +74,6 @@ class NotificationAdminApplication:
                     session_id=session_id,
                     trusted_ip=trusted_ip,
                 )
-            )
-            await TransactionalOutboxWriter().append(
-                session=session,
-                topic="notification.admin.changed.v1",
-                aggregate_type="NOTIFICATION_DELIVERY",
-                aggregate_id=object_id,
-                queue="maintenance",
-                payload={"action": method, **summary},
-                dedupe_key=f"notification-admin:{idempotency_key}",
             )
             return result
 

@@ -24,6 +24,7 @@ from long_invest.modules.backtests.api import (
 from long_invest.modules.calendar.api import router as calendar_router
 from long_invest.modules.daily_data.api import router as daily_data_router
 from long_invest.modules.health.api import router as health_router
+from long_invest.modules.history_backfills.api import router as history_backfills_router
 from long_invest.modules.market_data.quality_api import router as quality_router
 from long_invest.modules.monitor_schedules.api import router as monitor_schedules_router
 from long_invest.modules.monitoring.api import router as monitoring_router
@@ -46,6 +47,7 @@ from long_invest.modules.watchlists.api import router as watchlists_router
 from long_invest.platform.audit.api import router as audit_router
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import get_database
+from long_invest.platform.events.api import router as events_router
 from long_invest.platform.http.exception_handlers import register_exception_handlers
 from long_invest.platform.http.middleware import RequestContextMiddleware
 from long_invest.platform.http.request_id import (
@@ -72,10 +74,17 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    from long_invest.bootstrap.history_backfills import (
+        build_history_backfill_application,
+    )
     from long_invest.bootstrap.stage4_runtime import build_backtest_application
+    from long_invest.modules.history_backfills.application import (
+        configure_history_backfill_application,
+    )
 
     settings = get_settings()
     configure_backtest_application(build_backtest_application)
+    configure_history_backfill_application(build_history_backfill_application)
     configure_job_admin_application(lambda: JobAdminApplication(get_database()))
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(RequestContextMiddleware)
@@ -109,5 +118,7 @@ def create_app() -> FastAPI:
     app.include_router(audit_router)
     app.include_router(quality_router)
     app.include_router(alerts_router)
+    app.include_router(history_backfills_router)
+    app.include_router(events_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

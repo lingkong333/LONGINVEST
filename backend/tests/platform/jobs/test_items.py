@@ -76,7 +76,7 @@ async def test_initialize_items_is_idempotent_but_rejects_scope_drift() -> None:
 async def test_finish_item_updates_parent_progress_only_with_active_child_fence() -> (
     None
 ):
-    parent = SimpleNamespace(progress={}, updated_at=None)
+    parent = SimpleNamespace(progress={}, updated_at=None, version=1)
     item = SimpleNamespace(
         status=JobItemStatus.PENDING,
         attempt_count=0,
@@ -126,7 +126,7 @@ async def test_finish_item_locks_child_run_before_parent() -> None:
         fence_token=fence_token,
         status=JobRunStatus.RUNNING,
     )
-    parent = SimpleNamespace(progress={}, updated_at=None)
+    parent = SimpleNamespace(progress={}, updated_at=None, version=1)
     item = SimpleNamespace(
         status=JobItemStatus.PENDING,
         attempt_count=0,
@@ -156,6 +156,7 @@ async def test_finish_item_locks_child_run_before_parent() -> None:
 
     service = JobService(Session())
     service._jobs = OrderedRepository()
+    service._outbox_writer = None
 
     await service.finish_item(
         child_job_id=child_job_id,
@@ -174,7 +175,7 @@ async def test_finish_item_locks_child_run_before_parent() -> None:
 
 @pytest.mark.anyio
 async def test_last_successful_item_requests_completion_only_once() -> None:
-    parent = SimpleNamespace(progress={}, updated_at=None)
+    parent = SimpleNamespace(progress={}, updated_at=None, version=1)
     item = SimpleNamespace(
         status=JobItemStatus.PENDING,
         attempt_count=0,

@@ -18,6 +18,7 @@ from long_invest.platform.jobs.contracts import (
     JobStatus,
 )
 from long_invest.platform.jobs.models import Job, JobItem, JobRun
+from long_invest.platform.jobs.service import JobService
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
 JobAction = Literal["cancel", "pause", "resume", "retry", "retry-failed-items"]
@@ -183,6 +184,7 @@ class JobAdminService:
         job.version += 1
         job.updated_at = now
         await self._session.flush()
+        await JobService(self._session).append_changed(job, change=action)
         if action in {"cancel", "pause"}:
             self._session.add(_control_event(job, action, context.request_id))
         await self._audit.append(

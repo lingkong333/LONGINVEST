@@ -75,6 +75,14 @@ class FakeRepository:
         self.deliveries = deliveries
         self.added: list[NotificationDelivery] = []
         self.flush_count = 0
+        self.resource_events = type(
+            "ResourceEvents",
+            (),
+            {
+                "event_changed": AsyncMock(),
+                "delivery_changed": AsyncMock(),
+            },
+        )()
 
     async def lock_delivery(self, delivery_id):
         return next((item for item in self.deliveries if item.id == delivery_id), None)
@@ -158,6 +166,12 @@ async def test_retry_failed_delivery_creates_new_generation_without_mutating_old
     assert result.delivery.deterministic_message_id.endswith(":WECOM:2")
     assert event.status == NotificationEventStatus.DISPATCHED
     assert repository.flush_count == 1
+    repository.resource_events.delivery_changed.assert_awaited_once_with(
+        result.delivery,
+        request_id=event.request_id,
+        change="retry",
+        dedupe_token="generation-2",
+    )
 
 
 @pytest.mark.anyio
@@ -217,6 +231,10 @@ async def test_cancel_pending_is_idempotent_and_aggregates_current_generations()
     assert current.error_code == "CANCELED_BY_USER"
     assert event.status == NotificationEventStatus.CANCELED
     assert repository.flush_count == 1
+    assert repository.resource_events.delivery_changed.await_count == 1
+    assert repository.resource_events.delivery_changed.await_args.kwargs["change"] == (
+        "canceled"
+    )
 
 
 @pytest.mark.anyio
@@ -256,6 +274,7 @@ async def test_failed_batch_retries_valid_items_and_isolates_invalid_items() -> 
         (UUID(int=0), "NOTIFICATION_RESOURCE_NOT_FOUND"),
     ]
     assert event.status == NotificationEventStatus.DISPATCHED
+    assert repository.resource_events.delivery_changed.await_count == 1
 
 
 def test_event_aggregation_only_uses_latest_generation_per_channel() -> None:

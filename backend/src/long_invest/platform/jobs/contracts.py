@@ -146,8 +146,8 @@ class SubmitJob:
     hard_timeout_seconds: int = 60
 
     def __post_init__(self) -> None:
-        if not 0 < self.soft_timeout_seconds <= self.hard_timeout_seconds <= 3600:
-            raise ValueError("job timeout must satisfy 0 < soft <= hard <= 3600")
+        if not 0 < self.soft_timeout_seconds <= self.hard_timeout_seconds <= 86400:
+            raise ValueError("job timeout must satisfy 0 < soft <= hard <= 86400")
         try:
             snapshot = json.loads(
                 json.dumps(self.config_snapshot, ensure_ascii=False, allow_nan=False)

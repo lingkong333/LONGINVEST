@@ -1,6 +1,7 @@
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.platform.jobs.models import Job, JobItem, JobRun
@@ -78,3 +79,46 @@ class JobRepository:
             )
         )
         return int(completed or 0), int(total or 0)
+
+    async def recover_active_items(self, job_id: UUID) -> None:
+        await self._session.execute(
+            update(JobItem)
+            .where(
+                JobItem.job_id == job_id,
+                JobItem.status.in_(("FETCHING", "VALIDATING", "RUNNING", "SAVING")),
+            )
+            .values(status="PENDING", started_at=None, ended_at=None)
+        )
+        await self._session.flush()
+
+    async def claim_pending_items(self, job_id: UUID, *, limit: int) -> list[JobItem]:
+        items = list(
+            (
+                await self._session.scalars(
+                    select(JobItem)
+                    .where(JobItem.job_id == job_id, JobItem.status == "PENDING")
+                    .order_by(JobItem.item_key)
+                    .limit(limit)
+                    .with_for_update(skip_locked=True)
+                )
+            ).all()
+        )
+        return items
+
+    async def item_status_counts(self, job_id: UUID) -> dict[str, int]:
+        rows = (
+            await self._session.execute(
+                select(JobItem.status, func.count())
+                .where(JobItem.job_id == job_id)
+                .group_by(JobItem.status)
+            )
+        ).all()
+        return {str(status): int(count) for status, count in rows}
+
+    async def cancel_pending_items(self, job_id: UUID, now: datetime) -> None:
+        await self._session.execute(
+            update(JobItem)
+            .where(JobItem.job_id == job_id, JobItem.status == "PENDING")
+            .values(status="CANCELED", ended_at=now, updated_at=now)
+        )
+        await self._session.flush()

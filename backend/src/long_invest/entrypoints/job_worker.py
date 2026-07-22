@@ -1,5 +1,6 @@
 from typing import Any
 
+from long_invest.bootstrap.history_backfills import build_history_backfill_job_handler
 from long_invest.bootstrap.jobs import (
     daily_data_coordinate,
     daily_data_finalize,
@@ -60,6 +61,7 @@ async def backtest_single(context):
 
 
 HANDLERS["BACKTEST_SINGLE"] = backtest_single
+HANDLERS["MARKET_HISTORY_BACKFILL"] = build_history_backfill_job_handler()
 
 
 def execute_job(job_id: str, outbox_id: str) -> dict[str, Any]:

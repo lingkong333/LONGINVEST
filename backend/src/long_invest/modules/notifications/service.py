@@ -204,10 +204,33 @@ class NotificationService:
         delivery.next_retry_at = None
         self._clear_lease(delivery)
         event = await self._repository.lock_event(delivery.event_id)
+        old_event_status = event.status if event is not None else None
         if event is not None:
             deliveries = await self._repository.list_deliveries(event.id)
             event.status = aggregate_current_event_status(deliveries)
         await self._repository.flush()
+        request_id = event.request_id if event is not None else None
+        change = (
+            "canceled"
+            if delivery_status is NotificationDeliveryStatus.CANCELED
+            else delivery_status.value.lower()
+        )
+        await self._repository.resource_events.delivery_changed(
+            delivery,
+            request_id=request_id,
+            change=change,
+            dedupe_token=(
+                f"generation-{delivery.generation}-attempt-{delivery.attempt_count + 1}"
+            ),
+        )
+        if event is not None and event.status != old_event_status:
+            await self._repository.resource_events.event_changed(
+                event,
+                change="status_changed",
+                dedupe_token=(
+                    f"delivery-{delivery.id}-generation-{delivery.generation}-skip"
+                ),
+            )
         return True
 
     async def recover_expired_leases(
@@ -248,6 +271,7 @@ class NotificationService:
         phase: str,
     ) -> None:
         event = await self._repository.lock_event(delivery.event_id)
+        old_event_status = event.status if event is not None else None
         request_count = delivery.attempt_count + 1
         duration_ms = max(
             0,
@@ -294,6 +318,21 @@ class NotificationService:
         if event is not None:
             deliveries = await self._repository.list_deliveries(event.id)
             event.status = aggregate_current_event_status(deliveries)
+        await self._repository.resource_events.delivery_changed(
+            delivery,
+            request_id=event.request_id if event is not None else None,
+            change=_delivery_result_change(delivery.status),
+            dedupe_token=(f"generation-{delivery.generation}-attempt-{request_count}"),
+        )
+        if event is not None and event.status != old_event_status:
+            await self._repository.resource_events.event_changed(
+                event,
+                change="status_changed",
+                dedupe_token=(
+                    f"delivery-{delivery.id}-generation-{delivery.generation}-"
+                    f"attempt-{request_count}"
+                ),
+            )
 
     @staticmethod
     def _apply_decision(
@@ -336,6 +375,17 @@ class NotificationService:
 
 def transactional_notification_service(session) -> NotificationService:
     return NotificationService(NotificationRepository(session))
+
+
+def _delivery_result_change(status: object) -> str:
+    current = NotificationDeliveryStatus(status)
+    if current is NotificationDeliveryStatus.SENT:
+        return "succeeded"
+    if current is NotificationDeliveryStatus.RETRY_WAIT:
+        return "retry"
+    if current is NotificationDeliveryStatus.OUTCOME_UNKNOWN:
+        return "outcome_unknown"
+    return "failed"
 
 
 def _publish_content_hash(command: PublishNotification) -> str:

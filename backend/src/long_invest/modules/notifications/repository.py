@@ -14,6 +14,9 @@ from long_invest.modules.notifications.models import (
     NotificationDeliveryAttempt,
     NotificationEvent,
 )
+from long_invest.modules.notifications.resource_events import (
+    NotificationResourceEvents,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,8 +26,13 @@ class ClaimedDelivery:
 
 
 class NotificationRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        resource_events: NotificationResourceEvents | None = None,
+    ) -> None:
         self._session = session
+        self.resource_events = resource_events or NotificationResourceEvents(session)
 
     async def find_event_by_idempotency(
         self,
@@ -46,6 +54,18 @@ class NotificationRepository:
             await self._session.flush([event])
             self._session.add_all(deliveries)
             await self._session.flush(deliveries)
+            await self.resource_events.event_changed(
+                event,
+                change=("suppressed" if event.status == "SUPPRESSED" else "requested"),
+                dedupe_token="created",
+            )
+            for delivery in deliveries:
+                await self.resource_events.delivery_changed(
+                    delivery,
+                    request_id=event.request_id,
+                    change="created",
+                    dedupe_token=f"generation-{delivery.generation}",
+                )
 
     async def claim_next(
         self,
@@ -84,6 +104,14 @@ class NotificationRepository:
         delivery.lease_token = lease_token
         delivery.lease_expires_at = now + lease_for
         await self._session.flush()
+        await self.resource_events.delivery_changed(
+            delivery,
+            request_id=None,
+            change="started",
+            dedupe_token=(
+                f"generation-{delivery.generation}-attempt-{delivery.attempt_count + 1}"
+            ),
+        )
         return ClaimedDelivery(delivery, lease_token)
 
     async def lock_expired_leases(

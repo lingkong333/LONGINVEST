@@ -372,6 +372,9 @@ async def test_watchdog_closes_linked_parent_after_second_lost_run(monkeypatch) 
         def __init__(self, _session):
             pass
 
+        async def append_changed(self, _job, *, change):
+            assert change == "lost"
+
         async def finalize_parent(self, requested_parent_id, result):
             parent_results.append((requested_parent_id, result.code))
             return True

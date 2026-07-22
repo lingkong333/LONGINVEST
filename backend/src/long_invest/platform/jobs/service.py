@@ -20,12 +20,19 @@ from long_invest.platform.jobs.contracts import (
 from long_invest.platform.jobs.models import Job, JobItem, JobRun
 from long_invest.platform.jobs.repository import JobRepository
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
+from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 
 class JobService:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        *,
+        outbox_writer: TransactionalOutboxWriter | None = None,
+    ) -> None:
         self._session = session
         self._jobs = JobRepository(session)
+        self._outbox_writer = outbox_writer or TransactionalOutboxWriter()
 
     async def get(self, job_id: UUID) -> Job | None:
         return await self._jobs.get(job_id)
@@ -91,6 +98,7 @@ class JobService:
             async with self._session.begin_nested():
                 self._session.add_all((job, event))
                 await self._session.flush()
+                await self._append_changed(job, change="submitted")
         except IntegrityError:
             existing = await self._jobs.find_by_idempotency(
                 scope=command.idempotency_scope,
@@ -120,6 +128,146 @@ class JobService:
             if key not in existing
         )
         await self._session.flush()
+
+    async def recover_active_items(self, job_id: UUID, fence_token: UUID) -> bool:
+        if await self._active_run(job_id, fence_token) is None:
+            return False
+        await self._jobs.recover_active_items(job_id)
+        return True
+
+    async def control_status(self, job_id: UUID, fence_token: UUID) -> JobStatus | None:
+        active = await self._active_run(job_id, fence_token)
+        return JobStatus(active[0].status) if active is not None else None
+
+    async def claim_pending_items(
+        self, job_id: UUID, fence_token: UUID, *, limit: int
+    ) -> tuple[str, ...]:
+        if limit <= 0:
+            raise ValueError("claim limit must be positive")
+        if await self._active_run(job_id, fence_token) is None:
+            return ()
+        items = await self._jobs.claim_pending_items(job_id, limit=limit)
+        now = datetime.now(UTC)
+        for item in items:
+            item.status = JobItemStatus.FETCHING
+            item.attempt_count += 1
+            item.started_at = now
+            item.ended_at = None
+            item.error_code = None
+            item.result_ref = None
+            item.updated_at = now
+        await self._session.flush()
+        return tuple(item.item_key for item in items)
+
+    async def set_item_stage(
+        self,
+        job_id: UUID,
+        fence_token: UUID,
+        item_key: str,
+        status: JobItemStatus,
+    ) -> bool:
+        if status not in {
+            JobItemStatus.FETCHING,
+            JobItemStatus.VALIDATING,
+            JobItemStatus.RUNNING,
+            JobItemStatus.SAVING,
+        }:
+            raise ValueError("item stage must be active")
+        if await self._active_run(job_id, fence_token) is None:
+            return False
+        item = await self._jobs.lock_item(job_id, item_key)
+        if item is None or JobItemStatus(item.status) in {
+            JobItemStatus.SUCCEEDED,
+            JobItemStatus.SKIPPED,
+            JobItemStatus.CANCELED,
+        }:
+            return False
+        item.status = status
+        item.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return True
+
+    async def release_item(
+        self, job_id: UUID, fence_token: UUID, item_key: str
+    ) -> bool:
+        if await self._active_run(job_id, fence_token) is None:
+            return False
+        item = await self._jobs.lock_item(job_id, item_key)
+        if item is None or JobItemStatus(item.status) in {
+            JobItemStatus.SUCCEEDED,
+            JobItemStatus.SKIPPED,
+            JobItemStatus.CANCELED,
+        }:
+            return False
+        item.status = JobItemStatus.PENDING
+        item.started_at = None
+        item.updated_at = datetime.now(UTC)
+        await self._session.flush()
+        return True
+
+    async def finish_claimed_item(
+        self,
+        job_id: UUID,
+        fence_token: UUID,
+        item_key: str,
+        *,
+        status: JobItemStatus,
+        result_ref: dict[str, object] | None = None,
+        error_code: str | None = None,
+    ) -> bool:
+        if status not in {
+            JobItemStatus.SUCCEEDED,
+            JobItemStatus.FAILED,
+            JobItemStatus.SKIPPED,
+            JobItemStatus.CANCELED,
+        }:
+            raise ValueError("item completion status must be terminal")
+        if await self._active_run(job_id, fence_token) is None:
+            return False
+        item = await self._jobs.lock_item(job_id, item_key)
+        if item is None or JobItemStatus(item.status) in {
+            JobItemStatus.SUCCEEDED,
+            JobItemStatus.SKIPPED,
+            JobItemStatus.CANCELED,
+        }:
+            return False
+        now = datetime.now(UTC)
+        item.status = status
+        item.result_ref = result_ref
+        item.error_code = error_code
+        item.ended_at = now
+        item.updated_at = now
+        await self._session.flush()
+        return True
+
+    async def item_status_counts(
+        self, job_id: UUID, fence_token: UUID
+    ) -> dict[str, int] | None:
+        if await self._active_run(job_id, fence_token) is None:
+            return None
+        return await self._jobs.item_status_counts(job_id)
+
+    async def cancel_pending_items(self, job_id: UUID, fence_token: UUID) -> bool:
+        if await self._active_run(job_id, fence_token) is None:
+            return False
+        await self._jobs.cancel_pending_items(job_id, datetime.now(UTC))
+        return True
+
+    async def request_pause_from_worker(self, job_id: UUID, fence_token: UUID) -> bool:
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, _run = active
+        if JobStatus(job.status) is JobStatus.PAUSING:
+            return True
+        if JobStatus(job.status) is not JobStatus.RUNNING:
+            return False
+        job.status = JobStatus.PAUSING
+        job.updated_at = datetime.now(UTC)
+        job.version += 1
+        await self._session.flush()
+        await self._append_changed(job, change="pause_requested")
+        return True
 
     async def finish_item(
         self,
@@ -174,9 +322,13 @@ class JobService:
             changed = True
             await self._session.flush()
         completed, total = await self._jobs.item_progress(parent_job_id)
-        parent.progress = {"completed": completed, "total": total}
-        parent.updated_at = now
-        await self._session.flush()
+        next_progress = {"completed": completed, "total": total}
+        if parent.progress != next_progress:
+            parent.progress = next_progress
+            parent.updated_at = now
+            parent.version += 1
+            await self._session.flush()
+            await self._append_changed(parent, change="progress")
         return completed, total, changed and total > 0 and completed == total
 
     async def abandon_item(
@@ -212,9 +364,13 @@ class JobService:
             item.updated_at = now
             await self._session.flush()
         completed, total = await self._jobs.item_progress(parent_job_id)
-        parent.progress = {"completed": completed, "total": total}
-        parent.updated_at = now
-        await self._session.flush()
+        next_progress = {"completed": completed, "total": total}
+        if parent.progress != next_progress:
+            parent.progress = next_progress
+            parent.updated_at = now
+            parent.version += 1
+            await self._session.flush()
+            await self._append_changed(parent, change="progress")
         return completed, total, total > 0 and completed == total
 
     async def defer(
@@ -237,6 +393,7 @@ class JobService:
         job.updated_at = now
         job.version += 1
         await self._session.flush()
+        await self._append_changed(job, change="deferred")
         return True
 
     async def finalize_parent(self, job_id: UUID, result: JobResult) -> bool:
@@ -264,6 +421,7 @@ class JobService:
         job.updated_at = now
         job.version += 1
         await self._session.flush()
+        await self._append_changed(job, change="parent_finalized")
         return True
 
     async def claim(
@@ -299,13 +457,14 @@ class JobService:
                 job.updated_at = datetime.now(UTC)
                 job.version += 1
                 await self._session.flush()
+                await self._append_changed(job, change="running")
                 return recovery_run
             raise AppError(
                 code="JOB_RUN_CONFLICT",
                 message="任务已有活动执行记录",
                 status_code=409,
             )
-        if not 0 < job.soft_timeout_seconds <= job.hard_timeout_seconds <= 3600:
+        if not 0 < job.soft_timeout_seconds <= job.hard_timeout_seconds <= 86400:
             raise AppError(
                 code="JOB_TIMEOUT_INVALID",
                 message="浠诲姟鍐荤粨瓒呮椂閰嶇疆鏃犳晥",
@@ -330,6 +489,7 @@ class JobService:
         job.updated_at = now
         job.version += 1
         await self._session.flush()
+        await self._append_changed(job, change="running")
         return run
 
     async def start(self, *, job_id: UUID, fence_token: UUID) -> bool:
@@ -367,15 +527,20 @@ class JobService:
         if active is None:
             return False
         job, run = active
-        now = datetime.now(UTC)
-        job.progress = {
+        next_progress = {
             "completed": progress.completed,
             "total": progress.total,
             "message": progress.message,
         }
+        if job.progress == next_progress:
+            return True
+        now = datetime.now(UTC)
+        job.progress = next_progress
         job.updated_at = now
+        job.version += 1
         run.heartbeat_at = now
         await self._session.flush()
+        await self._append_changed(job, change="progress")
         return True
 
     async def complete(
@@ -406,6 +571,68 @@ class JobService:
         job.current_fence_token = None
         job.version += 1
         await self._session.flush()
+        await self._append_changed(job, change="completed")
+        return True
+
+    async def pause_at_safe_point(
+        self,
+        *,
+        job_id: UUID,
+        fence_token: UUID,
+        result: JobResult,
+    ) -> bool:
+        if not result.success:
+            raise ValueError("pause requires a successful JobResult")
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        if JobStatus(job.status) is not JobStatus.PAUSING:
+            return False
+        now = datetime.now(UTC)
+        run.status = JobRunStatus.CANCELED
+        run.ended_at = now
+        run.heartbeat_at = now
+        run.metrics = result.metrics
+        job.status = JobStatus.PAUSED
+        job.result_summary = result.as_dict()
+        job.updated_at = now
+        job.current_run_id = None
+        job.current_fence_token = None
+        job.version += 1
+        await self._session.flush()
+        await self._append_changed(job, change="paused")
+        return True
+
+    async def cancel_at_safe_point(
+        self,
+        *,
+        job_id: UUID,
+        fence_token: UUID,
+        result: JobResult,
+    ) -> bool:
+        if not result.success:
+            raise ValueError("cancel requires a successful JobResult")
+        active = await self._active_run(job_id, fence_token)
+        if active is None:
+            return False
+        job, run = active
+        if JobStatus(job.status) is not JobStatus.CANCEL_REQUESTED:
+            return False
+        now = datetime.now(UTC)
+        run.status = JobRunStatus.CANCELED
+        run.ended_at = now
+        run.heartbeat_at = now
+        run.metrics = result.metrics
+        job.status = JobStatus.CANCELED
+        job.result_summary = result.as_dict()
+        job.terminal_at = now
+        job.updated_at = now
+        job.current_run_id = None
+        job.current_fence_token = None
+        job.version += 1
+        await self._session.flush()
+        await self._append_changed(job, change="canceled")
         return True
 
     async def timeout(
@@ -436,6 +663,7 @@ class JobService:
         job.current_fence_token = None
         job.version += 1
         await self._session.flush()
+        await self._append_changed(job, change="timed_out")
         return True
 
     async def fail(
@@ -466,7 +694,35 @@ class JobService:
         job.current_fence_token = None
         job.version += 1
         await self._session.flush()
+        await self._append_changed(
+            job,
+            change="retry_waiting" if result.retryable else "failed",
+        )
         return True
+
+    async def append_changed(self, job: Job, *, change: str) -> None:
+        await self._append_changed(job, change=change)
+
+    async def _append_changed(self, job: Job, *, change: str) -> None:
+        writer = getattr(self, "_outbox_writer", None)
+        if writer is None:
+            return
+        await writer.append(
+            session=self._session,
+            topic="job.changed.v1",
+            aggregate_type="job",
+            aggregate_id=str(job.id),
+            queue="maintenance",
+            payload={
+                "job_id": str(job.id),
+                "status": JobStatus(job.status).value,
+                "version": job.version,
+                "progress": job.progress,
+                "request_id": job.request_id,
+                "change": change,
+            },
+            dedupe_key=f"job-changed:{job.id}:v{job.version}:{change}",
+        )
 
     async def _active_run(
         self,

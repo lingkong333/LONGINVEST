@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from long_invest.platform.jobs.contracts import JobStatus
 from long_invest.platform.jobs.models import Job
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
+from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +100,22 @@ class OutboxRepository:
         job.updated_at = now
         job.version += 1
         await self._session.flush()
+        await TransactionalOutboxWriter().append(
+            session=self._session,
+            topic="job.changed.v1",
+            aggregate_type="job",
+            aggregate_id=str(job.id),
+            queue="maintenance",
+            payload={
+                "job_id": str(job.id),
+                "status": JobStatus.QUEUED.value,
+                "version": job.version,
+                "progress": job.progress,
+                "request_id": job.request_id,
+                "change": "queued",
+            },
+            dedupe_key=f"job-changed:{job.id}:v{job.version}:queued",
+        )
         return True
 
     async def mark_failed(

@@ -38,7 +38,7 @@ class Job(Base):
         CheckConstraint("soft_timeout_seconds > 0", name="soft_timeout_positive"),
         CheckConstraint(
             "hard_timeout_seconds >= soft_timeout_seconds "
-            "AND hard_timeout_seconds <= 3600",
+            "AND hard_timeout_seconds <= 86400",
             name="hard_timeout_not_less_than_soft",
         ),
         CheckConstraint(

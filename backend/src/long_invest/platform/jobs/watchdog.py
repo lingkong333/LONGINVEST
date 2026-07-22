@@ -147,6 +147,7 @@ class JobsWatchdog:
                 job.terminal_at = now
                 job.updated_at = now
                 job.version += 1
+                await JobService(session).append_changed(job, change="lost")
                 linked = linked_job_item(job.config_snapshot)
                 if linked is not None:
                     item_service = JobService(session)
@@ -207,6 +208,7 @@ class JobsWatchdog:
         job.current_fence_token = recovery_run.fence_token
         job.updated_at = now
         job.version += 1
+        await JobService(session).append_changed(job, change="retry_waiting")
 
 
 def _is_stale_active_run(run: JobRun, cutoff) -> bool:

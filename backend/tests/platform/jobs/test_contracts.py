@@ -120,7 +120,19 @@ def test_submit_job_freezes_supported_timeout_range() -> None:
     assert command.soft_timeout_seconds == 45
     assert command.hard_timeout_seconds == 60
 
-    for soft, hard in ((0, 60), (61, 60), (45, 3601)):
+    long_running = SubmitJob(
+        job_type="MARKET_HISTORY_BACKFILL",
+        queue="bulk-history",
+        idempotency_scope="history:all",
+        idempotency_key="long-running",
+        request_id="req-long-running",
+        config_snapshot={},
+        soft_timeout_seconds=82800,
+        hard_timeout_seconds=86400,
+    )
+    assert long_running.hard_timeout_seconds == 86400
+
+    for soft, hard in ((0, 60), (61, 60), (45, 86401)):
         with pytest.raises(ValueError, match="timeout"):
             SubmitJob(
                 job_type="REALTIME_QUOTE_CYCLE",

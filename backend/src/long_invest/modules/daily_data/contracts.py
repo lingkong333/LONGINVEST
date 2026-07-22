@@ -106,6 +106,42 @@ class DailyBarSnapshot:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoricalDailyBarInput:
+    security_id: UUID
+    symbol: str
+    trade_date: date
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    close: Decimal
+    volume: int
+    amount: Decimal
+    source: str
+
+    def __post_init__(self) -> None:
+        _require_uuid(self.security_id, "股票编号")
+        validate_symbol(self.symbol)
+        _require_date(self.trade_date, "交易日期")
+        prices = (self.open, self.high, self.low, self.close)
+        if any(not value.is_finite() or value <= 0 for value in prices):
+            raise ValueError("历史日线价格必须是有限正数")
+        if self.high < max(prices) or self.low > min(prices):
+            raise ValueError("历史日线价格范围无效")
+        if self.volume < 0 or not self.amount.is_finite() or self.amount < 0:
+            raise ValueError("历史日线成交量和成交额不能为负数")
+        if not self.source.strip():
+            raise ValueError("历史日线数据来源不能为空")
+
+
+@dataclass(frozen=True, slots=True)
+class HistoricalDailyStoreResult:
+    inserted: int
+    unchanged: int
+    revised: int
+    review_required: int
+
+
+@dataclass(frozen=True, slots=True)
 class CreateDailyBatch:
     trading_date: date
     universe_snapshot_id: UUID | None
@@ -136,10 +172,9 @@ class CreateDailyBatch:
             raise ValueError("冻结股票范围不能包含重复股票编号")
         object.__setattr__(self, "security_ids", security_ids)
         corporate_action_symbols = tuple(self.known_corporate_action_symbols)
-        if (
-            len(corporate_action_symbols) != len(set(corporate_action_symbols))
-            or not set(corporate_action_symbols).issubset(symbols)
-        ):
+        if len(corporate_action_symbols) != len(
+            set(corporate_action_symbols)
+        ) or not set(corporate_action_symbols).issubset(symbols):
             raise ValueError(
                 "known corporate action symbols must be unique and inside scope"
             )
@@ -222,10 +257,7 @@ class StageDailyBar:
             raise ValueError("缺失状态必须提供明确缺失原因")
         if status is not DailyStageStatus.MISSING and reason is not None:
             raise ValueError("只有缺失状态可以提供缺失原因")
-        if (
-            status is DailyStageStatus.FETCHED
-            and not self.provider_payload
-        ):
+        if status is DailyStageStatus.FETCHED and not self.provider_payload:
             raise ValueError("有效暂存状态必须提供日线数据")
         if self.provider_payload is not None:
             object.__setattr__(

@@ -146,6 +146,18 @@ async def _execute_job(job_id: UUID, outbox_id: UUID) -> JobResult:
                     fence_token=run.fence_token,
                     result=result,
                 )
+            elif result.success and result.code == "HISTORY_BACKFILL_PAUSED":
+                accepted = await service.pause_at_safe_point(
+                    job_id=job_id,
+                    fence_token=run.fence_token,
+                    result=result,
+                )
+            elif result.success and result.code == "HISTORY_BACKFILL_CANCELED":
+                accepted = await service.cancel_at_safe_point(
+                    job_id=job_id,
+                    fence_token=run.fence_token,
+                    result=result,
+                )
             elif result.success:
                 accepted = await service.complete(
                     job_id=job_id,

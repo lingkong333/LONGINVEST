@@ -13,6 +13,8 @@ from long_invest.modules.daily_data.contracts import (
     DailyBatchSummary,
     DailyMissingReason,
     DailyStageStatus,
+    HistoricalDailyBarInput,
+    HistoricalDailyStoreResult,
     StageDailyBar,
 )
 from long_invest.modules.daily_data.models import (
@@ -62,6 +64,111 @@ class DailyDataService:
         batch, _created = await self._repository.claim_batch(command, self._now())
         return _summary(batch)
 
+    async def store_historical_bars(
+        self,
+        bars: tuple[HistoricalDailyBarInput, ...],
+        *,
+        reason: str,
+    ) -> HistoricalDailyStoreResult:
+        if not bars:
+            raise ValueError("historical daily bars cannot be empty")
+        if not reason.strip() or len(reason) > 500:
+            raise ValueError("historical daily revision reason is invalid")
+        ordered = tuple(sorted(bars, key=lambda item: item.trade_date))
+        if len({(item.security_id, item.trade_date) for item in ordered}) != len(
+            ordered
+        ):
+            raise ValueError("historical daily bars contain duplicate dates")
+
+        inserted = unchanged = revised = review_required = 0
+        for item in ordered:
+            previous_close = await self._repository.get_previous_close(
+                item.security_id, item.trade_date
+            )
+            payload = {
+                "symbol": item.symbol,
+                "trading_date": item.trade_date,
+                "open": item.open,
+                "high": item.high,
+                "low": item.low,
+                "close": item.close,
+                "previous_close": previous_close,
+                "volume": item.volume,
+                "amount": item.amount,
+                "source": item.source,
+            }
+            quality = validate_daily_bar(
+                payload,
+                expected_symbol=item.symbol,
+                expected_date=item.trade_date,
+                context=DailyQualityContext(
+                    is_new_listing=previous_close is None,
+                    is_st=False,
+                    has_known_corporate_action=False,
+                    previous_close=previous_close,
+                ),
+                seen_keys=set(),
+            )
+            if not quality.valid:
+                raise AppError(
+                    code=quality.code,
+                    message="历史日线数据未通过正式数据校验",
+                    status_code=422,
+                )
+            existing = await self._repository.get_bar(item.security_id, item.trade_date)
+            stage = DailyBarStage(
+                id=uuid4(),
+                batch_id=uuid4(),
+                security_id=item.security_id,
+                symbol=item.symbol,
+                trading_date=item.trade_date,
+                status=(
+                    DailyStageStatus.REVIEW_REQUIRED
+                    if quality.review_required
+                    else DailyStageStatus.VALID
+                ),
+                provider_payload=payload,
+                received_at=self._now(),
+                validated_at=self._now(),
+                expires_at=self._now() + timedelta(days=7),
+            )
+            revision_no = await self._commit_stage(stage, revision_reason=reason)
+            if existing is None:
+                inserted += 1
+            elif revision_no:
+                revised += 1
+            else:
+                unchanged += 1
+            if quality.review_required:
+                review_required += 1
+                await self._quality_service().open(
+                    OpenQualityIssue(
+                        issue_type=quality.code,
+                        subject_type="daily_bar_unadjusted",
+                        subject_id=f"{item.security_id}:{item.trade_date}",
+                        symbol=item.symbol,
+                        severity=QualitySeverity.WARNING,
+                        evidence={
+                            "security_id": str(item.security_id),
+                            "symbol": item.symbol,
+                            "trade_date": item.trade_date.isoformat(),
+                            "quality_code": quality.code,
+                            "source": item.source,
+                        },
+                        dedupe_key=(
+                            f"history-daily-review:{item.security_id}:"
+                            f"{item.trade_date}:{quality.code}"
+                        ),
+                        requires_review=True,
+                    )
+                )
+        return HistoricalDailyStoreResult(
+            inserted=inserted,
+            unchanged=unchanged,
+            revised=revised,
+            review_required=review_required,
+        )
+
     async def stage(self, batch_id: UUID, item: StageDailyBar) -> None:
         batch = await self._batch(batch_id, for_update=True)
         status = DailyBatchStatus(batch.status)
@@ -84,9 +191,9 @@ class DailyDataService:
                 message="日线日期与批次日期不一致",
                 status_code=422,
             )
-        frozen_security_id = dict(
-            zip(batch.symbols, batch.security_ids, strict=True)
-        )[item.symbol]
+        frozen_security_id = dict(zip(batch.symbols, batch.security_ids, strict=True))[
+            item.symbol
+        ]
         if str(item.security_id) != str(frozen_security_id):
             raise AppError(
                 code="DAILY_BAR_SECURITY_MISMATCH",
@@ -142,9 +249,7 @@ class DailyDataService:
             )
             if "previous_close" in payload:
                 try:
-                    previous_close = _positive_previous_close(
-                        payload["previous_close"]
-                    )
+                    previous_close = _positive_previous_close(payload["previous_close"])
                 except (InvalidOperation, TypeError, ValueError):
                     _invalidate_stage(
                         stage,
@@ -425,7 +530,9 @@ class DailyDataService:
             )
         return batch
 
-    async def _commit_stage(self, stage: DailyBarStage) -> int:
+    async def _commit_stage(
+        self, stage: DailyBarStage, *, revision_reason: str = "provider_replay_changed"
+    ) -> int:
         values = _bar_values(stage)
         await self._repository.lock_bar_key(stage.security_id, stage.trading_date)
         existing = await self._repository.get_bar(stage.security_id, stage.trading_date)
@@ -462,7 +569,7 @@ class DailyDataService:
                 new_values=_json_values(values),
                 changed_fields=list(changed_fields),
                 source=values["source"],
-                reason="provider_replay_changed",
+                reason=revision_reason,
                 created_at=self._now(),
             )
         )

@@ -2,6 +2,7 @@ import importlib
 import importlib.util
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -42,6 +43,14 @@ class FakeRepository:
         self.operations: list[str] = []
         self.concurrent_conflict: str | None = None
         self.conflict_raised = False
+        self.resource_events = type(
+            "ResourceEvents",
+            (),
+            {
+                "event_changed": AsyncMock(),
+                "delivery_changed": AsyncMock(),
+            },
+        )()
 
     async def find_event_by_idempotency(self, idempotency_key):
         self.operations.append("find_event_by_idempotency")
@@ -133,12 +142,13 @@ def event_and_delivery():
 
 @pytest.mark.anyio
 @pytest.mark.parametrize(
-    ("result", "expected_status", "expected_event_status"),
+    ("result", "expected_status", "expected_event_status", "expected_change"),
     [
         (
             ChannelResult.success(summary="accepted"),
             NotificationDeliveryStatus.SENT,
             NotificationEventStatus.DELIVERED,
+            "succeeded",
         ),
         (
             ChannelResult.temporary_failure(
@@ -147,6 +157,7 @@ def event_and_delivery():
             ),
             NotificationDeliveryStatus.RETRY_WAIT,
             NotificationEventStatus.DISPATCHED,
+            "retry",
         ),
         (
             ChannelResult.permanent_failure(
@@ -155,6 +166,7 @@ def event_and_delivery():
             ),
             NotificationDeliveryStatus.FAILED,
             NotificationEventStatus.FAILED,
+            "failed",
         ),
         (
             ChannelResult.outcome_unknown(
@@ -163,6 +175,7 @@ def event_and_delivery():
             ),
             NotificationDeliveryStatus.OUTCOME_UNKNOWN,
             NotificationEventStatus.DISPATCHED,
+            "outcome_unknown",
         ),
     ],
 )
@@ -170,6 +183,7 @@ async def test_record_result_writes_attempt_and_advances_delivery_and_event(
     result,
     expected_status,
     expected_event_status,
+    expected_change,
 ) -> None:
     service = load_service()
     event, delivery, lease_token = event_and_delivery()
@@ -197,6 +211,12 @@ async def test_record_result_writes_attempt_and_advances_delivery_and_event(
     assert repository.operations.index("lock_event") < repository.operations.index(
         "list_deliveries"
     )
+    repository.resource_events.delivery_changed.assert_awaited_once_with(
+        delivery,
+        request_id=event.request_id,
+        change=expected_change,
+        dedupe_token="generation-1-attempt-1",
+    )
 
 
 @pytest.mark.anyio
@@ -217,6 +237,7 @@ async def test_stale_worker_lease_cannot_overwrite_reclaimed_delivery() -> None:
     assert accepted is False
     assert delivery.status == NotificationDeliveryStatus.SENDING
     assert repository.attempts == []
+    repository.resource_events.delivery_changed.assert_not_awaited()
 
 
 @pytest.mark.anyio
@@ -239,6 +260,12 @@ async def test_skip_delivery_is_fenced_and_advances_event_without_attempt() -> N
     assert delivery.lease_token is None
     assert event.status == NotificationEventStatus.SUPPRESSED
     assert repository.attempts == []
+    repository.resource_events.delivery_changed.assert_awaited_once_with(
+        delivery,
+        request_id=event.request_id,
+        change="skipped_ineligible",
+        dedupe_token="generation-1-attempt-1",
+    )
 
 
 @pytest.mark.anyio

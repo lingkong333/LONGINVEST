@@ -16,6 +16,9 @@ from long_invest.modules.notifications.models import (
     NotificationDeliveryAttempt,
     NotificationEvent,
 )
+from long_invest.modules.notifications.resource_events import (
+    NotificationResourceEvents,
+)
 
 _CANCELABLE_STATUSES = {
     NotificationDeliveryStatus.PENDING,
@@ -63,8 +66,13 @@ class NotificationAdminError(ValueError):
 
 
 class NotificationAdminRepository:
-    def __init__(self, session: AsyncSession) -> None:
+    def __init__(
+        self,
+        session: AsyncSession,
+        resource_events: NotificationResourceEvents | None = None,
+    ) -> None:
         self._session = session
+        self.resource_events = resource_events or NotificationResourceEvents(session)
 
     async def list_events(
         self,
@@ -315,8 +323,21 @@ class NotificationAdminService:
         )
         self._repository.add_delivery(retried)
         deliveries.append(retried)
+        old_event_status = event.status
         event.status = aggregate_current_event_status(deliveries)
         await self._repository.flush()
+        await self._repository.resource_events.delivery_changed(
+            retried,
+            request_id=event.request_id,
+            change="retry",
+            dedupe_token=f"generation-{generation}",
+        )
+        if event.status != old_event_status:
+            await self._repository.resource_events.event_changed(
+                event,
+                change="status_changed",
+                dedupe_token=f"delivery-{retried.id}-generation-{generation}",
+            )
         return DeliveryMutation(delivery=retried, changed=True)
 
     async def cancel_delivery(self, delivery_id: UUID) -> DeliveryMutation:
@@ -345,8 +366,23 @@ class NotificationAdminService:
         delivery.status = NotificationDeliveryStatus.CANCELED
         delivery.next_retry_at = None
         delivery.error_code = "CANCELED_BY_USER"
+        old_event_status = event.status
         event.status = aggregate_current_event_status(deliveries)
         await self._repository.flush()
+        await self._repository.resource_events.delivery_changed(
+            delivery,
+            request_id=event.request_id,
+            change="canceled",
+            dedupe_token=f"generation-{delivery.generation}",
+        )
+        if event.status != old_event_status:
+            await self._repository.resource_events.event_changed(
+                event,
+                change="status_changed",
+                dedupe_token=(
+                    f"delivery-{delivery.id}-generation-{delivery.generation}-canceled"
+                ),
+            )
         return DeliveryMutation(delivery=delivery, changed=True)
 
     async def retry_failed_batch(

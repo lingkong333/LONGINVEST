@@ -6,6 +6,8 @@ from long_invest.modules.signals.contracts import PriceZoneRuleInput, PriceZoneR
 
 
 class BacktestProductionSignalRule:
+    rule_version = "signals-price-zone-v1"
+
     def __init__(self, production_rule: PriceZoneRulePort) -> None:
         self._production_rule = production_rule
 

@@ -37,11 +37,28 @@ class BacktestRepository:
             statement = statement.with_for_update()
         return await self._session.scalar(statement)
 
+    async def get_task_by_idempotency(
+        self, idempotency_key: str, *, for_update: bool = False
+    ):
+        statement = select(BacktestTask).where(
+            BacktestTask.idempotency_key == idempotency_key
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        return await self._session.scalar(statement)
+
     async def get_item(self, task_id: UUID, *, for_update: bool = False):
         statement = select(BacktestItem).where(BacktestItem.task_id == task_id)
         if for_update:
             statement = statement.with_for_update()
         return await self._session.scalar(statement)
+
+    async def get_item_by_id(self, task_id: UUID, item_id: UUID):
+        return await self._session.scalar(
+            select(BacktestItem).where(
+                BacktestItem.task_id == task_id, BacktestItem.id == item_id
+            )
+        )
 
     async def get_universe(self, task_id: UUID):
         return await self._session.scalar(
@@ -105,6 +122,14 @@ class BacktestRepository:
             select(BacktestOrder)
             .where(BacktestOrder.item_id == item_id)
             .order_by(BacktestOrder.signal_date, BacktestOrder.id)
+        )
+        return list(rows.all())
+
+    async def list_adjustments(self, item_id: UUID):
+        rows = await self._session.scalars(
+            select(BacktestTargetAdjustment)
+            .where(BacktestTargetAdjustment.item_id == item_id)
+            .order_by(BacktestTargetAdjustment.event_date)
         )
         return list(rows.all())
 

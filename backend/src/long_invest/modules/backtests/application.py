@@ -12,6 +12,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestCreateRequest,
     BacktestCreationSnapshotPort,
     BacktestErrorCode,
+    BacktestItemStatus,
     BacktestStrategyExecutionPort,
 )
 from long_invest.modules.backtests.engine import BacktestBar, FixedTargetBacktestEngine
@@ -29,6 +30,18 @@ from long_invest.modules.strategies.contracts import (
 )
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
+from long_invest.platform.jobs.contracts import JobExecutionContext, JobResult
+
+_TERMINAL_ITEM_STATUSES = {
+    BacktestItemStatus.SUCCEEDED,
+    BacktestItemStatus.FAILED,
+    BacktestItemStatus.SKIPPED,
+    BacktestItemStatus.CANCELED,
+}
+_NON_FATAL_CONFLICTS = {
+    "BACKTEST_ALREADY_RUNNING",
+    "BACKTEST_EXECUTION_FENCED",
+}
 
 
 class BacktestApplication:
@@ -71,15 +84,30 @@ class BacktestApplication:
         snapshot = await self._creation_snapshots.resolve_creation_snapshot(
             task_id=task_id, request=request
         )
-        return await self._write("create", snapshot, context)
+        try:
+            return await self._write("create", snapshot, context)
+        except AppError as exc:
+            if exc.code != "BACKTEST_CONFLICT":
+                raise
+            return await self._write("create", snapshot, context)
 
     async def get_execution(self, task_id: UUID):
         return await self._read("get_execution", task_id)
 
-    async def run(self, task_id: UUID):
+    async def get_result(self, task_id: UUID, item_id: UUID):
+        return await self._read("get_result", task_id, item_id)
+
+    async def run(self, task_id: UUID, *, execution_token: UUID):
         try:
-            state = await self._write("start", task_id)
+            state = await self._write("start", task_id, execution_token)
+            if state.item_status in _TERMINAL_ITEM_STATUSES:
+                return state
             task = state.task
+            if self._engine.rule_version != task.rule_version:
+                raise _failure(
+                    "BACKTEST_RULE_VERSION_MISMATCH",
+                    "回测规则版本与冻结任务不一致",
+                )
             entry = task.universe_snapshot[0]
             forecast = state.forecast
             if forecast is None:
@@ -96,34 +124,43 @@ class BacktestApplication:
                 _verify_security_snapshot(
                     entry, training, BacktestErrorCode.TRAINING_DATA_INVALID
                 )
-                await self._write("claim_forecast", task_id, training)
-                execution = await self._strategy_executions.resolve_execution(task)
-                request = StrategyForecastRequest(
-                    strategy_id=execution.strategy_id,
-                    security_name=entry.name,
-                    strategy_version_id=task.strategy_version_id,
-                    draft_id=task.draft_id,
-                    draft_version=task.draft_version,
-                    source_code=execution.source_code,
-                    source_code_hash=task.source_code_hash,
-                    metadata=task.strategy_metadata,
-                    parameter_schema=task.parameter_schema,
-                    environment_version=task.environment_version,
-                    runner_image_digest=task.runner_image_digest,
-                    parameter_snapshot=task.parameter_snapshot,
-                    parameter_hash=task.parameter_hash,
-                    training_data=training,
-                    requested_at=self._clock(),
-                )
-                result = await self._forecasts.forecast(request)
-                forecast = await self._write(
-                    "freeze_forecast",
+                claimed = await self._write(
+                    "claim_forecast",
                     task_id,
                     training,
-                    result,
-                    frozen_at=self._clock(),
+                    execution_token=execution_token,
                 )
-                del request, result, training, execution
+                forecast = claimed.forecast
+                if forecast is None:
+                    execution = await self._strategy_executions.resolve_execution(task)
+                    request = StrategyForecastRequest(
+                        strategy_id=execution.strategy_id,
+                        security_name=entry.name,
+                        strategy_version_id=task.strategy_version_id,
+                        draft_id=task.draft_id,
+                        draft_version=task.draft_version,
+                        source_code=execution.source_code,
+                        source_code_hash=task.source_code_hash,
+                        metadata=task.strategy_metadata,
+                        parameter_schema=task.parameter_schema,
+                        environment_version=task.environment_version,
+                        runner_image_digest=task.runner_image_digest,
+                        parameter_snapshot=task.parameter_snapshot,
+                        parameter_hash=task.parameter_hash,
+                        training_data=training,
+                        requested_at=self._clock(),
+                    )
+                    result = await self._forecasts.forecast(request)
+                    forecast = await self._write(
+                        "freeze_forecast",
+                        task_id,
+                        training,
+                        result,
+                        execution_token=execution_token,
+                        frozen_at=self._clock(),
+                    )
+                    del request, result, execution
+                del training
 
             test_data = await self._test_data.get_test_data(
                 security_id=entry.security_id,
@@ -137,7 +174,12 @@ class BacktestApplication:
             _verify_security_snapshot(
                 entry, test_data, BacktestErrorCode.TEST_DATA_INVALID
             )
-            await self._write("claim_simulation", task_id, test_data)
+            await self._write(
+                "claim_simulation",
+                task_id,
+                test_data,
+                execution_token=execution_token,
+            )
             timeline = await self._adjustments.get_adjustment_timeline(
                 security_id=entry.security_id,
                 start_date=task.date_range.test_start_date,
@@ -145,7 +187,6 @@ class BacktestApplication:
                 as_of=test_data.fetched_at,
             )
             result = self._engine.run(
-                task_id=task.id,
                 item_id=state.item_id,
                 security_id=entry.security_id,
                 bars=tuple(_bar(row) for row in test_data.rows),
@@ -155,26 +196,41 @@ class BacktestApplication:
                 hysteresis_ratio=task.hysteresis_ratio,
                 minimum_hysteresis=task.minimum_hysteresis,
             )
-            return await self._write("save_success", task_id, test_data, result)
+            return await self._write(
+                "save_success",
+                task_id,
+                test_data,
+                result,
+                execution_token=execution_token,
+            )
         except AppError as exc:
-            await self._record_failure(task_id, exc.code)
+            if exc.code not in _NON_FATAL_CONFLICTS:
+                await self._record_failure(task_id, exc.code, execution_token)
             raise
         except RuntimeError as exc:
             code = _forecast_failure_code(exc)
-            await self._record_failure(task_id, code)
+            await self._record_failure(task_id, code, execution_token)
             raise _failure(code, "策略预测失败") from exc
         except TimeoutError as exc:
             code = BacktestErrorCode.STRATEGY_FORECAST_TIMEOUT.value
-            await self._record_failure(task_id, code)
+            await self._record_failure(task_id, code, execution_token)
             raise _failure(code, "策略预测超时") from exc
         except (SQLAlchemyError, ValueError) as exc:
             code = BacktestErrorCode.BACKTEST_RESULT_SAVE_FAILED.value
-            await self._record_failure(task_id, code)
+            await self._record_failure(task_id, code, execution_token)
             raise _failure(code, "回测执行或结果保存失败") from exc
 
-    async def _record_failure(self, task_id: UUID, code: str) -> None:
+    async def recover(self, task_id: UUID, *, execution_token: UUID):
+        await self._write("recover", task_id, execution_token=execution_token)
+        return await self.run(task_id, execution_token=execution_token)
+
+    async def _record_failure(
+        self, task_id: UUID, code: str, execution_token: UUID
+    ) -> None:
         try:
-            await self._write("fail", task_id, code)
+            await self._write(
+                "fail", task_id, code, execution_token=execution_token
+            )
         except (AppError, SQLAlchemyError):
             return
 
@@ -219,3 +275,33 @@ def _forecast_failure_code(exc: RuntimeError) -> str:
 def _failure(code: BacktestErrorCode | str, message: str) -> AppError:
     value = code.value if isinstance(code, BacktestErrorCode) else code
     return AppError(code=value, message=message, status_code=409)
+
+
+def build_backtest_job_handler(application: BacktestApplication):
+    async def handle(context: JobExecutionContext) -> JobResult:
+        try:
+            task_id = UUID(str(context.config["backtest_task_id"]))
+        except (KeyError, TypeError, ValueError):
+            return JobResult.failure(
+                code="BACKTEST_JOB_CONFIG_INVALID",
+                message="回测任务配置无效",
+                retryable=False,
+            )
+        try:
+            if context.config.get("recover") is True:
+                state = await application.recover(
+                    task_id, execution_token=context.job_id
+                )
+            else:
+                state = await application.run(task_id, execution_token=context.job_id)
+        except AppError as exc:
+            return JobResult.failure(
+                code=exc.code,
+                message=exc.message,
+                retryable=exc.code in _NON_FATAL_CONFLICTS,
+            )
+        return JobResult.success_result(
+            data={"backtest_task_id": str(task_id), "status": state.item_status.value}
+        )
+
+    return handle

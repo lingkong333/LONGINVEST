@@ -59,7 +59,8 @@ class BacktestTask(Base):
         CheckConstraint(
             "universe_hash ~ '^[0-9a-f]{64}$' "
             "AND source_code_hash ~ '^[0-9a-f]{64}$' "
-            "AND parameter_hash ~ '^[0-9a-f]{64}$'",
+            "AND parameter_hash ~ '^[0-9a-f]{64}$' "
+            "AND request_digest ~ '^[0-9a-f]{64}$'",
             name="hashes_sha256",
         ),
         CheckConstraint(
@@ -91,6 +92,7 @@ class BacktestTask(Base):
         ),
         Index("ix_backtest_task_status_created", "status", "created_at"),
         Index("ix_backtest_task_strategy_version", "strategy_version_id"),
+        UniqueConstraint("idempotency_key", name="uq_backtest_task_idempotency_key"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -98,6 +100,8 @@ class BacktestTask(Base):
     )
     mode: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     universe_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     training_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     training_end_date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -216,6 +220,7 @@ class BacktestItem(Base):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String(100))
+    execution_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     training_data_fetched_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
@@ -579,7 +584,7 @@ class BacktestMetric(Base):
     ending_equity: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     total_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     realized_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
-    annualized_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
+    annualized_return: Mapped[Decimal] = mapped_column(Numeric(50, 8), nullable=False)
     max_drawdown: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     volatility: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     sharpe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))

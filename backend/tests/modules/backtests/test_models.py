@@ -62,6 +62,8 @@ def test_backtest_task_and_item_save_complete_replay_provenance() -> None:
     assert {
         "mode",
         "status",
+        "idempotency_key",
+        "request_digest",
         "universe_hash",
         "strategy_version_id",
         "draft_source_code",
@@ -84,6 +86,7 @@ def test_backtest_task_and_item_save_complete_replay_provenance() -> None:
         "test_data_row_count",
         "test_data_hash",
         "test_price_basis",
+        "execution_token",
     } <= set(BacktestItem.__table__.c.keys())
     assert "ck_backtest_task_mode_valid" in _constraint_names(BacktestTask)
     assert "ck_backtest_task_status_valid" in _constraint_names(BacktestTask)

@@ -9,6 +9,7 @@ from long_invest.modules.backtests.contracts import (
 from long_invest.modules.backtests.engine import (
     BacktestBar,
     FixedTargetBacktestEngine,
+    _annualized_return,
 )
 from long_invest.modules.market_data.contracts import AdjustmentTimelineEntry
 from long_invest.modules.signals.contracts import SignalZone
@@ -51,7 +52,7 @@ def _targets() -> TargetValues:
 
 def test_engine_executes_on_next_available_open_and_supports_multiple_rounds():
     item_id = uuid4()
-    engine = FixedTargetBacktestEngine(ProductionRuleFake())
+    engine = FixedTargetBacktestEngine(ProductionRuleFake(), rule_version="rules-1")
 
     result = engine.run(
         item_id=item_id,
@@ -86,7 +87,9 @@ def test_engine_executes_on_next_available_open_and_supports_multiple_rounds():
 
 
 def test_engine_does_not_force_liquidate_and_marks_last_order_unfilled():
-    result = FixedTargetBacktestEngine(ProductionRuleFake()).run(
+    result = FixedTargetBacktestEngine(
+        ProductionRuleFake(), rule_version="rules-1"
+    ).run(
         item_id=uuid4(),
         security_id=uuid4(),
         bars=(_bar(2, "10", "8.5"), _bar(3, "8", "12.5")),
@@ -114,7 +117,9 @@ def test_company_action_adjusts_targets_without_reforecasting():
         data_hash="a" * 64,
     )
 
-    result = FixedTargetBacktestEngine(ProductionRuleFake()).run(
+    result = FixedTargetBacktestEngine(
+        ProductionRuleFake(), rule_version="rules-1"
+    ).run(
         item_id=uuid4(),
         security_id=uuid4(),
         bars=(_bar(2, "10", "8.5"), _bar(3, "4", "6.5"), _bar(4, "7", "7")),
@@ -143,9 +148,15 @@ def test_same_snapshot_produces_identical_business_results():
         hysteresis_ratio=Decimal("0.02"),
         minimum_hysteresis=Decimal("0.02"),
     )
-    engine = FixedTargetBacktestEngine(ProductionRuleFake())
+    engine = FixedTargetBacktestEngine(ProductionRuleFake(), rule_version="rules-1")
 
     first = engine.run(**values)
     second = engine.run(**values)
 
     assert first == second
+
+
+def test_annualized_return_uses_compounding() -> None:
+    assert _annualized_return(
+        Decimal("110"), Decimal("100"), trading_days=126
+    ) == Decimal("0.21000000")

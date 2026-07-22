@@ -463,3 +463,15 @@ class BacktestDailyResultView(StrictContract):
         if self.cash + self.position_market_value != self.equity:
             raise ValueError("equity must equal cash plus position market value")
         return self
+
+
+class BacktestResultView(StrictContract):
+    task_id: UUID
+    item_id: UUID
+    item_status: BacktestItemStatus
+    forecast: BacktestForecastSnapshotView | None
+    adjustments: tuple[BacktestTargetAdjustmentView, ...]
+    orders: tuple[BacktestOrderView, ...]
+    trades: tuple[BacktestTradeView, ...]
+    daily_results: tuple[BacktestDailyResultView, ...]
+    metric: BacktestMetricView | None

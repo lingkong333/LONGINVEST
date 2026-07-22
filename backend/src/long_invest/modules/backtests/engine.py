@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import date, datetime, time
-from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, ROUND_HALF_UP, Decimal, localcontext
 from statistics import fmean, pstdev
 from uuid import UUID, uuid5
 from zoneinfo import ZoneInfo
@@ -71,8 +71,17 @@ class _Position:
 
 
 class FixedTargetBacktestEngine:
-    def __init__(self, signal_rules: BacktestSignalRulePort) -> None:
+    def __init__(
+        self, signal_rules: BacktestSignalRulePort, *, rule_version: str
+    ) -> None:
+        if not rule_version.strip():
+            raise ValueError("backtest rule version must not be blank")
         self._signal_rules = signal_rules
+        self._rule_version = rule_version
+
+    @property
+    def rule_version(self) -> str:
+        return self._rule_version
 
     def run(
         self,
@@ -318,7 +327,9 @@ def _metrics(
 ) -> BacktestMetricView:
     ending_equity = daily[-1].equity
     total_return = _ratio(ending_equity / initial_capital - 1)
-    annualized = _ratio(total_return * Decimal(252) / Decimal(len(daily)))
+    annualized = _annualized_return(
+        ending_equity, initial_capital, trading_days=len(daily)
+    )
     daily_returns = [
         float(daily[index].equity / daily[index - 1].equity - 1)
         for index in range(1, len(daily))
@@ -387,6 +398,18 @@ def _metrics(
             order.status is BacktestOrderStatus.UNFILLED_AT_END for order in orders
         ),
     )
+
+
+def _annualized_return(
+    ending_equity: Decimal, initial_capital: Decimal, *, trading_days: int
+) -> Decimal:
+    if ending_equity == 0:
+        return Decimal("-1.00000000")
+    with localcontext() as context:
+        context.prec = 80
+        exponent = Decimal(252) / Decimal(trading_days)
+        compounded = (ending_equity / initial_capital) ** exponent - 1
+        return compounded.quantize(_RATIO, rounding=ROUND_HALF_UP)
 
 
 def _money(value: Decimal) -> Decimal:

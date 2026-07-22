@@ -47,13 +47,17 @@ def _job_for_event(event: StrategyEvent) -> SubmitJob | None:
     actor_user_id = str(values.get("actor_user_id") or "") or None
     if event.topic == "strategy.validation_requested":
         run_id = str(values["validation_run_id"])
+        backtest_task_id = values.get("backtest_task_id")
+        config = {"validation_run_id": run_id}
+        if backtest_task_id is not None:
+            config["backtest_task_id"] = str(backtest_task_id)
         return SubmitJob(
             job_type="STRATEGY_VALIDATE",
             queue="strategy",
             idempotency_scope="strategy-validation-run",
             idempotency_key=event.dedupe_key,
             request_id=request_id,
-            config_snapshot={"validation_run_id": run_id},
+            config_snapshot=config,
             business_object_type="strategy_validation_run",
             business_object_id=run_id,
             created_by_user_id=actor_user_id,

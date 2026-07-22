@@ -468,6 +468,7 @@ class BacktestResultView(StrictContract):
     item_id: UUID
     item_status: BacktestItemStatus
     forecast: BacktestForecastSnapshotView | None
+    test_data_snapshot: BacktestTestDataSnapshotView | None = None
     adjustments: tuple[BacktestTargetAdjustmentView, ...]
     orders: tuple[BacktestOrderView, ...]
     trades: tuple[BacktestTradeView, ...]

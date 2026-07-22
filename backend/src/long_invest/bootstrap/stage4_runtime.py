@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import socket
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any
@@ -9,6 +10,10 @@ from typing import Any
 import docker
 
 from long_invest.bootstrap.strategy_data import QfqStrategyDataPort
+from long_invest.bootstrap.strategy_validation import (
+    StrategyValidationEvidenceVerifier,
+    StrategyValidationExecutor,
+)
 from long_invest.modules.backtests.application import BacktestApplication
 from long_invest.modules.backtests.contracts import (
     BacktestCreateRequest,
@@ -210,6 +215,18 @@ def build_backtest_application() -> BacktestApplication:
     )
 
 
+def build_strategy_validation_executor() -> StrategyValidationExecutor:
+    return StrategyValidationExecutor(
+        strategies=get_strategy_application(),
+        backtests=build_backtest_application(),
+        forecasts=LazyStrategyForecastService(),
+    )
+
+
+def build_strategy_validation_evidence_verifier() -> StrategyValidationEvidenceVerifier:
+    return StrategyValidationEvidenceVerifier(backtests=build_backtest_application())
+
+
 @lru_cache
 def _forecast_service() -> SandboxedStrategyForecastService:
     settings = get_settings()
@@ -217,12 +234,17 @@ def _forecast_service() -> SandboxedStrategyForecastService:
     runner = DockerStrategyRunnerClient(
         docker_client=client,
         image=settings.strategy_runner_image_digest,
-        worker_id="stage4-worker",
+        worker_id=_worker_id(socket.gethostname()),
     )
     return SandboxedStrategyForecastService(
         runner,
         request_verifier=get_strategy_application(),
     )
+
+
+def _worker_id(hostname: str) -> str:
+    digest = hashlib.sha256(hostname.encode()).hexdigest()[:16]
+    return f"stage4-{digest}"
 
 
 def _hash_json(value: Any) -> str:

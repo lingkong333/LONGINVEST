@@ -1,3 +1,4 @@
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -35,6 +36,20 @@ class Application:
         return SimpleNamespace(
             run=SimpleNamespace(id=uuid4(), status="PENDING"),
             version=SimpleNamespace(id=uuid4()),
+        )
+
+    async def request_validation(self, strategy_id, **kwargs):
+        self.calls.append({"strategy_id": strategy_id, **kwargs})
+        return SimpleNamespace(
+            id=uuid4(),
+            strategy_id=strategy_id,
+            strategy_version_id=None,
+            draft_version=1,
+            source_code_hash="a" * 64,
+            status="PENDING",
+            error_code=None,
+            created_at=datetime(2026, 7, 22, tzinfo=UTC),
+            completed_at=None,
         )
 
     async def restore(self, strategy_id, **kwargs):
@@ -137,6 +152,44 @@ def test_publish_returns_accepted_run_without_executing_work_inline():
     assert response.status_code == 202
     assert response.json()["code"] == "STRATEGY_PUBLISH_REQUESTED"
     assert response.json()["data"]["status"] == "PENDING"
+
+
+def test_validation_requires_an_explicit_backtest_task():
+    strategy_id = uuid4()
+    response = client(Application()).post(
+        f"/api/v1/strategies/{strategy_id}/validate",
+        headers={"Idempotency-Key": "validate-1"},
+        json={
+            "metadata": {"name": "策略"},
+            "parameter_schema": {"type": "object"},
+            "params": {},
+            "confirm": True,
+            "reason": "验证",
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_validation_passes_the_selected_backtest_task_unchanged():
+    application = Application()
+    strategy_id = uuid4()
+    backtest_task_id = uuid4()
+    response = client(application).post(
+        f"/api/v1/strategies/{strategy_id}/validate",
+        headers={"Idempotency-Key": "validate-1"},
+        json={
+            "backtest_task_id": str(backtest_task_id),
+            "metadata": {"name": "策略"},
+            "parameter_schema": {"type": "object"},
+            "params": {"window": 20},
+            "confirm": True,
+            "reason": "验证",
+        },
+    )
+
+    assert response.status_code == 202
+    assert application.calls[0]["backtest_task_id"] == backtest_task_id
 
 
 def test_archived_strategy_has_explicit_restore_api():

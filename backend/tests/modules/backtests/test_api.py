@@ -34,6 +34,7 @@ class Application:
             item_id=uuid4(),
             item_status=BacktestItemStatus.PENDING,
             forecast=None,
+            test_data_snapshot=None,
         )
 
     async def get_result(self, task_id, item_id):
@@ -42,6 +43,7 @@ class Application:
             item_id=item_id,
             item_status=BacktestItemStatus.PENDING,
             forecast=None,
+            test_data_snapshot=None,
             adjustments=(),
             orders=(),
             trades=(),

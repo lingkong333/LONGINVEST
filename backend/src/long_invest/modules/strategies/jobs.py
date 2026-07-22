@@ -23,7 +23,7 @@ class StrategyValidationOutcome:
 
 class StrategyValidationExecutor(Protocol):
     async def execute(
-        self, validation_run_id: UUID
+        self, validation_run_id: UUID, backtest_task_id: UUID
     ) -> StrategyValidationOutcome: ...
 
 
@@ -54,6 +54,16 @@ async def strategy_validate(context: JobExecutionContext) -> JobResult:
     terminal = _terminal_validation_result(run)
     if terminal is not None:
         return terminal
+    try:
+        backtest_task_id = UUID(str(context.config["backtest_task_id"]))
+    except (KeyError, TypeError, ValueError):
+        return await _settle_validation_failure(
+            application,
+            validation_run_id,
+            context,
+            code="STRATEGY_VALIDATION_CONFIG_INVALID",
+            reason="记录缺少单股回测绑定的策略验证任务",
+        )
     if str(run.status) != "PENDING":
         return await _settle_validation_failure(
             application,
@@ -71,7 +81,9 @@ async def strategy_validate(context: JobExecutionContext) -> JobResult:
             reason="记录策略验证执行器未接入",
         )
     try:
-        outcome = await _validation_executor_factory().execute(validation_run_id)
+        outcome = await _validation_executor_factory().execute(
+            validation_run_id, backtest_task_id
+        )
     except Exception:
         return await _settle_validation_failure(
             application,

@@ -15,6 +15,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestResultView,
     BacktestTaskSnapshot,
     BacktestTaskStatus,
+    BacktestTestDataSnapshotView,
     BacktestUniverseEntry,
 )
 from long_invest.modules.backtests.engine import BacktestEngineResult
@@ -194,6 +195,7 @@ class BacktestService:
             item_id=item.id,
             item_status=BacktestItemStatus(item.status),
             forecast=forecast_view(forecast) if forecast is not None else None,
+            test_data_snapshot=_test_data_snapshot(item),
             adjustments=tuple(adjustment_view(row) for row in adjustments),
             orders=tuple(order_view(row) for row in orders),
             trades=tuple(trade_view(row) for row in trades),
@@ -583,6 +585,33 @@ def _validate_frozen_test_snapshot(item, data: TrainingDataSnapshot) -> None:
             BacktestErrorCode.TEST_DATA_INVALID.value,
             "恢复时测试数据必须与首次冻结快照一致",
         )
+
+
+def _test_data_snapshot(item: BacktestItem) -> BacktestTestDataSnapshotView | None:
+    values = (
+        item.test_data_fetched_at,
+        item.test_data_start_date,
+        item.test_data_end_date,
+        item.test_data_row_count,
+        item.test_data_hash,
+        item.test_price_basis,
+    )
+    if all(value is None for value in values):
+        return None
+    if any(value is None for value in values):
+        raise _error(
+            BacktestErrorCode.TEST_DATA_INVALID.value,
+            "测试数据冻结快照不完整",
+        )
+    return BacktestTestDataSnapshotView(
+        item_id=item.id,
+        fetched_at=item.test_data_fetched_at,
+        start_date=item.test_data_start_date,
+        end_date=item.test_data_end_date,
+        row_count=item.test_data_row_count,
+        data_hash=item.test_data_hash,
+        price_basis=item.test_price_basis,
+    )
 
 
 def _validate_data_snapshot(task, item, data, *, training_period: bool) -> None:

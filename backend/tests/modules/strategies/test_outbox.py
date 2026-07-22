@@ -96,6 +96,7 @@ def test_validation_request_submits_platform_job():
     writer = Writer()
     jobs = Jobs()
     run_id = uuid4()
+    backtest_task_id = uuid4()
     adapter = StrategyOutboxAdapter(
         SimpleNamespace(),
         writer=writer,
@@ -108,7 +109,10 @@ def test_validation_request_submits_platform_job():
                 topic="strategy.validation_requested",
                 strategy_id=uuid4(),
                 dedupe_key="strategy:validation",
-                payload={"validation_run_id": str(run_id)},
+                payload={
+                    "validation_run_id": str(run_id),
+                    "backtest_task_id": str(backtest_task_id),
+                },
             )
         )
     )
@@ -116,4 +120,30 @@ def test_validation_request_submits_platform_job():
     command = jobs.calls[0]
     assert command.job_type == "STRATEGY_VALIDATE"
     assert command.queue == "strategy"
-    assert command.config_snapshot == {"validation_run_id": str(run_id)}
+    assert command.config_snapshot == {
+        "validation_run_id": str(run_id),
+        "backtest_task_id": str(backtest_task_id),
+    }
+
+
+def test_legacy_validation_event_stays_dispatchable_without_guessing_backtest() -> None:
+    jobs = Jobs()
+    run_id = uuid4()
+    adapter = StrategyOutboxAdapter(
+        SimpleNamespace(),
+        writer=Writer(),
+        job_service_factory=lambda _session: jobs,
+    )
+
+    asyncio.run(
+        adapter.emit(
+            StrategyEvent(
+                topic="strategy.validation_requested",
+                strategy_id=uuid4(),
+                dedupe_key="strategy:legacy-validation",
+                payload={"validation_run_id": str(run_id)},
+            )
+        )
+    )
+
+    assert jobs.calls[0].config_snapshot == {"validation_run_id": str(run_id)}

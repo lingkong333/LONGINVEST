@@ -75,9 +75,7 @@ class FakeRepository:
         revision = self.revisions.get(revision_id)
         draft = self.drafts.get(strategy_id)
         return (
-            revision
-            if revision and draft and revision.draft_id == draft.id
-            else None
+            revision if revision and draft and revision.draft_id == draft.id else None
         )
 
     async def list_revisions(self, strategy_id, **_kwargs):
@@ -557,6 +555,7 @@ async def test_validation_lifecycle_binds_current_draft_and_marks_validated():
 
     run = await subject.request_validation(
         created.strategy.id,
+        backtest_task_id=uuid4(),
         metadata={"name": "策略"},
         parameter_schema={"type": "object"},
         params={},
@@ -588,6 +587,7 @@ async def test_successful_validation_rejects_boolean_or_missing_level_evidence()
     created = await subject.create("策略", context())
     run = await subject.request_validation(
         created.strategy.id,
+        backtest_task_id=uuid4(),
         metadata={"name": "策略"},
         parameter_schema={"type": "object"},
         params={},
@@ -614,6 +614,7 @@ async def test_completed_validation_replay_requires_identical_result_and_evidenc
     created = await subject.create("策略", context())
     run = await subject.request_validation(
         created.strategy.id,
+        backtest_task_id=uuid4(),
         metadata={"name": "策略"},
         parameter_schema={"type": "object"},
         params={},
@@ -648,6 +649,7 @@ async def test_repeated_validation_request_reuses_same_frozen_run():
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
     values = {
+        "backtest_task_id": uuid4(),
         "metadata": {"name": "策略"},
         "parameter_schema": {"type": "object"},
         "params": {},
@@ -661,6 +663,12 @@ async def test_repeated_validation_request_reuses_same_frozen_run():
 
     assert replay.id == first.id
     assert len(repository.validation_runs) == 1
+    with pytest.raises(AppError) as raised:
+        await subject.request_validation(
+            created.strategy.id,
+            **{**values, "backtest_task_id": uuid4()},
+        )
+    assert raised.value.code == "STRATEGY_IDEMPOTENCY_CONFLICT"
 
 
 @async_test
@@ -669,6 +677,7 @@ async def test_late_validation_for_old_draft_does_not_validate_new_draft():
     created = await subject.create("策略", context())
     run = await subject.request_validation(
         created.strategy.id,
+        backtest_task_id=uuid4(),
         metadata={"name": "策略"},
         parameter_schema={"type": "object"},
         params={},
@@ -700,6 +709,7 @@ async def test_old_validation_completion_does_not_clobber_new_validation_state()
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
     values = {
+        "backtest_task_id": uuid4(),
         "metadata": {"name": "策略"},
         "parameter_schema": {"type": "object"},
         "params": {},
@@ -882,6 +892,7 @@ async def test_publish_rejects_non_json_or_non_finite_snapshots():
     with pytest.raises(AppError) as raised:
         await subject.request_validation(
             created.strategy.id,
+            backtest_task_id=uuid4(),
             metadata={"bad": float("nan")},
             parameter_schema={"type": "object"},
             params={},

@@ -160,6 +160,7 @@ async def test_strategy_revision_validation_and_publish_binding_are_atomic() -> 
             )
             validation = await service.request_validation(
                 created.strategy.id,
+                backtest_task_id=uuid4(),
                 metadata={"name": f"策略-{key}"},
                 parameter_schema={"type": "object"},
                 params={},

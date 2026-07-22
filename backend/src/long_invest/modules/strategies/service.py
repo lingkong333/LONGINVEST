@@ -365,6 +365,7 @@ class StrategyService:
         self,
         strategy_id: UUID,
         *,
+        backtest_task_id: UUID,
         metadata: dict[str, Any],
         parameter_schema: dict[str, Any],
         params: dict[str, Any],
@@ -392,6 +393,7 @@ class StrategyService:
         source_code_hash = self.hash_source(draft.source_code)
         frozen_facts = {
             "schema_version": 1,
+            "backtest_task_id": str(backtest_task_id),
             "draft_version": draft.draft_version,
             "source_code_hash": source_code_hash,
             "metadata_hash": _json_hash(metadata),

@@ -118,6 +118,11 @@ def test_draft_backtest_rejects_a_changed_version(monkeypatch) -> None:
     assert raised.value.code == "BACKTEST_DRAFT_VERSION_CONFLICT"
 
 
+def test_runner_identity_is_stable_per_worker_host() -> None:
+    assert runtime._worker_id("worker-a") == runtime._worker_id("worker-a")
+    assert runtime._worker_id("worker-a") != runtime._worker_id("worker-b")
+
+
 def _draft_request(draft, *, draft_version: int | None = None):
     return BacktestCreateRequest(
         symbol="600000.SH",

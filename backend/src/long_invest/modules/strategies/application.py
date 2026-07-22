@@ -36,6 +36,11 @@ class UnconfiguredValidationEvidenceVerifier:
         return False
 
 
+class ConfiguredValidationEvidenceVerifier:
+    async def verify(self, claim: ValidationEvidenceClaim) -> bool:
+        return await get_configured_validation_evidence_verifier().verify(claim)
+
+
 _validation_evidence_verifier_factory: (
     Callable[[], ValidationEvidenceVerifier] | None
 ) = None
@@ -229,6 +234,7 @@ class StrategyApplication:
         self,
         strategy_id: UUID,
         *,
+        backtest_task_id: UUID,
         metadata: dict[str, Any],
         parameter_schema: dict[str, Any],
         params: dict[str, Any],
@@ -237,6 +243,7 @@ class StrategyApplication:
         return await self._write(
             "request_validation",
             strategy_id,
+            backtest_task_id=backtest_task_id,
             metadata=metadata,
             parameter_schema=parameter_schema,
             params=params,
@@ -512,7 +519,7 @@ def get_strategy_application() -> StrategyApplication:
             "strategy_runner_image_digest",
             "",
         ),
-        evidence_verifier=get_configured_validation_evidence_verifier(),
+        evidence_verifier=ConfiguredValidationEvidenceVerifier(),
     )
 
 

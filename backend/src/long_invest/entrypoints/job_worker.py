@@ -14,10 +14,19 @@ from long_invest.bootstrap.jobs import (
 )
 from long_invest.bootstrap.stage4_runtime import (
     build_backtest_application,
+    build_strategy_validation_evidence_verifier,
+    build_strategy_validation_executor,
     build_target_application,
 )
 from long_invest.modules.backtests.application import build_backtest_job_handler
-from long_invest.modules.strategies.jobs import strategy_publish, strategy_validate
+from long_invest.modules.strategies.application import (
+    configure_strategy_validation_evidence_verifier,
+)
+from long_invest.modules.strategies.jobs import (
+    configure_strategy_validation_executor,
+    strategy_publish,
+    strategy_validate,
+)
 from long_invest.modules.targets.jobs import (
     configure_target_job_application,
     target_calculate,
@@ -35,6 +44,10 @@ HANDLERS["DAILY_DATA_RETRY"] = daily_data_retry
 HANDLERS["QFQ_REFRESH"] = qfq_refresh
 HANDLERS["SIGNAL_EVALUATE_BATCH"] = signal_evaluate_batch
 HANDLERS["SIGNAL_REEVALUATE"] = signal_reevaluate
+configure_strategy_validation_evidence_verifier(
+    build_strategy_validation_evidence_verifier
+)
+configure_strategy_validation_executor(build_strategy_validation_executor)
 HANDLERS["STRATEGY_VALIDATE"] = strategy_validate
 HANDLERS["STRATEGY_PUBLISH"] = strategy_publish
 configure_target_job_application(build_target_application)

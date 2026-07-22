@@ -4447,6 +4447,11 @@ export interface components {
             confirm: boolean;
             /** Reason */
             reason: string;
+            /**
+             * Backtest Task Id
+             * Format: uuid
+             */
+            backtest_task_id: string;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;

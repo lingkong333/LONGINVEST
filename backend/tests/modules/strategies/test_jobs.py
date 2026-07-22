@@ -1,6 +1,6 @@
 import asyncio
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from long_invest.modules.strategies import jobs
 from long_invest.modules.strategies.jobs import StrategyValidationOutcome
@@ -14,6 +14,13 @@ def context(config):
         fence_token=uuid4(),
         config=config,
     )
+
+
+def validation_config(application):
+    return {
+        "validation_run_id": str(application.validation_run.id),
+        "backtest_task_id": str(uuid4()),
+    }
 
 
 class Application:
@@ -31,9 +38,7 @@ class Application:
 
     async def record_validation_result_from_worker(self, run_id, **kwargs):
         self.validation_calls.append((run_id, kwargs))
-        self.validation_run.status = (
-            "SUCCEEDED" if kwargs["succeeded"] else "FAILED"
-        )
+        self.validation_run.status = "SUCCEEDED" if kwargs["succeeded"] else "FAILED"
         self.validation_run.error_code = kwargs["error_code"]
         if self.raise_after_validation_commit:
             self.raise_after_validation_commit = False
@@ -50,8 +55,8 @@ class ValidationExecutor:
         self.failure = failure
         self.calls = []
 
-    async def execute(self, _run_id):
-        self.calls.append(_run_id)
+    async def execute(self, run_id, backtest_task_id):
+        self.calls.append((run_id, backtest_task_id))
         if self.failure is not None:
             raise self.failure
         return StrategyValidationOutcome(
@@ -66,9 +71,7 @@ def test_validation_job_fails_closed_until_executor_is_configured(monkeypatch):
     monkeypatch.setattr(jobs, "_validation_executor_factory", None)
 
     result = asyncio.run(
-        jobs.strategy_validate(
-            context({"validation_run_id": str(application.validation_run.id)})
-        )
+        jobs.strategy_validate(context(validation_config(application)))
     )
 
     assert not result.success
@@ -86,15 +89,14 @@ def test_validation_job_records_executor_result(monkeypatch):
         lambda: executor,
     )
     run_id = application.validation_run.id
+    config = validation_config(application)
 
-    result = asyncio.run(
-        jobs.strategy_validate(context({"validation_run_id": str(run_id)}))
-    )
+    result = asyncio.run(jobs.strategy_validate(context(config)))
 
     assert result.success
     assert application.validation_calls[0][0] == run_id
     assert application.validation_calls[0][1]["succeeded"] is True
-    assert executor.calls == [run_id]
+    assert executor.calls == [(run_id, UUID(config["backtest_task_id"]))]
 
 
 def test_validation_job_replays_terminal_result_without_executor(monkeypatch):
@@ -122,12 +124,9 @@ def test_validation_job_replays_terminal_failure_without_executor(monkeypatch):
     executor = ValidationExecutor()
     monkeypatch.setattr(jobs, "get_strategy_application", lambda: application)
     monkeypatch.setattr(jobs, "_validation_executor_factory", lambda: executor)
+    config = validation_config(application)
 
-    result = asyncio.run(
-        jobs.strategy_validate(
-            context({"validation_run_id": str(application.validation_run.id)})
-        )
-    )
+    result = asyncio.run(jobs.strategy_validate(context(config)))
 
     assert not result.success
     assert result.code == "STRATEGY_SAMPLE_FAILED"
@@ -141,6 +140,23 @@ def test_validation_confirmation_loss_reuses_committed_result(monkeypatch):
     executor = ValidationExecutor()
     monkeypatch.setattr(jobs, "get_strategy_application", lambda: application)
     monkeypatch.setattr(jobs, "_validation_executor_factory", lambda: executor)
+    config = validation_config(application)
+
+    result = asyncio.run(jobs.strategy_validate(context(config)))
+
+    assert result.success
+    assert application.validation_run.status == "SUCCEEDED"
+    assert executor.calls == [
+        (application.validation_run.id, UUID(config["backtest_task_id"]))
+    ]
+    assert len(application.validation_calls) == 1
+
+
+def test_pending_validation_without_backtest_id_fails_closed(monkeypatch):
+    application = Application()
+    executor = ValidationExecutor()
+    monkeypatch.setattr(jobs, "get_strategy_application", lambda: application)
+    monkeypatch.setattr(jobs, "_validation_executor_factory", lambda: executor)
 
     result = asyncio.run(
         jobs.strategy_validate(
@@ -148,10 +164,10 @@ def test_validation_confirmation_loss_reuses_committed_result(monkeypatch):
         )
     )
 
-    assert result.success
-    assert application.validation_run.status == "SUCCEEDED"
-    assert executor.calls == [application.validation_run.id]
-    assert len(application.validation_calls) == 1
+    assert not result.success
+    assert result.code == "STRATEGY_VALIDATION_CONFIG_INVALID"
+    assert application.validation_run.status == "FAILED"
+    assert executor.calls == []
 
 
 def test_validation_executor_exception_is_sanitized_and_settled(monkeypatch):
@@ -161,9 +177,7 @@ def test_validation_executor_exception_is_sanitized_and_settled(monkeypatch):
     monkeypatch.setattr(jobs, "_validation_executor_factory", lambda: executor)
 
     result = asyncio.run(
-        jobs.strategy_validate(
-            context({"validation_run_id": str(application.validation_run.id)})
-        )
+        jobs.strategy_validate(context(validation_config(application)))
     )
 
     assert not result.success

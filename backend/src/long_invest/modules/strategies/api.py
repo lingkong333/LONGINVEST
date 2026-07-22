@@ -62,6 +62,7 @@ class PublishStrategyRequest(ConfirmedRequest):
 
 
 class ValidateStrategyRequest(ConfirmedRequest):
+    backtest_task_id: UUID
     metadata: dict[str, Any]
     parameter_schema: dict[str, Any]
     params: dict[str, Any]
@@ -319,6 +320,7 @@ async def validate_strategy(
     _confirm(body)
     row = await application.request_validation(
         strategy_id,
+        backtest_task_id=body.backtest_task_id,
         metadata=body.metadata,
         parameter_schema=body.parameter_schema,
         params=body.params,

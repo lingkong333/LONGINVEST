@@ -13170,6 +13170,11 @@
             "minLength": 1,
             "title": "Reason"
           },
+          "backtest_task_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Backtest Task Id"
+          },
           "metadata": {
             "additionalProperties": true,
             "type": "object",
@@ -13191,6 +13196,7 @@
         "required": [
           "confirm",
           "reason",
+          "backtest_task_id",
           "metadata",
           "parameter_schema",
           "params"

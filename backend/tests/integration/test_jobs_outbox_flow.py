@@ -53,7 +53,10 @@ async def test_system_noop_flows_through_database_rq_and_fenced_worker() -> None
 
         async with database.session() as session:
             outbox = await session.scalar(
-                select(EventOutbox).where(EventOutbox.aggregate_id == str(job.id))
+                select(EventOutbox).where(
+                    EventOutbox.aggregate_id == str(job.id),
+                    EventOutbox.topic == "jobs.dispatch",
+                )
             )
         assert outbox is not None
         queued_ids = await asyncio.to_thread(queue.get_job_ids)

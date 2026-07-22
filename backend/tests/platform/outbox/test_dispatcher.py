@@ -104,7 +104,10 @@ async def test_successful_dispatch_marks_outbox_and_job_queued() -> None:
         async with database.session() as session:
             stored_job = await session.get(Job, job.id)
             outbox = await session.scalar(
-                select(EventOutbox).where(EventOutbox.aggregate_id == str(job.id))
+                select(EventOutbox).where(
+                    EventOutbox.aggregate_id == str(job.id),
+                    EventOutbox.topic == "jobs.dispatch",
+                )
             )
 
         assert report.claimed >= 1
@@ -134,7 +137,10 @@ async def test_redis_failure_returns_outbox_to_pending() -> None:
         async with database.session() as session:
             stored_job = await session.get(Job, job.id)
             outbox = await session.scalar(
-                select(EventOutbox).where(EventOutbox.aggregate_id == str(job.id))
+                select(EventOutbox).where(
+                    EventOutbox.aggregate_id == str(job.id),
+                    EventOutbox.topic == "jobs.dispatch",
+                )
             )
 
         assert report.failed == 1
@@ -190,7 +196,10 @@ async def test_replayed_dispatch_uses_same_deterministic_rq_id() -> None:
         await dispatcher.dispatch_once()
         async with database.transaction() as session:
             outbox = await session.scalar(
-                select(EventOutbox).where(EventOutbox.aggregate_id == str(job.id))
+                select(EventOutbox).where(
+                    EventOutbox.aggregate_id == str(job.id),
+                    EventOutbox.topic == "jobs.dispatch",
+                )
             )
             assert outbox is not None
             outbox.status = OutboxStatus.PENDING

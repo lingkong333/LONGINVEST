@@ -24,4 +24,26 @@ def test_runner_seccomp_denies_network_and_host_control_syscalls() -> None:
     }
 
     assert profile["defaultAction"] == "SCMP_ACT_ALLOW"
-    assert {"socket", "connect", "mount", "ptrace", "bpf", "setns", "unshare"} <= denied
+    assert {
+        "socket",
+        "connect",
+        "mount",
+        "ptrace",
+        "bpf",
+        "setns",
+        "unshare",
+        "fork",
+        "vfork",
+        "clone3",
+    } <= denied
+    clone_rule = next(
+        group for group in profile["syscalls"] if group["names"] == ["clone"]
+    )
+    assert clone_rule["args"] == [
+        {
+            "index": 0,
+            "value": 0,
+            "valueTwo": 65536,
+            "op": "SCMP_CMP_MASKED_EQ",
+        }
+    ]

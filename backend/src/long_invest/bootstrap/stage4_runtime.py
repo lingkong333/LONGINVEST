@@ -3,9 +3,12 @@ from __future__ import annotations
 import hashlib
 import json
 import socket
+from collections.abc import Callable
+from datetime import UTC, datetime
 from decimal import Decimal
 from functools import lru_cache
 from typing import Any
+from uuid import uuid4
 
 import docker
 
@@ -29,6 +32,9 @@ from long_invest.modules.backtests.engine import FixedTargetBacktestEngine
 from long_invest.modules.backtests.outbox import BacktestOutboxAdapter
 from long_invest.modules.backtests.signal_rule import BacktestProductionSignalRule
 from long_invest.modules.daily_data.application import get_daily_data_application
+from long_invest.modules.market_data.application import (
+    CorporateActionCollectionApplication,
+)
 from long_invest.modules.market_data.repository import CorporateActionRepository
 from long_invest.modules.market_data.service import CorporateActionService
 from long_invest.modules.monitoring.application import (
@@ -170,11 +176,62 @@ class BacktestStrategyResolver:
 
 
 class PersistentAdjustmentTimeline:
-    async def get_adjustment_timeline(self, **query: Any):
-        async with get_database().session() as session:
+    def __init__(
+        self,
+        *,
+        database: Any | None = None,
+        providers: Any | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ):
+        self._database = database or get_database()
+        self._providers = providers or LazyCorporateActionProvider(self._database)
+        self._clock = clock
+
+    async def prepare_adjustment_timeline(
+        self,
+        *,
+        security_id,
+        symbol,
+        start_date,
+        end_date,
+        deadline,
+    ):
+        collector = CorporateActionCollectionApplication(
+            self._database,
+            providers=self._providers,
+            clock=self._clock,
+        )
+        await collector.collect(
+            batch_id=uuid4(),
+            security_id=security_id,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            deadline=deadline,
+        )
+        as_of = self._clock()
+        async with self._database.session() as session:
             return await CorporateActionService(
                 CorporateActionRepository(session)
-            ).get_adjustment_timeline(**query)
+            ).get_adjustment_timeline(
+                security_id=security_id,
+                start_date=start_date,
+                end_date=end_date,
+                as_of=as_of,
+            )
+
+
+class LazyCorporateActionProvider:
+    def __init__(self, database: Any) -> None:
+        self._database = database
+
+    async def corporate_actions(self, request, deadline):
+        from long_invest.bootstrap.providers import build_provider_service
+
+        async with self._database.session() as session:
+            return await build_provider_service(session).corporate_actions(
+                request, deadline
+            )
 
 
 class LazyStrategyForecastService:
@@ -217,7 +274,7 @@ def build_backtest_application() -> BacktestApplication:
         training_data=data,
         test_data=data,
         forecasts=LazyStrategyForecastService(),
-        adjustments=PersistentAdjustmentTimeline(),
+        adjustments=PersistentAdjustmentTimeline(database=database),
         engine=FixedTargetBacktestEngine(rule, rule_version=rule.rule_version),
         event_factory=BacktestOutboxAdapter,
     )

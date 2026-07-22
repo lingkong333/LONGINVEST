@@ -5,6 +5,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
+import pytest
+
 from long_invest.modules.market_data.application import (
     CorporateActionCollectionApplication,
 )
@@ -15,6 +17,7 @@ from long_invest.modules.providers.contracts import (
     ProviderCode,
 )
 from long_invest.modules.providers.retry import ProviderHttpError
+from long_invest.platform.errors import AppError
 
 
 class Database:
@@ -81,7 +84,9 @@ def test_collection_persists_provider_failure_without_partial_facts() -> None:
             clock=lambda: datetime(2026, 7, 22, tzinfo=UTC),
         )
 
-        await _collect(application, uuid4())
+        with pytest.raises(AppError) as raised:
+            await _collect(application, uuid4())
+        assert raised.value.code == "ADJUSTMENT_DATA_UNAVAILABLE"
         assert recorder.command.succeeded is False
         assert recorder.command.error_code == "ADJUSTMENT_DATA_UNAVAILABLE"
         assert recorder.command.facts == ()

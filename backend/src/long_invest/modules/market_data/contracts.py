@@ -106,6 +106,18 @@ class AdjustmentTimelinePort(Protocol):
     ) -> AdjustmentTimelineSnapshot: ...
 
 
+class AdjustmentTimelinePreparationPort(Protocol):
+    async def prepare_adjustment_timeline(
+        self,
+        *,
+        security_id: UUID,
+        symbol: str,
+        start_date: date,
+        end_date: date,
+        deadline: AwareDatetime,
+    ) -> AdjustmentTimelineSnapshot: ...
+
+
 def _require_text(value: str, field: str) -> None:
     if not value.strip():
         raise ValueError(f"{field} 不能为空")

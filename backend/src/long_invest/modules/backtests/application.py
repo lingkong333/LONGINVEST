@@ -21,7 +21,7 @@ from long_invest.modules.backtests.service import (
     BacktestCommandContext,
     BacktestService,
 )
-from long_invest.modules.market_data.contracts import AdjustmentTimelinePort
+from long_invest.modules.market_data.contracts import AdjustmentTimelinePreparationPort
 from long_invest.modules.strategies.contracts import (
     StrategyForecastPort,
     StrategyForecastRequest,
@@ -54,7 +54,7 @@ class BacktestApplication:
         training_data: TrainingDataPort,
         test_data: TestDataPort,
         forecasts: StrategyForecastPort,
-        adjustments: AdjustmentTimelinePort,
+        adjustments: AdjustmentTimelinePreparationPort,
         engine: FixedTargetBacktestEngine,
         repository_factory: Callable[..., Any] = BacktestRepository,
         service_factory: Callable[..., Any] = BacktestService,
@@ -182,12 +182,13 @@ class BacktestApplication:
             )
             timeline = state.adjustment_snapshot
             if timeline is None:
-                timeline = await self._adjustments.get_adjustment_timeline(
+                timeline = await self._adjustments.prepare_adjustment_timeline(
                     security_id=entry.security_id,
+                    symbol=entry.symbol,
                     start_date=task.date_range.training_end_date
                     + timedelta(days=1),
                     end_date=task.date_range.test_end_date,
-                    as_of=self._clock(),
+                    deadline=self._clock() + timedelta(minutes=5),
                 )
                 timeline = await self._write(
                     "freeze_adjustment_snapshot",

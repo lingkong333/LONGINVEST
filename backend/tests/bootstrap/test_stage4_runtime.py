@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from contextlib import asynccontextmanager
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -121,6 +122,72 @@ def test_draft_backtest_rejects_a_changed_version(monkeypatch) -> None:
 def test_runner_identity_is_stable_per_worker_host() -> None:
     assert runtime._worker_id("worker-a") == runtime._worker_id("worker-a")
     assert runtime._worker_id("worker-a") != runtime._worker_id("worker-b")
+
+
+def test_adjustment_timeline_is_collected_before_it_is_frozen(monkeypatch) -> None:
+    now = datetime(2026, 7, 22, 12, tzinfo=UTC)
+    security_id = uuid4()
+    expected = SimpleNamespace(as_of=now)
+    calls = []
+
+    class Database:
+        @asynccontextmanager
+        async def session(self):
+            calls.append("query")
+            yield object()
+
+    class Collector:
+        def __init__(self, database, *, providers, clock):
+            assert isinstance(database, Database)
+            assert providers == "provider"
+            assert clock() == now
+
+        async def collect(self, **command):
+            calls.append(("collect", command))
+
+    class Service:
+        def __init__(self, repository):
+            assert repository == "repository"
+
+        async def get_adjustment_timeline(self, **query):
+            calls.append(("freeze", query))
+            return expected
+
+    monkeypatch.setattr(runtime, "CorporateActionCollectionApplication", Collector)
+    monkeypatch.setattr(
+        runtime, "CorporateActionRepository", lambda session: "repository"
+    )
+    monkeypatch.setattr(runtime, "CorporateActionService", Service)
+    preparer = runtime.PersistentAdjustmentTimeline(
+        database=Database(), providers="provider", clock=lambda: now
+    )
+    deadline = now + timedelta(minutes=5)
+
+    result = asyncio.run(
+        preparer.prepare_adjustment_timeline(
+            security_id=security_id,
+            symbol="600000.SH",
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 12, 31),
+            deadline=deadline,
+        )
+    )
+
+    assert result is expected
+    assert calls[0][0] == "collect"
+    assert calls[0][1]["security_id"] == security_id
+    assert calls[0][1]["symbol"] == "600000.SH"
+    assert calls[0][1]["deadline"] == deadline
+    assert calls[1] == "query"
+    assert calls[2] == (
+        "freeze",
+        {
+            "security_id": security_id,
+            "start_date": date(2025, 1, 1),
+            "end_date": date(2025, 12, 31),
+            "as_of": now,
+        },
+    )
 
 
 def _draft_request(draft, *, draft_version: int | None = None):

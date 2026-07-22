@@ -16,6 +16,7 @@ from long_invest.modules.market_data.service import (
 from long_invest.modules.providers.contracts import CorporateActionRequest
 from long_invest.modules.providers.retry import ProviderHttpError
 from long_invest.platform.database.engine import Database
+from long_invest.platform.errors import AppError
 
 
 class CorporateActionCollectionApplication:
@@ -56,6 +57,7 @@ class CorporateActionCollectionApplication:
             else:
                 records = result.items
         except (
+            AppError,
             ProviderHttpError,
             httpx.HTTPError,
             RuntimeError,
@@ -94,4 +96,11 @@ class CorporateActionCollectionApplication:
         )
         async with self._database.transaction() as session:
             service = self._service_factory(self._repository_factory(session))
-            return await service.record_fetch(command)
+            recorded_batch_id = await service.record_fetch(command)
+        if error_code is not None:
+            raise AppError(
+                code="ADJUSTMENT_DATA_UNAVAILABLE",
+                message="Corporate action data could not be verified",
+                status_code=503,
+            )
+        return recorded_batch_id

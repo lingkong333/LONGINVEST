@@ -47,6 +47,7 @@ class FakeService:
         self.task = task
         self.item_id = uuid4()
         self.forecast = None
+        self.adjustment_snapshot = None
         self.calls: list[str] = []
         self.failure_code = None
         self.saved_result = None
@@ -58,6 +59,7 @@ class FakeService:
             item_id=self.item_id,
             item_status="FETCHING_DATA",
             forecast=self.forecast,
+            adjustment_snapshot=self.adjustment_snapshot,
         )
 
     async def claim_forecast(self, _task_id, _training, **_kwargs):
@@ -96,6 +98,7 @@ class FakeService:
 
     async def freeze_adjustment_snapshot(self, _task_id, timeline, **_kwargs):
         self.calls.append("freeze_adjustment_snapshot")
+        self.adjustment_snapshot = timeline
         return timeline
 
     async def save_success(self, _task_id, _test_data, result, **_kwargs):
@@ -135,6 +138,16 @@ class DataPort:
     async def get_test_data(self, **_kwargs):
         self.order.append(self.label)
         return self.snapshot
+
+
+class AdjustmentRecorder:
+    def __init__(self, timeline) -> None:
+        self.timeline = timeline
+        self.calls = []
+
+    async def prepare_adjustment_timeline(self, **query):
+        self.calls.append(query)
+        return self.timeline
 
 
 def test_holdout_workflow_freezes_forecast_before_loading_test_data() -> None:
@@ -243,7 +256,7 @@ def test_forecast_race_loser_reuses_the_frozen_forecast() -> None:
             test_data=DataPort(test, "load_test", order),
             forecasts=forecasts,
             adjustments=SimpleNamespace(
-                get_adjustment_timeline=_async_value(
+                prepare_adjustment_timeline=_async_value(
                     _timeline(security_id, task, test)
                 )
             ),
@@ -275,6 +288,7 @@ async def _run_holdout_workflow() -> None:
     order: list[str] = []
     service = FakeService(task)
     forecasts = ForecastRecorder(order)
+    adjustments = AdjustmentRecorder(_timeline(security_id, task, test))
     engine = FixedTargetBacktestEngine(
         BacktestProductionSignalRule(ProductionPriceZoneRule()),
         rule_version=BacktestProductionSignalRule.rule_version,
@@ -290,9 +304,7 @@ async def _run_holdout_workflow() -> None:
         training_data=DataPort(training, "load_training", order),
         test_data=DataPort(test, "load_test", order),
         forecasts=forecasts,
-        adjustments=SimpleNamespace(
-            get_adjustment_timeline=_async_value(_timeline(security_id, task, test))
-        ),
+        adjustments=adjustments,
         engine=engine,
         repository_factory=lambda session: session,
         service_factory=lambda _repository, **_kwargs: service,
@@ -318,7 +330,19 @@ async def _run_holdout_workflow() -> None:
         "freeze_adjustment_snapshot",
         "save_success",
     ]
+    assert adjustments.calls == [
+        {
+            "security_id": security_id,
+            "symbol": "600000.SH",
+            "start_date": date(2025, 1, 1),
+            "end_date": date(2025, 12, 31),
+            "deadline": datetime(2026, 7, 21, 0, 5, tzinfo=UTC),
+        }
+    ]
     assert service.saved_result.daily_results[0].trade_date == date(2025, 12, 31)
+
+    await application.run(task.id, execution_token=uuid4())
+    assert len(adjustments.calls) == 1
 
 
 def _task(security_id):

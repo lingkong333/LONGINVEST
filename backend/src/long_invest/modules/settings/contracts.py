@@ -14,6 +14,17 @@ class NotificationPolicyValue(StrictModel):
     channels: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
 
 
+class SystemAlertPolicyValue(StrictModel):
+    enabled: bool = True
+    warning: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
+    error: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
+    critical: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
+    recovered: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
+    daily_unresolved: list[Literal["WECOM", "EMAIL"]] = Field(
+        default_factory=list
+    )
+
+
 class WeComChannelValue(StrictModel):
     enabled: bool = False
     timeout_seconds: float = Field(default=5.0, ge=1, le=15)
@@ -34,7 +45,7 @@ SETTING_SCHEMAS: dict[str, tuple[type[BaseModel], str]] = {
     "notification.policy.global": (NotificationPolicyValue, "全局通知开关和默认渠道"),
     "notification.policy.signals": (NotificationPolicyValue, "信号通知开关和渠道"),
     "notification.policy.system_alerts": (
-        NotificationPolicyValue,
+        SystemAlertPolicyValue,
         "系统告警通知开关和渠道",
     ),
     "notification.channel.wecom": (WeComChannelValue, "企业微信机器人运行参数"),

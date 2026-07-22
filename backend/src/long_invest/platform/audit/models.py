@@ -44,4 +44,3 @@ class AuditEvent(Base):
         unique=True,
     )
     risk_level: Mapped[str] = mapped_column(String(20), nullable=False)
-

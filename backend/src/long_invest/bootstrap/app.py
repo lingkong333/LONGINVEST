@@ -9,6 +9,7 @@ from long_invest.bootstrap.providers import (
     get_provider_resources,
     provide_provider_service,
 )
+from long_invest.modules.alerts.api import router as alerts_router
 from long_invest.modules.auth.api import router as auth_router
 from long_invest.modules.auth.application import (
     close_auth_resources,
@@ -23,6 +24,7 @@ from long_invest.modules.backtests.api import (
 from long_invest.modules.calendar.api import router as calendar_router
 from long_invest.modules.daily_data.api import router as daily_data_router
 from long_invest.modules.health.api import router as health_router
+from long_invest.modules.market_data.quality_api import router as quality_router
 from long_invest.modules.monitor_schedules.api import router as monitor_schedules_router
 from long_invest.modules.monitoring.api import router as monitoring_router
 from long_invest.modules.notifications.api import router as notifications_router
@@ -41,7 +43,9 @@ from long_invest.modules.signals.api import router as signals_router
 from long_invest.modules.strategies.api import router as strategies_router
 from long_invest.modules.targets.api import router as targets_router
 from long_invest.modules.watchlists.api import router as watchlists_router
+from long_invest.platform.audit.api import router as audit_router
 from long_invest.platform.config.settings import get_settings
+from long_invest.platform.database.engine import get_database
 from long_invest.platform.http.exception_handlers import register_exception_handlers
 from long_invest.platform.http.middleware import RequestContextMiddleware
 from long_invest.platform.http.request_id import (
@@ -49,6 +53,13 @@ from long_invest.platform.http.request_id import (
     create_request_id,
     is_valid_request_id,
 )
+from long_invest.platform.jobs.api import (
+    configure_job_admin_application,
+)
+from long_invest.platform.jobs.api import (
+    router as jobs_router,
+)
+from long_invest.platform.jobs.application import JobAdminApplication
 
 
 @asynccontextmanager
@@ -65,6 +76,7 @@ def create_app() -> FastAPI:
 
     settings = get_settings()
     configure_backtest_application(build_backtest_application)
+    configure_job_admin_application(lambda: JobAdminApplication(get_database()))
     app = FastAPI(title=settings.app_name, lifespan=lifespan)
     app.add_middleware(RequestContextMiddleware)
     app.add_middleware(
@@ -93,5 +105,9 @@ def create_app() -> FastAPI:
     app.include_router(signals_router)
     app.include_router(strategies_router)
     app.include_router(backtests_router)
+    app.include_router(jobs_router)
+    app.include_router(audit_router)
+    app.include_router(quality_router)
+    app.include_router(alerts_router)
     app.dependency_overrides[get_provider_service] = provide_provider_service
     return app

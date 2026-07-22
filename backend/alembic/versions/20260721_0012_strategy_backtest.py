@@ -661,6 +661,7 @@ def _create_backtest_root_tables() -> None:
         sa.Column("security_id", sa.UUID(), nullable=False),
         sa.Column("status", sa.String(32), nullable=False),
         sa.Column("failure_code", sa.String(100), nullable=True),
+        sa.Column("execution_token", sa.UUID(), nullable=True),
         sa.Column("training_data_fetched_at", sa.DateTime(timezone=True)),
         sa.Column("training_data_start_date", sa.Date()),
         sa.Column("training_data_end_date", sa.Date()),

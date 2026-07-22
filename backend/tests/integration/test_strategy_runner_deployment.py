@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 RUNNER_DOCKERFILE = Path("/deploy/docker/strategy-runner.Dockerfile")
 SECCOMP_PROFILE = Path("/deploy/security/strategy-runner-seccomp.json")
 

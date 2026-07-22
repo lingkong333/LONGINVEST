@@ -436,7 +436,8 @@ async def _assert_upgraded(owner_url, *, app_url=None, test_constraints=False) -
             restored = (
                 await session.execute(
                     text(
-                        "SELECT status, source_code_hash, validation_run_id, git_commit "
+                        "SELECT status, source_code_hash, validation_run_id, "
+                        "git_commit "
                         "FROM strategy_version WHERE id = :id"
                     ),
                     {"id": strategy_version_id},

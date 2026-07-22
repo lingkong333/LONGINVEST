@@ -594,6 +594,8 @@ services:
       redis:
         condition: service_healthy
     read_only: true
+    volumes:
+      - strategy_test_git_data:/var/lib/long-invest/strategies
     tmpfs:
       - /tmp:size=64m,mode=1777
     mem_limit: 512m
@@ -605,3 +607,4 @@ volumes:
   redis_data:
   application_logs:
   strategy_git_data:
+  strategy_test_git_data:

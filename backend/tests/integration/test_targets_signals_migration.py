@@ -36,6 +36,7 @@ from long_invest.modules.signals.models import (
     SignalEvent,
     SignalState,
 )
+from long_invest.modules.strategies.models import StrategyVersion  # noqa: F401
 from long_invest.modules.targets.models import SubscriptionTargetBinding, TargetRevision
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.base import Base
@@ -67,11 +68,15 @@ def _source() -> str:
     return MIGRATION.read_text(encoding="utf-8")
 
 
-def test_targets_signals_migration_is_the_single_head() -> None:
+def test_targets_signals_migration_remains_on_the_single_main_chain() -> None:
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "alembic"))
+    scripts = ScriptDirectory.from_config(config)
 
-    assert ScriptDirectory.from_config(config).get_heads() == ["20260717_0011"]
+    assert len(scripts.get_heads()) == 1
+    assert "20260717_0011" in {
+        revision.revision for revision in scripts.walk_revisions()
+    }
 
 
 def test_targets_signals_models_are_registered_with_metadata_and_alembic() -> None:
@@ -1024,7 +1029,7 @@ _SQL_TOKEN = re.compile(
     r"'(?:''|[^'])*'|"
     r'"(?:""|[^"])*"|'
     r"\d+(?:\.\d+)?|"
-    r"::|>=|<=|<>|!=|=|>|<|"
+    r"::|>=|<=|<>|!=|=|~|>|<|"
     r"[(),\[\]]|"
     r"[a-z_][a-z0-9_$.]*",
     re.IGNORECASE,
@@ -1209,7 +1214,7 @@ def _expression_signature(expression: str, column_types=None):
             return ("not_in" if negated else "in", left, parse_list(")"))
 
         operator = peek()
-        if operator in {">", "<", ">=", "<=", "<>", "!=", "="}:
+        if operator in {">", "<", ">=", "<=", "<>", "!=", "=", "~"}:
             take()
             right = parse_primary()
             if operator == "=" and right[0] == "call" and right[1] == "ANY":

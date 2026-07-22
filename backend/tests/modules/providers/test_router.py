@@ -6,6 +6,7 @@ from functools import wraps
 import pytest
 
 from long_invest.modules.providers.contracts import (
+    CorporateActionRequest,
     DailyBarRequest,
     ProviderBatchResult,
     ProviderCapability,
@@ -57,6 +58,7 @@ class FakeProvider:
         self.result = result
         self.quote_requests: list[tuple[str, ...]] = []
         self.bar_requests: list[DailyBarRequest] = []
+        self.action_requests: list[CorporateActionRequest] = []
         self.error: Exception | None = None
 
     async def realtime_quotes(self, symbols, deadline):
@@ -69,6 +71,11 @@ class FakeProvider:
     async def daily_bars(self, request, deadline):
         del deadline
         self.bar_requests.append(request)
+        return self.result
+
+    async def corporate_actions(self, request, deadline):
+        del deadline
+        self.action_requests.append(request)
         return self.result
 
 
@@ -147,6 +154,33 @@ async def test_history_uses_eastmoney_only_without_day_level_stitching() -> None
     assert result.batch_error_code == "PROVIDER_FAILED"
     assert len(east.bar_requests) == 1
     assert sina.bar_requests == []
+
+
+@async_test
+async def test_corporate_actions_use_dedicated_eastmoney_route() -> None:
+    east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    request = CorporateActionRequest(
+        "600000.SH", date(2025, 1, 1), date(2025, 12, 31)
+    )
+    config = StaticProviderConfiguration(
+        {
+            ProviderCapability.CORPORATE_ACTIONS: (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY,
+                    ProviderCapability.CORPORATE_ACTIONS,
+                ),
+            )
+        }
+    )
+
+    result = await ProviderRouter(east, sina, config=config).corporate_actions(
+        request, deadline()
+    )
+
+    assert result is east.result
+    assert east.action_requests == [request]
+    assert sina.action_requests == []
 
 
 @async_test

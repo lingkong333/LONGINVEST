@@ -1,10 +1,14 @@
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
-from long_invest.bootstrap.strategy_data import QfqStrategyDataPort
+from long_invest.bootstrap.strategy_data import (
+    PointInTimeBacktestDataPort,
+    QfqStrategyDataPort,
+)
 from long_invest.modules.qfq.contracts import (
     QfqBarView,
     QfqDatasetLifecycle,
@@ -111,3 +115,47 @@ async def test_rejects_stale_or_missing_qfq_data() -> None:
         )
         is None
     )
+
+
+@pytest.mark.anyio
+async def test_backtest_data_reanchors_training_and_keeps_holdout_raw() -> None:
+    window = _window()
+    raw = SimpleNamespace(
+        security_id=window.dataset.security_id,
+        trade_date=date(2025, 12, 31),
+        open=Decimal("18"),
+        high=Decimal("22"),
+        low=Decimal("16"),
+        close=Decimal("20"),
+        volume=100,
+        amount=Decimal("1000"),
+        source="EASTMONEY",
+        data_version=8,
+        updated_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+
+    async def get_window(*_args, **_kwargs):
+        return window
+
+    async def list_bars(*_args, **_kwargs):
+        return [raw], 1
+
+    port = PointInTimeBacktestDataPort(
+        SimpleNamespace(get_window=get_window),
+        SimpleNamespace(list_bars=list_bars),
+    )
+    training = await port.get_training_data(
+        security_id=window.dataset.security_id,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31),
+    )
+    test = await port.get_test_data(
+        security_id=window.dataset.security_id,
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 12, 31),
+    )
+
+    assert training is not None and test is not None
+    assert training.rows[0]["close"] == "20"
+    assert test.rows[0]["close"] == "20"
+    assert training.price_basis == test.price_basis == port.price_basis

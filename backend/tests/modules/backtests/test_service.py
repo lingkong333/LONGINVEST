@@ -17,6 +17,7 @@ from long_invest.modules.backtests.service import (
     BacktestCommandContext,
     BacktestService,
 )
+from long_invest.modules.market_data.contracts import AdjustmentTimelineSnapshot
 from long_invest.modules.strategies.contracts import (
     StrategyForecastResult,
     TrainingDataSnapshot,
@@ -31,6 +32,7 @@ class Repository:
         self.items = {}
         self.universes = {}
         self.forecasts = {}
+        self.adjustment_snapshots = {}
 
     async def get_task(self, task_id, **_kwargs):
         return self.tasks.get(task_id)
@@ -49,6 +51,9 @@ class Repository:
     async def get_forecast(self, item_id):
         return self.forecasts.get(item_id)
 
+    async def get_adjustment_snapshot(self, item_id):
+        return self.adjustment_snapshots.get(item_id)
+
     async def get_metric(self, _item_id):
         return None
 
@@ -61,6 +66,11 @@ class Repository:
         if forecast.id is None:
             forecast.id = uuid4()
         self.forecasts[forecast.item_id] = forecast
+
+    async def add_adjustment_snapshot(self, snapshot):
+        if snapshot.id is None:
+            snapshot.id = uuid4()
+        self.adjustment_snapshots[snapshot.item_id] = snapshot
 
 
 def test_create_replays_same_idempotency_and_rejects_changed_content() -> None:
@@ -143,6 +153,49 @@ def test_recovery_reuses_first_frozen_test_snapshot() -> None:
             )
         assert captured.value.code == "TEST_DATA_INVALID"
         assert repository.items[snapshot.id].test_data_hash == "e" * 64
+
+    asyncio.run(scenario())
+
+
+def test_adjustment_snapshot_freezes_empty_coverage_for_recovery() -> None:
+    async def scenario() -> None:
+        repository = Repository()
+        service = BacktestService(repository)
+        snapshot = _task()
+        token = uuid4()
+        await service.create(snapshot, _context("adjustments"))
+        await service.start(snapshot.id, token)
+        training = _data(snapshot, training=True, content="c" * 64)
+        await service.claim_forecast(snapshot.id, training, execution_token=token)
+        await service.freeze_forecast(
+            snapshot.id,
+            training,
+            StrategyForecastResult(values=_targets()),
+            execution_token=token,
+            frozen_at=datetime(2026, 7, 21, tzinfo=UTC),
+        )
+        test_data = _data(snapshot, training=False, content="e" * 64)
+        await service.claim_simulation(snapshot.id, test_data, execution_token=token)
+        timeline = AdjustmentTimelineSnapshot(
+            snapshot_id=uuid4(),
+            security_id=snapshot.universe_snapshot[0].security_id,
+            start_date=date(2025, 1, 1),
+            end_date=date(2025, 12, 31),
+            as_of=datetime(2026, 7, 21, tzinfo=UTC),
+            source="EASTMONEY",
+            provider_contract_version="corporate-actions-v1",
+            fetched_at=datetime(2026, 7, 20, tzinfo=UTC),
+            row_count=0,
+            content_hash="f" * 64,
+            entries=(),
+        )
+
+        frozen = await service.freeze_adjustment_snapshot(
+            snapshot.id, timeline, execution_token=token
+        )
+        assert frozen == timeline
+        execution = await service.get_execution(snapshot.id)
+        assert execution.adjustment_snapshot == timeline
 
     asyncio.run(scenario())
 

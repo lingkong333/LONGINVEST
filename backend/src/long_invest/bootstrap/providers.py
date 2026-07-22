@@ -114,6 +114,9 @@ def get_provider_resources() -> ProviderResources:
                 {
                     "push2.eastmoney.com",
                     "push2his.eastmoney.com",
+                    "datacenter-web.eastmoney.com",
+                    "np-anotice-stock.eastmoney.com",
+                    "np-cnotice-stock.eastmoney.com",
                     "hq.sinajs.cn",
                 }
             ),

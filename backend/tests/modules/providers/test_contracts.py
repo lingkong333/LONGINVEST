@@ -20,6 +20,7 @@ def test_provider_contract_enumerations_are_stable() -> None:
         "DAILY_BAR_UNADJUSTED",
         "HISTORICAL_DAILY_UNADJUSTED",
         "HISTORICAL_DAILY_QFQ",
+        "CORPORATE_ACTIONS",
     }
     assert {item.value for item in ProviderCode} == {"EASTMONEY", "SINA"}
 

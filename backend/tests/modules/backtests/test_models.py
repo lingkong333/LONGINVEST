@@ -1,6 +1,7 @@
 from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Numeric, UniqueConstraint
 
 from long_invest.modules.backtests.models import (
+    BacktestAdjustmentSnapshot,
     BacktestDailyResult,
     BacktestForecastSnapshot,
     BacktestItem,
@@ -17,6 +18,7 @@ def test_backtest_models_own_frozen_snapshot_and_adjustment_records() -> None:
     assert BacktestTask.__tablename__ == "backtest_task"
     assert BacktestItem.__tablename__ == "backtest_item"
     assert BacktestForecastSnapshot.__tablename__ == "backtest_forecast_snapshot"
+    assert BacktestAdjustmentSnapshot.__tablename__ == "backtest_adjustment_snapshot"
     assert BacktestTargetAdjustment.__tablename__ == "backtest_target_adjustment"
     assert {
         "training_start_date",
@@ -30,6 +32,13 @@ def test_backtest_models_own_frozen_snapshot_and_adjustment_records() -> None:
         "parameter_hash",
         "frozen_at",
     } <= set(BacktestForecastSnapshot.__table__.c.keys())
+    assert {
+        "source_snapshot_id",
+        "as_of",
+        "provider_contract_version",
+        "content_hash",
+        "entries",
+    } <= set(BacktestAdjustmentSnapshot.__table__.c.keys())
     assert {
         "event_date",
         "adjustment_factor",

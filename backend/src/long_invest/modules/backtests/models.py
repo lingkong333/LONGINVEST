@@ -304,6 +304,60 @@ class BacktestForecastSnapshot(Base):
     )
 
 
+class BacktestAdjustmentSnapshot(Base):
+    __tablename__ = "backtest_adjustment_snapshot"
+    __table_args__ = (
+        UniqueConstraint("item_id", name="uq_backtest_adjustment_snapshot_item_id"),
+        CheckConstraint("start_date <= end_date", name="date_range_valid"),
+        CheckConstraint("row_count >= 0", name="row_count_nonnegative"),
+        CheckConstraint(
+            "content_hash ~ '^[0-9a-f]{64}$'", name="content_hash_sha256"
+        ),
+        CheckConstraint("fetched_at <= as_of", name="fetch_before_knowledge_cutoff"),
+        CheckConstraint(
+            "length(trim(source)) > 0 AND "
+            "length(trim(provider_contract_version)) > 0",
+            name="required_text_nonblank",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(entries) = 'array' "
+            "AND jsonb_array_length(entries) = row_count",
+            name="entries_consistent",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_snapshot_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), nullable=False
+    )
+    security_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("security.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    start_date: Mapped[date] = mapped_column(Date, nullable=False)
+    end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    as_of: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_contract_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    entries: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    frozen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
 class BacktestTargetAdjustment(Base):
     __tablename__ = "backtest_target_adjustment"
     __table_args__ = (

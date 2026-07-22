@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -5,7 +6,121 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.market_data.contracts import QualityIssueStatus
-from long_invest.modules.market_data.models import DataQualityIssue
+from long_invest.modules.market_data.models import (
+    CorporateActionFact,
+    CorporateActionFetchBatch,
+    DataQualityIssue,
+)
+
+
+class CorporateActionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    @property
+    def session(self) -> AsyncSession:
+        return self._session
+
+    async def get_batch(self, batch_id: UUID) -> CorporateActionFetchBatch | None:
+        return await self._session.get(CorporateActionFetchBatch, batch_id)
+
+    async def list_event_facts_for_update(
+        self,
+        *,
+        security_id: UUID,
+        source: str,
+        source_event_ids: tuple[str, ...],
+    ) -> list[CorporateActionFact]:
+        if not source_event_ids:
+            return []
+        rows = await self._session.scalars(
+            select(CorporateActionFact)
+            .where(
+                CorporateActionFact.security_id == security_id,
+                CorporateActionFact.source == source,
+                CorporateActionFact.source_event_id.in_(source_event_ids),
+            )
+            .order_by(
+                CorporateActionFact.source_event_id,
+                CorporateActionFact.revision_no,
+            )
+            .with_for_update()
+        )
+        return list(rows.all())
+
+    async def claim_fetch(
+        self,
+        batch: CorporateActionFetchBatch,
+        facts: tuple[CorporateActionFact, ...],
+    ) -> tuple[CorporateActionFetchBatch | None, bool]:
+        try:
+            async with self._session.begin_nested():
+                self._session.add(batch)
+                self._session.add_all(facts)
+                await self._session.flush()
+        except IntegrityError:
+            existing = await self.get_batch(batch.id)
+            return existing, False
+        return batch, True
+
+    async def list_covering_batches(
+        self,
+        *,
+        security_id: UUID,
+        start_date: date,
+        end_date: date,
+        as_of: datetime,
+    ) -> list[CorporateActionFetchBatch]:
+        rows = await self._session.scalars(
+            select(CorporateActionFetchBatch)
+            .where(
+                CorporateActionFetchBatch.security_id == security_id,
+                CorporateActionFetchBatch.status == "SUCCESS",
+                CorporateActionFetchBatch.coverage_start <= start_date,
+                CorporateActionFetchBatch.coverage_end >= end_date,
+                CorporateActionFetchBatch.observed_at <= as_of,
+                CorporateActionFetchBatch.fetched_at <= as_of,
+            )
+            .order_by(
+                CorporateActionFetchBatch.observed_at.desc(),
+                CorporateActionFetchBatch.fetched_at.desc(),
+                CorporateActionFetchBatch.id,
+            )
+        )
+        return list(rows.all())
+
+    async def list_facts(
+        self,
+        *,
+        security_id: UUID,
+        source: str,
+        start_date: date,
+        end_date: date,
+        as_of: datetime,
+        observed_through: datetime,
+    ) -> list[CorporateActionFact]:
+        rows = await self._session.scalars(
+            select(CorporateActionFact)
+            .join(
+                CorporateActionFetchBatch,
+                CorporateActionFetchBatch.id == CorporateActionFact.batch_id,
+            )
+            .where(
+                CorporateActionFact.security_id == security_id,
+                CorporateActionFact.source == source,
+                CorporateActionFact.effective_date >= start_date,
+                CorporateActionFact.effective_date <= end_date,
+                CorporateActionFact.observed_at <= observed_through,
+                CorporateActionFetchBatch.status == "SUCCESS",
+                CorporateActionFetchBatch.fetched_at <= as_of,
+            )
+            .order_by(
+                CorporateActionFact.source_event_id,
+                CorporateActionFact.revision_no.desc(),
+                CorporateActionFact.id,
+            )
+        )
+        return list(rows.all())
 
 
 class QualityIssueRepository:

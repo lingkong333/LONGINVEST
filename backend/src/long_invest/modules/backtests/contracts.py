@@ -17,6 +17,7 @@ from pydantic import (
     model_validator,
 )
 
+from long_invest.modules.market_data.contracts import AdjustmentTimelineSnapshot
 from long_invest.modules.signals.contracts import SignalZone
 from long_invest.modules.targets.contracts import TargetValues
 from long_invest.platform.json_snapshot import freeze_json_mapping, thaw_json_value
@@ -469,6 +470,7 @@ class BacktestResultView(StrictContract):
     item_status: BacktestItemStatus
     forecast: BacktestForecastSnapshotView | None
     test_data_snapshot: BacktestTestDataSnapshotView | None = None
+    adjustment_snapshot: AdjustmentTimelineSnapshot | None = None
     adjustments: tuple[BacktestTargetAdjustmentView, ...]
     orders: tuple[BacktestOrderView, ...]
     trades: tuple[BacktestTradeView, ...]

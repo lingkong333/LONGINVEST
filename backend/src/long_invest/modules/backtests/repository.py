@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import date, datetime
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -15,6 +17,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestTradeView,
 )
 from long_invest.modules.backtests.models import (
+    BacktestAdjustmentSnapshot,
     BacktestDailyResult,
     BacktestForecastSnapshot,
     BacktestItem,
@@ -24,6 +27,10 @@ from long_invest.modules.backtests.models import (
     BacktestTask,
     BacktestTrade,
     BacktestUniverseSnapshot,
+)
+from long_invest.modules.market_data.contracts import (
+    AdjustmentTimelineEntry,
+    AdjustmentTimelineSnapshot,
 )
 
 
@@ -74,6 +81,13 @@ class BacktestRepository:
             )
         )
 
+    async def get_adjustment_snapshot(self, item_id: UUID):
+        return await self._session.scalar(
+            select(BacktestAdjustmentSnapshot).where(
+                BacktestAdjustmentSnapshot.item_id == item_id
+            )
+        )
+
     async def get_metric(self, item_id: UUID):
         return await self._session.scalar(
             select(BacktestMetric).where(BacktestMetric.item_id == item_id)
@@ -90,6 +104,12 @@ class BacktestRepository:
 
     async def add_forecast(self, forecast: BacktestForecastSnapshot) -> None:
         self._session.add(forecast)
+        await self._session.flush()
+
+    async def add_adjustment_snapshot(
+        self, snapshot: BacktestAdjustmentSnapshot
+    ) -> None:
+        self._session.add(snapshot)
         await self._session.flush()
 
     async def add_results(
@@ -166,6 +186,34 @@ def forecast_view(row: BacktestForecastSnapshot) -> BacktestForecastSnapshotView
         runner_image_digest=row.runner_image_digest,
         price_basis=row.price_basis,
         frozen_at=row.frozen_at,
+    )
+
+
+def adjustment_snapshot_view(
+    row: BacktestAdjustmentSnapshot,
+) -> AdjustmentTimelineSnapshot:
+    return AdjustmentTimelineSnapshot(
+        snapshot_id=row.source_snapshot_id,
+        security_id=row.security_id,
+        start_date=row.start_date,
+        end_date=row.end_date,
+        as_of=row.as_of,
+        source=row.source,
+        provider_contract_version=row.provider_contract_version,
+        fetched_at=row.fetched_at,
+        row_count=row.row_count,
+        content_hash=row.content_hash,
+        entries=tuple(
+            AdjustmentTimelineEntry(
+                event_date=date.fromisoformat(entry["event_date"]),
+                effective_date=date.fromisoformat(entry["effective_date"]),
+                published_at=datetime.fromisoformat(entry["published_at"]),
+                source=entry["source"],
+                adjustment_factor=Decimal(entry["adjustment_factor"]),
+                data_hash=entry["data_hash"],
+            )
+            for entry in row.entries
+        ),
     )
 
 

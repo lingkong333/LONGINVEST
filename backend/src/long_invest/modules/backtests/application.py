@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -180,18 +180,27 @@ class BacktestApplication:
                 test_data,
                 execution_token=execution_token,
             )
-            timeline = await self._adjustments.get_adjustment_timeline(
-                security_id=entry.security_id,
-                start_date=task.date_range.test_start_date,
-                end_date=task.date_range.test_end_date,
-                as_of=test_data.fetched_at,
-            )
+            timeline = state.adjustment_snapshot
+            if timeline is None:
+                timeline = await self._adjustments.get_adjustment_timeline(
+                    security_id=entry.security_id,
+                    start_date=task.date_range.training_end_date
+                    + timedelta(days=1),
+                    end_date=task.date_range.test_end_date,
+                    as_of=self._clock(),
+                )
+                timeline = await self._write(
+                    "freeze_adjustment_snapshot",
+                    task_id,
+                    timeline,
+                    execution_token=execution_token,
+                )
             result = self._engine.run(
                 item_id=state.item_id,
                 security_id=entry.security_id,
                 bars=tuple(_bar(row) for row in test_data.rows),
                 targets=forecast.values,
-                adjustments=timeline,
+                adjustments=timeline.entries,
                 initial_capital=task.initial_capital,
                 hysteresis_ratio=task.hysteresis_ratio,
                 minimum_hysteresis=task.minimum_hysteresis,

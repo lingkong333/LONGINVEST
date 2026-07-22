@@ -28,7 +28,16 @@ def _retryable(error: Exception) -> bool:
     ):
         return False
     return isinstance(
-        error, (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout)
+        error,
+        (
+            httpx.ConnectError,
+            httpx.ConnectTimeout,
+            httpx.PoolTimeout,
+            httpx.ReadError,
+            httpx.ReadTimeout,
+            httpx.RemoteProtocolError,
+            httpx.WriteError,
+        ),
     ) or (isinstance(error, ProviderHttpError) and error.retryable)
 
 

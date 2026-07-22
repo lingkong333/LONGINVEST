@@ -11,7 +11,7 @@ from enum import StrEnum
 from typing import NoReturn, Protocol
 from uuid import UUID
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 from long_invest.modules.providers.contracts import validate_symbol
 
@@ -58,13 +58,40 @@ class AdjustmentTimelineEntry:
 class AdjustmentTimelineSnapshot(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    snapshot_id: UUID
+    security_id: UUID
+    start_date: date
+    end_date: date
     as_of: AwareDatetime
+    source: str = Field(min_length=1, max_length=32)
+    provider_contract_version: str = Field(min_length=1, max_length=64)
+    fetched_at: AwareDatetime
+    row_count: int = Field(ge=0)
+    content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     entries: tuple[AdjustmentTimelineEntry, ...]
 
     @model_validator(mode="after")
-    def reject_future_publications(self) -> AdjustmentTimelineSnapshot:
-        if any(entry.published_at > self.as_of for entry in self.entries):
-            raise ValueError("adjustment publication must not be later than as_of")
+    def validate_frozen_timeline(self) -> AdjustmentTimelineSnapshot:
+        if self.start_date > self.end_date:
+            raise ValueError("adjustment timeline range is invalid")
+        if self.fetched_at > self.as_of:
+            raise ValueError("adjustment timeline cannot be fetched after as_of")
+        if self.row_count != len(self.entries):
+            raise ValueError("adjustment row count must match entries")
+        effective_dates = [entry.effective_date for entry in self.entries]
+        if (
+            effective_dates != sorted(effective_dates)
+            or len(effective_dates) != len(set(effective_dates))
+        ):
+            raise ValueError("adjustment entries must be unique and ordered")
+        if any(
+            entry.published_at > self.as_of
+            or not self.start_date <= entry.effective_date <= self.end_date
+            for entry in self.entries
+        ):
+            raise ValueError(
+                "adjustment entries must be in range and published by as_of"
+            )
         return self
 
 
@@ -76,7 +103,7 @@ class AdjustmentTimelinePort(Protocol):
         start_date: date,
         end_date: date,
         as_of: AwareDatetime,
-    ) -> tuple[AdjustmentTimelineEntry, ...]: ...
+    ) -> AdjustmentTimelineSnapshot: ...
 
 
 def _require_text(value: str, field: str) -> None:

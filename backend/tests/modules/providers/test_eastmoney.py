@@ -1,10 +1,14 @@
+import asyncio
 import json
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
 
 from long_invest.modules.providers.contracts import (
+    CorporateActionRequest,
+    CorporateActionType,
     DailyBarRequest,
     ProviderCapability,
     ProviderCode,
@@ -24,6 +28,225 @@ def test_eastmoney_declares_supported_capabilities_and_real_hosts() -> None:
     assert EastmoneyProvider.REALTIME_URL.startswith("https://push2.eastmoney.com/")
     assert ProviderCapability.HISTORICAL_DAILY_QFQ in EastmoneyProvider.capabilities
     assert ProviderCapability.SECURITY_MASTER in EastmoneyProvider.capabilities
+    assert ProviderCapability.CORPORATE_ACTIONS in EastmoneyProvider.capabilities
+
+
+class CorporateActionClient:
+    def __init__(self, *, content_matches: bool = True) -> None:
+        self.content_matches = content_matches
+        self.requests = []
+
+    async def request_json(self, request, *, deadline):
+        del deadline
+        self.requests.append(request)
+        if request.url == EastmoneyProvider.CORPORATE_ACTION_URL:
+            if request.params["reportName"] == "RPT_IPO_ALLOTMENT":
+                return {
+                    "version": None,
+                    "result": None,
+                    "success": False,
+                    "message": "empty",
+                    "code": 9201,
+                }
+            return {
+                "version": "v1",
+                "result": {
+                    "pages": 1,
+                    "count": 1,
+                    "data": [
+                        {
+                            "SECUCODE": "300033.SZ",
+                            "SECURITY_CODE": "300033",
+                            "BONUS_RATIO": None,
+                            "IT_RATIO": 4,
+                            "PRETAX_BONUS_RMB": 51,
+                            "NOTICE_DATE": "2025-04-02 00:00:00",
+                            "EQUITY_RECORD_DATE": "2025-04-09 00:00:00",
+                            "EX_DIVIDEND_DATE": "2025-04-10 00:00:00",
+                            "REPORT_DATE": "2024-12-31 00:00:00",
+                            "ASSIGN_PROGRESS": "实施分配",
+                        }
+                    ],
+                },
+                "success": True,
+                "code": 0,
+            }
+        if request.url == EastmoneyProvider.ANNOUNCEMENT_URL:
+            return {
+                "data": {
+                    "list": [
+                        {
+                            "art_code": "AN1",
+                            "columns": [
+                                {"column_code": "001002002001005"}
+                            ],
+                            "display_time": "2025-04-02 18:19:23:211",
+                            "eiTime": "2025-04-02 18:20:42:000",
+                            "title": (
+                                "示例:2024年度利润分配及资本公积金"
+                                "转增股本实施公告"
+                            ),
+                        }
+                    ],
+                    "total_hits": 1,
+                },
+                "success": 1,
+            }
+        if request.url == EastmoneyProvider.ANNOUNCEMENT_CONTENT_URL:
+            terms = (
+                "每10股派51.000000元，同时每10股转增4.000000股。"
+                if self.content_matches
+                else "每10股派50元，同时每10股转增4股。"
+            )
+            return {
+                "data": {
+                    "art_code": "AN1",
+                    "notice_content": (
+                        f"{terms}股权登记日为2025年4月9日；"
+                        "除权除息日为2025年4月10日。"
+                    ),
+                },
+                "success": 1,
+            }
+        if request.url == EastmoneyProvider.HISTORY_URL:
+            return {
+                "rc": 0,
+                "data": {
+                    "code": "300033",
+                    "klines": ["2025-04-09,99,100,101,98,1,100"],
+                },
+            }
+        raise AssertionError(request.url)
+
+
+def test_corporate_actions_builds_verified_dividend_factor() -> None:
+    client = CorporateActionClient()
+    request = CorporateActionRequest(
+        "300033.SZ", date(2025, 4, 10), date(2025, 4, 10)
+    )
+    result = asyncio.run(
+        EastmoneyProvider(client).corporate_actions(
+            request, datetime.now(UTC) + timedelta(seconds=5)
+        )
+    )
+    assert len(result.items) == 1
+    item = result.items[0]
+    assert item.event_type is CorporateActionType.COMPOSITE
+    assert item.source_event_id == "AN1"
+    assert item.adjustment_factor == (
+        Decimal("100") - Decimal("5.1")
+    ) / Decimal("140")
+    assert item.published_at == datetime(2025, 4, 2, 10, 20, 42, tzinfo=UTC)
+    assert len(item.raw_payload_hash) == 64
+
+
+def test_corporate_actions_rejects_announcement_terms_that_do_not_match() -> None:
+    request = CorporateActionRequest(
+        "300033.SZ", date(2025, 4, 10), date(2025, 4, 10)
+    )
+    with pytest.raises(ProviderHttpError, match="ADJUSTMENT_DATA_UNAVAILABLE"):
+        asyncio.run(
+            EastmoneyProvider(
+                CorporateActionClient(content_matches=False)
+            ).corporate_actions(request, datetime.now(UTC) + timedelta(seconds=5))
+        )
+
+
+class IncompletePaginationClient:
+    async def request_json(self, request, *, deadline):
+        del deadline
+        return {
+            "result": {
+                "pages": 2,
+                "count": 2,
+                "data": [{}] if request.params["pageNumber"] == "1" else [],
+            },
+            "success": True,
+            "code": 0,
+        }
+
+
+def test_corporate_action_report_rejects_missing_page_rows() -> None:
+    provider = EastmoneyProvider(IncompletePaginationClient())
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        asyncio.run(
+            provider._report_rows(
+                "RPT_SHAREBONUS_DET",
+                "PLAN_NOTICE_DATE",
+                "300033.SZ",
+                datetime.now(UTC) + timedelta(seconds=5),
+            )
+        )
+
+
+def test_rights_evidence_requires_issue_terms_and_actual_result_quantity() -> None:
+    EastmoneyProvider._validate_rights_content(
+        (
+            "股权登记日2022年1月18日，按每10股配售1.5股，"
+            "配股价格为14.43元/股。"
+        ),
+        "实际发行1,552,021,645股。",
+        event_date=date(2022, 1, 18),
+        ratio_per_ten=Decimal("1.5"),
+        issue_price=Decimal("14.43"),
+        issue_num=Decimal("1552021645"),
+    )
+
+
+def test_rights_action_uses_issue_and_result_evidence_for_factor() -> None:
+    class RightsProvider(EastmoneyProvider):
+        async def _matching_rights_announcements(
+            self, symbol, target_date, column, title_suffix, deadline
+        ):
+            del symbol, target_date, title_suffix, deadline
+            return [
+                {
+                    "art_code": "ISSUE" if column.endswith("004") else "RESULT",
+                    "display_time": "",
+                    "eiTime": (
+                        "2022-01-13 19:09:43:000"
+                        if column.endswith("004")
+                        else "2022-01-26 16:07:13:000"
+                    ),
+                }
+            ]
+
+        async def _announcement_content(self, announcement, deadline):
+            del deadline
+            if announcement["art_code"] == "ISSUE":
+                return (
+                    "股权登记日2022年1月18日，按每10股配售1.5股，"
+                    "配股价格为14.43元/股。"
+                )
+            return "实际发行1,552,021,645股。"
+
+        async def _previous_close(self, symbol, effective_date, deadline):
+            del symbol, effective_date, deadline
+            return Decimal("20")
+
+    row = {
+        "SECUCODE": "600030.SH",
+        "SECURITY_CODE": "600030",
+        "PLACING_RATIO": 1.5,
+        "ISSUE_PRICE": 14.43,
+        "ISSUE_NUM": 1552021645,
+        "EQUITY_RECORD_DATE": "2022-01-18 00:00:00",
+        "EX_DIVIDEND_DATE": "2022-01-27 00:00:00",
+        "FIRST_NOTICE_DATE": "2022-01-14 00:00:00",
+    }
+    item = asyncio.run(
+        RightsProvider(None)._rights_action(
+            row,
+            CorporateActionRequest(
+                "600030.SH", date(2022, 1, 27), date(2022, 1, 27)
+            ),
+            datetime(2025, 1, 1, tzinfo=UTC),
+            datetime.now(UTC) + timedelta(seconds=5),
+        )
+    )
+    assert item.event_type is CorporateActionType.RIGHTS_ISSUE
+    assert item.source_event_id == "ISSUE+RESULT"
+    assert item.adjustment_factor == Decimal("22.1645") / Decimal("23")
 
 
 def test_eastmoney_normalizes_quotes_and_multiple_markets() -> None:

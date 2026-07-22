@@ -8,6 +8,8 @@ from uuid import UUID
 
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import (
+    CorporateActionRecord,
+    CorporateActionRequest,
     DailyBar,
     DailyBarRequest,
     ProviderBatchResult,
@@ -68,6 +70,11 @@ class ProviderService:
         self, request: DailyBarRequest, deadline: datetime
     ) -> ProviderBatchResult[DailyBar]:
         return await self._router.daily_bars(request, deadline)
+
+    async def corporate_actions(
+        self, request: CorporateActionRequest, deadline: datetime
+    ) -> ProviderBatchResult[CorporateActionRecord]:
+        return await self._router.corporate_actions(request, deadline)
 
     async def get_provider(self, provider_code: ProviderCode) -> dict[str, Any]:
         self._require(provider_code)

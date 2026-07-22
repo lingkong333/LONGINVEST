@@ -14,11 +14,21 @@ class ProviderCapability(StrEnum):
     DAILY_BAR_UNADJUSTED = "DAILY_BAR_UNADJUSTED"
     HISTORICAL_DAILY_UNADJUSTED = "HISTORICAL_DAILY_UNADJUSTED"
     HISTORICAL_DAILY_QFQ = "HISTORICAL_DAILY_QFQ"
+    CORPORATE_ACTIONS = "CORPORATE_ACTIONS"
 
 
 class ProviderCode(StrEnum):
     EASTMONEY = "EASTMONEY"
     SINA = "SINA"
+
+
+class CorporateActionType(StrEnum):
+    CASH_DIVIDEND = "CASH_DIVIDEND"
+    BONUS_SHARE = "BONUS_SHARE"
+    RIGHTS_ISSUE = "RIGHTS_ISSUE"
+    SPLIT = "SPLIT"
+    REVERSE_SPLIT = "REVERSE_SPLIT"
+    COMPOSITE = "COMPOSITE"
 
 
 def validate_symbol(symbol: str) -> str:
@@ -141,6 +151,49 @@ class DailyBarRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class CorporateActionRequest:
+    symbol: str
+    start: date
+    end: date
+
+    def __post_init__(self) -> None:
+        validate_symbol(self.symbol)
+        if self.start > self.end:
+            raise ValueError("start must not be after end")
+
+
+@dataclass(frozen=True, slots=True)
+class CorporateActionRecord:
+    symbol: str
+    source_event_id: str
+    event_type: CorporateActionType
+    event_date: date
+    effective_date: date
+    published_at: datetime
+    observed_at: datetime
+    adjustment_factor: Decimal
+    source_reference: str
+    raw_payload_hash: str
+    source: ProviderCode
+
+    def __post_init__(self) -> None:
+        validate_symbol(self.symbol)
+        if not self.source_event_id.strip() or not self.source_reference.strip():
+            raise ValueError("corporate action source identity is required")
+        object.__setattr__(self, "event_type", CorporateActionType(self.event_type))
+        _aware(self.published_at)
+        _aware(self.observed_at)
+        if self.published_at > self.observed_at:
+            raise ValueError("corporate action cannot be observed before publication")
+        if self.event_date > self.effective_date:
+            raise ValueError("corporate action event date cannot follow effective date")
+        if not self.adjustment_factor.is_finite() or self.adjustment_factor <= 0:
+            raise ValueError("corporate action factor must be finite and positive")
+        if re.fullmatch(r"[0-9a-f]{64}", self.raw_payload_hash) is None:
+            raise ValueError("corporate action payload hash must be sha256")
+
+
+@dataclass(frozen=True, slots=True)
 class ProbeResult:
     provider: ProviderCode
     capability: ProviderCapability
@@ -191,6 +244,10 @@ class MarketDataProvider(Protocol):
     async def daily_bars(
         self, request: DailyBarRequest, deadline: datetime
     ) -> ProviderBatchResult[DailyBar]: ...
+
+    async def corporate_actions(
+        self, request: CorporateActionRequest, deadline: datetime
+    ) -> ProviderBatchResult[CorporateActionRecord]: ...
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime

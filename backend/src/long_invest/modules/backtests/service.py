@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID, uuid5
 
@@ -20,6 +20,7 @@ from long_invest.modules.backtests.contracts import (
 )
 from long_invest.modules.backtests.engine import BacktestEngineResult
 from long_invest.modules.backtests.models import (
+    BacktestAdjustmentSnapshot,
     BacktestDailyResult,
     BacktestForecastSnapshot,
     BacktestItem,
@@ -31,6 +32,7 @@ from long_invest.modules.backtests.models import (
     BacktestUniverseSnapshot,
 )
 from long_invest.modules.backtests.repository import (
+    adjustment_snapshot_view,
     adjustment_view,
     daily_view,
     forecast_view,
@@ -38,6 +40,7 @@ from long_invest.modules.backtests.repository import (
     order_view,
     trade_view,
 )
+from long_invest.modules.market_data.contracts import AdjustmentTimelineSnapshot
 from long_invest.modules.strategies.contracts import (
     StrategyForecastResult,
     TrainingDataSnapshot,
@@ -72,6 +75,7 @@ class BacktestExecutionState:
     item_id: UUID
     item_status: BacktestItemStatus
     forecast: BacktestForecastSnapshotView | None
+    adjustment_snapshot: AdjustmentTimelineSnapshot | None = None
 
 
 _TERMINAL_ITEM_STATUSES = {
@@ -173,11 +177,17 @@ class BacktestService:
         if task is None or item is None or universe is None:
             raise _not_found()
         forecast = await self._repository.get_forecast(item.id)
+        adjustment_snapshot = await self._repository.get_adjustment_snapshot(item.id)
         return BacktestExecutionState(
             task=_task_snapshot(task, universe),
             item_id=item.id,
             item_status=BacktestItemStatus(item.status),
             forecast=forecast_view(forecast) if forecast is not None else None,
+            adjustment_snapshot=(
+                adjustment_snapshot_view(adjustment_snapshot)
+                if adjustment_snapshot is not None
+                else None
+            ),
         )
 
     async def get_result(self, task_id: UUID, item_id: UUID) -> BacktestResultView:
@@ -185,6 +195,7 @@ class BacktestService:
         if item is None:
             raise _not_found()
         forecast = await self._repository.get_forecast(item.id)
+        adjustment_snapshot = await self._repository.get_adjustment_snapshot(item.id)
         metric = await self._repository.get_metric(item.id)
         adjustments = await self._repository.list_adjustments(item.id)
         orders = await self._repository.list_orders(item.id)
@@ -196,6 +207,11 @@ class BacktestService:
             item_status=BacktestItemStatus(item.status),
             forecast=forecast_view(forecast) if forecast is not None else None,
             test_data_snapshot=_test_data_snapshot(item),
+            adjustment_snapshot=(
+                adjustment_snapshot_view(adjustment_snapshot)
+                if adjustment_snapshot is not None
+                else None
+            ),
             adjustments=tuple(adjustment_view(row) for row in adjustments),
             orders=tuple(order_view(row) for row in orders),
             trades=tuple(trade_view(row) for row in trades),
@@ -208,6 +224,7 @@ class BacktestService:
     ) -> BacktestExecutionState:
         task, item, universe = await self._locked(task_id)
         forecast = await self._repository.get_forecast(item.id)
+        adjustment_snapshot = await self._repository.get_adjustment_snapshot(item.id)
         if item.status in _TERMINAL_ITEM_STATUSES:
             return _execution_state(task, item, universe, forecast)
         if item.execution_token is not None and item.execution_token != execution_token:
@@ -237,6 +254,11 @@ class BacktestService:
             item_id=item.id,
             item_status=BacktestItemStatus(item.status),
             forecast=forecast_view(forecast) if forecast is not None else None,
+            adjustment_snapshot=(
+                adjustment_snapshot_view(adjustment_snapshot)
+                if adjustment_snapshot is not None
+                else None
+            ),
         )
 
     async def claim_forecast(
@@ -356,6 +378,63 @@ class BacktestService:
             BacktestItemStatus.SIMULATING,
             forecast_view(forecast),
         )
+
+    async def freeze_adjustment_snapshot(
+        self,
+        task_id: UUID,
+        timeline: AdjustmentTimelineSnapshot,
+        *,
+        execution_token: UUID,
+    ) -> AdjustmentTimelineSnapshot:
+        task, item, _ = await self._locked(task_id)
+        _require_execution_owner(item, execution_token)
+        existing = await self._repository.get_adjustment_snapshot(item.id)
+        if existing is not None:
+            frozen = adjustment_snapshot_view(existing)
+            if frozen != timeline:
+                raise _error(
+                    "BACKTEST_ADJUSTMENT_SNAPSHOT_CONFLICT",
+                    "公司行动输入已经冻结，不能替换",
+                )
+            return frozen
+        if item.status != BacktestItemStatus.SIMULATING.value:
+            raise _state_conflict()
+        if (
+            timeline.security_id != item.security_id
+            or timeline.start_date != task.training_end_date + timedelta(days=1)
+            or timeline.end_date != task.test_end_date
+            or timeline.as_of < item.test_data_fetched_at
+        ):
+            raise _error(
+                BacktestErrorCode.TEST_DATA_INVALID.value,
+                "公司行动快照与回测范围不一致",
+            )
+        row = BacktestAdjustmentSnapshot(
+            item_id=item.id,
+            source_snapshot_id=timeline.snapshot_id,
+            security_id=timeline.security_id,
+            start_date=timeline.start_date,
+            end_date=timeline.end_date,
+            as_of=timeline.as_of,
+            source=timeline.source,
+            provider_contract_version=timeline.provider_contract_version,
+            fetched_at=timeline.fetched_at,
+            row_count=timeline.row_count,
+            content_hash=timeline.content_hash,
+            entries=[
+                {
+                    "event_date": entry.event_date.isoformat(),
+                    "effective_date": entry.effective_date.isoformat(),
+                    "published_at": entry.published_at.isoformat(),
+                    "source": entry.source,
+                    "adjustment_factor": str(entry.adjustment_factor),
+                    "data_hash": entry.data_hash,
+                }
+                for entry in timeline.entries
+            ],
+        )
+        await self._repository.add_adjustment_snapshot(row)
+        return adjustment_snapshot_view(row)
 
     async def save_success(
         self,

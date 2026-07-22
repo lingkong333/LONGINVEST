@@ -23,6 +23,7 @@ def async_test(function):
     [
         httpx.ConnectError("connect"),
         httpx.ReadTimeout("read"),
+        httpx.RemoteProtocolError("peer closed response"),
         ProviderHttpError("PROVIDER_UPSTREAM_TEMPORARY", retryable=True),
     ],
 )

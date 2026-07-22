@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from functools import wraps
 from unittest.mock import AsyncMock
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import (
+    CorporateActionRequest,
     DailyBarRequest,
     ProbeResult,
     ProviderBatchResult,
@@ -597,6 +598,10 @@ class AcquisitionRouter:
         self.calls.append(("daily_bars", request, deadline))
         return self.result
 
+    async def corporate_actions(self, request, deadline):
+        self.calls.append(("corporate_actions", request, deadline))
+        return self.result
+
 
 def acquisition_service(router: AcquisitionRouter) -> ProviderService:
     return ProviderService(router, {}, ServiceRepository(), ProbeRuntime())
@@ -655,6 +660,21 @@ async def test_service_routes_unadjusted_daily_bars() -> None:
 
     assert result is router.result
     assert router.calls == [("daily_bars", request, expires_at)]
+
+
+@async_test
+async def test_service_routes_corporate_actions() -> None:
+    router = AcquisitionRouter()
+    service = acquisition_service(router)
+    expires_at = datetime.now(UTC) + timedelta(seconds=5)
+    request = CorporateActionRequest(
+        "600000.SH", date(2025, 1, 1), date(2025, 12, 31)
+    )
+
+    result = await service.corporate_actions(request, expires_at)
+
+    assert result is router.result
+    assert router.calls == [("corporate_actions", request, expires_at)]
 
 
 @async_test

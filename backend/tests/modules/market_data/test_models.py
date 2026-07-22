@@ -2,7 +2,52 @@ from sqlalchemy import CheckConstraint, Index, UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateTable
 
-from long_invest.modules.market_data.models import DataQualityIssue
+from long_invest.modules.market_data.models import (
+    CorporateActionFact,
+    CorporateActionFetchBatch,
+    DataQualityIssue,
+)
+
+
+def test_corporate_action_tables_preserve_batch_and_revision_evidence() -> None:
+    assert set(CorporateActionFetchBatch.__table__.columns.keys()) == {
+        "id",
+        "security_id",
+        "source",
+        "provider_contract_version",
+        "coverage_start",
+        "coverage_end",
+        "observed_at",
+        "fetched_at",
+        "status",
+        "row_count",
+        "content_hash",
+        "error_code",
+        "created_at",
+    }
+    assert set(CorporateActionFact.__table__.columns.keys()) == {
+        "id",
+        "batch_id",
+        "security_id",
+        "source",
+        "source_event_id",
+        "event_type",
+        "event_date",
+        "effective_date",
+        "published_at",
+        "observed_at",
+        "revision_no",
+        "adjustment_factor",
+        "source_reference",
+        "raw_content_hash",
+    }
+    unique_names = {
+        constraint.name
+        for constraint in CorporateActionFact.__table__.constraints
+        if isinstance(constraint, UniqueConstraint)
+    }
+    assert "uq_corporate_action_fact_source_event_revision" in unique_names
+    assert "uq_corporate_action_fact_source_event_content" in unique_names
 
 
 def test_data_quality_issue_has_required_persistence_fields() -> None:

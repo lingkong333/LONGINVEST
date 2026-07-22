@@ -9,7 +9,10 @@ from typing import Any
 
 import docker
 
-from long_invest.bootstrap.strategy_data import QfqStrategyDataPort
+from long_invest.bootstrap.strategy_data import (
+    PointInTimeBacktestDataPort,
+    QfqStrategyDataPort,
+)
 from long_invest.bootstrap.strategy_validation import (
     StrategyValidationEvidenceVerifier,
     StrategyValidationExecutor,
@@ -25,6 +28,9 @@ from long_invest.modules.backtests.contracts import (
 from long_invest.modules.backtests.engine import FixedTargetBacktestEngine
 from long_invest.modules.backtests.outbox import BacktestOutboxAdapter
 from long_invest.modules.backtests.signal_rule import BacktestProductionSignalRule
+from long_invest.modules.daily_data.application import get_daily_data_application
+from long_invest.modules.market_data.repository import CorporateActionRepository
+from long_invest.modules.market_data.service import CorporateActionService
 from long_invest.modules.monitoring.application import (
     transactional_monitor_subscription_port,
 )
@@ -129,7 +135,7 @@ class BacktestSnapshotResolver:
             hysteresis_ratio=Decimal("0.02"),
             minimum_hysteresis=Decimal("0.02"),
             initial_capital=request.initial_capital,
-            price_basis="QFQ_AS_OF",
+            price_basis=PointInTimeBacktestDataPort.price_basis,
             data_source="EASTMONEY",
         )
 
@@ -163,12 +169,12 @@ class BacktestStrategyResolver:
         )
 
 
-class UnavailableAdjustmentTimeline:
-    async def get_adjustment_timeline(self, **_: Any):
-        raise _error(
-            "ADJUSTMENT_DATA_UNAVAILABLE",
-            "point-in-time corporate action data is unavailable",
-        )
+class PersistentAdjustmentTimeline:
+    async def get_adjustment_timeline(self, **query: Any):
+        async with get_database().session() as session:
+            return await CorporateActionService(
+                CorporateActionRepository(session)
+            ).get_adjustment_timeline(**query)
 
 
 class LazyStrategyForecastService:
@@ -198,7 +204,9 @@ def build_backtest_application() -> BacktestApplication:
 
     database = get_database()
     strategies = get_strategy_application()
-    data = QfqStrategyDataPort(get_qfq_application())
+    data = PointInTimeBacktestDataPort(
+        get_qfq_application(), get_daily_data_application()
+    )
     rule = BacktestProductionSignalRule(ProductionPriceZoneRule())
     return BacktestApplication(
         database,
@@ -209,7 +217,7 @@ def build_backtest_application() -> BacktestApplication:
         training_data=data,
         test_data=data,
         forecasts=LazyStrategyForecastService(),
-        adjustments=UnavailableAdjustmentTimeline(),
+        adjustments=PersistentAdjustmentTimeline(),
         engine=FixedTargetBacktestEngine(rule, rule_version=rule.rule_version),
         event_factory=BacktestOutboxAdapter,
     )

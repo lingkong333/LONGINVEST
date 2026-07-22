@@ -64,11 +64,13 @@ EXPECTED_INDEXES = {
 }
 
 
-def test_strategy_backtest_migration_is_the_single_head() -> None:
+def test_strategy_backtest_migration_remains_on_the_single_main_chain() -> None:
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "alembic"))
 
-    assert ScriptDirectory.from_config(config).get_heads() == [REVISION]
+    scripts = ScriptDirectory.from_config(config)
+    assert scripts.get_heads() == ["20260722_0013"]
+    assert scripts.get_revision("20260722_0013").down_revision == REVISION
 
 
 def test_strategy_backtest_models_are_registered_with_alembic_metadata() -> None:

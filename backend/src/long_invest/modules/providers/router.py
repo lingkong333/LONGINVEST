@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Any
 
 from long_invest.modules.providers.contracts import (
+    CorporateActionRecord,
+    CorporateActionRequest,
     DailyBar,
     DailyBarRequest,
     MarketDataProvider,
@@ -113,6 +115,15 @@ class ProviderRouter:
             request.capability,
             deadline,
             lambda provider: provider.daily_bars(request, deadline),
+        )
+
+    async def corporate_actions(
+        self, request: CorporateActionRequest, deadline: datetime
+    ) -> ProviderBatchResult[CorporateActionRecord]:
+        return await self._single(
+            ProviderCapability.CORPORATE_ACTIONS,
+            deadline,
+            lambda provider: provider.corporate_actions(request, deadline),
         )
 
     async def security_master(self, deadline: datetime):

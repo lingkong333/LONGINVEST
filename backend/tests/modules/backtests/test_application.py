@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from contextlib import asynccontextmanager
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -22,6 +22,7 @@ from long_invest.modules.backtests.contracts import (
 from long_invest.modules.backtests.engine import FixedTargetBacktestEngine
 from long_invest.modules.backtests.service import BacktestExecutionState
 from long_invest.modules.backtests.signal_rule import BacktestProductionSignalRule
+from long_invest.modules.market_data.contracts import AdjustmentTimelineSnapshot
 from long_invest.modules.signals.rules import ProductionPriceZoneRule
 from long_invest.modules.strategies.contracts import (
     StrategyForecastResult,
@@ -92,6 +93,10 @@ class FakeService:
 
     async def claim_simulation(self, _task_id, _test_data, **_kwargs):
         self.calls.append("claim_simulation")
+
+    async def freeze_adjustment_snapshot(self, _task_id, timeline, **_kwargs):
+        self.calls.append("freeze_adjustment_snapshot")
+        return timeline
 
     async def save_success(self, _task_id, _test_data, result, **_kwargs):
         self.calls.append("save_success")
@@ -237,7 +242,11 @@ def test_forecast_race_loser_reuses_the_frozen_forecast() -> None:
             training_data=DataPort(training, "load_training", order),
             test_data=DataPort(test, "load_test", order),
             forecasts=forecasts,
-            adjustments=SimpleNamespace(get_adjustment_timeline=_async_value(())),
+            adjustments=SimpleNamespace(
+                get_adjustment_timeline=_async_value(
+                    _timeline(security_id, task, test)
+                )
+            ),
             engine=FixedTargetBacktestEngine(
                 BacktestProductionSignalRule(ProductionPriceZoneRule()),
                 rule_version=BacktestProductionSignalRule.rule_version,
@@ -282,7 +291,7 @@ async def _run_holdout_workflow() -> None:
         test_data=DataPort(test, "load_test", order),
         forecasts=forecasts,
         adjustments=SimpleNamespace(
-            get_adjustment_timeline=_async_value(())
+            get_adjustment_timeline=_async_value(_timeline(security_id, task, test))
         ),
         engine=engine,
         repository_factory=lambda session: session,
@@ -306,6 +315,7 @@ async def _run_holdout_workflow() -> None:
         "claim_forecast",
         "freeze_forecast",
         "claim_simulation",
+        "freeze_adjustment_snapshot",
         "save_success",
     ]
     assert service.saved_result.daily_results[0].trade_date == date(2025, 12, 31)
@@ -390,6 +400,22 @@ def _forecast(task, item_id, training):
         runner_image_digest=task.runner_image_digest,
         price_basis=training.price_basis,
         frozen_at=datetime(2026, 7, 21, tzinfo=UTC),
+    )
+
+
+def _timeline(security_id, task, test):
+    return AdjustmentTimelineSnapshot(
+        snapshot_id=uuid4(),
+        security_id=security_id,
+        start_date=task.date_range.training_end_date + timedelta(days=1),
+        end_date=task.date_range.test_end_date,
+        as_of=test.fetched_at,
+        source="EASTMONEY",
+        provider_contract_version="corporate-actions-v1",
+        fetched_at=test.fetched_at,
+        row_count=0,
+        content_hash="a" * 64,
+        entries=(),
     )
 
 

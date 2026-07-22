@@ -210,6 +210,12 @@ class StaticProviderConfiguration:
                     ProviderCapability.HISTORICAL_DAILY_QFQ,
                 ),
             ),
+            ProviderCapability.CORPORATE_ACTIONS: (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY,
+                    ProviderCapability.CORPORATE_ACTIONS,
+                ),
+            ),
         }
 
     async def routes(

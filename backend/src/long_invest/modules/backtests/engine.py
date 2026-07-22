@@ -104,16 +104,32 @@ class FixedTargetBacktestEngine:
         trades: list[BacktestTradeView] = []
         daily: list[BacktestDailyResultView] = []
         recorded_adjustments: list[BacktestTargetAdjustmentView] = []
-        adjustment_by_date = {entry.effective_date: entry for entry in adjustments}
+        ordered_adjustments = sorted(
+            adjustments,
+            key=lambda entry: (
+                entry.effective_date,
+                entry.event_date,
+                entry.published_at,
+                entry.source,
+                entry.data_hash,
+            ),
+        )
+        adjustment_index = 0
         peak_equity = position.cash
 
         for index, bar in enumerate(bars):
-            entry = adjustment_by_date.get(bar.trade_date)
-            if entry is not None:
+            while (
+                adjustment_index < len(ordered_adjustments)
+                and ordered_adjustments[adjustment_index].effective_date
+                <= bar.trade_date
+            ):
+                entry = ordered_adjustments[adjustment_index]
                 current_targets, recorded = _adjust_targets(
                     item_id, current_targets, entry
                 )
+                pending = _adjust_open_position(position, pending, entry)
                 recorded_adjustments.append(recorded)
+                adjustment_index += 1
 
             if pending is not None:
                 pending, trade = _fill_order(pending, bar, index, position)
@@ -215,6 +231,24 @@ def _adjust_targets(
         published_at=entry.published_at,
         effective_at=effective_at,
     )
+
+
+def _adjust_open_position(
+    position: _Position,
+    pending: BacktestOrderView | None,
+    entry: AdjustmentTimelineEntry,
+) -> BacktestOrderView | None:
+    if position.status is BacktestPositionStatus.FLAT:
+        return pending
+    if position.entry_price is None:
+        raise ValueError("open position requires an entry price")
+    position.quantity = (position.quantity / entry.adjustment_factor).quantize(
+        _QUANTITY, rounding=ROUND_DOWN
+    )
+    position.entry_price *= entry.adjustment_factor
+    if pending is not None and pending.direction is BacktestOrderDirection.SELL:
+        return pending.model_copy(update={"position_before": position.quantity})
+    return pending
 
 
 def _new_order(

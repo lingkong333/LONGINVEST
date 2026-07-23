@@ -88,24 +88,6 @@ class SecurityMasterService:
         if replay is not None:
             return replay
 
-        version_record = SecurityMasterVersion(
-            source=snapshot.source,
-            source_version=snapshot.source_version,
-            idempotency_key=snapshot.idempotency_key,
-            content_hash=content_hash,
-            master_version=await self._repository.current_master_version() + 1,
-            item_count=len(snapshot.items),
-        )
-        claim = getattr(self._repository, "claim_master_import", None)
-        if claim is None:
-            self._repository.add_master_import(version_record)
-            await self._repository.flush()
-            claimed, created = version_record, True
-        else:
-            claimed, created = await claim(version_record)
-        if not created:
-            return _resolve_existing(claimed, content_hash)
-
         existing = {
             security.symbol: security
             for security in await self._repository.list_all_for_update()
@@ -114,7 +96,7 @@ class SecurityMasterService:
         updated_count = 0
         unchanged_count = 0
         revision_count = 0
-        master_version = version_record.master_version
+        master_version = await self._repository.current_master_version() + 1
 
         for incoming in snapshot.items:
             current = existing.get(incoming.symbol)
@@ -181,7 +163,26 @@ class SecurityMasterService:
             unchanged_count=unchanged_count,
             revision_count=revision_count,
         )
-        version_record.result_summary = asdict(result)
+        version_record = SecurityMasterVersion(
+            source=snapshot.source,
+            source_version=snapshot.source_version,
+            idempotency_key=snapshot.idempotency_key,
+            content_hash=content_hash,
+            master_version=master_version,
+            item_count=len(snapshot.items),
+            result_summary=asdict(result),
+        )
+        claim = getattr(self._repository, "claim_master_import", None)
+        if claim is None:
+            self._repository.add_master_import(version_record)
+        else:
+            _claimed, created = await claim(version_record)
+            if not created:
+                raise AppError(
+                    code="SECURITY_MASTER_VERSION_CONFLICT",
+                    message="股票主数据版本并发冲突，请重试",
+                    status_code=409,
+                )
         await audit.record(
             SecurityMasterAuditEvent(
                 context=audit_context,

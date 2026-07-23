@@ -203,6 +203,16 @@ async def test_first_snapshot_creates_securities_and_emits_one_update_event() ->
     assert event.master_version == 1
     assert session.audit_events[0].master_version == 1
     assert repository.master_lock_count == 1
+    stored_version = repository.imports_by_key["refresh-1"]
+    assert stored_version.result_summary == {
+        "master_version": 1,
+        "total_count": 1,
+        "created_count": 1,
+        "updated_count": 0,
+        "unchanged_count": 0,
+        "revision_count": 0,
+        "replayed": False,
+    }
     session.commit.assert_not_awaited()
 
 

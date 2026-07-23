@@ -377,7 +377,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           <h1 className="text-2xl font-semibold">行情数据中心</h1>
         </div>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <ShieldCheckIcon className="size-4 text-emerald-700" aria-hidden="true" />
+          <ShieldCheckIcon className="size-4 text-primary" aria-hidden="true" />
           价格仅由数据源采集，不支持人工录入
         </div>
       </header>
@@ -428,7 +428,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                         <strong className="font-medium">{item.symbol}</strong>
                         <span className="ml-2 text-muted-foreground">{item.name}</span>
                         {item.isSt || item.isSuspended ? (
-                          <AlertTriangleIcon className="ml-2 inline size-3.5 text-amber-700" aria-label="存在特别状态" />
+                          <AlertTriangleIcon className="ml-2 inline size-3.5 text-destructive" aria-label="存在特别状态" />
                         ) : null}
                       </TableCell>
                       <TableCell>{item.market}</TableCell>

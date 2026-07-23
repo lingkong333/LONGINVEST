@@ -10,7 +10,7 @@ export function ProtectedRoute() {
 
   if (auth.phase === "bootstrapping") {
     return (
-      <main className="auth-state-page">
+      <main className="grid min-h-screen place-items-center p-4">
         <PageState
           state="loading"
           title="正在确认登录状态"
@@ -22,7 +22,7 @@ export function ProtectedRoute() {
 
   if (auth.phase === "unavailable") {
     return (
-      <main className="auth-state-page">
+      <main className="grid min-h-screen place-items-center p-4">
         <PageState
           state="error"
           title="认证服务暂不可用"

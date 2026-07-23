@@ -548,7 +548,7 @@ function EvaluationsSection({
                   <TableCell className="text-xs text-muted-foreground">
                     {item.skip_code ? <span className="block">跳过原因：{item.skip_code}</span> : null}
                     {item.hysteresis_applied ? <span className="block">已应用区间缓冲</span> : null}
-                    {item.used_stale_target ? <span className="block text-amber-700">使用了待更新目标</span> : null}
+                    {item.used_stale_target ? <span className="block text-destructive">使用了待更新目标</span> : null}
                     {!item.skip_code && !item.hysteresis_applied && !item.used_stale_target ? "无" : null}
                   </TableCell>
                 </TableRow>
@@ -609,7 +609,7 @@ export function SignalsPage({
       <header className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
         <div>
           <p className="mb-1 flex items-center gap-2 text-xs font-semibold text-muted-foreground">
-            <CheckCircle2 className="size-4 text-emerald-600" aria-hidden="true" />
+            <CheckCircle2 className="size-4 text-primary" aria-hidden="true" />
             价格区间判断
           </p>
           <h1 className="text-2xl font-semibold">信号中心</h1>

@@ -3,7 +3,6 @@ import {
   Activity,
   Archive,
   BriefcaseBusiness,
-  CircleAlert,
   FlaskConical,
   Power,
   PowerOff,
@@ -44,6 +43,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/shared/ui/empty"
+import { PageState } from "@/shared/ui/page-state"
+import { Skeleton } from "@/shared/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group"
 
 type MonitorFilter = "全部" | "已启用" | "持仓" | "需关注"
@@ -157,12 +158,16 @@ function formatShanghaiTime(value: string | null) {
 
 function MonitoringSkeleton() {
   return (
-    <main className="monitoring-page" aria-label="监控列表加载中">
-      <div className="monitoring-skeleton">
-        <span />
-        <span />
-        <span />
-        <span />
+    <main className="mx-auto w-full max-w-7xl space-y-4 p-4 sm:p-6" aria-label="监控列表加载中">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {Array.from({ length: 4 }, (_, index) => (
+          <Card key={index}>
+            <CardContent className="space-y-2 py-4">
+              <Skeleton className="h-7 w-16" />
+              <Skeleton className="h-4 w-24" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </main>
   )
@@ -259,18 +264,17 @@ export function MonitoringPage({
       ? overviewQuery.error.code
       : "MONITORING_UNAVAILABLE"
     return (
-      <main className="monitoring-page monitoring-page--error">
-        <CircleAlert aria-hidden="true" />
-        <strong>监控列表暂时无法读取</strong>
-        <code>{code}</code>
-        <Button
-          variant="outline"
-          aria-label="重新加载监控列表"
-          onClick={() => void overviewQuery.refetch()}
-        >
-          <RefreshCw aria-hidden="true" />
-          重试
-        </Button>
+      <main className="mx-auto grid min-h-[60vh] w-full max-w-7xl place-items-center p-4 sm:p-6">
+        <PageState
+          state="error"
+          title="监控列表暂时无法读取"
+          description="其他功能不受影响。"
+          error={{ code }}
+          action={{
+            label: "重新加载监控列表",
+            onClick: () => void overviewQuery.refetch(),
+          }}
+        />
       </main>
     )
   }
@@ -300,13 +304,15 @@ export function MonitoringPage({
   }
 
   return (
-    <main className="monitoring-page">
-      <header className="monitoring-header">
-        <div>
-          <span className="monitoring-header__mark"><Radar aria-hidden="true" /></span>
+    <main className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
+      <header className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <span className="flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <Radar aria-hidden="true" />
+          </span>
           <div>
-            <p>实时监控</p>
-            <h1>监控列表</h1>
+            <p className="text-sm text-muted-foreground">实时监控</p>
+            <h1 className="text-2xl font-semibold">监控列表</h1>
           </div>
         </div>
         <Button
@@ -320,46 +326,43 @@ export function MonitoringPage({
         </Button>
       </header>
 
-      <section className="monitoring-summary" aria-label="监控概况">
-        <Card><CardContent><strong>{overview.items.length}</strong><span>全部股票</span></CardContent></Card>
-        <Card><CardContent><strong>{enabledCount}</strong><span>已启用</span></CardContent></Card>
-        <Card><CardContent><strong>{holdingCount}</strong><span>当前持仓</span></CardContent></Card>
-        <Card className={attentionCount > 0 ? "is-attention" : ""}>
-          <CardContent><strong>{attentionCount}</strong><span>需要关注</span></CardContent>
+      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="监控概况">
+        <Card><CardContent className="py-4"><strong className="block text-2xl">{overview.items.length}</strong><span className="text-sm text-muted-foreground">全部股票</span></CardContent></Card>
+        <Card><CardContent className="py-4"><strong className="block text-2xl">{enabledCount}</strong><span className="text-sm text-muted-foreground">已启用</span></CardContent></Card>
+        <Card><CardContent className="py-4"><strong className="block text-2xl">{holdingCount}</strong><span className="text-sm text-muted-foreground">当前持仓</span></CardContent></Card>
+        <Card className={attentionCount > 0 ? "border-destructive/60" : undefined}>
+          <CardContent className="py-4"><strong className="block text-2xl">{attentionCount}</strong><span className="text-sm text-muted-foreground">需要关注</span></CardContent>
         </Card>
       </section>
 
       {overview.warningCodes.length > 0 ? (
-        <Alert className="monitoring-warning">
+        <Alert>
           <TriangleAlert aria-hidden="true" />
-          <AlertDescription>
+          <AlertDescription className="flex flex-wrap justify-between gap-2">
             <span>部分辅助数据暂不可用，股票订阅仍可正常查看。</span>
-            <code>{overview.warningCodes.join(" · ")}</code>
+            <code className="text-xs">{overview.warningCodes.join(" · ")}</code>
           </AlertDescription>
         </Alert>
       ) : null}
 
-      <section className="monitoring-toolbar" aria-label="监控筛选">
-        <ToggleGroup
-          className="monitoring-filters"
-          type="single"
-          variant="outline"
-          value={filter}
-          onValueChange={(value) => {
-            if (value) setFilter(value as MonitorFilter)
-          }}
-        >
-          {(["全部", "已启用", "持仓", "需关注"] as const).map((option) => (
-            <ToggleGroupItem
-              key={option}
-              value={option}
-            >
-              {option}
-            </ToggleGroupItem>
-          ))}
-        </ToggleGroup>
-        <div className="monitoring-selects">
-          <label>
+      <Card aria-label="监控筛选">
+        <CardContent className="flex flex-wrap items-center gap-3 py-4">
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            value={filter}
+            onValueChange={(value) => {
+              if (value) setFilter(value as MonitorFilter)
+            }}
+          >
+            {(["全部", "已启用", "持仓", "需关注"] as const).map((option) => (
+              <ToggleGroupItem key={option} value={option}>
+                {option}
+              </ToggleGroupItem>
+            ))}
+          </ToggleGroup>
+          <div className="grid flex-1 gap-2 sm:grid-cols-3">
+            <label>
             <span className="sr-only">按分组筛选</span>
             <NativeSelect
               aria-label="按分组筛选"
@@ -371,8 +374,8 @@ export function MonitoringPage({
                 <NativeSelectOption value={group} key={group}>{group}</NativeSelectOption>
               ))}
             </NativeSelect>
-          </label>
-          <label>
+            </label>
+            <label>
             <span className="sr-only">按目标模式筛选</span>
             <NativeSelect
               aria-label="按目标模式筛选"
@@ -383,8 +386,8 @@ export function MonitoringPage({
               <NativeSelectOption value="MANUAL">手工目标</NativeSelectOption>
               <NativeSelectOption value="STRATEGY">策略目标</NativeSelectOption>
             </NativeSelect>
-          </label>
-          <label>
+            </label>
+            <label>
             <span className="sr-only">按价格区间筛选</span>
             <NativeSelect
               aria-label="按价格区间筛选"
@@ -396,21 +399,23 @@ export function MonitoringPage({
                 <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
               ))}
             </NativeSelect>
+            </label>
+          </div>
+          <label className="relative min-w-60 flex-1">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+            <span className="sr-only">搜索股票、名称或分组</span>
+            <Input
+              className="pl-9"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="搜索股票、名称或分组"
+            />
           </label>
-        </div>
-        <label className="monitoring-search">
-          <Search aria-hidden="true" />
-          <span className="sr-only">搜索股票、名称或分组</span>
-          <Input
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            placeholder="搜索股票、名称或分组"
-          />
-        </label>
-      </section>
+        </CardContent>
+      </Card>
 
       {overview.items.length === 0 ? (
-        <Empty className="monitoring-empty">
+        <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon"><Radar aria-hidden="true" /></EmptyMedia>
             <EmptyTitle>还没有监控股票</EmptyTitle>
@@ -418,7 +423,7 @@ export function MonitoringPage({
           </EmptyHeader>
         </Empty>
       ) : visibleItems.length === 0 ? (
-        <Empty className="monitoring-empty">
+        <Empty>
           <EmptyHeader>
             <EmptyMedia variant="icon"><Search aria-hidden="true" /></EmptyMedia>
             <EmptyTitle>没有符合条件的股票</EmptyTitle>
@@ -426,8 +431,8 @@ export function MonitoringPage({
           </EmptyHeader>
         </Empty>
       ) : (
-        <section className="monitoring-list" aria-label="监控股票">
-          <div className="monitoring-list__head" aria-hidden="true">
+        <section className="space-y-3" aria-label="监控股票">
+          <div className="hidden grid-cols-[1.2fr_1fr_1fr_1.2fr_1fr_1.4fr] gap-4 px-6 text-xs font-medium text-muted-foreground xl:grid" aria-hidden="true">
             <span>股票</span>
             <span>分组</span>
             <span>状态</span>
@@ -436,38 +441,38 @@ export function MonitoringPage({
             <span>操作</span>
           </div>
           {visibleItems.map((item) => (
-            <Card className="monitoring-row" key={item.subscriptionId}>
-              <CardContent className="contents">
-              <div className="monitoring-stock">
+            <Card className="relative" key={item.subscriptionId}>
+              <CardContent className="grid gap-4 py-4 sm:grid-cols-2 xl:grid-cols-[1.2fr_1fr_1fr_1.2fr_1fr_1.4fr] xl:items-center">
+              <div className="flex flex-col">
                 <strong>{item.securityName ?? "名称暂缺"}</strong>
-                <code>{item.symbol}</code>
+                <code className="text-xs text-muted-foreground">{item.symbol}</code>
               </div>
-              <div className="monitoring-groups">
+              <div className="flex flex-wrap gap-1">
                 {item.groups.length > 0
                   ? item.groups.map((group) => <Badge variant="secondary" key={group}>{group}</Badge>)
                   : <Badge variant="outline">未分组</Badge>}
               </div>
-              <div className="monitoring-state">
-                <Badge variant="outline" className={`status-dot status-dot--${item.subscriptionStatus.toLowerCase()}`}>
+              <div className="flex flex-col items-start gap-1">
+                <Badge variant={item.subscriptionStatus === "ENABLED" ? "default" : "outline"}>
                   {translated(subscriptionLabels, item.subscriptionStatus)}
                 </Badge>
                 {item.isHolding ? (
-                  <span><BriefcaseBusiness aria-hidden="true" />持仓</span>
-                ) : <span>未持仓</span>}
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground"><BriefcaseBusiness className="size-3.5" aria-hidden="true" />持仓</span>
+                ) : <span className="text-xs text-muted-foreground">未持仓</span>}
               </div>
-              <div className="monitoring-config">
+              <div className="flex flex-col text-sm">
                 <span>{item.scheduleName ?? "未设置调度"}</span>
                 <span>{translated(targetModeLabels, item.targetMode)}</span>
-                <small>{translated(targetLabels, item.targetStatus)}</small>
+                <small className="text-muted-foreground">{translated(targetLabels, item.targetStatus)}</small>
               </div>
-              <div className="monitoring-price">
+              <div className="flex flex-col">
                 <strong>{item.lastPrice ? `¥ ${item.lastPrice}` : "暂无价格"}</strong>
-                <span>{translated(zoneLabels, item.zone)}</span>
-                <time dateTime={item.lastPriceAt ?? undefined}>
+                <span className="text-sm">{translated(zoneLabels, item.zone)}</span>
+                <time className="text-xs text-muted-foreground" dateTime={item.lastPriceAt ?? undefined}>
                   {formatShanghaiTime(item.lastPriceAt)}
                 </time>
               </div>
-              <div className="monitoring-actions">
+              <div className="flex flex-wrap gap-2">
                 {item.allowedActions
                   .filter((action) => action !== "RESTORE")
                   .map((action) => (
@@ -485,7 +490,7 @@ export function MonitoringPage({
               </div>
               {item.warningCodes.length > 0 ? (
                 <TriangleAlert
-                  className="monitoring-row__warning"
+                  className="absolute right-3 top-3 size-4 text-destructive"
                   aria-label="该股票部分数据暂不可用"
                 />
               ) : null}
@@ -525,7 +530,7 @@ export function MonitoringPage({
               ? actionCopy[pendingAction.action].description
               : "请确认本次监控操作。"}
           </DialogDescription>
-          <label className="monitoring-action-reason">
+          <label className="grid gap-2 text-sm font-medium">
             <span>操作原因</span>
             <Input
               value={reason}
@@ -536,13 +541,13 @@ export function MonitoringPage({
             />
           </label>
           {actionMutation.isError ? (
-            <p className="monitoring-action-error" role="alert">
+            <p className="text-sm text-destructive" role="alert">
               {actionMutation.error instanceof Error
                 ? actionMutation.error.message
                 : "操作失败，请刷新订阅状态后重试。"}
             </p>
           ) : null}
-          <div className="monitoring-action-footer">
+          <div className="flex justify-end gap-2">
             <Button
               type="button"
               variant="outline"

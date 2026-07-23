@@ -380,7 +380,7 @@ export function PositionsPage({
                                 <span className="text-muted-foreground">已加入监控</span>
                               ) : item.isMonitored === false && item.status === "HOLDING" ? (
                                 <div>
-                                  <span className="block font-medium text-amber-800">已持仓 · 未监控</span>
+                                  <span className="block font-medium text-destructive">已持仓 · 未监控</span>
                                   <a
                                     className="mt-1 inline-block text-xs font-medium text-primary underline-offset-4 hover:underline"
                                     href={`/monitoring?symbol=${encodeURIComponent(item.symbol)}`}

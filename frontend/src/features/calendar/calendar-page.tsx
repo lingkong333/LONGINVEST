@@ -234,10 +234,10 @@ export function CalendarPage({
   const today = dateText(new Date())
 
   return (
-    <main className="workspace-page">
-      <header className="workspace-page__header">
+    <main className="space-y-6">
+      <header className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <p className="workspace-page__eyebrow">运行基准</p>
+          <p className="text-sm font-medium text-muted-foreground">运行基准</p>
           <h1>交易日历</h1>
           <p>查看正式交易日、特殊时段和不可变版本，所有自动任务以这里为准。</p>
         </div>
@@ -618,7 +618,7 @@ function OverrideDialog({
             设为休市日
           </Button>
         </div>
-        <p className="border-l-2 border-amber-500 pl-3 text-sm text-muted-foreground">
+        <p className="border-l-2 border-primary pl-3 text-sm text-muted-foreground">
           {isPast
             ? "该日期已经过去：系统不会补跑错过的任务，只会保留历史并记录修正。"
             : isTradingDay

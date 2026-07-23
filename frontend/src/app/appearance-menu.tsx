@@ -19,6 +19,7 @@ import {
 import {
   Tooltip,
   TooltipContent,
+  TooltipProvider,
   TooltipTrigger,
 } from "@/shared/ui/tooltip"
 
@@ -38,7 +39,8 @@ export function AppearanceMenu() {
   const isDark = theme === "dark"
 
   return (
-    <div className="flex items-center gap-1">
+    <TooltipProvider>
+      <div className="flex items-center gap-1">
       <DropdownMenu>
         <Tooltip>
           <TooltipTrigger asChild>
@@ -92,6 +94,7 @@ export function AppearanceMenu() {
         </TooltipTrigger>
         <TooltipContent>{isDark ? "切换亮色模式" : "切换暗色模式"}</TooltipContent>
       </Tooltip>
-    </div>
+      </div>
+    </TooltipProvider>
   )
 }

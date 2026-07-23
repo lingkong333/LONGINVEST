@@ -203,7 +203,7 @@ function EventsView({
                 <TableCell><span className="block">{event.businessObjectType}</span><span className="mt-1 block max-w-56 truncate font-mono text-xs text-muted-foreground">{event.businessObjectId}</span></TableCell>
                 <TableCell>
                   <span>{statusLabels[event.eligibilityStatus] ?? event.eligibilityStatus}</span>
-                  {event.suppressionReason ? <span className="mt-1 block text-xs text-amber-800">{event.suppressionReason}</span> : null}
+                  {event.suppressionReason ? <span className="mt-1 block text-xs text-destructive">{event.suppressionReason}</span> : null}
                 </TableCell>
                 <TableCell>{event.effectiveChannels.length > 0 ? event.effectiveChannels.map((channel) => channelLabels[channel]).join("、") : "仅网页"}</TableCell>
                 <TableCell><StatusBadge status={event.status} /></TableCell>
@@ -624,7 +624,7 @@ function TemplatesView({ gateway, onUnauthorized }: { gateway: NotificationGatew
             <div className="space-y-2">
               {templates.map((template) => (
                 <div key={template.version} className="flex flex-wrap items-center justify-between gap-3 border-b px-3 py-2 text-sm last:border-b-0">
-                  <div className="flex items-center gap-3"><span className="font-mono">{template.version}</span>{template.active ? <span className="flex items-center gap-1 text-emerald-700"><CheckCircle2 className="size-4" />当前启用</span> : <span className="text-muted-foreground">{formatTime(template.createdAt)}</span>}</div>
+                  <div className="flex items-center gap-3"><span className="font-mono">{template.version}</span>{template.active ? <span className="flex items-center gap-1 text-primary"><CheckCircle2 className="size-4" />当前启用</span> : <span className="text-muted-foreground">{formatTime(template.createdAt)}</span>}</div>
                   <div className="flex gap-2"><Button size="sm" variant="outline" disabled={!hasAction(template.allowedActions, "PREVIEW")} onClick={() => setOperation({ kind: "preview", template })}><FileText />预览</Button><Button size="sm" disabled={template.active || !hasAction(template.allowedActions, "ACTIVATE")} onClick={() => setOperation({ kind: "activate", template })}><RotateCcw />{template.active ? "已启用" : "启用此版本"}</Button></div>
                 </div>
               ))}

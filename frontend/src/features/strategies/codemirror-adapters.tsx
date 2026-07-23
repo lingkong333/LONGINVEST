@@ -35,11 +35,11 @@ export function StrategyDiffViewer({
 }: DiffViewerProps) {
   return (
     <div className="grid gap-3" aria-label={`${originalLabel} 与 ${modifiedLabel}差异`}>
-      <div className="grid grid-cols-2 gap-3 text-xs font-medium text-slate-500">
+      <div className="grid grid-cols-2 gap-3 text-xs font-medium text-muted-foreground">
         <span>{originalLabel}</span>
         <span>{modifiedLabel}</span>
       </div>
-      <CodeMirrorMerge orientation="a-b" className="overflow-hidden rounded-md border border-slate-200">
+      <CodeMirrorMerge orientation="a-b" className="overflow-hidden rounded-md border">
         <Original value={original} extensions={[python()]} readOnly editable={false} />
         <Modified value={modified} extensions={[python()]} readOnly editable={false} />
       </CodeMirrorMerge>

@@ -4,10 +4,18 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import { z } from "zod"
 
 import { useAuth } from "@/features/auth/auth-context"
+import { AppearanceMenu } from "@/app/appearance-menu"
 import { toErrorDiagnostic } from "@/shared/errors/error-diagnostic"
 import { useZodForm } from "@/shared/forms/use-zod-form"
 import { Alert, AlertDescription } from "@/shared/ui/alert"
 import { Button } from "@/shared/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/shared/ui/card"
 import { FormField } from "@/shared/ui/form-field"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
@@ -32,7 +40,7 @@ export function LoginPage() {
 
   if (auth.phase === "bootstrapping") {
     return (
-      <main className="auth-state-page">
+      <main className="grid min-h-screen place-items-center p-4">
         <PageState
           state="loading"
           title="正在确认登录状态"
@@ -44,7 +52,7 @@ export function LoginPage() {
 
   if (auth.phase === "unavailable") {
     return (
-      <main className="auth-state-page">
+      <main className="grid min-h-screen place-items-center p-4">
         <PageState
           state="error"
           title="认证服务暂不可用"
@@ -74,35 +82,29 @@ export function LoginPage() {
   })
 
   return (
-    <main className="login-page">
-      <section className="login-visual" aria-hidden="true">
-        <div className="login-visual__orbit">
-          <CandlestickChart />
-          <i />
-          <i />
-          <i />
-        </div>
-        <div className="login-visual__bars">
-          {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
-        </div>
-      </section>
-
-      <section className="login-panel" aria-labelledby="login-title">
-        <div className="login-panel__inner">
-          <div className="login-brand">
-            <span className="login-brand__mark"><CandlestickChart aria-hidden="true" /></span>
-            <span>LONGINVEST</span>
+    <main className="relative grid min-h-screen place-items-center p-4">
+      <div className="absolute right-4 top-4">
+        <AppearanceMenu />
+      </div>
+      <Card className="w-full max-w-sm" aria-labelledby="login-title">
+        <CardHeader>
+          <div className="mb-2 flex size-10 items-center justify-center rounded-md bg-primary text-primary-foreground">
+            <CandlestickChart aria-hidden="true" />
           </div>
-          <h1 id="login-title" className="sr-only">登录工作台</h1>
-
-          <form onSubmit={submit} className="login-form" noValidate>
+          <CardTitle>
+            <h1 id="login-title">登录工作台</h1>
+          </CardTitle>
+          <CardDescription>LONGINVEST</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="grid gap-4" noValidate>
             <FormField control={form.control} name="username" label="用户名">
               {({ field }) => (
                 <Input
                   {...field}
                   autoComplete="username"
                   autoFocus
-              placeholder="用户名"
+                  placeholder="用户名"
                 />
               )}
             </FormField>
@@ -112,7 +114,7 @@ export function LoginPage() {
                   {...field}
                   type="password"
                   autoComplete="current-password"
-              placeholder="密码"
+                  placeholder="密码"
                 />
               )}
             </FormField>
@@ -129,12 +131,12 @@ export function LoginPage() {
               disabled={auth.isSubmitting}
               aria-label={auth.isSubmitting ? "正在登录" : "登录"}
             >
-            <span>{auth.isSubmitting ? "登录中" : "登录"}</span>
+              <span>{auth.isSubmitting ? "登录中" : "登录"}</span>
               <ArrowRight aria-hidden="true" />
             </Button>
           </form>
-        </div>
-      </section>
+        </CardContent>
+      </Card>
     </main>
   )
 }

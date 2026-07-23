@@ -26,7 +26,15 @@ import type {
 import { ApiError } from "@/shared/api/client"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
-import { Card, CardContent } from "@/shared/ui/card"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/shared/ui/card"
+import { PageState } from "@/shared/ui/page-state"
+import { Skeleton } from "@/shared/ui/skeleton"
 
 interface MetricDefinition {
   section: keyof DashboardSummary["sections"]
@@ -83,9 +91,19 @@ function statusTone(status: DashboardSection["status"]) {
 
 function DashboardSkeleton() {
   return (
-    <main className="dashboard-page" aria-label="仪表盘加载中">
-      <div className="dashboard-loading">
-        {metrics.map(({ section }) => <span key={section} />)}
+    <main className="mx-auto w-full max-w-7xl p-4 sm:p-6" aria-label="仪表盘加载中">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+        {metrics.map(({ section }) => (
+          <Card key={section}>
+            <CardHeader>
+              <Skeleton className="size-9" />
+              <Skeleton className="h-4 w-24" />
+            </CardHeader>
+            <CardContent>
+              <Skeleton className="h-9 w-20" />
+            </CardContent>
+          </Card>
+        ))}
       </div>
     </main>
   )
@@ -118,17 +136,17 @@ export function DashboardPage({
       ? summaryQuery.error.code
       : "DASHBOARD_UNAVAILABLE"
     return (
-      <main className="dashboard-page dashboard-page--error">
-        <CircleAlert aria-hidden="true" />
-        <code>{code}</code>
-        <Button
-          variant="outline"
-          size="icon"
-          aria-label="重试仪表盘"
-          onClick={() => void summaryQuery.refetch()}
-        >
-          <RefreshCw aria-hidden="true" />
-        </Button>
+      <main className="mx-auto grid min-h-[60vh] w-full max-w-7xl place-items-center p-4 sm:p-6">
+        <PageState
+          state="error"
+          title="仪表盘暂时无法读取"
+          description="其他页面仍可继续使用。"
+          error={{ code }}
+          action={{
+            label: "重试仪表盘",
+            onClick: () => void summaryQuery.refetch(),
+          }}
+        />
       </main>
     )
   }
@@ -143,44 +161,56 @@ export function DashboardPage({
   }).format(new Date(summary.generated_at))
 
   return (
-    <main className="dashboard-page">
-      <header className="dashboard-header">
+    <main className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
         <Badge
           variant={summary.status === "UNHEALTHY" ? "destructive" : "secondary"}
-          className={`dashboard-health dashboard-health--${summary.status.toLowerCase()}`}
         >
-          <span aria-hidden="true" />
-          <strong>{healthLabels[summary.status]}</strong>
+          {healthLabels[summary.status]}
         </Badge>
-        <time dateTime={summary.generated_at}>{generatedAt} 上海时间</time>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label="刷新仪表盘"
-          onClick={() => void summaryQuery.refetch()}
-          disabled={summaryQuery.isFetching}
-        >
-          <RefreshCw aria-hidden="true" />
-        </Button>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <time dateTime={summary.generated_at}>{generatedAt} 上海时间</time>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="刷新仪表盘"
+            onClick={() => void summaryQuery.refetch()}
+            disabled={summaryQuery.isFetching}
+          >
+            <RefreshCw aria-hidden="true" />
+          </Button>
+        </div>
       </header>
 
-      <section className="dashboard-metrics" aria-label="系统实时指标">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="系统实时指标">
         {metrics.map(({ section, field, label, icon: Icon }) => {
           const snapshot = summary.sections[section]
           const value = metricValue(snapshot, field)
           const tone = statusTone(snapshot.status)
           return (
             <Card
-              className={`metric-card metric-card--${tone}`}
+              className={
+                tone === "danger"
+                  ? "border-destructive/60"
+                  : tone === "warning"
+                    ? "border-primary/60"
+                    : undefined
+              }
               key={`${section}-${field}`}
               aria-label={`${label}：${value ?? "无数据"}，状态${sectionStatusLabels[snapshot.status]}`}
               title={snapshot.error ?? label}
             >
-              <CardContent className="contents">
-              <div className="metric-card__icon"><Icon aria-hidden="true" /></div>
-              <strong>{value ?? "—"}</strong>
-              <span>{label}</span>
-              <i aria-hidden="true" />
+              <CardHeader className="flex-row items-start justify-between">
+                <div className="rounded-md bg-muted p-2">
+                  <Icon className="size-5" aria-hidden="true" />
+                </div>
+                <Badge variant={tone === "danger" ? "destructive" : "outline"}>
+                  {sectionStatusLabels[snapshot.status]}
+                </Badge>
+              </CardHeader>
+              <CardContent>
+                <CardTitle className="text-3xl">{value ?? "—"}</CardTitle>
+                <CardDescription className="mt-1">{label}</CardDescription>
               </CardContent>
             </Card>
           )

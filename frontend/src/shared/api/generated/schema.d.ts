@@ -7415,6 +7415,11 @@ export interface components {
             data: components["schemas"]["StrategyVersionOperationData"];
         };
         /**
+         * SubscriptionAction
+         * @enum {string}
+         */
+        SubscriptionAction: "ENABLE" | "DISABLE" | "ARCHIVE" | "RESTORE" | "CHECK_NOW" | "DIAGNOSE";
+        /**
          * SubscriptionNotificationChannel
          * @enum {string}
          */
@@ -7446,6 +7451,8 @@ export interface components {
             current_revision_id: string | null;
             /** Archived At */
             archived_at: string | null;
+            /** Allowed Actions */
+            allowed_actions: components["schemas"]["SubscriptionAction"][];
         };
         /** SuccessEnvelope */
         SuccessEnvelope: {

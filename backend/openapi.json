@@ -22708,6 +22708,18 @@
         ],
         "title": "StrategyVersionOperationResponse"
       },
+      "SubscriptionAction": {
+        "type": "string",
+        "enum": [
+          "ENABLE",
+          "DISABLE",
+          "ARCHIVE",
+          "RESTORE",
+          "CHECK_NOW",
+          "DIAGNOSE"
+        ],
+        "title": "SubscriptionAction"
+      },
       "SubscriptionNotificationChannel": {
         "type": "string",
         "enum": [
@@ -22771,6 +22783,13 @@
               }
             ],
             "title": "Archived At"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/SubscriptionAction"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
@@ -22781,7 +22800,8 @@
           "status",
           "version",
           "current_revision_id",
-          "archived_at"
+          "archived_at",
+          "allowed_actions"
         ],
         "title": "SubscriptionRecord"
       },

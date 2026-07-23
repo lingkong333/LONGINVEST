@@ -763,7 +763,8 @@ button:not(:disabled),
     minmax(8rem, 1fr)
     minmax(7rem, 0.8fr)
     minmax(10rem, 1fr)
-    minmax(9rem, 0.9fr);
+    minmax(9rem, 0.9fr)
+    minmax(12rem, 1.15fr);
   align-items: center;
   gap: 1rem;
 }
@@ -798,6 +799,40 @@ button:not(:disabled),
 .monitoring-state {
   display: grid;
   gap: 0.38rem;
+}
+
+.monitoring-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.monitoring-actions button {
+  min-height: 1.8rem;
+  font-size: 0.64rem;
+}
+
+.monitoring-actions svg {
+  width: 0.78rem;
+}
+
+.monitoring-action-reason {
+  display: grid;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.monitoring-action-error {
+  margin: 0;
+  color: var(--destructive);
+  font-size: 0.75rem;
+}
+
+.monitoring-action-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 
 .monitoring-stock strong {
@@ -1192,7 +1227,8 @@ button:not(:disabled),
   }
 
   .monitoring-stock,
-  .monitoring-price {
+  .monitoring-price,
+  .monitoring-actions {
     grid-column: span 2;
   }
 
@@ -1205,6 +1241,11 @@ button:not(:disabled),
 
   .monitoring-price time {
     grid-column: 1 / -1;
+  }
+
+  .monitoring-actions {
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--border);
   }
 }
 

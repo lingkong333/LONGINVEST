@@ -1,7 +1,12 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  Activity,
+  Archive,
   BriefcaseBusiness,
   CircleAlert,
+  FlaskConical,
+  Power,
+  PowerOff,
   Radar,
   RefreshCw,
   Search,
@@ -12,11 +17,18 @@ import { useEffect, useMemo, useState } from "react"
 import { useAuth } from "@/features/auth"
 import { monitoringGateway } from "@/features/monitoring/gateway"
 import type {
+  MonitoringAction,
   MonitoringGateway,
   MonitoringOverviewItem,
 } from "@/features/monitoring/types"
 import { ApiError } from "@/shared/api/client"
 import { Button } from "@/shared/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 
 type MonitorFilter = "全部" | "已启用" | "持仓" | "需关注"
@@ -50,6 +62,52 @@ const zoneLabels: Record<string, string> = {
   NORMAL: "正常区间",
   HIGH: "高位",
   STRONG_HIGH: "强高位",
+}
+
+const actionCopy: Record<
+  MonitoringAction,
+  { label: string; description: string }
+> = {
+  ENABLE: {
+    label: "启用监控",
+    description: "启用后，系统会按照当前调度和目标设置进行正式监控。",
+  },
+  DISABLE: {
+    label: "暂停监控",
+    description: "暂停立即生效，后续不会产生新的正式信号和通知。",
+  },
+  ARCHIVE: {
+    label: "归档订阅",
+    description: "归档后该股票会从默认监控列表隐藏，历史记录仍会保留。",
+  },
+  RESTORE: {
+    label: "恢复订阅",
+    description: "恢复后订阅保持暂停，需要再次确认启用。",
+  },
+  CHECK_NOW: {
+    label: "立即检查",
+    description: "获取最新行情并按当前监控配置执行一次正式检查。",
+  },
+  DIAGNOSE: {
+    label: "测试行情",
+    description: "只测试行情获取和解析，不修改信号状态，也不发送业务通知。",
+  },
+}
+
+function ActionIcon({ action }: { action: MonitoringAction }) {
+  if (action === "ENABLE" || action === "RESTORE") {
+    return <Power aria-hidden="true" />
+  }
+  if (action === "DISABLE") {
+    return <PowerOff aria-hidden="true" />
+  }
+  if (action === "ARCHIVE") {
+    return <Archive aria-hidden="true" />
+  }
+  if (action === "CHECK_NOW") {
+    return <Activity aria-hidden="true" />
+  }
+  return <FlaskConical aria-hidden="true" />
 }
 
 function translated(mapping: Record<string, string>, value: string | null) {
@@ -101,15 +159,39 @@ export function MonitoringPage({
   gateway?: MonitoringGateway
 }) {
   const { invalidate } = useAuth()
+  const queryClient = useQueryClient()
   const [filter, setFilter] = useState<MonitorFilter>("全部")
   const [search, setSearch] = useState("")
   const [groupFilter, setGroupFilter] = useState("")
   const [modeFilter, setModeFilter] = useState("")
   const [zoneFilter, setZoneFilter] = useState("")
+  const [pendingAction, setPendingAction] = useState<{
+    item: MonitoringOverviewItem
+    action: MonitoringAction
+  } | null>(null)
+  const [reason, setReason] = useState("")
   const overviewQuery = useQuery({
     queryKey: ["monitoring", "overview"],
     queryFn: () => gateway.loadOverview(),
     refetchInterval: 15_000,
+  })
+  const actionMutation = useMutation({
+    mutationFn: async () => {
+      if (!pendingAction) {
+        return
+      }
+      await gateway.runAction(
+        pendingAction.item.subscriptionId,
+        pendingAction.action,
+        pendingAction.item.subscriptionVersion,
+        reason.trim(),
+      )
+    },
+    onSuccess: async () => {
+      setPendingAction(null)
+      setReason("")
+      await queryClient.invalidateQueries({ queryKey: ["monitoring", "overview"] })
+    },
   })
 
   useEffect(() => {
@@ -117,6 +199,12 @@ export function MonitoringPage({
       invalidate()
     }
   }, [invalidate, overviewQuery.error])
+
+  useEffect(() => {
+    if (actionMutation.error instanceof ApiError && actionMutation.error.status === 401) {
+      invalidate()
+    }
+  }, [actionMutation.error, invalidate])
 
   const visibleItems = useMemo(() => {
     if (!overviewQuery.data) {
@@ -181,6 +269,20 @@ export function MonitoringPage({
   const groupOptions = Array.from(
     new Set(overview.items.flatMap((item) => item.groups)),
   ).sort((left, right) => left.localeCompare(right, "zh-CN"))
+  const openAction = (
+    item: MonitoringOverviewItem,
+    action: MonitoringAction,
+  ) => {
+    actionMutation.reset()
+    setReason("")
+    setPendingAction({ item, action })
+  }
+  const closeAction = () => {
+    if (!actionMutation.isPending) {
+      setPendingAction(null)
+      setReason("")
+    }
+  }
 
   return (
     <main className="monitoring-page">
@@ -305,6 +407,7 @@ export function MonitoringPage({
             <span>状态</span>
             <span>监控设置</span>
             <span>区间与价格</span>
+            <span>操作</span>
           </div>
           {visibleItems.map((item) => (
             <article className="monitoring-row" key={item.subscriptionId}>
@@ -337,6 +440,22 @@ export function MonitoringPage({
                   {formatShanghaiTime(item.lastPriceAt)}
                 </time>
               </div>
+              <div className="monitoring-actions">
+                {item.allowedActions
+                  .filter((action) => action !== "RESTORE")
+                  .map((action) => (
+                    <Button
+                      type="button"
+                      size="xs"
+                      variant={action === "ARCHIVE" ? "destructive" : "outline"}
+                      key={action}
+                      onClick={() => openAction(item, action)}
+                    >
+                      <ActionIcon action={action} />
+                      {actionCopy[action].label}
+                    </Button>
+                  ))}
+              </div>
               {item.warningCodes.length > 0 ? (
                 <TriangleAlert
                   className="monitoring-row__warning"
@@ -347,6 +466,73 @@ export function MonitoringPage({
           ))}
         </section>
       )}
+      <Dialog
+        open={pendingAction !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeAction()
+          }
+        }}
+      >
+        <DialogContent
+          showCloseButton={false}
+          onEscapeKeyDown={(event) => {
+            if (actionMutation.isPending) {
+              event.preventDefault()
+            }
+          }}
+          onPointerDownOutside={(event) => {
+            if (actionMutation.isPending) {
+              event.preventDefault()
+            }
+          }}
+        >
+          <DialogTitle>
+            {pendingAction
+              ? `确认${actionCopy[pendingAction.action].label}`
+              : "确认监控操作"}
+          </DialogTitle>
+          <DialogDescription>
+            {pendingAction
+              ? actionCopy[pendingAction.action].description
+              : "请确认本次监控操作。"}
+          </DialogDescription>
+          <label className="monitoring-action-reason">
+            <span>操作原因</span>
+            <Input
+              value={reason}
+              maxLength={200}
+              autoFocus
+              onChange={(event) => setReason(event.target.value)}
+              placeholder="请填写本次操作原因"
+            />
+          </label>
+          {actionMutation.isError ? (
+            <p className="monitoring-action-error" role="alert">
+              {actionMutation.error instanceof Error
+                ? actionMutation.error.message
+                : "操作失败，请刷新订阅状态后重试。"}
+            </p>
+          ) : null}
+          <div className="monitoring-action-footer">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={actionMutation.isPending}
+              onClick={closeAction}
+            >
+              返回
+            </Button>
+            <Button
+              type="button"
+              disabled={!reason.trim() || actionMutation.isPending}
+              onClick={() => actionMutation.mutate()}
+            >
+              {actionMutation.isPending ? "处理中" : "确认执行"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </main>
   )
 }

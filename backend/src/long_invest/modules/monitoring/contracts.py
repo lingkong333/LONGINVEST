@@ -22,6 +22,15 @@ class SubscriptionStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class SubscriptionAction(StrEnum):
+    ENABLE = "ENABLE"
+    DISABLE = "DISABLE"
+    ARCHIVE = "ARCHIVE"
+    RESTORE = "RESTORE"
+    CHECK_NOW = "CHECK_NOW"
+    DIAGNOSE = "DIAGNOSE"
+
+
 class SubscriptionNotificationMode(StrEnum):
     INHERIT = "INHERIT"
     CUSTOM = "CUSTOM"

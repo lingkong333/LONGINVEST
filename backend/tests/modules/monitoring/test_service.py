@@ -6,6 +6,7 @@ import pytest
 
 from long_invest.modules.monitoring.contracts import (
     FrozenSubscription,
+    SubscriptionAction,
     SubscriptionNotificationChannel,
     SubscriptionNotificationMode,
     SubscriptionStatus,
@@ -14,10 +15,32 @@ from long_invest.modules.monitoring.service import (
     MonitorSubscriptionService,
     SubscriptionAuditContext,
     SubscriptionConfig,
+    subscription_allowed_actions,
 )
 from long_invest.platform.errors import AppError
 
 NOW = datetime(2026, 7, 17, tzinfo=UTC)
+
+
+def test_allowed_actions_follow_subscription_status() -> None:
+    assert subscription_allowed_actions(SubscriptionStatus.ENABLED) == (
+        SubscriptionAction.DISABLE,
+        SubscriptionAction.CHECK_NOW,
+        SubscriptionAction.DIAGNOSE,
+    )
+    assert subscription_allowed_actions(SubscriptionStatus.PAUSED) == (
+        SubscriptionAction.ENABLE,
+        SubscriptionAction.ARCHIVE,
+        SubscriptionAction.DIAGNOSE,
+    )
+    assert subscription_allowed_actions(SubscriptionStatus.CONFIGURING) == (
+        SubscriptionAction.ENABLE,
+        SubscriptionAction.DISABLE,
+        SubscriptionAction.DIAGNOSE,
+    )
+    assert subscription_allowed_actions(SubscriptionStatus.ARCHIVED) == (
+        SubscriptionAction.RESTORE,
+    )
 
 
 class Repository:

@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import type {
+  MonitoringAction,
   MonitoringGateway,
   MonitoringOverview,
   MonitoringOverviewItem,
@@ -8,12 +9,22 @@ import type {
 import { ApiError, createApiClient } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
+const monitoringActionSchema = z.enum([
+  "ENABLE",
+  "DISABLE",
+  "ARCHIVE",
+  "RESTORE",
+  "CHECK_NOW",
+  "DIAGNOSE",
+])
+
 const subscriptionSchema = z.object({
   id: z.string().min(1),
   symbol: z.string().min(1),
   status: z.string().min(1),
   version: z.number().int().positive(),
   current_revision_id: z.string().nullable(),
+  allowed_actions: z.array(monitoringActionSchema),
 })
 
 const subscriptionListSchema = z.object({
@@ -264,6 +275,7 @@ export function createMonitoringGateway(baseUrl = ""): MonitoringGateway {
             zone: signal?.zone ?? null,
             lastPrice: signal?.last_price ?? null,
             lastPriceAt: signal?.last_price_at ?? null,
+            allowedActions: subscription.allowed_actions,
             warningCodes: itemWarnings,
           }
         },
@@ -275,7 +287,78 @@ export function createMonitoringGateway(baseUrl = ""): MonitoringGateway {
         warningCodes: [...new Set(warnings)],
       } satisfies MonitoringOverview
     },
+    async runAction(subscriptionId, action, expectedVersion, reason) {
+      const body = {
+        expected_version: expectedVersion,
+        reason,
+        confirm: true as const,
+      }
+      await runSubscriptionAction(
+        api,
+        subscriptionId,
+        action,
+        body,
+      )
+    },
   }
 }
 
 export const monitoringGateway = createMonitoringGateway()
+
+async function runSubscriptionAction(
+  api: ReturnType<typeof createApiClient<paths>>,
+  subscriptionId: string,
+  action: MonitoringAction,
+  body: {
+    expected_version: number
+    reason: string
+    confirm: true
+  },
+) {
+  const params = {
+    params: {
+      path: { subscription_id: subscriptionId },
+      header: { "Idempotency-Key": crypto.randomUUID() },
+    },
+    body,
+  }
+  if (action === "ENABLE") {
+    await api.request(api.client.POST(
+      "/api/v1/monitor-subscriptions/{subscription_id}/enable",
+      params,
+    ))
+    return
+  }
+  if (action === "DISABLE") {
+    await api.request(api.client.POST(
+      "/api/v1/monitor-subscriptions/{subscription_id}/disable",
+      params,
+    ))
+    return
+  }
+  if (action === "ARCHIVE") {
+    await api.request(api.client.POST(
+      "/api/v1/monitor-subscriptions/{subscription_id}/archive",
+      params,
+    ))
+    return
+  }
+  if (action === "RESTORE") {
+    await api.request(api.client.POST(
+      "/api/v1/monitor-subscriptions/{subscription_id}/restore",
+      params,
+    ))
+    return
+  }
+  if (action === "CHECK_NOW") {
+    await api.request(api.client.POST(
+      "/api/v1/monitor-subscriptions/{subscription_id}/check-now",
+      params,
+    ))
+    return
+  }
+  await api.request(api.client.POST(
+    "/api/v1/monitor-subscriptions/{subscription_id}/diagnose",
+    params,
+  ))
+}

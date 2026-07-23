@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 from long_invest.modules.monitoring.contracts import (
     FrozenScheduleSubscriptions,
     FrozenSubscription,
+    SubscriptionAction,
     SubscriptionNotificationChannel,
     SubscriptionNotificationMode,
     SubscriptionNotificationPolicyView,
@@ -558,6 +559,31 @@ class MonitorSubscriptionService:
         )
         await self.audit.record(event)
         await self.events.publish(event)
+
+
+def subscription_allowed_actions(
+    status: SubscriptionStatus | str,
+) -> tuple[SubscriptionAction, ...]:
+    normalized = SubscriptionStatus(str(status))
+    if normalized is SubscriptionStatus.ENABLED:
+        return (
+            SubscriptionAction.DISABLE,
+            SubscriptionAction.CHECK_NOW,
+            SubscriptionAction.DIAGNOSE,
+        )
+    if normalized is SubscriptionStatus.PAUSED:
+        return (
+            SubscriptionAction.ENABLE,
+            SubscriptionAction.ARCHIVE,
+            SubscriptionAction.DIAGNOSE,
+        )
+    if normalized is SubscriptionStatus.CONFIGURING:
+        return (
+            SubscriptionAction.ENABLE,
+            SubscriptionAction.DISABLE,
+            SubscriptionAction.DIAGNOSE,
+        )
+    return (SubscriptionAction.RESTORE,)
 
 
 def _revision(subscription_id, no, cfg, digest, context):

@@ -8,7 +8,13 @@ from long_invest.modules.auth.dependencies import (
     require_authenticated_request,
     require_verified_write_request,
 )
-from long_invest.modules.monitoring.api import TransitionRequest, check_now, router
+from long_invest.modules.monitoring.api import (
+    TransitionRequest,
+    _owner,
+    check_now,
+    router,
+)
+from long_invest.modules.monitoring.contracts import SubscriptionStatus
 from long_invest.platform.errors import AppError
 
 
@@ -62,3 +68,25 @@ async def test_check_now_requires_confirmation_before_capability_error() -> None
             "key",
         )
     assert caught.value.status_code == 422
+
+
+def test_subscription_response_includes_backend_allowed_actions() -> None:
+    owner = type(
+        "Owner",
+        (),
+        {
+            "id": uuid4(),
+            "security_id": uuid4(),
+            "symbol": "600000.SH",
+            "status": SubscriptionStatus.ENABLED,
+            "version": 3,
+            "current_revision_id": uuid4(),
+            "archived_at": None,
+        },
+    )()
+
+    assert _owner(owner)["allowed_actions"] == [
+        "DISABLE",
+        "CHECK_NOW",
+        "DIAGNOSE",
+    ]

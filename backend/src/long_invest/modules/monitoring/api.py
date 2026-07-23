@@ -16,10 +16,14 @@ from long_invest.modules.monitoring.application import (
     get_monitor_subscription_application,
 )
 from long_invest.modules.monitoring.contracts import (
+    SubscriptionAction,
     SubscriptionNotificationChannel,
     SubscriptionNotificationMode,
 )
-from long_invest.modules.monitoring.service import SubscriptionAuditContext
+from long_invest.modules.monitoring.service import (
+    SubscriptionAuditContext,
+    subscription_allowed_actions,
+)
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import SuccessEnvelope
@@ -89,6 +93,7 @@ class SubscriptionRecord(BaseModel):
     version: int
     current_revision_id: UUID | None
     archived_at: datetime | None
+    allowed_actions: list[SubscriptionAction]
 
 
 class RevisionRecord(BaseModel):
@@ -415,7 +420,7 @@ async def diagnose(
 
 
 def _owner(x):
-    return {
+    owner = {
         k: getattr(x, k)
         for k in (
             "id",
@@ -427,6 +432,8 @@ def _owner(x):
             "archived_at",
         )
     }
+    owner["allowed_actions"] = list(subscription_allowed_actions(x.status))
+    return owner
 
 
 def _revision(x):

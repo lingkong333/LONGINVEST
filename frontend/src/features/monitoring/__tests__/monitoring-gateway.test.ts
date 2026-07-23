@@ -30,6 +30,7 @@ const subscription = {
   version: 3,
   current_revision_id: "revision-1",
   archived_at: null,
+  allowed_actions: ["DISABLE", "CHECK_NOW", "DIAGNOSE"],
 }
 
 function useHappyPathHandlers() {
@@ -125,6 +126,21 @@ function useHappyPathHandlers() {
         }],
       }))
     )),
+    http.post(
+      "http://localhost/api/v1/monitor-subscriptions/sub-1/disable",
+      async ({ request }) => {
+        const body = await request.json()
+        return HttpResponse.json(envelope({
+          body,
+          subscription: {
+            ...subscription,
+            status: "PAUSED",
+            version: 4,
+            allowed_actions: ["ENABLE", "ARCHIVE", "DIAGNOSE"],
+          },
+        }))
+      },
+    ),
   )
 }
 
@@ -147,6 +163,7 @@ describe("监控列表请求边界", () => {
         targetStatus: "READY",
         zone: "NORMAL",
         lastPrice: "10.25",
+        allowedActions: ["DISABLE", "CHECK_NOW", "DIAGNOSE"],
       }),
     ])
   })
@@ -177,5 +194,12 @@ describe("监控列表请求边界", () => {
     expect(result.items[0].isHolding).toBe(false)
     expect(result.items[0].warningCodes).toContain("SECURITY_UNAVAILABLE")
     expect(result.warningCodes).toContain("POSITIONS_UNAVAILABLE")
+  })
+
+  it("执行后端允许的订阅操作并提交版本和确认原因", async () => {
+    useHappyPathHandlers()
+    const gateway = createMonitoringGateway("http://localhost")
+
+    await gateway.runAction("sub-1", "DISABLE", 3, "用户主动暂停")
   })
 })

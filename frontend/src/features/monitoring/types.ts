@@ -1,3 +1,11 @@
+export type MonitoringAction =
+  | "ENABLE"
+  | "DISABLE"
+  | "ARCHIVE"
+  | "RESTORE"
+  | "CHECK_NOW"
+  | "DIAGNOSE"
+
 export interface MonitoringOverviewItem {
   subscriptionId: string
   symbol: string
@@ -13,6 +21,7 @@ export interface MonitoringOverviewItem {
   zone: string | null
   lastPrice: string | null
   lastPriceAt: string | null
+  allowedActions: MonitoringAction[]
   warningCodes: string[]
 }
 
@@ -24,4 +33,10 @@ export interface MonitoringOverview {
 
 export interface MonitoringGateway {
   loadOverview(): Promise<MonitoringOverview>
+  runAction(
+    subscriptionId: string,
+    action: MonitoringAction,
+    expectedVersion: number,
+    reason: string,
+  ): Promise<void>
 }

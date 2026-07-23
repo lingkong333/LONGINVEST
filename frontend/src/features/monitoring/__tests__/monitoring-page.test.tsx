@@ -57,6 +57,7 @@ function overview(overrides: Partial<MonitoringOverview> = {}): MonitoringOvervi
         zone: "NORMAL",
         lastPrice: "10.25",
         lastPriceAt: "2026-07-23T01:45:00Z",
+        allowedActions: ["DISABLE", "CHECK_NOW", "DIAGNOSE"],
         warningCodes: [],
       },
       {
@@ -74,6 +75,7 @@ function overview(overrides: Partial<MonitoringOverview> = {}): MonitoringOvervi
         zone: "UNKNOWN",
         lastPrice: null,
         lastPriceAt: null,
+        allowedActions: ["ENABLE", "ARCHIVE", "DIAGNOSE"],
         warningCodes: [],
       },
     ],
@@ -96,7 +98,10 @@ function renderPage(gateway: MonitoringGateway) {
 
 describe("监控列表页面", () => {
   it("展示中文监控信息，并支持持仓筛选和搜索", async () => {
-    renderPage({ loadOverview: vi.fn().mockResolvedValue(overview()) })
+    renderPage({
+      loadOverview: vi.fn().mockResolvedValue(overview()),
+      runAction: vi.fn(),
+    })
 
     expect(await screen.findByText("浦发银行")).toBeInTheDocument()
     expect(screen.getByText("¥ 10.25")).toBeInTheDocument()
@@ -136,7 +141,10 @@ describe("监控列表页面", () => {
         },
       ],
     })
-    renderPage({ loadOverview: vi.fn().mockResolvedValue(value) })
+    renderPage({
+      loadOverview: vi.fn().mockResolvedValue(value),
+      runAction: vi.fn(),
+    })
 
     expect(await screen.findByText("浦发银行")).toBeInTheDocument()
     expect(screen.getByText("部分辅助数据暂不可用，股票订阅仍可正常查看。"))
@@ -152,12 +160,38 @@ describe("监控列表页面", () => {
         status: 503,
       }))
       .mockResolvedValueOnce(overview({ items: [] }))
-    renderPage({ loadOverview })
+    renderPage({ loadOverview, runAction: vi.fn() })
 
     expect(await screen.findByText("监控列表暂时无法读取")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "重新加载监控列表" }))
 
     expect(await screen.findByText("还没有监控股票")).toBeInTheDocument()
     expect(loadOverview).toHaveBeenCalledTimes(2)
+  })
+
+  it("只展示后端允许的操作，并携带版本和原因执行", async () => {
+    const runAction = vi.fn().mockResolvedValue(undefined)
+    renderPage({
+      loadOverview: vi.fn().mockResolvedValue(overview()),
+      runAction,
+    })
+
+    expect(await screen.findByRole("button", { name: "暂停监控" }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "归档订阅" }))
+      .toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "立即检查" }))
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "操作原因" }),
+      "人工复核最新行情",
+    )
+    await userEvent.click(screen.getByRole("button", { name: "确认执行" }))
+
+    expect(runAction).toHaveBeenCalledWith(
+      "sub-1",
+      "CHECK_NOW",
+      3,
+      "人工复核最新行情",
+    )
   })
 })

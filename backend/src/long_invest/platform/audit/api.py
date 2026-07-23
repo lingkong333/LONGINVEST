@@ -51,6 +51,7 @@ class AuditEventResponse(BaseModel):
 class AuditEventPageResponse(BaseModel):
     items: list[AuditEventResponse]
     pagination: Pagination
+    allowed_actions: list[str]
 
 
 class AuditEventPageEnvelope(SuccessEnvelope):
@@ -97,6 +98,7 @@ def _page(result: AuditEventPage) -> dict[str, Any]:
             "page_size": result.page_size,
             "total": result.total,
         },
+        "allowed_actions": [],
     }
 
 

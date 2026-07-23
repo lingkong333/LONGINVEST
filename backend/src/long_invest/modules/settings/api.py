@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header
@@ -53,21 +54,107 @@ class SecretUpdateRequest(StrictRequest):
     confirm: StrictBool
 
 
-@router.get("/settings", response_model=SuccessEnvelope)
+class SettingDefinitionResponse(BaseModel):
+    value_type: str
+    default_value: Any
+    value_schema: dict[str, Any]
+    sensitive: bool
+    applies_to_new_tasks: bool
+    rollback_allowed: bool
+
+
+class SettingResponse(BaseModel):
+    key: str
+    value: dict[str, Any]
+    schema_version: int
+    version: int
+    description: str
+    definition: SettingDefinitionResponse
+    updated_by: str | None
+    updated_at: datetime
+    allowed_actions: list[str]
+
+
+class SettingCommandResponse(SettingResponse):
+    replayed: bool
+
+
+class SettingHistoryResponse(BaseModel):
+    version: int
+    value: dict[str, Any]
+    reason: str
+    actor_user_id: str
+    request_id: str
+    created_at: datetime
+    allowed_actions: list[str]
+
+
+class SecretStatusResponse(BaseModel):
+    key: str
+    configured: bool
+    masked: str | None
+    version: int
+    fingerprint: str | None
+    updated_at: datetime | None
+    definition: SettingDefinitionResponse
+    allowed_actions: list[str]
+
+
+class SecretCommandResponse(SecretStatusResponse):
+    replayed: bool
+
+
+class SettingListData(BaseModel):
+    items: list[SettingResponse]
+
+
+class SettingHistoryData(BaseModel):
+    items: list[SettingHistoryResponse]
+
+
+class SecretStatusListData(BaseModel):
+    items: list[SecretStatusResponse]
+
+
+class SettingListEnvelope(SuccessEnvelope):
+    data: SettingListData
+
+
+class SettingEnvelope(SuccessEnvelope):
+    data: SettingResponse
+
+
+class SettingCommandEnvelope(SuccessEnvelope):
+    data: SettingCommandResponse
+
+
+class SettingHistoryEnvelope(SuccessEnvelope):
+    data: SettingHistoryData
+
+
+class SecretStatusListEnvelope(SuccessEnvelope):
+    data: SecretStatusListData
+
+
+class SecretCommandEnvelope(SuccessEnvelope):
+    data: SecretCommandResponse
+
+
+@router.get("/settings", response_model=SettingListEnvelope)
 async def list_settings(
     application: Application, _identity: ReadIdentity
 ) -> dict[str, Any]:
     return success_response(data={"items": await application.read("list_settings")})
 
 
-@router.get("/settings/{key}", response_model=SuccessEnvelope)
+@router.get("/settings/{key}", response_model=SettingEnvelope)
 async def get_setting(
     key: str, application: Application, _identity: ReadIdentity
 ) -> dict[str, Any]:
     return success_response(data=await application.read("get_setting", key))
 
 
-@router.patch("/settings/{key}", response_model=SuccessEnvelope)
+@router.patch("/settings/{key}", response_model=SettingCommandEnvelope)
 async def update_setting(
     key: str,
     body: SettingUpdateRequest,
@@ -89,14 +176,14 @@ async def update_setting(
     )
 
 
-@router.get("/settings/{key}/history", response_model=SuccessEnvelope)
+@router.get("/settings/{key}/history", response_model=SettingHistoryEnvelope)
 async def setting_history(
     key: str, application: Application, _identity: ReadIdentity
 ) -> dict[str, Any]:
     return success_response(data={"items": await application.read("history", key)})
 
 
-@router.post("/settings/{key}/rollback", response_model=SuccessEnvelope)
+@router.post("/settings/{key}/rollback", response_model=SettingCommandEnvelope)
 async def rollback_setting(
     key: str,
     body: SettingRollbackRequest,
@@ -118,14 +205,14 @@ async def rollback_setting(
     )
 
 
-@router.get("/secrets/status", response_model=SuccessEnvelope)
+@router.get("/secrets/status", response_model=SecretStatusListEnvelope)
 async def secret_status(
     application: Application, _identity: ReadIdentity
 ) -> dict[str, Any]:
     return success_response(data={"items": await application.read("secret_statuses")})
 
 
-@router.patch("/secrets/{key}", response_model=SuccessEnvelope)
+@router.patch("/secrets/{key}", response_model=SecretCommandEnvelope)
 async def update_secret(
     key: str,
     body: SecretUpdateRequest,

@@ -34,3 +34,14 @@ def test_router_exposes_all_system_operations_endpoints() -> None:
         operation = schema["paths"][path][method.lower()]
         response = operation["responses"]["200"]["content"]["application/json"]
         assert response["schema"].get("$ref")
+
+    for name in (
+        "SystemHealthData",
+        "ComponentListData",
+        "WorkerListData",
+        "QueueListData",
+        "SchedulerStatusData",
+        "OccurrenceListData",
+        "SystemClockStatusData",
+    ):
+        assert "allowed_actions" in schema["components"]["schemas"][name]["required"]

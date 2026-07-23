@@ -51,11 +51,16 @@ ReadIdentity = Annotated[AuthenticatedRequest, Depends(require_authenticated_req
 
 
 class SystemHealthEnvelope(SuccessEnvelope):
-    data: SystemHealth
+    data: SystemHealthData
+
+
+class SystemHealthData(SystemHealth):
+    allowed_actions: list[str]
 
 
 class ComponentListData(BaseModel):
     items: list[ComponentStatus]
+    allowed_actions: list[str]
 
 
 class ComponentListEnvelope(SuccessEnvelope):
@@ -64,6 +69,7 @@ class ComponentListEnvelope(SuccessEnvelope):
 
 class WorkerListData(BaseModel):
     items: list[WorkerStatus]
+    allowed_actions: list[str]
 
 
 class WorkerListEnvelope(SuccessEnvelope):
@@ -72,6 +78,7 @@ class WorkerListEnvelope(SuccessEnvelope):
 
 class QueueListData(BaseModel):
     items: list[QueueStatus]
+    allowed_actions: list[str]
 
 
 class QueueListEnvelope(SuccessEnvelope):
@@ -79,12 +86,17 @@ class QueueListEnvelope(SuccessEnvelope):
 
 
 class SchedulerStatusEnvelope(SuccessEnvelope):
-    data: SchedulerStatus
+    data: SchedulerStatusData
+
+
+class SchedulerStatusData(SchedulerStatus):
+    allowed_actions: list[str]
 
 
 class OccurrenceListData(BaseModel):
     items: list[ScheduleOccurrence]
     pagination: Pagination
+    allowed_actions: list[str]
 
 
 class OccurrenceListEnvelope(SuccessEnvelope):
@@ -92,7 +104,11 @@ class OccurrenceListEnvelope(SuccessEnvelope):
 
 
 class SystemClockStatusEnvelope(SuccessEnvelope):
-    data: SystemClockStatus
+    data: SystemClockStatusData
+
+
+class SystemClockStatusData(SystemClockStatus):
+    allowed_actions: list[str]
 
 
 @router.get("/api/v1/system/health", response_model=SystemHealthEnvelope)
@@ -101,7 +117,9 @@ async def system_health(
     _identity: ReadIdentity,
 ) -> dict[str, Any]:
     value = await application.get_health()
-    return success_response(data=value.model_dump(mode="json"))
+    return success_response(
+        data={**value.model_dump(mode="json"), "allowed_actions": []}
+    )
 
 
 @router.get("/api/v1/system/components", response_model=ComponentListEnvelope)
@@ -111,7 +129,10 @@ async def system_components(
 ) -> dict[str, Any]:
     items = await application.list_components()
     return success_response(
-        data={"items": [item.model_dump(mode="json") for item in items]}
+        data={
+            "items": [item.model_dump(mode="json") for item in items],
+            "allowed_actions": [],
+        }
     )
 
 
@@ -122,7 +143,10 @@ async def workers(
 ) -> dict[str, Any]:
     items = await application.list_workers()
     return success_response(
-        data={"items": [item.model_dump(mode="json") for item in items]}
+        data={
+            "items": [item.model_dump(mode="json") for item in items],
+            "allowed_actions": [],
+        }
     )
 
 
@@ -133,7 +157,10 @@ async def queues(
 ) -> dict[str, Any]:
     items = await application.list_queues()
     return success_response(
-        data={"items": [item.model_dump(mode="json") for item in items]}
+        data={
+            "items": [item.model_dump(mode="json") for item in items],
+            "allowed_actions": [],
+        }
     )
 
 
@@ -143,7 +170,9 @@ async def scheduler_status(
     _identity: ReadIdentity,
 ) -> dict[str, Any]:
     value = await application.get_scheduler_status()
-    return success_response(data=value.model_dump(mode="json"))
+    return success_response(
+        data={**value.model_dump(mode="json"), "allowed_actions": []}
+    )
 
 
 @router.get("/api/v1/schedule-occurrences", response_model=OccurrenceListEnvelope)
@@ -173,6 +202,7 @@ async def schedule_occurrences(
                 "page_size": result.page_size,
                 "total": result.total,
             },
+            "allowed_actions": [],
         }
     )
 
@@ -183,4 +213,6 @@ async def system_clock_status(
     _identity: ReadIdentity,
 ) -> dict[str, Any]:
     value = await application.get_clock_status()
-    return success_response(data=value.model_dump(mode="json"))
+    return success_response(
+        data={**value.model_dump(mode="json"), "allowed_actions": []}
+    )

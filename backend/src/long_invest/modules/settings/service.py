@@ -8,6 +8,8 @@ from pydantic import ValidationError
 from long_invest.modules.settings.contracts import (
     SECRET_KEYS,
     SETTING_SCHEMAS,
+    secret_definition,
+    setting_definition,
     validate_setting,
 )
 from long_invest.modules.settings.crypto import SecretCipher
@@ -41,7 +43,7 @@ class SettingsService:
         return self._setting_view(item)
 
     async def history(self, key: str) -> list[dict[str, Any]]:
-        await self.get_setting(key)
+        current = await self.get_setting(key)
         return [
             {
                 "version": item.version,
@@ -50,6 +52,9 @@ class SettingsService:
                 "actor_user_id": item.actor_user_id,
                 "request_id": item.request_id,
                 "created_at": item.created_at,
+                "allowed_actions": (
+                    ["ROLLBACK"] if item.version != current["version"] else []
+                ),
             }
             for item in await self._repository.list_history(key)
         ]
@@ -272,8 +277,10 @@ class SettingsService:
             "schema_version": item.schema_version,
             "version": item.version,
             "description": SETTING_SCHEMAS[item.key][1],
+            "definition": setting_definition(item.key),
             "updated_by": item.updated_by,
             "updated_at": item.updated_at,
+            "allowed_actions": ["UPDATE", "ROLLBACK"],
         }
 
     @staticmethod
@@ -285,6 +292,10 @@ class SettingsService:
             "version": item.version if item is not None else 0,
             "fingerprint": item.fingerprint if item and item.configured else None,
             "updated_at": item.updated_at if item is not None else None,
+            "definition": secret_definition(),
+            "allowed_actions": (
+                ["UPDATE", "CLEAR"] if item and item.configured else ["UPDATE"]
+            ),
         }
 
 

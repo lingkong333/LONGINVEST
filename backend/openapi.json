@@ -761,7 +761,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SettingListEnvelope"
                 }
               }
             }
@@ -793,7 +793,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SettingEnvelope"
                 }
               }
             }
@@ -854,7 +854,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SettingCommandEnvelope"
                 }
               }
             }
@@ -896,7 +896,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SettingHistoryEnvelope"
                 }
               }
             }
@@ -959,7 +959,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SettingCommandEnvelope"
                 }
               }
             }
@@ -990,7 +990,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SecretStatusListEnvelope"
                 }
               }
             }
@@ -1043,7 +1043,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SuccessEnvelope"
+                  "$ref": "#/components/schemas/SecretCommandEnvelope"
                 }
               }
             }
@@ -12475,12 +12475,20 @@
           },
           "pagination": {
             "$ref": "#/components/schemas/Pagination"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "pagination"
+          "pagination",
+          "allowed_actions"
         ],
         "title": "AuditEventPageResponse"
       },
@@ -14961,11 +14969,19 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "allowed_actions"
         ],
         "title": "ComponentListData"
       },
@@ -18057,12 +18073,20 @@
           },
           "pagination": {
             "$ref": "#/components/schemas/Pagination"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "pagination"
+          "pagination",
+          "allowed_actions"
         ],
         "title": "OccurrenceListData"
       },
@@ -19427,11 +19451,19 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "allowed_actions"
         ],
         "title": "QueueListData"
       },
@@ -21193,7 +21225,7 @@
         ],
         "title": "ScheduleRevisionRecord"
       },
-      "SchedulerStatus": {
+      "SchedulerStatusData": {
         "properties": {
           "status": {
             "$ref": "#/components/schemas/HealthStatus"
@@ -21247,6 +21279,13 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "additionalProperties": false,
@@ -21255,9 +21294,10 @@
           "status",
           "scan_interval_seconds",
           "automatic_scheduling_paused",
-          "updated_at"
+          "updated_at",
+          "allowed_actions"
         ],
-        "title": "SchedulerStatus"
+        "title": "SchedulerStatusData"
       },
       "SchedulerStatusEnvelope": {
         "properties": {
@@ -21284,7 +21324,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/SchedulerStatus"
+            "$ref": "#/components/schemas/SchedulerStatusData"
           }
         },
         "type": "object",
@@ -21297,6 +21337,249 @@
           "data"
         ],
         "title": "SchedulerStatusEnvelope"
+      },
+      "SecretCommandEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SecretCommandResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SecretCommandEnvelope"
+      },
+      "SecretCommandResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/SettingDefinitionResponse"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "configured",
+          "masked",
+          "version",
+          "fingerprint",
+          "updated_at",
+          "definition",
+          "allowed_actions",
+          "replayed"
+        ],
+        "title": "SecretCommandResponse"
+      },
+      "SecretStatusListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SecretStatusResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SecretStatusListData"
+      },
+      "SecretStatusListEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SecretStatusListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SecretStatusListEnvelope"
+      },
+      "SecretStatusResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "configured": {
+            "type": "boolean",
+            "title": "Configured"
+          },
+          "masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Masked"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fingerprint"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/SettingDefinitionResponse"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "configured",
+          "masked",
+          "version",
+          "fingerprint",
+          "updated_at",
+          "definition",
+          "allowed_actions"
+        ],
+        "title": "SecretStatusResponse"
       },
       "SecretUpdateRequest": {
         "properties": {
@@ -21383,6 +21666,349 @@
         ],
         "title": "SelectSourceBody"
       },
+      "SettingCommandEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SettingCommandResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SettingCommandEnvelope"
+      },
+      "SettingCommandResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Value"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/SettingDefinitionResponse"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          },
+          "replayed": {
+            "type": "boolean",
+            "title": "Replayed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value",
+          "schema_version",
+          "version",
+          "description",
+          "definition",
+          "updated_by",
+          "updated_at",
+          "allowed_actions",
+          "replayed"
+        ],
+        "title": "SettingCommandResponse"
+      },
+      "SettingDefinitionResponse": {
+        "properties": {
+          "value_type": {
+            "type": "string",
+            "title": "Value Type"
+          },
+          "default_value": {
+            "title": "Default Value"
+          },
+          "value_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Value Schema"
+          },
+          "sensitive": {
+            "type": "boolean",
+            "title": "Sensitive"
+          },
+          "applies_to_new_tasks": {
+            "type": "boolean",
+            "title": "Applies To New Tasks"
+          },
+          "rollback_allowed": {
+            "type": "boolean",
+            "title": "Rollback Allowed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value_type",
+          "default_value",
+          "value_schema",
+          "sensitive",
+          "applies_to_new_tasks",
+          "rollback_allowed"
+        ],
+        "title": "SettingDefinitionResponse"
+      },
+      "SettingEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SettingResponse"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SettingEnvelope"
+      },
+      "SettingHistoryData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SettingHistoryResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SettingHistoryData"
+      },
+      "SettingHistoryEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SettingHistoryData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SettingHistoryEnvelope"
+      },
+      "SettingHistoryResponse": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "value": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Value"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          },
+          "actor_user_id": {
+            "type": "string",
+            "title": "Actor User Id"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "value",
+          "reason",
+          "actor_user_id",
+          "request_id",
+          "created_at",
+          "allowed_actions"
+        ],
+        "title": "SettingHistoryResponse"
+      },
+      "SettingListData": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SettingResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "title": "SettingListData"
+      },
+      "SettingListEnvelope": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/SettingListData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "SettingListEnvelope"
+      },
       "SettingMutationRequest": {
         "properties": {
           "reason": {
@@ -21415,6 +22041,70 @@
           "expected_version"
         ],
         "title": "SettingMutationRequest"
+      },
+      "SettingResponse": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Value"
+          },
+          "schema_version": {
+            "type": "integer",
+            "title": "Schema Version"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "definition": {
+            "$ref": "#/components/schemas/SettingDefinitionResponse"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value",
+          "schema_version",
+          "version",
+          "description",
+          "definition",
+          "updated_by",
+          "updated_at",
+          "allowed_actions"
+        ],
+        "title": "SettingResponse"
       },
       "SettingRollbackRequest": {
         "properties": {
@@ -23074,7 +23764,7 @@
         ],
         "title": "SuccessEnvelope"
       },
-      "SystemClockStatus": {
+      "SystemClockStatusData": {
         "properties": {
           "status": {
             "$ref": "#/components/schemas/HealthStatus"
@@ -23122,6 +23812,13 @@
             "type": "string",
             "format": "date-time",
             "title": "Updated At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "additionalProperties": false,
@@ -23133,9 +23830,10 @@
           "max_skew_seconds",
           "automatic_scheduling_paused",
           "sources",
-          "updated_at"
+          "updated_at",
+          "allowed_actions"
         ],
-        "title": "SystemClockStatus"
+        "title": "SystemClockStatusData"
       },
       "SystemClockStatusEnvelope": {
         "properties": {
@@ -23162,7 +23860,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/SystemClockStatus"
+            "$ref": "#/components/schemas/SystemClockStatusData"
           }
         },
         "type": "object",
@@ -23205,7 +23903,7 @@
         "type": "object",
         "title": "SystemData"
       },
-      "SystemHealth": {
+      "SystemHealthData": {
         "properties": {
           "status": {
             "$ref": "#/components/schemas/HealthStatus"
@@ -23221,6 +23919,13 @@
             },
             "type": "array",
             "title": "Components"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "additionalProperties": false,
@@ -23228,9 +23933,10 @@
         "required": [
           "status",
           "updated_at",
-          "components"
+          "components",
+          "allowed_actions"
         ],
-        "title": "SystemHealth"
+        "title": "SystemHealthData"
       },
       "SystemHealthEnvelope": {
         "properties": {
@@ -23257,7 +23963,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/SystemHealth"
+            "$ref": "#/components/schemas/SystemHealthData"
           }
         },
         "type": "object",
@@ -25308,11 +26014,19 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "allowed_actions"
         ],
         "title": "WorkerListData"
       },

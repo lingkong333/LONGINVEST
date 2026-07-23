@@ -3438,6 +3438,8 @@ export interface components {
             /** Items */
             items: components["schemas"]["AuditEventResponse"][];
             pagination: components["schemas"]["Pagination"];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** AuditEventResponse */
         AuditEventResponse: {
@@ -4373,6 +4375,8 @@ export interface components {
         ComponentListData: {
             /** Items */
             items: components["schemas"]["ComponentStatus"][];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** ComponentListEnvelope */
         ComponentListEnvelope: {
@@ -5578,6 +5582,8 @@ export interface components {
             /** Items */
             items: components["schemas"]["ScheduleOccurrence"][];
             pagination: components["schemas"]["Pagination"];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** OccurrenceListEnvelope */
         OccurrenceListEnvelope: {
@@ -6144,6 +6150,8 @@ export interface components {
         QueueListData: {
             /** Items */
             items: components["schemas"]["QueueStatus"][];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** QueueListEnvelope */
         QueueListEnvelope: {
@@ -6795,8 +6803,8 @@ export interface components {
              */
             created_at: string;
         };
-        /** SchedulerStatus */
-        SchedulerStatus: {
+        /** SchedulerStatusData */
+        SchedulerStatusData: {
             status: components["schemas"]["HealthStatus"];
             /** Scan Interval Seconds */
             scan_interval_seconds: number;
@@ -6813,6 +6821,8 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** SchedulerStatusEnvelope */
         SchedulerStatusEnvelope: {
@@ -6832,7 +6842,90 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SchedulerStatus"];
+            data: components["schemas"]["SchedulerStatusData"];
+        };
+        /** SecretCommandEnvelope */
+        SecretCommandEnvelope: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SecretCommandResponse"];
+        };
+        /** SecretCommandResponse */
+        SecretCommandResponse: {
+            /** Key */
+            key: string;
+            /** Configured */
+            configured: boolean;
+            /** Masked */
+            masked: string | null;
+            /** Version */
+            version: number;
+            /** Fingerprint */
+            fingerprint: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            definition: components["schemas"]["SettingDefinitionResponse"];
+            /** Allowed Actions */
+            allowed_actions: string[];
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** SecretStatusListData */
+        SecretStatusListData: {
+            /** Items */
+            items: components["schemas"]["SecretStatusResponse"][];
+        };
+        /** SecretStatusListEnvelope */
+        SecretStatusListEnvelope: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SecretStatusListData"];
+        };
+        /** SecretStatusResponse */
+        SecretStatusResponse: {
+            /** Key */
+            key: string;
+            /** Configured */
+            configured: boolean;
+            /** Masked */
+            masked: string | null;
+            /** Version */
+            version: number;
+            /** Fingerprint */
+            fingerprint: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            definition: components["schemas"]["SettingDefinitionResponse"];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** SecretUpdateRequest */
         SecretUpdateRequest: {
@@ -6864,6 +6957,162 @@ export interface components {
             /** Selected Source */
             selected_source: string;
         };
+        /** SettingCommandEnvelope */
+        SettingCommandEnvelope: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SettingCommandResponse"];
+        };
+        /** SettingCommandResponse */
+        SettingCommandResponse: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
+            /** Schema Version */
+            schema_version: number;
+            /** Version */
+            version: number;
+            /** Description */
+            description: string;
+            definition: components["schemas"]["SettingDefinitionResponse"];
+            /** Updated By */
+            updated_by: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
+            /** Replayed */
+            replayed: boolean;
+        };
+        /** SettingDefinitionResponse */
+        SettingDefinitionResponse: {
+            /** Value Type */
+            value_type: string;
+            /** Default Value */
+            default_value: unknown;
+            /** Value Schema */
+            value_schema: {
+                [key: string]: unknown;
+            };
+            /** Sensitive */
+            sensitive: boolean;
+            /** Applies To New Tasks */
+            applies_to_new_tasks: boolean;
+            /** Rollback Allowed */
+            rollback_allowed: boolean;
+        };
+        /** SettingEnvelope */
+        SettingEnvelope: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SettingResponse"];
+        };
+        /** SettingHistoryData */
+        SettingHistoryData: {
+            /** Items */
+            items: components["schemas"]["SettingHistoryResponse"][];
+        };
+        /** SettingHistoryEnvelope */
+        SettingHistoryEnvelope: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SettingHistoryData"];
+        };
+        /** SettingHistoryResponse */
+        SettingHistoryResponse: {
+            /** Version */
+            version: number;
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
+            /** Reason */
+            reason: string;
+            /** Actor User Id */
+            actor_user_id: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
+        };
+        /** SettingListData */
+        SettingListData: {
+            /** Items */
+            items: components["schemas"]["SettingResponse"][];
+        };
+        /** SettingListEnvelope */
+        SettingListEnvelope: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["SettingListData"];
+        };
         /** SettingMutationRequest */
         SettingMutationRequest: {
             /** Reason */
@@ -6876,6 +7125,31 @@ export interface components {
             };
             /** Expected Version */
             expected_version: number;
+        };
+        /** SettingResponse */
+        SettingResponse: {
+            /** Key */
+            key: string;
+            /** Value */
+            value: {
+                [key: string]: unknown;
+            };
+            /** Schema Version */
+            schema_version: number;
+            /** Version */
+            version: number;
+            /** Description */
+            description: string;
+            definition: components["schemas"]["SettingDefinitionResponse"];
+            /** Updated By */
+            updated_by: string | null;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** SettingRollbackRequest */
         SettingRollbackRequest: {
@@ -7511,8 +7785,8 @@ export interface components {
              */
             server_time: string;
         };
-        /** SystemClockStatus */
-        SystemClockStatus: {
+        /** SystemClockStatusData */
+        SystemClockStatusData: {
             status: components["schemas"]["HealthStatus"];
             /**
              * Application Time
@@ -7532,6 +7806,8 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** SystemClockStatusEnvelope */
         SystemClockStatusEnvelope: {
@@ -7551,7 +7827,7 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SystemClockStatus"];
+            data: components["schemas"]["SystemClockStatusData"];
         };
         /** SystemData */
         SystemData: {
@@ -7560,8 +7836,8 @@ export interface components {
             /** Critical Alerts */
             critical_alerts?: number | null;
         };
-        /** SystemHealth */
-        SystemHealth: {
+        /** SystemHealthData */
+        SystemHealthData: {
             status: components["schemas"]["HealthStatus"];
             /**
              * Updated At
@@ -7570,6 +7846,8 @@ export interface components {
             updated_at: string;
             /** Components */
             components: components["schemas"]["ComponentStatus"][];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** SystemHealthEnvelope */
         SystemHealthEnvelope: {
@@ -7589,7 +7867,7 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SystemHealth"];
+            data: components["schemas"]["SystemHealthData"];
         };
         /** TargetBindingView */
         TargetBindingView: {
@@ -8415,6 +8693,8 @@ export interface components {
         WorkerListData: {
             /** Items */
             items: components["schemas"]["WorkerStatus"][];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** WorkerListEnvelope */
         WorkerListEnvelope: {
@@ -9014,7 +9294,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SettingListEnvelope"];
                 };
             };
         };
@@ -9036,7 +9316,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SettingEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -9073,7 +9353,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SettingCommandEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -9104,7 +9384,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SettingHistoryEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -9141,7 +9421,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SettingCommandEnvelope"];
                 };
             };
             /** @description Validation Error */
@@ -9170,7 +9450,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SecretStatusListEnvelope"];
                 };
             };
         };
@@ -9198,7 +9478,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SuccessEnvelope"];
+                    "application/json": components["schemas"]["SecretCommandEnvelope"];
                 };
             };
             /** @description Validation Error */

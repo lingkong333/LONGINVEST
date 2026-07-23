@@ -133,6 +133,13 @@ async def test_setting_update_is_versioned_audited_and_announced() -> None:
     assert result["replayed"] is False
     assert repository.history[0].value["enabled"] is True
     assert len(subject._outbox.items) == 1
+    assert result["allowed_actions"] == ["UPDATE", "ROLLBACK"]
+    assert result["definition"]["default_value"] == {
+        "enabled": False,
+        "timeout_seconds": 5.0,
+    }
+    assert result["definition"]["value_schema"]["additionalProperties"] is False
+    assert result["definition"]["sensitive"] is False
 
 
 @sync_test
@@ -189,9 +196,40 @@ async def test_secret_is_never_returned_and_clear_preserves_version() -> None:
 
     assert updated["masked"] == "********"
     assert "private-password" not in str(updated)
+    assert updated["allowed_actions"] == ["UPDATE", "CLEAR"]
+    assert updated["definition"]["sensitive"] is True
     assert cleared["configured"] is False
     assert cleared["version"] == 2
+    assert cleared["allowed_actions"] == ["UPDATE"]
     assert await subject.resolve_secret("notification.email.password") is None
+
+
+@sync_test
+async def test_history_only_allows_rollback_to_an_older_version() -> None:
+    repository = FakeRepository()
+    subject = service(repository)
+    await subject.update_setting(
+        repository.setting.key,
+        value={"enabled": True, "timeout_seconds": 3},
+        expected_version=1,
+        **context(),
+    )
+    repository.history.insert(
+        0,
+        SimpleNamespace(
+            version=1,
+            value={"enabled": False, "timeout_seconds": 5.0},
+            reason="系统初始配置",
+            actor_user_id="system",
+            request_id="migration",
+            created_at=datetime.now(UTC),
+        ),
+    )
+
+    history = await subject.history(repository.setting.key)
+
+    assert history[0]["allowed_actions"] == ["ROLLBACK"]
+    assert history[1]["allowed_actions"] == []
 
 
 @sync_test

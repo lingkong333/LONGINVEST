@@ -55,6 +55,29 @@ SETTING_SCHEMAS: dict[str, tuple[type[BaseModel], str]] = {
 SECRET_KEYS = frozenset({"notification.wecom.webhook", "notification.email.password"})
 
 
+def setting_definition(key: str) -> dict[str, Any]:
+    model, _description = SETTING_SCHEMAS[key]
+    return {
+        "value_type": "object",
+        "default_value": model().model_dump(mode="json"),
+        "value_schema": model.model_json_schema(mode="validation"),
+        "sensitive": False,
+        "applies_to_new_tasks": True,
+        "rollback_allowed": True,
+    }
+
+
+def secret_definition() -> dict[str, Any]:
+    return {
+        "value_type": "string",
+        "default_value": None,
+        "value_schema": {"type": "string", "maxLength": 4096},
+        "sensitive": True,
+        "applies_to_new_tasks": True,
+        "rollback_allowed": False,
+    }
+
+
 def validate_setting(key: str, value: Any) -> dict[str, Any]:
     definition = SETTING_SCHEMAS.get(key)
     if definition is None:

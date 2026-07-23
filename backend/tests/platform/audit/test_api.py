@@ -121,6 +121,7 @@ def test_audit_api_forwards_filters_and_returns_safe_explicit_fields() -> None:
             }
         ],
         "pagination": {"page": 2, "page_size": 10, "total": 21},
+        "allowed_actions": [],
     }
     application.list_events.assert_awaited_once_with(
         page=2,
@@ -153,3 +154,5 @@ def test_audit_openapi_exposes_one_unique_typed_operation() -> None:
     assert operation["operationId"] == "list_audit_events_api_v1_audit_events_get"
     schema = operation["responses"]["200"]["content"]["application/json"]["schema"]
     assert schema["$ref"].endswith("AuditEventPageEnvelope")
+    page_schema = _app().openapi()["components"]["schemas"]["AuditEventPageResponse"]
+    assert "allowed_actions" in page_schema["required"]

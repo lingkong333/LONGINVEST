@@ -13,6 +13,7 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
         "LONGINVEST_DATABASE_APP_ROLE",
         "LONGINVEST_DATABASE_APP_PASSWORD",
         "LONGINVEST_REDIS_URL",
+        "LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST",
     ):
         monkeypatch.delenv(name, raising=False)
 

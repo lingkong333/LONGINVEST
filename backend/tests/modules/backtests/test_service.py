@@ -603,6 +603,10 @@ def test_control_idempotency_rerun_and_summary() -> None:
         assert repository.items[rerun_id].attempt_count == 0
 
         page = await service.list_tasks(page=1, page_size=10)
+        listed = next(item for item in page.items if item.task_id == snapshot.id)
+        assert listed.strategy_version_id == snapshot.strategy_version_id
+        assert listed.draft_id == snapshot.draft_id
+        assert listed.draft_version == snapshot.draft_version
         assert page.total == 2
         assert page.items[0].task_id == rerun_id
         assert BacktestAction.PAUSE in page.items[0].allowed_actions

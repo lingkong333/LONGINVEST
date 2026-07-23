@@ -23,6 +23,7 @@ from long_invest.modules.strategies.contracts import (
     StrategySubscriptionScope,
     StrategyVersionOperation,
 )
+from long_invest.modules.strategies.service import strategy_allowed_actions
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import SuccessEnvelope
@@ -152,6 +153,7 @@ async def list_strategies(
         data={
             "items": [_strategy(row) for row in rows],
             "pagination": {"page": page, "page_size": page_size, "total": total},
+            "allowed_actions": ["CREATE"],
         }
     )
 
@@ -538,7 +540,14 @@ def _context(identity: AuthenticatedRequest, key: str, reason: str) -> dict[str,
 
 
 def _strategy(row: Any) -> dict[str, Any]:
-    return {"id": str(row.id), "name": row.name, "status": str(row.status)}
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "status": str(row.status),
+        "allowed_actions": [
+            action.value for action in strategy_allowed_actions(row.status)
+        ],
+    }
 
 
 def _draft(row: Any) -> dict[str, Any]:

@@ -13792,6 +13792,42 @@
           "status": {
             "$ref": "#/components/schemas/BacktestTaskStatus"
           },
+          "strategy_version_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Version Id"
+          },
+          "draft_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Id"
+          },
+          "draft_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Version"
+          },
           "date_range": {
             "$ref": "#/components/schemas/BacktestDateRange"
           },
@@ -19102,6 +19138,20 @@
             "type": "object",
             "title": "Evidence"
           },
+          "source_candidates": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Candidates"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/QualityResolutionAction"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          },
           "occurrence_count": {
             "type": "integer",
             "title": "Occurrence Count"
@@ -19182,6 +19232,8 @@
           "status",
           "severity",
           "evidence",
+          "source_candidates",
+          "allowed_actions",
           "occurrence_count",
           "first_seen_at",
           "last_seen_at",

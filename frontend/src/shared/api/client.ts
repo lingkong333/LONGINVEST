@@ -111,7 +111,7 @@ export function unwrapEnvelope<T>(envelope: ApiEnvelope<T> | undefined, status?:
 }
 
 export function createApiClient<Paths extends object>({
-  baseUrl = "/api/v1",
+  baseUrl = "",
   timeoutMs = 15_000,
   getCsrfToken,
   onUnauthorized,

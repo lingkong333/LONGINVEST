@@ -23,14 +23,19 @@ const draft: StrategyDraft = {
   sourceCode: "def calculate_targets(history, params, context):\n    return [1, 2, 3, 4]",
   parameterSchema: '{"type":"object","properties":{}}',
   version: 4,
+  strategyVersion: 1,
   updatedAt: "2026-07-21T09:00:00Z",
   allowedActions: ["validate", "test", "archive"],
+  canSave: true,
+  canRestoreRevision: true,
 }
 
 const successResult = { status: "SUCCEEDED", sourceVersion: 4, summary: "检查通过" } as const
 
 function createApi(overrides: Partial<StrategyApi> = {}): StrategyApi {
   return {
+    listStrategies: vi.fn().mockResolvedValue({ items: [], canCreate: false }),
+    createStrategy: vi.fn(),
     getDraft: vi.fn().mockResolvedValue(draft),
     saveDraft: vi.fn().mockImplementation(async (_id, input) => ({ ...draft, ...input, version: input.expectedVersion + 1 })),
     listRevisions: vi.fn().mockResolvedValue([]),
@@ -52,6 +57,23 @@ function createApi(overrides: Partial<StrategyApi> = {}): StrategyApi {
 function renderWorkspace(ui: React.ReactElement) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={queryClient}>{ui}</QueryClientProvider>)
+}
+
+async function fillStrategyActionFields(
+  user: ReturnType<typeof userEvent.setup>,
+  action: "验证" | "测试" | "发布" | "归档",
+) {
+  if (action === "验证") {
+    await user.type(screen.getByRole("textbox", { name: "完整单股回测任务号" }), "backtest-1")
+  } else if (action === "测试") {
+    await user.type(screen.getByRole("textbox", { name: "股票代码" }), "600000.SH")
+    fireEvent.change(screen.getByLabelText("训练开始"), { target: { value: "2010-01-01" } })
+    fireEvent.change(screen.getByLabelText("训练结束"), { target: { value: "2020-12-31" } })
+    fireEvent.change(screen.getByLabelText("测试开始"), { target: { value: "2021-01-01" } })
+    fireEvent.change(screen.getByLabelText("测试结束"), { target: { value: "2022-12-31" } })
+  } else if (action === "发布") {
+    await user.type(screen.getByRole("textbox", { name: "验证运行号" }), "validation-1")
+  }
 }
 
 describe("策略工作台", () => {
@@ -223,6 +245,7 @@ describe("策略工作台", () => {
     await user.type(editor, "# 修改")
     await user.click(screen.getByRole("button", { name: "验证" }))
     await user.type(screen.getByRole("textbox", { name: "操作原因" }), "准备发布")
+    await fillStrategyActionFields(user, "验证")
     await user.click(screen.getByRole("button", { name: "确认执行" }))
     expect(await screen.findByText("草稿保存失败，后续操作已中止。请检查网络后重试。")).toBeInTheDocument()
     expect(validateDraft).not.toHaveBeenCalled()
@@ -250,6 +273,7 @@ describe("策略工作台", () => {
     await screen.findByRole("textbox", { name: "Python 策略源码" })
     await user.click(screen.getByRole("button", { name: "验证" }))
     await user.type(screen.getByRole("textbox", { name: "操作原因" }), "检查语法")
+    await fillStrategyActionFields(user, "验证")
     await user.click(screen.getByRole("button", { name: "确认执行" }))
     expect(await screen.findByRole("alert")).toHaveTextContent("语法检查失败")
     expect(screen.getByText("第 2 行错误")).toBeInTheDocument()
@@ -287,9 +311,31 @@ describe("策略工作台", () => {
     await screen.findByRole("textbox", { name: "Python 策略源码" })
     await user.click(screen.getByRole("button", { name: buttonLabel }))
     await user.type(screen.getByRole("textbox", { name: "操作原因" }), "例行检查")
+    await fillStrategyActionFields(user, buttonLabel)
     await user.click(screen.getByRole("button", { name: "确认执行" }))
     expect(await screen.findByText(message)).toBeInTheDocument()
-    expect(api[method]).toHaveBeenCalledWith("strategy-1", "例行检查")
+    if (method === "validateDraft") {
+      expect(api.validateDraft).toHaveBeenCalledWith("strategy-1", {
+        reason: "例行检查",
+        backtestTaskId: "backtest-1",
+        metadata: {},
+        parameterSchema: { type: "object", properties: {} },
+        params: {},
+      })
+    } else if (method === "testDraft") {
+      expect(api.testDraft).toHaveBeenCalledWith("strategy-1", {
+        reason: "例行检查",
+        symbol: "600000.SH",
+        trainingStartDate: "2010-01-01",
+        trainingEndDate: "2020-12-31",
+        testStartDate: "2021-01-01",
+        testEndDate: "2022-12-31",
+        parameterSnapshot: {},
+        initialCapital: "100000",
+      })
+    } else {
+      expect(api.archiveStrategy).toHaveBeenCalledWith("strategy-1", "例行检查", 1)
+    }
   })
 
   it("只有服务器允许且验证和测试都新鲜时才可发布", async () => {
@@ -301,9 +347,14 @@ describe("策略工作台", () => {
     expect(screen.getByRole("button", { name: "发布" })).toBeEnabled()
     await user.click(screen.getByRole("button", { name: "发布" }))
     await user.type(screen.getByRole("textbox", { name: "操作原因" }), "发布稳定版本")
+    await fillStrategyActionFields(user, "发布")
     await user.click(screen.getByRole("button", { name: "确认执行" }))
     expect(await screen.findByText("发布已完成")).toBeInTheDocument()
-    expect(api.publishDraft).toHaveBeenCalledWith("strategy-1", "发布稳定版本")
+    expect(api.publishDraft).toHaveBeenCalledWith("strategy-1", {
+      reason: "发布稳定版本",
+      validationRunId: "validation-1",
+      expectedDraftVersion: 4,
+    })
   })
 
   it("可以查看当前草稿与发布版本的差异", async () => {

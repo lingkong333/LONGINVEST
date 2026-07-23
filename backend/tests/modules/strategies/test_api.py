@@ -98,6 +98,7 @@ def test_create_passes_verified_identity_reason_and_idempotency():
 
     assert response.status_code == 200
     assert response.json()["data"]["draft"]["draft_version"] == 1
+    assert "SAVE_DRAFT" in response.json()["data"]["strategy"]["allowed_actions"]
     assert application.calls[0]["idempotency_key"] == "create-1"
     assert application.calls[0]["reason"] == "创建策略"
 

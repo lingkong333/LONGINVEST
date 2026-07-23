@@ -11,6 +11,7 @@ from long_invest.modules.notifications.admin import (
     NotificationAdminRepository,
     NotificationAdminService,
     aggregate_current_event_status,
+    notification_delivery_allowed_actions,
 )
 from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
@@ -21,6 +22,14 @@ from long_invest.modules.notifications.models import (
     NotificationDelivery,
     NotificationEvent,
 )
+
+
+def test_delivery_allowed_actions_follow_status_and_duplicate_risk() -> None:
+    assert notification_delivery_allowed_actions("PENDING") == ("CANCEL",)
+    assert notification_delivery_allowed_actions("FAILED") == ("RETRY",)
+    assert notification_delivery_allowed_actions("SENT") == ("RETRY",)
+    assert notification_delivery_allowed_actions("OUTCOME_UNKNOWN") == ("RETRY",)
+    assert notification_delivery_allowed_actions("SENDING") == ()
 
 
 def make_event() -> NotificationEvent:

@@ -556,6 +556,9 @@ class BacktestTaskListItemView(StrictContract):
     rerun_from_task_id: UUID | None = None
     mode: BacktestMode
     status: BacktestTaskStatus
+    strategy_version_id: UUID | None = None
+    draft_id: UUID | None = None
+    draft_version: int | None = Field(default=None, ge=1)
     date_range: BacktestDateRange
     item: BacktestItemSummaryView
     allowed_actions: tuple[BacktestAction, ...]

@@ -10,12 +10,23 @@ from uuid import uuid4
 
 import pytest
 
+from long_invest.modules.strategies.contracts import StrategyAction
 from long_invest.modules.strategies.service import (
     PublishEvidence,
     StrategyCommandContext,
     StrategyService,
+    strategy_allowed_actions,
 )
 from long_invest.platform.errors import AppError
+
+
+def test_allowed_actions_follow_strategy_lifecycle() -> None:
+    assert strategy_allowed_actions("ARCHIVED") == (StrategyAction.RESTORE,)
+    assert StrategyAction.PUBLISH in strategy_allowed_actions("VALIDATED")
+    assert StrategyAction.PUBLISH in strategy_allowed_actions("PUBLISH_FAILED")
+    assert StrategyAction.ARCHIVE in strategy_allowed_actions("PUBLISHED")
+    assert StrategyAction.VALIDATE not in strategy_allowed_actions("PUBLISHING")
+    assert StrategyAction.PUBLISH not in strategy_allowed_actions("DRAFT")
 
 
 def async_test(function):

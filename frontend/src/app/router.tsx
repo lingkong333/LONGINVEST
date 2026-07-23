@@ -1,3 +1,4 @@
+import { lazy, Suspense, type ReactNode } from "react"
 import { createBrowserRouter } from "react-router-dom"
 
 import { AppShell } from "@/app/app-shell"
@@ -8,6 +9,30 @@ import { MonitoringPage } from "@/features/monitoring"
 import { PositionsPage } from "@/features/positions"
 import { SignalsPage } from "@/features/signals"
 import { TargetManagementPage } from "@/features/targets"
+import { PageState } from "@/shared/ui/page-state"
+
+const MarketDataPage = lazy(async () => {
+  const module = await import("@/features/market-data")
+  return { default: module.MarketDataPage }
+})
+const NotificationsPage = lazy(async () => {
+  const module = await import("@/features/notifications")
+  return { default: module.NotificationsPage }
+})
+const StrategyOperationsPage = lazy(async () => {
+  const module = await import("@/features/strategies")
+  return { default: module.StrategyOperationsPage }
+})
+
+function deferredPage(element: ReactNode) {
+  return (
+    <Suspense
+      fallback={<PageState state="loading" title="正在加载页面" description="正在准备当前工作区。" />}
+    >
+      {element}
+    </Suspense>
+  )
+}
 
 export const appRouter = createBrowserRouter([
   {
@@ -41,6 +66,22 @@ export const appRouter = createBrowserRouter([
           {
             path: "/signals",
             element: <SignalsPage />,
+          },
+          {
+            path: "/strategies",
+            element: deferredPage(<StrategyOperationsPage />),
+          },
+          {
+            path: "/backtests",
+            element: deferredPage(<StrategyOperationsPage initialView="backtest" />),
+          },
+          {
+            path: "/market-data",
+            element: deferredPage(<MarketDataPage />),
+          },
+          {
+            path: "/notifications",
+            element: deferredPage(<NotificationsPage />),
           },
         ],
       },

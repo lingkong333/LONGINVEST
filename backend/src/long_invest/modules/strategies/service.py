@@ -10,6 +10,8 @@ from typing import Any, Protocol
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from long_invest.modules.strategies.contracts import (
+    StrategyAction,
+    StrategyLifecycleStatus,
     StrategySubscriptionScope,
     StrategyVersionOperation,
 )
@@ -1396,6 +1398,32 @@ def _stale_evidence(message: str) -> AppError:
         message=message,
         status_code=409,
     )
+
+
+def strategy_allowed_actions(
+    status: StrategyLifecycleStatus | str,
+) -> tuple[StrategyAction, ...]:
+    lifecycle = StrategyLifecycleStatus(status)
+    if lifecycle is StrategyLifecycleStatus.ARCHIVED:
+        return (StrategyAction.RESTORE,)
+
+    actions = [
+        StrategyAction.RENAME,
+        StrategyAction.SAVE_DRAFT,
+        StrategyAction.CREATE_REVISION,
+        StrategyAction.RESTORE_REVISION,
+        StrategyAction.TEST,
+    ]
+    if lifecycle is not StrategyLifecycleStatus.PUBLISHING:
+        actions.append(StrategyAction.VALIDATE)
+    if lifecycle in {
+        StrategyLifecycleStatus.VALIDATED,
+        StrategyLifecycleStatus.PUBLISH_FAILED,
+    }:
+        actions.append(StrategyAction.PUBLISH)
+    if lifecycle is StrategyLifecycleStatus.PUBLISHED:
+        actions.append(StrategyAction.ARCHIVE)
+    return tuple(actions)
 
 
 def _require_context(context: StrategyCommandContext) -> None:

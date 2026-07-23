@@ -71,6 +71,18 @@ class StrategyLifecycleStatus(StrEnum):
     ARCHIVED = "ARCHIVED"
 
 
+class StrategyAction(StrEnum):
+    RENAME = "RENAME"
+    SAVE_DRAFT = "SAVE_DRAFT"
+    CREATE_REVISION = "CREATE_REVISION"
+    RESTORE_REVISION = "RESTORE_REVISION"
+    VALIDATE = "VALIDATE"
+    TEST = "TEST"
+    PUBLISH = "PUBLISH"
+    ARCHIVE = "ARCHIVE"
+    RESTORE = "RESTORE"
+
+
 class ValidationRunStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"

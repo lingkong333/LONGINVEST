@@ -93,6 +93,23 @@ def fake_application(view: QualityIssueView):
     return application
 
 
+def test_detail_exposes_saved_source_candidates_and_allowed_actions() -> None:
+    application = fake_application(issue_view())
+    client, _, app = client_for(application)
+    try:
+        response = client.get(f"/api/v1/data-quality/issues/{issue_view().id}")
+        assert response.status_code == 200
+        data = response.json()["data"]
+        assert data["source_candidates"] == ["EASTMONEY", "SINA"]
+        assert data["allowed_actions"] == [
+            "SELECT_SOURCE",
+            "INVALIDATE",
+            "REFETCH",
+        ]
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_routes_cover_list_detail_and_three_safe_actions() -> None:
     paths = {
         (method, route.path) for route in router.routes for method in route.methods

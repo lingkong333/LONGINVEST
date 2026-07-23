@@ -31,6 +31,18 @@ _DUPLICATE_RISK_STATUSES = {
 }
 
 
+def notification_delivery_allowed_actions(
+    status: NotificationDeliveryStatus | str,
+) -> tuple[str, ...]:
+    current = NotificationDeliveryStatus(status)
+    actions: list[str] = []
+    if current in _MANUALLY_RETRYABLE_STATUSES | _DUPLICATE_RISK_STATUSES:
+        actions.append("RETRY")
+    if current in _CANCELABLE_STATUSES:
+        actions.append("CANCEL")
+    return tuple(actions)
+
+
 @dataclass(frozen=True, slots=True)
 class AdminPage[T]:
     items: tuple[T, ...]

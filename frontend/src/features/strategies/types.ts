@@ -23,7 +23,19 @@ export interface StrategyEditorComponents {
 
 export type StrategyAction = "validate" | "test" | "publish" | "archive"
 
+export interface StrategyListItem {
+  id: string
+  name: string
+  status: string
+}
+
+export interface StrategyListResult {
+  items: StrategyListItem[]
+  canCreate: boolean
+}
+
 export interface StrategyRunResult {
+  id?: string
   status: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED" | "CANCELED"
   sourceVersion: number
   summary?: string
@@ -38,8 +50,11 @@ export interface StrategyDraft {
   sourceCode: string
   parameterSchema: string
   version: number
+  strategyVersion: number
   updatedAt: string
   allowedActions: StrategyAction[]
+  canSave: boolean
+  canRestoreRevision: boolean
   validationResult?: StrategyRunResult
   testResult?: StrategyRunResult
 }
@@ -80,6 +95,8 @@ export interface HoldoutBacktestInput {
   trainingEndDate: string
   testStartDate: string
   testEndDate: string
+  parameterSnapshot?: Record<string, unknown>
+  initialCapital?: string
 }
 
 export type BacktestTaskStatus =
@@ -113,6 +130,31 @@ export interface BacktestDateRangeDto {
   trainingEndDate: string
   testStartDate: string
   testEndDate: string
+}
+
+export interface StrategyValidationInput {
+  reason: string
+  backtestTaskId: string
+  metadata: Record<string, unknown>
+  parameterSchema: Record<string, unknown>
+  params: Record<string, unknown>
+}
+
+export interface StrategyTestInput {
+  reason: string
+  symbol: string
+  trainingStartDate: string
+  trainingEndDate: string
+  testStartDate: string
+  testEndDate: string
+  parameterSnapshot: Record<string, unknown>
+  initialCapital: string
+}
+
+export interface StrategyPublishInput {
+  reason: string
+  validationRunId: string
+  expectedDraftVersion: number
 }
 
 export interface BacktestItemSummaryDto {
@@ -297,6 +339,8 @@ export interface HoldoutBacktestResult {
 }
 
 export interface StrategyApi {
+  listStrategies(): Promise<StrategyListResult>
+  createStrategy(name: string, reason: string): Promise<StrategyListItem>
   getDraft(strategyId: string): Promise<StrategyDraft>
   saveDraft(strategyId: string, input: DraftSaveInput): Promise<StrategyDraft>
   listRevisions(strategyId: string): Promise<DraftRevision[]>
@@ -306,10 +350,10 @@ export interface StrategyApi {
     reason: string,
     idempotencyKey: string,
   ): Promise<StrategyDraft>
-  validateDraft(strategyId: string, reason: string): Promise<StrategyRunResult>
-  testDraft(strategyId: string, reason: string): Promise<StrategyRunResult>
-  publishDraft(strategyId: string, reason: string): Promise<StrategyRunResult>
-  archiveStrategy(strategyId: string, reason: string): Promise<StrategyRunResult>
+  validateDraft(strategyId: string, input: StrategyValidationInput): Promise<StrategyRunResult>
+  testDraft(strategyId: string, input: StrategyTestInput): Promise<StrategyRunResult>
+  publishDraft(strategyId: string, input: StrategyPublishInput): Promise<StrategyRunResult>
+  archiveStrategy(strategyId: string, reason: string, expectedVersion: number): Promise<StrategyRunResult>
   listVersions(strategyId: string): Promise<StrategyVersion[]>
   createHoldoutBacktest(input: HoldoutBacktestInput): Promise<HoldoutBacktestResult>
   listHoldoutBacktests(strategyId: string): Promise<BacktestTaskPageDto>

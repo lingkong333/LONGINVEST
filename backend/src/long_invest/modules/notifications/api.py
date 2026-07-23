@@ -12,6 +12,9 @@ from long_invest.modules.auth.dependencies import (
     require_authenticated_request,
     require_verified_write_request,
 )
+from long_invest.modules.notifications.admin import (
+    notification_delivery_allowed_actions,
+)
 from long_invest.modules.notifications.application import (
     NotificationAdminApplication,
     get_notification_admin_application,
@@ -631,6 +634,7 @@ def _event(item):
 
 
 def _delivery(item):
+    status = NotificationDeliveryStatus(item.status)
     return {
         "id": item.id,
         "event_id": item.event_id,
@@ -638,7 +642,13 @@ def _delivery(item):
         "channel": item.channel,
         "config_version": item.config_version,
         "target_fingerprint": item.target_fingerprint,
-        "status": item.status,
+        "status": status,
+        "allowed_actions": list(notification_delivery_allowed_actions(status)),
+        "requires_duplicate_confirmation": status
+        in {
+            NotificationDeliveryStatus.SENT,
+            NotificationDeliveryStatus.OUTCOME_UNKNOWN,
+        },
         "attempt_count": item.attempt_count,
         "next_retry_at": item.next_retry_at,
         "sent_at": item.sent_at,

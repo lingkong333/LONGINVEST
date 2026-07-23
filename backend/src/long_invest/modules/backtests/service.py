@@ -1326,6 +1326,9 @@ def _task_list_item(
         rerun_from_task_id=task.rerun_from_task_id,
         mode=task.mode,
         status=task.status,
+        strategy_version_id=task.strategy_version_id,
+        draft_id=task.draft_id,
+        draft_version=task.draft_version,
         date_range={
             "training_start_date": task.training_start_date,
             "training_end_date": task.training_end_date,

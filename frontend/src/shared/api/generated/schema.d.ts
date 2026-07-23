@@ -3916,6 +3916,12 @@ export interface components {
             rerun_from_task_id?: string | null;
             mode: components["schemas"]["BacktestMode"];
             status: components["schemas"]["BacktestTaskStatus"];
+            /** Strategy Version Id */
+            strategy_version_id?: string | null;
+            /** Draft Id */
+            draft_id?: string | null;
+            /** Draft Version */
+            draft_version?: number | null;
             date_range: components["schemas"]["BacktestDateRange"];
             item: components["schemas"]["BacktestItemSummaryView"];
             /** Allowed Actions */
@@ -6035,6 +6041,10 @@ export interface components {
             evidence: {
                 [key: string]: unknown;
             };
+            /** Source Candidates */
+            source_candidates: string[];
+            /** Allowed Actions */
+            allowed_actions: components["schemas"]["QualityResolutionAction"][];
             /** Occurrence Count */
             occurrence_count: number;
             /**

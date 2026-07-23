@@ -1,4 +1,6 @@
 export { StrategyBacktestWorkspace } from "./backtest-workspace"
+export { createStrategyApi } from "./gateway"
+export { StrategyOperationsPage } from "./operations-page"
 export {
   StrategyCodeEditor,
   StrategyDiffViewer,
@@ -33,6 +35,11 @@ export type {
   CodeEditorProps,
   DiffViewerProps,
   StrategyRunResult,
+  StrategyListItem,
+  StrategyListResult,
+  StrategyPublishInput,
+  StrategyTestInput,
+  StrategyValidationInput,
   StrategyVersion,
   TargetValuesDto,
 } from "./types"

@@ -66,6 +66,22 @@ function isJsonSchema(value: string): boolean {
   }
 }
 
+function parseJsonRecord(value: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(value)
+  return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : {}
+}
+
+function isJsonObject(value: string): boolean {
+  try {
+    const parsed: unknown = JSON.parse(value)
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+  } catch {
+    return false
+  }
+}
+
 const draftSchema = z.object({
   name: z.string().trim().min(1, "请输入策略名称"),
   description: z.string().trim().min(1, "请输入策略说明"),
@@ -160,6 +176,16 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
   const [revisionToRestore, setRevisionToRestore] = useState<string | null>(null)
   const [restoreKey, setRestoreKey] = useState("")
   const [reason, setReason] = useState("")
+  const [backtestTaskId, setBacktestTaskId] = useState("")
+  const [validationRunId, setValidationRunId] = useState("")
+  const [testSymbol, setTestSymbol] = useState("")
+  const [trainingStartDate, setTrainingStartDate] = useState("")
+  const [trainingEndDate, setTrainingEndDate] = useState("")
+  const [testStartDate, setTestStartDate] = useState("")
+  const [testEndDate, setTestEndDate] = useState("")
+  const [parameterSnapshot, setParameterSnapshot] = useState("{}")
+  const [strategyMetadata, setStrategyMetadata] = useState("{}")
+  const [initialCapital, setInitialCapital] = useState("100000")
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [actionPending, setActionPending] = useState(false)
@@ -244,6 +270,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
     setActionError(null)
     setActionMessage(null)
     setReason("")
+    setValidationRunId(action === "publish" ? (validationResult ?? draftQuery.data?.validationResult)?.id ?? "" : "")
     setReasonAction(action)
     setRevisionToRestore(revisionId ?? null)
     setRestoreKey(action === "restore" ? newIdempotencyKey() : "")
@@ -284,13 +311,35 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
             return
           }
         }
-        const calls = {
-          validate: api.validateDraft,
-          test: api.testDraft,
-          publish: api.publishDraft,
-          archive: api.archiveStrategy,
+        let result: StrategyRunResult
+        if (reasonAction === "validate") {
+          result = await api.validateDraft(strategyId, {
+            reason: reason.trim(),
+            backtestTaskId: backtestTaskId.trim(),
+            metadata: parseJsonRecord(strategyMetadata),
+            parameterSchema: parseJsonRecord(actionDraft.parameterSchema),
+            params: parseJsonRecord(parameterSnapshot),
+          })
+        } else if (reasonAction === "test") {
+          result = await api.testDraft(strategyId, {
+            reason: reason.trim(),
+            symbol: testSymbol.trim().toUpperCase(),
+            trainingStartDate,
+            trainingEndDate,
+            testStartDate,
+            testEndDate,
+            parameterSnapshot: parseJsonRecord(parameterSnapshot),
+            initialCapital,
+          })
+        } else if (reasonAction === "publish") {
+          result = await api.publishDraft(strategyId, {
+            reason: reason.trim(),
+            validationRunId: validationRunId.trim(),
+            expectedDraftVersion: actionDraft.version,
+          })
+        } else {
+          result = await api.archiveStrategy(strategyId, reason.trim(), actionDraft.strategyVersion)
         }
-        const result = await calls[reasonAction](strategyId, reason.trim())
         if (reasonAction === "publish" || reasonAction === "archive") setLastActionResult({ action: reasonAction, result })
         if (reasonAction === "validate") setValidationResult(result)
         if (reasonAction === "test") setTestResult(result)
@@ -325,13 +374,26 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
     try { await saveMutation.mutateAsync(toDraftInput(merged, conflict.current.version)) } catch { /* keep conflict dialog open */ }
   }
 
+  const actionDetailsValid = reasonAction === "validate"
+    ? Boolean(backtestTaskId.trim() && isJsonObject(strategyMetadata) && isJsonObject(parameterSnapshot))
+    : reasonAction === "test"
+      ? Boolean(
+        /^[0-9]{6}\.(SH|SZ|BJ)$/.test(testSymbol.trim().toUpperCase())
+        && trainingStartDate && trainingEndDate && testStartDate && testEndDate
+        && trainingStartDate <= trainingEndDate && trainingEndDate < testStartDate && testStartDate <= testEndDate
+        && isJsonObject(parameterSnapshot) && Number(initialCapital) > 0,
+      )
+      : reasonAction === "publish"
+        ? Boolean(validationRunId.trim())
+        : true
+
   return (
     <section className="mx-auto grid w-full max-w-7xl gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:p-6">
       <form className="min-w-0 space-y-4" onSubmit={saveNow}>
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div><p className="text-sm font-medium text-muted-foreground">策略工作台</p><h1 className="m-0 text-2xl font-semibold">{draftQuery.data.name}</h1></div>
           <div className="flex flex-wrap gap-2">
-            <OperationButton icon={<Save size={16} />} label={saveMutation.isPending ? "保存中" : "保存"} onClick={saveNow} disabled={saveMutation.isPending || conflict !== null} />
+            <OperationButton icon={<Save size={16} />} label={saveMutation.isPending ? "保存中" : "保存"} onClick={saveNow} disabled={!draftQuery.data.canSave || saveMutation.isPending || conflict !== null} />
             <OperationButton icon={<CheckCircle2 size={16} />} label="验证" onClick={() => openAction("validate")} disabled={!allowed("validate") || actionPending || conflict !== null} />
             <OperationButton icon={<FlaskConical size={16} />} label="测试" onClick={() => openAction("test")} disabled={!allowed("test") || actionPending || conflict !== null} />
             <OperationButton icon={<Rocket size={16} />} label="发布" onClick={() => openAction("publish")} disabled={!allowed("publish") || !validationFresh || !testFresh || actionPending || conflict !== null} />
@@ -354,7 +416,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
       <aside className="space-y-5 border-l border-border pl-0 lg:pl-5">
         <section>
           <div className="flex items-center gap-2"><History size={16} /><h2 className="text-sm font-semibold">草稿历史</h2></div>
-          {revisionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载草稿历史……</p> : revisionsQuery.isError ? <p role="alert" className="text-sm text-destructive">草稿历史加载失败，请重试。</p> : revisionsQuery.data?.length ? <ol className="space-y-2">{revisionsQuery.data.map((revision) => <li key={revision.id} className="border border-border p-2 text-sm"><span>修订 {revision.revisionNo}</span><Button type="button" variant="ghost" onClick={() => openAction("restore", revision.id)}><RotateCcw size={14} />应用回滚</Button></li>)}</ol> : <p className="text-sm text-muted-foreground">暂无历史草稿。</p>}
+          {revisionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载草稿历史……</p> : revisionsQuery.isError ? <p role="alert" className="text-sm text-destructive">草稿历史加载失败，请重试。</p> : revisionsQuery.data?.length ? <ol className="space-y-2">{revisionsQuery.data.map((revision) => <li key={revision.id} className="border border-border p-2 text-sm"><span>修订 {revision.revisionNo}</span><Button type="button" variant="ghost" disabled={!draftQuery.data.canRestoreRevision} title={draftQuery.data.canRestoreRevision ? "应用此草稿修订" : "服务器当前不允许恢复草稿"} onClick={() => openAction("restore", revision.id)}><RotateCcw size={14} />应用回滚</Button></li>)}</ol> : <p className="text-sm text-muted-foreground">暂无历史草稿。</p>}
         </section>
         <section>
           <h2 className="text-sm font-semibold">发布版本</h2>
@@ -390,9 +452,24 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
           <DialogTitle>{reasonAction === "restore" ? "确认应用回滚" : "确认策略操作"}</DialogTitle>
           <DialogDescription>这是重要操作，请填写原因后确认。</DialogDescription>
           <label className="grid gap-2 text-sm font-medium">操作原因<Input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          {reasonAction === "validate" ? <>
+            <label className="grid gap-2 text-sm font-medium">完整单股回测任务号<Input value={backtestTaskId} onChange={(event) => setBacktestTaskId(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">策略元数据<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={strategyMetadata} onChange={(event) => setStrategyMetadata(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">验证参数<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></label>
+          </> : null}
+          {reasonAction === "test" ? <div className="grid gap-3 sm:grid-cols-2">
+            <label className="grid gap-2 text-sm font-medium sm:col-span-2">股票代码<Input placeholder="600000.SH" value={testSymbol} onChange={(event) => setTestSymbol(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">训练开始<Input type="date" value={trainingStartDate} onChange={(event) => setTrainingStartDate(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">训练结束<Input type="date" value={trainingEndDate} onChange={(event) => setTrainingEndDate(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">测试开始<Input type="date" value={testStartDate} onChange={(event) => setTestStartDate(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">测试结束<Input type="date" value={testEndDate} onChange={(event) => setTestEndDate(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium">初始资金<Input inputMode="decimal" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} /></label>
+            <label className="grid gap-2 text-sm font-medium sm:col-span-2">参数快照<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></label>
+          </div> : null}
+          {reasonAction === "publish" ? <label className="grid gap-2 text-sm font-medium">验证运行号<Input value={validationRunId} onChange={(event) => setValidationRunId(event.target.value)} /></label> : null}
           {actionError ? <p role="alert" className="text-sm text-destructive">{actionError}</p> : null}
           {!actionPending ? <Button type="button" variant="secondary" onClick={() => setReasonAction(null)}>取消</Button> : null}
-          <Button type="button" onClick={() => void runAction()} disabled={!reason.trim() || actionPending}>{actionPending ? "处理中" : "确认执行"}</Button>
+          <Button type="button" onClick={() => void runAction()} disabled={!reason.trim() || !actionDetailsValid || actionPending}>{actionPending ? "处理中" : "确认执行"}</Button>
         </DialogContent>
       </Dialog>
     </section>

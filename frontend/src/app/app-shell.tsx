@@ -10,6 +10,7 @@ import {
   LogOut,
   Radar,
   RadioTower,
+  ScanSearch,
   Settings2,
   ShieldAlert,
   Target,
@@ -20,9 +21,6 @@ import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
 
 const futureNavigation = [
-  { label: "策略", icon: FlaskConical },
-  { label: "回测", icon: ChartNoAxesCombined },
-  { label: "通知", icon: BellRing },
   { label: "任务", icon: Activity },
   { label: "告警", icon: ShieldAlert },
   { label: "日历", icon: CalendarDays },
@@ -54,6 +52,18 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/signals" aria-label="信号中心" title="信号中心">
             <RadioTower aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/strategies" aria-label="策略工作台" title="策略工作台">
+            <FlaskConical aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/backtests" aria-label="回测任务" title="回测任务">
+            <ChartNoAxesCombined aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/market-data" aria-label="行情数据中心" title="行情数据中心">
+            <ScanSearch aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/notifications" aria-label="通知中心" title="通知中心">
+            <BellRing aria-hidden="true" />
           </NavLink>
           {futureNavigation.map(({ label, icon: Icon }) => (
             <span

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
@@ -61,6 +62,8 @@ class QualityIssueItem(BaseModel):
     status: QualityIssueStatus
     severity: QualitySeverity
     evidence: dict[str, Any]
+    source_candidates: list[str]
+    allowed_actions: list[QualityResolutionAction]
     occurrence_count: int
     first_seen_at: datetime
     last_seen_at: datetime
@@ -218,7 +221,36 @@ def _issue_response(
 
 
 def _item(issue: QualityIssueView) -> dict[str, Any]:
-    return QualityIssueItem.model_validate(issue).model_dump(mode="json")
+    payload = QualityIssueItem.model_validate(
+        {
+            **asdict(issue),
+            "source_candidates": _source_candidates(issue.evidence),
+            "allowed_actions": _allowed_actions(issue),
+        }
+    )
+    return payload.model_dump(mode="json")
+
+
+def _source_candidates(evidence: dict[str, Any]) -> list[str]:
+    sources = evidence.get("sources")
+    if not isinstance(sources, dict):
+        return []
+    return sorted(str(source) for source in sources)
+
+
+def _allowed_actions(issue: QualityIssueView) -> list[QualityResolutionAction]:
+    if issue.status not in {
+        QualityIssueStatus.OPEN,
+        QualityIssueStatus.REVIEW_REQUIRED,
+    }:
+        return []
+    actions = [
+        QualityResolutionAction.INVALIDATE,
+        QualityResolutionAction.REFETCH,
+    ]
+    if _source_candidates(issue.evidence):
+        actions.insert(0, QualityResolutionAction.SELECT_SOURCE)
+    return actions
 
 
 def _require_confirmation(confirm: bool) -> None:

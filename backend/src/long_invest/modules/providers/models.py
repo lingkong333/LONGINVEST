@@ -21,7 +21,13 @@ from long_invest.platform.database.base import Base
 
 class ProviderConfigVersion(Base):
     __tablename__ = "provider_config_version"
-    __table_args__ = (UniqueConstraint("provider_code", "version"),)
+    __table_args__ = (
+        UniqueConstraint("provider_code", "version"),
+        CheckConstraint(
+            "provider_code IN ('EASTMONEY', 'SINA')",
+            name="provider_code_supported",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
@@ -37,6 +43,10 @@ class ProviderCapabilitySetting(Base):
     __tablename__ = "provider_capability_setting"
     __table_args__ = (
         UniqueConstraint("config_version", "provider_code", "capability"),
+        CheckConstraint(
+            "provider_code IN ('EASTMONEY', 'SINA')",
+            name="provider_code_supported",
+        ),
         CheckConstraint("priority >= 0", name="priority_nonnegative"),
         CheckConstraint("concurrency BETWEEN 1 AND 32", name="concurrency_range"),
         CheckConstraint("rate_per_second > 0", name="rate_positive"),
@@ -58,7 +68,13 @@ class ProviderCapabilitySetting(Base):
 
 class ProviderHealthState(Base):
     __tablename__ = "provider_health_state"
-    __table_args__ = (UniqueConstraint("provider_code", "capability"),)
+    __table_args__ = (
+        UniqueConstraint("provider_code", "capability"),
+        CheckConstraint(
+            "provider_code IN ('EASTMONEY', 'SINA')",
+            name="provider_code_supported",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
@@ -75,6 +91,12 @@ class ProviderHealthState(Base):
 
 class ProviderCircuitHistory(Base):
     __tablename__ = "provider_circuit_history"
+    __table_args__ = (
+        CheckConstraint(
+            "provider_code IN ('EASTMONEY', 'SINA')",
+            name="provider_code_supported",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )
@@ -92,6 +114,10 @@ class ProviderCircuitState(Base):
     __tablename__ = "provider_circuit_state"
     __table_args__ = (
         UniqueConstraint("provider_code", "capability"),
+        CheckConstraint(
+            "provider_code IN ('EASTMONEY', 'SINA')",
+            name="provider_code_supported",
+        ),
         CheckConstraint("consecutive_failures >= 0", name="failures_nonnegative"),
         CheckConstraint("cooldown_index BETWEEN 0 AND 2", name="cooldown_index_range"),
     )
@@ -137,6 +163,12 @@ class ProviderMutationRequest(Base):
 
 class ProviderFailureSample(Base):
     __tablename__ = "provider_failure_sample"
+    __table_args__ = (
+        CheckConstraint(
+            "provider_code IN ('EASTMONEY', 'SINA')",
+            name="provider_code_supported",
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )

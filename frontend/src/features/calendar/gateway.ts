@@ -10,7 +10,7 @@ import type {
 import {
   ApiError,
   createApiClient,
-  createClientRequestId,
+  createClientIdempotencyKey,
 } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
@@ -173,7 +173,7 @@ export function createCalendarGateway(baseUrl = ""): CalendarGateway {
       await api.request(api.client.PATCH("/api/v1/trading-calendar/{date}", {
         params: {
           path: { date: input.day.tradeDate },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           market: "CN_A",
@@ -198,7 +198,7 @@ export function createCalendarGateway(baseUrl = ""): CalendarGateway {
           confirm: true,
         },
         params: {
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
       }))
     },
@@ -209,7 +209,7 @@ export function createCalendarGateway(baseUrl = ""): CalendarGateway {
         {
           params: {
             path: { version_id: input.version.id },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             market: "CN_A",

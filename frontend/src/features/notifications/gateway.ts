@@ -10,7 +10,7 @@ import type {
 import {
   ApiError,
   createApiClient,
-  createClientRequestId,
+  createClientIdempotencyKey,
 } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
@@ -314,7 +314,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         {
           params: {
             path: { delivery_id: input.deliveryId },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             reason: input.reason,
@@ -331,7 +331,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         {
           params: {
             path: { delivery_id: deliveryId },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: { reason, confirm: true },
         },
@@ -390,7 +390,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         {
           params: {
             path: { channel: channel.channel },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             value: channelValue(channel),
@@ -406,7 +406,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
       const params = {
         params: {
           path: { channel: input.channel },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           reason: input.reason,
@@ -453,7 +453,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         {
           params: {
             path: { scope: policy.scope },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             value: policyValue(policy),
@@ -511,7 +511,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         {
           params: {
             path: { type: template.templateType },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             version: template.version,

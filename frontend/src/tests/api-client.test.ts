@@ -48,8 +48,8 @@ describe("统一 API 客户端", () => {
     const first = createClientRequestId()
     const second = createClientRequestId()
 
-    expect(first).toMatch(/^web_/)
-    expect(second).toMatch(/^web_/)
+    expect(first).toMatch(/^req_[A-Za-z0-9_-]{8,60}$/)
+    expect(second).toMatch(/^req_[A-Za-z0-9_-]{8,60}$/)
     expect(second).not.toBe(first)
   })
 
@@ -57,7 +57,7 @@ describe("统一 API 客户端", () => {
     server.use(
       http.get("http://localhost/api/v1/status", ({ request }) => {
         expect(request.credentials).toBe("include")
-        expect(request.headers.get("X-Request-ID")).toMatch(/^web_/)
+        expect(request.headers.get("X-Request-ID")).toMatch(/^req_[A-Za-z0-9_-]{8,60}$/)
         return HttpResponse.json({
           success: true,
           code: "OK",
@@ -79,6 +79,7 @@ describe("统一 API 客户端", () => {
     server.use(
       http.post("http://localhost/api/v1/settings", async ({ request }) => {
         expect(request.headers.get("X-CSRF-Token")).toBe("csrf-memory-only")
+        expect(request.headers.get("X-Request-ID")).toMatch(/^req_[A-Za-z0-9_-]{8,60}$/)
         expect(request.headers.get("Idempotency-Key")).toMatch(/^web_/)
         return HttpResponse.json({
           success: true,

@@ -13,7 +13,7 @@ import type {
 import {
   ApiError,
   createApiClient,
-  createClientRequestId,
+  createClientIdempotencyKey,
 } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
@@ -198,7 +198,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
     async refreshSecurities(reason) {
       await api.request(api.client.POST("/api/v1/securities/refresh", {
         params: {
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: { confirm: true, reason },
       }))
@@ -255,7 +255,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
     async runQuoteOperation(command) {
       const request = {
         params: {
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           symbols: command.symbols,
@@ -307,7 +307,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
         {
           params: {
             path: { batch_id: command.batchId },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             confirm: true,
@@ -348,7 +348,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
       await api.request(api.client.POST("/api/v1/qfq-data/{symbol}/refresh", {
         params: {
           path: { symbol: command.dataset.symbol },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           start: command.dataset.actualStart,
@@ -390,7 +390,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
       const common = {
         params: {
           path: { issue_id: command.issueId },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           confirm: true as const,
@@ -456,7 +456,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
     async createBackfill(command) {
       await api.request(api.client.POST("/api/v1/market-history/backfills", {
         params: {
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           scope: command.scope,
@@ -482,7 +482,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
       await api.request(api.client.POST(path[command.action], {
         params: {
           path: { job_id: command.job.id },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           confirm: true,

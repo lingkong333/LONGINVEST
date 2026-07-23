@@ -10,7 +10,7 @@ import type {
 import {
   ApiError,
   createApiClient,
-  createClientRequestId,
+  createClientIdempotencyKey,
 } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
@@ -164,7 +164,7 @@ export function createProviderGateway(baseUrl = ""): ProviderGateway {
         {
           params: {
             path: { provider_code: input.provider.code },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             confirm: true,
@@ -184,7 +184,7 @@ export function createProviderGateway(baseUrl = ""): ProviderGateway {
       const request = {
         params: {
           path: { circuit_id: input.circuit.id },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: { confirm: true as const, reason: input.reason },
       }
@@ -206,7 +206,7 @@ export function createProviderGateway(baseUrl = ""): ProviderGateway {
           "/api/v1/providers/quote-diagnostics",
           {
             params: {
-              header: { "Idempotency-Key": createClientRequestId() },
+              header: { "Idempotency-Key": createClientIdempotencyKey() },
             },
             body: { confirm: true, reason, symbols },
           },

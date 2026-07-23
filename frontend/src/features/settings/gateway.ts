@@ -7,7 +7,7 @@ import type {
   SettingItem,
   SettingsGateway,
 } from "@/features/settings/types"
-import { ApiError, createApiClient, createClientRequestId } from "@/shared/api/client"
+import { ApiError, createApiClient, createClientIdempotencyKey } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
 const settingKeySchema = z.enum(settingKeys)
@@ -166,7 +166,7 @@ export function createSettingsGateway(baseUrl = ""): SettingsGateway {
         api.client.PATCH("/api/v1/settings/{key}", {
           params: {
             path: { key: input.key },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             value: input.value,
@@ -184,7 +184,7 @@ export function createSettingsGateway(baseUrl = ""): SettingsGateway {
         api.client.POST("/api/v1/settings/{key}/rollback", {
           params: {
             path: { key: input.key },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             source_version: input.sourceVersion,
@@ -202,7 +202,7 @@ export function createSettingsGateway(baseUrl = ""): SettingsGateway {
         api.client.PATCH("/api/v1/secrets/{key}", {
           params: {
             path: { key: input.key },
-            header: { "Idempotency-Key": createClientRequestId() },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
           },
           body: {
             value: input.value,

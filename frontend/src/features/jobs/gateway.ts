@@ -14,7 +14,7 @@ import {
 import {
   ApiError,
   createApiClient,
-  createClientRequestId,
+  createClientIdempotencyKey,
 } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
@@ -266,7 +266,7 @@ export function createJobGateway(baseUrl = ""): JobGateway {
       await api.request(api.client.POST(actionPath(input.action), {
         params: {
           path: { job_id: input.jobId },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           confirm: true,

@@ -56,21 +56,29 @@ interface ApiOperationResult {
   response: Response
 }
 
-export function createClientRequestId() {
+function createClientIdentifier(prefix: "req" | "web") {
   if (typeof globalThis.crypto?.randomUUID === "function") {
-    return `web_${globalThis.crypto.randomUUID()}`
+    return `${prefix}_${globalThis.crypto.randomUUID()}`
   }
   if (typeof globalThis.crypto?.getRandomValues === "function") {
     const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
-    return `web_${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}`
+    return `${prefix}_${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}`
   }
   fallbackRequestSequence = (fallbackRequestSequence + 1) % Number.MAX_SAFE_INTEGER
   return [
-    "web",
+    prefix,
     Date.now().toString(36),
     fallbackRequestSequence.toString(36),
     Math.random().toString(36).slice(2),
   ].join("_")
+}
+
+export function createClientRequestId() {
+  return createClientIdentifier("req")
+}
+
+export function createClientIdempotencyKey() {
+  return createClientIdentifier("web")
 }
 
 function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {
@@ -164,7 +172,7 @@ export function createApiClient<Paths extends object>({
       headers.set("X-Request-ID", createClientRequestId())
     }
     if (isWrite && !headers.has("Idempotency-Key")) {
-      headers.set("Idempotency-Key", createClientRequestId())
+      headers.set("Idempotency-Key", createClientIdempotencyKey())
     }
     const csrfToken = isWrite ? getCsrfToken?.() : undefined
     if (csrfToken && !headers.has("X-CSRF-Token")) {

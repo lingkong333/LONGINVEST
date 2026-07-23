@@ -8,7 +8,7 @@ import type {
   AlertOperationResult,
   AlertPage,
 } from "@/features/alerts/types"
-import { ApiError, createApiClient, createClientRequestId } from "@/shared/api/client"
+import { ApiError, createApiClient, createClientIdempotencyKey } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
 const severitySchema = z.enum(["INFO", "WARNING", "ERROR", "CRITICAL"])
@@ -214,7 +214,7 @@ export function createAlertGateway(baseUrl = ""): AlertGateway {
       const parameters = {
         params: {
           path: { alert_id: input.alertId },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: {
           expected_version: input.expectedVersion,

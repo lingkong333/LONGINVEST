@@ -169,7 +169,7 @@ describe("应用错误边界和入口", () => {
     render(<AppErrorBoundary><Broken /></AppErrorBoundary>)
 
     expect(screen.getByText("UNEXPECTED_CLIENT_ERROR")).toBeInTheDocument()
-    expect(screen.getByText(/^web_/)).toBeInTheDocument()
+    expect(screen.getByText(/^req_[A-Za-z0-9_-]{8,60}$/)).toBeInTheDocument()
     consoleError.mockRestore()
   })
 

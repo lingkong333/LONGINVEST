@@ -6,7 +6,7 @@ import type {
   MonitoringOverview,
   MonitoringOverviewItem,
 } from "@/features/monitoring/types"
-import { ApiError, createApiClient, createClientRequestId } from "@/shared/api/client"
+import { ApiError, createApiClient, createClientIdempotencyKey } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
 const monitoringActionSchema = z.enum([
@@ -318,7 +318,7 @@ async function runSubscriptionAction(
   const params = {
     params: {
       path: { subscription_id: subscriptionId },
-      header: { "Idempotency-Key": createClientRequestId() },
+      header: { "Idempotency-Key": createClientIdempotencyKey() },
     },
     body,
   }

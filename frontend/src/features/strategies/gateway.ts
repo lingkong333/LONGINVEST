@@ -1,5 +1,5 @@
 import type { paths } from "@/shared/api/generated/schema"
-import { ApiError, createApiClient, createClientRequestId } from "@/shared/api/client"
+import { ApiError, createApiClient, createClientIdempotencyKey } from "@/shared/api/client"
 
 import type {
   BacktestAction,
@@ -442,7 +442,7 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
     async createHoldoutBacktest(input: HoldoutBacktestInput) {
       const current = await loadDraft(api, input.strategyId)
       const value = record(await api.request(api.client.POST("/api/v1/backtests", {
-        params: { header: { "Idempotency-Key": createClientRequestId() } },
+        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
         body: {
           mode: "SINGLE", symbol: input.securitySymbol,
           date_range: {
@@ -527,7 +527,7 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
       const options = {
         params: {
           path: { task_id: backtestId },
-          header: { "Idempotency-Key": createClientRequestId() },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
         },
         body: { confirm: true, reason },
       }

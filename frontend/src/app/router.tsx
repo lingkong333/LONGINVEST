@@ -39,6 +39,18 @@ const CalendarPage = lazy(async () => {
   const module = await import("@/features/calendar")
   return { default: module.CalendarPage }
 })
+const SystemStatusPage = lazy(async () => {
+  const module = await import("@/features/system-status")
+  return { default: module.SystemStatusPage }
+})
+const AuditPage = lazy(async () => {
+  const module = await import("@/features/audit")
+  return { default: module.AuditPage }
+})
+const SettingsPage = lazy(async () => {
+  const module = await import("@/features/settings")
+  return { default: module.SettingsPage }
+})
 
 function deferredPage(element: ReactNode) {
   return (
@@ -114,6 +126,18 @@ export const appRouter = createBrowserRouter([
           {
             path: "/calendar",
             element: deferredPage(<CalendarPage />),
+          },
+          {
+            path: "/system-status",
+            element: deferredPage(<SystemStatusPage />),
+          },
+          {
+            path: "/audit",
+            element: deferredPage(<AuditPage />),
+          },
+          {
+            path: "/settings",
+            element: deferredPage(<SettingsPage />),
           },
         ],
       },

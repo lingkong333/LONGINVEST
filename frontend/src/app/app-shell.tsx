@@ -7,10 +7,12 @@ import {
   ChartNoAxesCombined,
   CircleGauge,
   FlaskConical,
+  HeartPulse,
   LogOut,
   Radar,
   RadioTower,
   ScanSearch,
+  ScrollText,
   Server,
   Settings2,
   ShieldAlert,
@@ -20,10 +22,6 @@ import { NavLink, Outlet } from "react-router-dom"
 
 import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
-
-const futureNavigation = [
-  { label: "设置", icon: Settings2 },
-]
 
 export function AppShell() {
   const auth = useAuth()
@@ -75,17 +73,15 @@ export function AppShell() {
           <NavLink to="/calendar" aria-label="交易日历" title="交易日历">
             <CalendarDays aria-hidden="true" />
           </NavLink>
-          {futureNavigation.map(({ label, icon: Icon }) => (
-            <span
-              className="workspace-nav__future"
-              key={label}
-              aria-disabled="true"
-              aria-label={label}
-              title={label}
-            >
-              <Icon aria-hidden="true" />
-            </span>
-          ))}
+          <NavLink to="/system-status" aria-label="运行状态" title="运行状态">
+            <HeartPulse aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/audit" aria-label="审计记录" title="审计记录">
+            <ScrollText aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/settings" aria-label="系统设置" title="系统设置">
+            <Settings2 aria-hidden="true" />
+          </NavLink>
         </nav>
 
         <div className="workspace-user">

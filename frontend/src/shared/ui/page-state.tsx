@@ -10,6 +10,14 @@ import {
 } from "lucide-react"
 
 import { Button } from "@/shared/ui/button"
+import {
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/shared/ui/empty"
 import { Skeleton } from "@/shared/ui/skeleton"
 
 type PageStateKind =
@@ -62,27 +70,37 @@ export function PageState({ state, title, description, action, error }: PageStat
     : null
 
   return (
-    <section className="page-state" role={role} aria-label={title} aria-live="polite">
-      <div className="page-state__icon" aria-hidden="true">
+    <Empty role={role} aria-label={title} aria-live="polite">
+      <EmptyHeader>
+        <EmptyMedia variant="icon" aria-hidden="true">
         <Icon className={isLoading ? "animate-spin" : undefined} />
-      </div>
-      <div className="page-state__content">
-        <h2>{title}</h2>
-        <p>{description}</p>
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+      <EmptyContent>
         {isLoading ? (
-          <div className="page-state__progress" aria-hidden="true">
+          <div className="grid w-full max-w-sm gap-2" aria-hidden="true">
             <Skeleton className="h-2 w-full" />
             <Skeleton className="h-2 w-2/3" />
           </div>
         ) : null}
         {error ? (
-          <dl className="page-state__details">
-            <div><dt>错误码</dt><dd>{error.code}</dd></div>
-            {error.requestId ? <div><dt>请求标识</dt><dd>{error.requestId}</dd></div> : null}
+          <dl className="grid w-full max-w-sm gap-2 rounded-md border bg-muted/40 p-3 text-sm">
+            <div className="flex justify-between gap-4">
+              <dt className="text-muted-foreground">错误码</dt>
+              <dd className="font-mono">{error.code}</dd>
+            </div>
+            {error.requestId ? (
+              <div className="flex justify-between gap-4">
+                <dt className="text-muted-foreground">请求标识</dt>
+                <dd className="break-all font-mono">{error.requestId}</dd>
+              </div>
+            ) : null}
           </dl>
         ) : null}
         {action || diagnostic ? (
-          <div className="page-state__actions">
+          <div className="flex items-center justify-center gap-2">
             {action ? <Button onClick={action.onClick}>{action.label}</Button> : null}
             {diagnostic ? (
               <Button
@@ -98,7 +116,7 @@ export function PageState({ state, title, description, action, error }: PageStat
             ) : null}
           </div>
         ) : null}
-      </div>
-    </section>
+      </EmptyContent>
+    </Empty>
   )
 }

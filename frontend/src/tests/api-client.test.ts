@@ -2,7 +2,13 @@ import { delay, http, HttpResponse } from "msw"
 import { setupServer } from "msw/node"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
-import { ApiError, createApiClient, unwrapEnvelope, type ApiEnvelope } from "@/shared/api/client"
+import {
+  ApiError,
+  createApiClient,
+  createClientRequestId,
+  unwrapEnvelope,
+  type ApiEnvelope,
+} from "@/shared/api/client"
 import { createAppQueryClient } from "@/shared/query/query-client"
 
 interface TestPaths {
@@ -29,10 +35,24 @@ interface TestPaths {
 const server = setupServer()
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  server.resetHandlers()
+  vi.unstubAllGlobals()
+})
 afterAll(() => server.close())
 
 describe("统一 API 客户端", () => {
+  it("非安全 HTTP 环境没有 randomUUID 时仍能生成不同请求标识", () => {
+    vi.stubGlobal("crypto", undefined)
+
+    const first = createClientRequestId()
+    const second = createClientRequestId()
+
+    expect(first).toMatch(/^web_/)
+    expect(second).toMatch(/^web_/)
+    expect(second).not.toBe(first)
+  })
+
   it("查询请求携带 Cookie 语义和请求标识并解析标准包络", async () => {
     server.use(
       http.get("http://localhost/api/v1/status", ({ request }) => {

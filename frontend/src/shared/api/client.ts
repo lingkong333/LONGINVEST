@@ -48,6 +48,7 @@ interface ApiClientOptions {
 }
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
+let fallbackRequestSequence = 0
 
 interface ApiOperationResult {
   data?: unknown
@@ -56,7 +57,20 @@ interface ApiOperationResult {
 }
 
 export function createClientRequestId() {
-  return `web_${globalThis.crypto.randomUUID()}`
+  if (typeof globalThis.crypto?.randomUUID === "function") {
+    return `web_${globalThis.crypto.randomUUID()}`
+  }
+  if (typeof globalThis.crypto?.getRandomValues === "function") {
+    const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+    return `web_${Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("")}`
+  }
+  fallbackRequestSequence = (fallbackRequestSequence + 1) % Number.MAX_SAFE_INTEGER
+  return [
+    "web",
+    Date.now().toString(36),
+    fallbackRequestSequence.toString(36),
+    Math.random().toString(36).slice(2),
+  ].join("_")
 }
 
 function isApiEnvelope(value: unknown): value is ApiEnvelope<unknown> {

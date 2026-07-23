@@ -7,7 +7,7 @@ import type {
   PositionHistoryItem,
   PositionOverview,
 } from "@/features/positions/types"
-import { ApiError, createApiClient } from "@/shared/api/client"
+import { ApiError, createApiClient, createClientRequestId } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
 
 const positionActionSchema = z.enum(["HOLD", "CLEAR"])
@@ -188,7 +188,7 @@ export function createPositionGateway(baseUrl = ""): PositionGateway {
       const params = {
         params: {
           path: { symbol: input.symbol },
-          header: { "Idempotency-Key": crypto.randomUUID() },
+          header: { "Idempotency-Key": createClientRequestId() },
         },
         body: {
           expected_version: input.expectedVersion || null,
@@ -214,7 +214,7 @@ export function createPositionGateway(baseUrl = ""): PositionGateway {
       const value = await api.request<unknown>(
         api.client.POST("/api/v1/positions/batch", {
           params: {
-            header: { "Idempotency-Key": crypto.randomUUID() },
+            header: { "Idempotency-Key": createClientRequestId() },
           },
           body: {
             items: input.items.map((item) => ({

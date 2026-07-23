@@ -1,5 +1,5 @@
 import type { components, paths } from "@/shared/api/generated/schema"
-import { createApiClient } from "@/shared/api/client"
+import { createApiClient, createClientRequestId } from "@/shared/api/client"
 
 import type {
   CalculateTargetInput,
@@ -24,7 +24,7 @@ const targetActions = new Set<TargetAction>([
 ])
 
 function idempotencyKey() {
-  return globalThis.crypto.randomUUID()
+  return createClientRequestId()
 }
 
 function recordOf(value: unknown): Record<string, unknown> {

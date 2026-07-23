@@ -90,12 +90,16 @@ def require_confirmation(confirm: bool) -> None:
 
 @router.get("")
 async def list_providers(service: ServiceDependency, _request: ReadRequest) -> dict:
-    return success_response(data=await service.list_providers())
+    return success_response(
+        data=[_provider(item) for item in await service.list_providers()]
+    )
 
 
 @router.get("/circuits")
 async def list_circuits(service: ServiceDependency, _request: ReadRequest) -> dict:
-    return success_response(data=await service.list_circuits())
+    return success_response(
+        data=[_circuit(item) for item in await service.list_circuits()]
+    )
 
 
 @router.post("/circuits/{circuit_id}/probe")
@@ -151,7 +155,7 @@ async def quote_diagnostics(
 async def get_provider(
     provider_code: ProviderCode, service: ServiceDependency, _request: ReadRequest
 ) -> dict:
-    return success_response(data=await service.get_provider(provider_code))
+    return success_response(data=_provider(await service.get_provider(provider_code)))
 
 
 @router.get("/{provider_code}/capabilities")
@@ -188,3 +192,14 @@ async def update_settings(
             audit_context=request.audit_context,
         )
     )
+
+
+def _provider(item: dict) -> dict:
+    return {
+        **item,
+        "allowed_actions": ["UPDATE_SETTINGS", "QUOTE_DIAGNOSTICS"],
+    }
+
+
+def _circuit(item: dict) -> dict:
+    return {**item, "allowed_actions": ["PROBE", "RESET"]}

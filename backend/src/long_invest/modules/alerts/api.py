@@ -14,6 +14,7 @@ from long_invest.modules.alerts.contracts import (
     AlertCommand,
     AlertSeverity,
     AlertStatus,
+    alert_allowed_actions,
 )
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -215,7 +216,19 @@ def _alert(item):
         "created_at",
         "updated_at",
     )
-    return {field: getattr(item, field) for field in fields}
+    value = {field: getattr(item, field) for field in fields}
+    value["allowed_actions"] = [
+        action.value
+        for action in alert_allowed_actions(
+            item.status,
+            can_retry=bool(
+                item.retry_job_type
+                and item.retry_queue
+                and item.retry_config is not None
+            ),
+        )
+    ]
+    return value
 
 
 def _occurrence(item):

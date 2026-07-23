@@ -319,8 +319,15 @@ button:not(:disabled),
 
 .workspace-nav {
   display: grid;
+  min-height: 0;
   gap: 0.4rem;
   margin-top: 2rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.workspace-nav::-webkit-scrollbar {
+  display: none;
 }
 
 .workspace-nav a,
@@ -1107,8 +1114,15 @@ button:not(:disabled),
 
   .workspace-nav {
     display: flex;
-    justify-content: center;
+    min-width: 0;
+    justify-content: flex-start;
     margin: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .workspace-nav a {
+    flex: 0 0 2.6rem;
   }
 
   .workspace-nav__future {

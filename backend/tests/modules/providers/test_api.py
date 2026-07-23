@@ -43,7 +43,7 @@ class FakeService:
         return {"version": 2}
 
     async def list_circuits(self):
-        return []
+        return [{"id": str(uuid4()), "state": "OPEN"}]
 
     async def probe_circuit(self, circuit_id, *, reason, audit_context):
         self.actions.append(
@@ -101,9 +101,16 @@ def test_api_defines_exact_v31_nine_routes() -> None:
 
 
 def test_read_api_uses_authenticated_dependency() -> None:
-    response = app_client(FakeService()).get("/api/v1/providers")
-    assert response.status_code == 200
-    assert response.json()["data"][0]["provider_code"] == "EASTMONEY"
+    client = app_client(FakeService())
+    providers = client.get("/api/v1/providers")
+    circuits = client.get("/api/v1/providers/circuits")
+
+    assert providers.status_code == 200
+    assert providers.json()["data"][0] == {
+        "provider_code": "EASTMONEY",
+        "allowed_actions": ["UPDATE_SETTINGS", "QUOTE_DIAGNOSTICS"],
+    }
+    assert circuits.json()["data"][0]["allowed_actions"] == ["PROBE", "RESET"]
 
 
 def test_settings_reject_unsafe_fields_and_require_confirmation_reason() -> None:

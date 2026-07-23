@@ -23,6 +23,18 @@ const StrategyOperationsPage = lazy(async () => {
   const module = await import("@/features/strategies")
   return { default: module.StrategyOperationsPage }
 })
+const JobsPage = lazy(async () => {
+  const module = await import("@/features/jobs")
+  return { default: module.JobsPage }
+})
+const ProvidersPage = lazy(async () => {
+  const module = await import("@/features/providers")
+  return { default: module.ProvidersPage }
+})
+const AlertsPage = lazy(async () => {
+  const module = await import("@/features/alerts")
+  return { default: module.AlertsPage }
+})
 
 function deferredPage(element: ReactNode) {
   return (
@@ -82,6 +94,18 @@ export const appRouter = createBrowserRouter([
           {
             path: "/notifications",
             element: deferredPage(<NotificationsPage />),
+          },
+          {
+            path: "/jobs",
+            element: deferredPage(<JobsPage />),
+          },
+          {
+            path: "/providers",
+            element: deferredPage(<ProvidersPage />),
+          },
+          {
+            path: "/alerts",
+            element: deferredPage(<AlertsPage />),
           },
         ],
       },

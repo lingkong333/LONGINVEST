@@ -31,6 +31,27 @@ class AlertActionType(StrEnum):
     RETRY_REQUESTED = "RETRY_REQUESTED"
 
 
+class AlertAllowedAction(StrEnum):
+    ACKNOWLEDGE = "ACKNOWLEDGE"
+    RESOLVE = "RESOLVE"
+    RETRY = "RETRY"
+
+
+def alert_allowed_actions(
+    status: AlertStatus | str, *, can_retry: bool
+) -> tuple[AlertAllowedAction, ...]:
+    current = AlertStatus(status)
+    if current is AlertStatus.RESOLVED:
+        return ()
+    actions: list[AlertAllowedAction] = []
+    if current is AlertStatus.OPEN:
+        actions.append(AlertAllowedAction.ACKNOWLEDGE)
+    actions.append(AlertAllowedAction.RESOLVE)
+    if can_retry:
+        actions.append(AlertAllowedAction.RETRY)
+    return tuple(actions)
+
+
 @dataclass(frozen=True, slots=True)
 class ReportAlert:
     aggregation_key: str

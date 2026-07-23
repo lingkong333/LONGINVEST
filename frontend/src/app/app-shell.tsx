@@ -11,6 +11,7 @@ import {
   Radar,
   RadioTower,
   ScanSearch,
+  Server,
   Settings2,
   ShieldAlert,
   Target,
@@ -21,8 +22,6 @@ import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
 
 const futureNavigation = [
-  { label: "任务", icon: Activity },
-  { label: "告警", icon: ShieldAlert },
   { label: "日历", icon: CalendarDays },
   { label: "设置", icon: Settings2 },
 ]
@@ -64,6 +63,15 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/notifications" aria-label="通知中心" title="通知中心">
             <BellRing aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/jobs" aria-label="任务管理" title="任务管理">
+            <Activity aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/providers" aria-label="数据源管理" title="数据源管理">
+            <Server aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/alerts" aria-label="系统告警" title="系统告警">
+            <ShieldAlert aria-hidden="true" />
           </NavLink>
           {futureNavigation.map(({ label, icon: Icon }) => (
             <span

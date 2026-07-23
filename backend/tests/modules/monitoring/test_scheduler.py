@@ -492,6 +492,9 @@ async def test_daily_market_data_claim_freezes_market_and_submits_once() -> None
         def __init__(self, session):
             pass
 
+        async def system_occurrence_exists(self, **_scope):
+            return False
+
         async def add_many(self, items):
             stored.extend(items)
 
@@ -548,6 +551,64 @@ async def test_daily_market_data_claim_freezes_market_and_submits_once() -> None
 
 
 @pytest.mark.anyio
+async def test_existing_daily_market_occurrence_skips_insert_and_job() -> None:
+    scheduled = datetime(2026, 7, 17, 9, tzinfo=UTC)
+    calls = []
+
+    class Database:
+        @asynccontextmanager
+        async def transaction(self):
+            yield object()
+
+    class Store:
+        def __init__(self, session):
+            pass
+
+        async def system_occurrence_exists(self, **scope):
+            calls.append(("exists", scope))
+            return True
+
+        async def add_many(self, items):
+            raise AssertionError("existing occurrence must not be inserted")
+
+    class Jobs:
+        def __init__(self, session):
+            pass
+
+        async def submit(self, command):
+            raise AssertionError("existing occurrence must not submit a job")
+
+    scanner = MonitorScanner(
+        Database(),
+        None,
+        None,
+        None,
+        job_factory=Jobs,
+        event_factory=None,
+        universe_freezer=None,
+        universe_all_freezer=lambda session: None,
+        store_factory=Store,
+    )
+
+    result = await scanner.claim_daily_market_data(
+        PlannedDailyMarketData(date(2026, 7, 17), uuid4(), scheduled),
+        now=scheduled + timedelta(minutes=5),
+    )
+
+    assert result.status == "DUPLICATE"
+    assert calls == [
+        (
+            "exists",
+            {
+                "occurrence_type": "DAILY_MARKET_DATA",
+                "definition_key": "daily-market-data",
+                "scheduled_at": scheduled,
+            },
+        )
+    ]
+
+
+@pytest.mark.anyio
 async def test_late_daily_market_data_occurrence_is_missed_without_job() -> None:
     scheduled = datetime(2026, 7, 17, 9, tzinfo=UTC)
 
@@ -564,6 +625,9 @@ async def test_late_daily_market_data_occurrence_is_missed_without_job() -> None
     class Store:
         def __init__(self, session):
             pass
+
+        async def system_occurrence_exists(self, **_scope):
+            return False
 
         async def add_many(self, items):
             pass

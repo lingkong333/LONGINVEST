@@ -69,6 +69,24 @@ class OccurrenceStore:
         self.session.add_all(occurrences)
         await self.session.flush()
 
+    async def system_occurrence_exists(
+        self,
+        *,
+        occurrence_type: str,
+        definition_key: str,
+        scheduled_at: datetime,
+    ) -> bool:
+        occurrence_id = await self.session.scalar(
+            select(ScheduleOccurrence.id)
+            .where(
+                ScheduleOccurrence.occurrence_type == occurrence_type,
+                ScheduleOccurrence.definition_key == definition_key,
+                ScheduleOccurrence.scheduled_at == scheduled_at,
+            )
+            .limit(1)
+        )
+        return occurrence_id is not None
+
     async def mark_job_missed(self, job_id: UUID, now: datetime):
         rows = await self.session.scalars(
             update(ScheduleOccurrence)
@@ -442,6 +460,13 @@ class MonitorScanner:
             raise RuntimeError("daily market universe freezer is not configured")
         late = now > plan.scheduled_at + timedelta(seconds=60)
         async with self.database.transaction() as session:
+            store = self.store_factory(session)
+            if await store.system_occurrence_exists(
+                occurrence_type="DAILY_MARKET_DATA",
+                definition_key="daily-market-data",
+                scheduled_at=plan.scheduled_at,
+            ):
+                return ClaimResult("DUPLICATE", False)
             occurrence = ScheduleOccurrence(
                 id=uuid4(),
                 occurrence_type="DAILY_MARKET_DATA",
@@ -455,7 +480,7 @@ class MonitorScanner:
             )
             try:
                 async with session.begin_nested():
-                    await self.store_factory(session).add_many((occurrence,))
+                    await store.add_many((occurrence,))
             except IntegrityError:
                 return ClaimResult("DUPLICATE", False)
             events = self.event_factory(session)

@@ -30,7 +30,10 @@ import type {
   AlertStatus,
 } from "@/features/alerts/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -38,6 +41,10 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
 
 const PAGE_SIZE = 20
@@ -298,7 +305,7 @@ function DetailPanel({
               确认已知不等于问题解决；只有问题已处理完成后才能人工解决。
             </p>
             {successMessage ? (
-              <p className="mt-3 text-sm text-emerald-700" role="status">{successMessage}</p>
+              <Alert className="mt-3"><AlertDescription role="status">{successMessage}</AlertDescription></Alert>
             ) : null}
           </section>
 
@@ -320,12 +327,14 @@ function DetailPanel({
         {occurrencesQuery.isPending ? (
           <p className="text-sm text-muted-foreground">正在读取发生记录...</p>
         ) : occurrencesQuery.isError ? (
-          <div role="alert" className="flex items-center justify-between gap-3 text-sm">
+          <Alert variant="destructive">
+            <AlertDescription className="flex items-center justify-between gap-3">
             <span>发生记录读取失败。</span>
             <Button size="sm" variant="outline" onClick={() => void occurrencesQuery.refetch()}>
-              <RefreshCw aria-hidden="true" />重试
+              <RefreshCw data-icon="inline-start" aria-hidden="true" />重试
             </Button>
-          </div>
+            </AlertDescription>
+          </Alert>
         ) : occurrencesQuery.data?.items.length === 0 ? (
           <p className="text-sm text-muted-foreground">暂无发生记录。</p>
         ) : (
@@ -351,12 +360,12 @@ function DetailPanel({
         {actionsQuery.isPending ? (
           <p className="text-sm text-muted-foreground">正在读取处理历史...</p>
         ) : actionsQuery.isError ? (
-          <div role="alert" className="flex items-center justify-between gap-3 text-sm">
+          <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-3">
             <span>处理历史读取失败。</span>
             <Button size="sm" variant="outline" onClick={() => void actionsQuery.refetch()}>
-              <RefreshCw aria-hidden="true" />重试
+              <RefreshCw data-icon="inline-start" aria-hidden="true" />重试
             </Button>
-          </div>
+          </AlertDescription></Alert>
         ) : actionsQuery.data?.items.length === 0 ? (
           <p className="text-sm text-muted-foreground">暂无处理历史。</p>
         ) : (
@@ -513,39 +522,37 @@ export function AlertsPage({
           disabled={listQuery.isFetching}
           onClick={() => void listQuery.refetch()}
         >
-          <RefreshCw className={listQuery.isFetching ? "animate-spin" : undefined} />
+          <RefreshCw data-icon="icon" className={listQuery.isFetching ? "animate-spin" : undefined} />
         </Button>
       </header>
 
       <section className="mb-5 flex flex-wrap items-end gap-3" aria-label="告警筛选">
         <label className="grid gap-1 text-sm">
           <span>状态</span>
-          <select
-            className="h-9 border bg-background px-3"
+          <NativeSelect
             aria-label="按状态筛选"
             value={status}
             onChange={(event) => updateStatus(event.target.value as AlertStatus | "")}
           >
-            <option value="">全部状态</option>
-            <option value="OPEN">待处理</option>
-            <option value="ACKNOWLEDGED">已确认</option>
-            <option value="RESOLVED">已解决</option>
-          </select>
+            <NativeSelectOption value="">全部状态</NativeSelectOption>
+            <NativeSelectOption value="OPEN">待处理</NativeSelectOption>
+            <NativeSelectOption value="ACKNOWLEDGED">已确认</NativeSelectOption>
+            <NativeSelectOption value="RESOLVED">已解决</NativeSelectOption>
+          </NativeSelect>
         </label>
         <label className="grid gap-1 text-sm">
           <span>严重程度</span>
-          <select
-            className="h-9 border bg-background px-3"
+          <NativeSelect
             aria-label="按严重程度筛选"
             value={severity}
             onChange={(event) => updateSeverity(event.target.value as AlertSeverity | "")}
           >
-            <option value="">全部级别</option>
-            <option value="INFO">提示</option>
-            <option value="WARNING">警告</option>
-            <option value="ERROR">错误</option>
-            <option value="CRITICAL">严重</option>
-          </select>
+            <NativeSelectOption value="">全部级别</NativeSelectOption>
+            <NativeSelectOption value="INFO">提示</NativeSelectOption>
+            <NativeSelectOption value="WARNING">警告</NativeSelectOption>
+            <NativeSelectOption value="ERROR">错误</NativeSelectOption>
+            <NativeSelectOption value="CRITICAL">严重</NativeSelectOption>
+          </NativeSelect>
         </label>
         <form
           className="flex min-w-64 flex-1 gap-2"
@@ -591,20 +598,20 @@ export function AlertsPage({
         />
       ) : (
         <>
-          <section className="divide-y border" aria-label="系统告警列表">
+          <section className="grid gap-3" aria-label="系统告警列表">
             {listQuery.data.items.map((alert: AlertItem) => (
-              <article
-                className="grid gap-3 p-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
+              <Card
                 key={alert.id}
               >
+                <CardContent className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                 <div className="min-w-0">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="border px-2 py-0.5 text-xs font-medium">
+                    <Badge variant={alert.severity === "CRITICAL" || alert.severity === "ERROR" ? "destructive" : "outline"}>
                       {severityLabels[alert.severity]}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
+                    </Badge>
+                    <Badge variant="secondary">
                       {statusLabels[alert.status]}
-                    </span>
+                    </Badge>
                     <code className="break-all text-xs text-muted-foreground">
                       {alert.alertType}
                     </code>
@@ -625,10 +632,11 @@ export function AlertsPage({
                   variant="outline"
                   onClick={() => setSelectedAlertId(alert.id)}
                 >
-                  <BellRing aria-hidden="true" />
+                  <BellRing data-icon="inline-start" aria-hidden="true" />
                   查看详情
                 </Button>
-              </article>
+                </CardContent>
+              </Card>
             ))}
           </section>
           <nav
@@ -647,7 +655,7 @@ export function AlertsPage({
                 disabled={page <= 1 || listQuery.isFetching}
                 onClick={() => setPage((current) => Math.max(1, current - 1))}
               >
-                <ChevronLeft aria-hidden="true" />
+                <ChevronLeft data-icon="icon" aria-hidden="true" />
               </Button>
               <Button
                 type="button"
@@ -657,7 +665,7 @@ export function AlertsPage({
                 disabled={page >= totalPages || listQuery.isFetching}
                 onClick={() => setPage((current) => current + 1)}
               >
-                <ChevronRight aria-hidden="true" />
+                <ChevronRight data-icon="icon" aria-hidden="true" />
               </Button>
             </div>
           </nav>

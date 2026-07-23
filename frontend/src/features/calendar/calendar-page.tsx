@@ -20,7 +20,9 @@ import type {
   CalendarVersion,
 } from "@/features/calendar/types"
 import { ApiError } from "@/shared/api/client"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Checkbox } from "@/shared/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -329,8 +331,9 @@ export function CalendarPage({
               )
               const day = daysByDate.get(tradeDate)
               return (
-                <button
-                  className="group min-h-24 border-b border-r bg-background p-2 text-left transition-colors hover:bg-muted/35 disabled:cursor-not-allowed disabled:bg-muted/10"
+                <Button
+                  variant="ghost"
+                  className="group h-auto min-h-24 flex-col items-stretch justify-start rounded-none border-b border-r bg-background p-2 text-left hover:bg-muted/35 disabled:bg-muted/10"
                   type="button"
                   key={tradeDate}
                   disabled={!day}
@@ -342,18 +345,7 @@ export function CalendarPage({
                       {dayNumber}
                     </strong>
                     {day ? (
-                      <span
-                        className={`size-2 rounded-full ${
-                          day.status === "MISSING"
-                            ? "bg-destructive"
-                            : day.status === "PROVISIONAL"
-                              ? "bg-amber-500"
-                              : day.status === "OVERRIDDEN"
-                                ? "bg-sky-500"
-                                : "bg-emerald-500"
-                        }`}
-                        aria-hidden="true"
-                      />
+                      <Badge variant={day.status === "MISSING" ? "destructive" : day.status === "CONFIRMED" ? "default" : "secondary"} className="h-1.5 min-w-1.5 rounded-full p-0" aria-hidden="true" />
                     ) : null}
                   </span>
                   <span className="mt-4 block text-xs font-medium">
@@ -364,7 +356,7 @@ export function CalendarPage({
                       ? day.sessions.map((item) => item.startsAt.slice(0, 5)).join(" / ")
                       : day ? statusLabels[day.status] : "阻止自动调度"}
                   </span>
-                </button>
+                </Button>
               )
             })}
           </div>
@@ -385,7 +377,7 @@ export function CalendarPage({
                     <div className="flex items-center gap-2">
                       <strong>v{version.versionNumber}</strong>
                       {version.isCurrent ? (
-                        <span className="text-xs font-medium text-emerald-700">当前</span>
+                        <Badge variant="secondary">当前</Badge>
                       ) : null}
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
@@ -527,14 +519,9 @@ function CoverageMetric({
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
       <div className="mt-2 flex items-center justify-between gap-3">
         <strong className="text-lg">{value}</strong>
-        <span
-          className={`size-2 rounded-full ${
-            tone === "danger"
-              ? "bg-destructive"
-              : tone === "warning" ? "bg-amber-500" : "bg-emerald-500"
-          }`}
-          aria-hidden="true"
-        />
+        <Badge variant={tone === "danger" ? "destructive" : tone === "warning" ? "secondary" : "default"}>
+          {tone === "danger" ? "异常" : tone === "warning" ? "关注" : "正常"}
+        </Badge>
       </div>
     </article>
   )
@@ -565,11 +552,10 @@ function ReasonAndConfirm({
         />
       </label>
       <label className="flex items-start gap-2 text-sm">
-        <input
+        <Checkbox
           className="mt-1"
-          type="checkbox"
           checked={confirmed}
-          onChange={(event) => setConfirmed(event.target.checked)}
+          onCheckedChange={(checked) => setConfirmed(checked === true)}
         />
         <span>{confirmation}</span>
       </label>

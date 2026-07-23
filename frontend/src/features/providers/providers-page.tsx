@@ -20,7 +20,17 @@ import type {
   QuoteDiagnostic,
 } from "@/features/providers/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/shared/ui/card"
+import { Checkbox } from "@/shared/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -30,6 +40,14 @@ import {
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
 
 const providerLabels = {
   EASTMONEY: "东方财富",
@@ -192,19 +210,19 @@ export function ProvidersPage({
             diagnosticMutation.reset()
           }}
         >
-          <Search />行情诊断
+          <Search data-icon="inline-start" />行情诊断
         </Button>
       </header>
 
       <section className="grid gap-4 xl:grid-cols-2" aria-label="数据源列表">
         {providers.data.map((provider) => (
-          <article key={provider.code} className="rounded-lg border bg-card p-5">
-            <div className="flex items-start justify-between gap-4">
+          <Card key={provider.code}>
+            <CardHeader className="flex-row items-start justify-between">
               <div className="flex items-center gap-3">
                 <span className="rounded-md bg-muted p-2"><Activity className="size-5" /></span>
                 <div>
-                  <h2 className="font-semibold">{providerLabels[provider.code]}</h2>
-                  <p className="mt-1 text-xs text-muted-foreground">配置版本 v{provider.version}</p>
+                  <CardTitle>{providerLabels[provider.code]}</CardTitle>
+                  <CardDescription>配置版本 v{provider.version}</CardDescription>
                 </div>
               </div>
               <Button
@@ -215,59 +233,59 @@ export function ProvidersPage({
                 disabled={!hasAction(provider.allowedActions, "UPDATE_SETTINGS") || provider.capabilities.length === 0}
                 onClick={() => openSettings(provider)}
               >
-                <Pencil />
+                <Pencil data-icon="icon" />
               </Button>
-            </div>
-            <div className="mt-5 overflow-x-auto">
-              <table className="w-full min-w-[620px] text-left text-sm">
-                <thead className="border-b text-muted-foreground">
-                  <tr><th className="py-2 font-medium">能力</th><th className="py-2 font-medium">状态</th><th className="py-2 font-medium">优先级</th><th className="py-2 font-medium">并发</th><th className="py-2 font-medium">每秒速率</th><th className="py-2 font-medium">超时</th></tr>
-                </thead>
-                <tbody className="divide-y">
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow><TableHead>能力</TableHead><TableHead>状态</TableHead><TableHead>优先级</TableHead><TableHead>并发</TableHead><TableHead>每秒速率</TableHead><TableHead>超时</TableHead></TableRow>
+                </TableHeader>
+                <TableBody>
                   {provider.capabilities.map((capability) => (
-                    <tr key={capability.capability}>
-                      <td className="py-3">{labelCapability(capability.capability)}</td>
-                      <td className="py-3">{capability.enabled ? "启用" : "停用"}</td>
-                      <td className="py-3">{capability.priority}</td>
-                      <td className="py-3">{capability.concurrency}</td>
-                      <td className="py-3">{capability.ratePerSecond}</td>
-                      <td className="py-3">{capability.timeoutSeconds} 秒</td>
-                    </tr>
+                    <TableRow key={capability.capability}>
+                      <TableCell>{labelCapability(capability.capability)}</TableCell>
+                      <TableCell><Badge variant={capability.enabled ? "default" : "secondary"}>{capability.enabled ? "启用" : "停用"}</Badge></TableCell>
+                      <TableCell>{capability.priority}</TableCell>
+                      <TableCell>{capability.concurrency}</TableCell>
+                      <TableCell>{capability.ratePerSecond}</TableCell>
+                      <TableCell>{capability.timeoutSeconds} 秒</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
-            </div>
+                </TableBody>
+              </Table>
             <HealthPanel provider={provider} gateway={gateway} />
-          </article>
+            </CardContent>
+          </Card>
         ))}
       </section>
 
-      <section className="rounded-lg border bg-card p-5" aria-label="熔断状态">
-        <div className="flex items-center gap-3">
-          <ShieldCheck className="size-5" />
-          <div><h2 className="font-semibold">熔断状态</h2><p className="mt-1 text-xs text-muted-foreground">按数据源和能力分别隔离。</p></div>
-        </div>
+      <Card aria-label="熔断状态">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-3"><ShieldCheck className="size-5" />熔断状态</CardTitle>
+          <CardDescription>按数据源和能力分别隔离。</CardDescription>
+        </CardHeader>
+        <CardContent>
         {circuits.isPending ? <p className="mt-5 text-sm text-muted-foreground">正在读取熔断状态…</p> : circuits.isError ? (
-          <div className="mt-5" role="alert"><p className="text-sm">熔断状态读取失败，数据源概览仍可使用。</p><Button className="mt-3" size="sm" variant="outline" onClick={() => void circuits.refetch()}><RefreshCw />重新加载</Button></div>
+          <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-3"><span>熔断状态读取失败，数据源概览仍可使用。</span><Button size="sm" variant="outline" onClick={() => void circuits.refetch()}><RefreshCw data-icon="inline-start" />重新加载</Button></AlertDescription></Alert>
         ) : circuits.data.length === 0 ? <p className="mt-5 text-sm text-muted-foreground">暂无熔断记录</p> : (
-          <div className="mt-5 overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b text-muted-foreground"><tr><th className="py-2 font-medium">数据源</th><th className="py-2 font-medium">能力</th><th className="py-2 font-medium">状态</th><th className="py-2 font-medium">连续失败</th><th className="py-2 font-medium">打开时间</th><th className="py-2 text-right font-medium">操作</th></tr></thead>
-              <tbody className="divide-y">
+            <Table>
+              <TableHeader><TableRow><TableHead>数据源</TableHead><TableHead>能力</TableHead><TableHead>状态</TableHead><TableHead>连续失败</TableHead><TableHead>打开时间</TableHead><TableHead className="text-right">操作</TableHead></TableRow></TableHeader>
+              <TableBody>
                 {circuits.data.map((circuit) => (
-                  <tr key={circuit.id}>
-                    <td className="py-3">{providerLabels[circuit.providerCode]}</td><td className="py-3">{labelCapability(circuit.capability)}</td><td className="py-3">{statusLabels[circuit.state] ?? circuit.state}</td><td className="py-3">{circuit.consecutiveFailures}</td><td className="py-3">{formatTime(circuit.openedAt)}</td>
-                    <td className="py-3"><div className="flex justify-end gap-2">
-                      <Button size="icon-sm" variant="outline" aria-label={`探测 ${providerLabels[circuit.providerCode]} ${labelCapability(circuit.capability)}`} title={hasAction(circuit.allowedActions, "PROBE") ? "执行安全探测" : "服务器未允许探测"} disabled={!hasAction(circuit.allowedActions, "PROBE")} onClick={() => { setCircuitAction({ circuit, action: "PROBE" }); setReason(""); circuitMutation.reset() }}><Gauge /></Button>
-                      <Button size="icon-sm" variant="outline" aria-label={`重置 ${providerLabels[circuit.providerCode]} ${labelCapability(circuit.capability)}`} title={hasAction(circuit.allowedActions, "RESET") ? "进入试探恢复并探测" : "服务器未允许重置"} disabled={!hasAction(circuit.allowedActions, "RESET")} onClick={() => { setCircuitAction({ circuit, action: "RESET" }); setReason(""); circuitMutation.reset() }}><RotateCcw /></Button>
-                    </div></td>
-                  </tr>
+                  <TableRow key={circuit.id}>
+                    <TableCell>{providerLabels[circuit.providerCode]}</TableCell><TableCell>{labelCapability(circuit.capability)}</TableCell><TableCell><Badge variant="outline">{statusLabels[circuit.state] ?? circuit.state}</Badge></TableCell><TableCell>{circuit.consecutiveFailures}</TableCell><TableCell>{formatTime(circuit.openedAt)}</TableCell>
+                    <TableCell><div className="flex justify-end gap-2">
+                      <Button size="icon-sm" variant="outline" aria-label={`探测 ${providerLabels[circuit.providerCode]} ${labelCapability(circuit.capability)}`} title={hasAction(circuit.allowedActions, "PROBE") ? "执行安全探测" : "服务器未允许探测"} disabled={!hasAction(circuit.allowedActions, "PROBE")} onClick={() => { setCircuitAction({ circuit, action: "PROBE" }); setReason(""); circuitMutation.reset() }}><Gauge data-icon="icon" /></Button>
+                      <Button size="icon-sm" variant="outline" aria-label={`重置 ${providerLabels[circuit.providerCode]} ${labelCapability(circuit.capability)}`} title={hasAction(circuit.allowedActions, "RESET") ? "进入试探恢复并探测" : "服务器未允许重置"} disabled={!hasAction(circuit.allowedActions, "RESET")} onClick={() => { setCircuitAction({ circuit, action: "RESET" }); setReason(""); circuitMutation.reset() }}><RotateCcw data-icon="icon" /></Button>
+                    </div></TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
         )}
-      </section>
+        </CardContent>
+      </Card>
 
       <Dialog open={editing !== null || circuitAction !== null} onOpenChange={(open) => { if (!open) closeDialog() }}>
         <DialogContent>
@@ -287,7 +305,7 @@ export function ProvidersPage({
           <label className="grid gap-2 text-sm font-medium">股票代码<Input placeholder="例如：600000.SH，000001.SZ" value={symbolsText} onChange={(event) => setSymbolsText(event.target.value)} /></label>
           <label className="grid gap-2 text-sm font-medium">操作原因<Input maxLength={255} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
           {diagnosticMutation.isError ? <p role="alert" className="text-sm text-destructive">{diagnosticMutation.error.message}</p> : null}
-          {diagnosticResult ? <div className="rounded-lg border p-3 text-sm" aria-label="诊断结果">{diagnosticResult.comparisons.map((item) => <p key={item.symbol}>{item.symbol}：{item.status === "MATCH" ? "来源一致" : item.status === "CONFLICT" ? "存在差异" : "来源不完整"}</p>)}</div> : null}
+          {diagnosticResult ? <Alert aria-label="诊断结果"><AlertDescription>{diagnosticResult.comparisons.map((item) => <p key={item.symbol}>{item.symbol}：{item.status === "MATCH" ? "来源一致" : item.status === "CONFLICT" ? "存在差异" : "来源不完整"}</p>)}</AlertDescription></Alert> : null}
           <DialogFooter><Button variant="outline" disabled={diagnosticMutation.isPending} onClick={() => setDiagnosticOpen(false)}>关闭</Button><Button disabled={parsedSymbols.length === 0 || parsedSymbols.length > 100 || !reason.trim() || diagnosticMutation.isPending} onClick={() => diagnosticMutation.mutate()}>{diagnosticMutation.isPending ? "正在诊断" : "确认诊断"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
@@ -298,16 +316,16 @@ export function ProvidersPage({
 function HealthPanel({ provider, gateway }: { provider: ProviderSummary; gateway: ProviderGateway }) {
   const query = useQuery({ queryKey: ["providers", provider.code, "health"], queryFn: () => gateway.loadHealth(provider.code) })
   if (query.isPending) return <p className="mt-5 text-sm text-muted-foreground">正在读取健康状态…</p>
-  if (query.isError) return <div className="mt-5 text-sm" role="alert">健康状态读取失败，配置仍可查看。</div>
+  if (query.isError) return <Alert className="mt-5" variant="destructive"><AlertDescription>健康状态读取失败，配置仍可查看。</AlertDescription></Alert>
   if (query.data.length === 0) return <p className="mt-5 text-sm text-muted-foreground">暂无健康观测</p>
-  return <div className="mt-5 border-t pt-4"><h3 className="text-sm font-semibold">运行健康</h3><ul className="mt-3 grid gap-2 sm:grid-cols-2">{query.data.map((health) => <li className="rounded-md bg-muted/40 p-3 text-sm" key={health.capability}><div className="flex justify-between gap-3"><span>{labelCapability(health.capability)}</span><strong>{statusLabels[health.status] ?? health.status}</strong></div><p className="mt-2 text-xs text-muted-foreground">连续失败 {health.consecutiveFailures} 次 · P95 {health.p95LatencyMs === null ? "暂无" : `${health.p95LatencyMs} ms`}</p></li>)}</ul></div>
+  return <div className="mt-5 border-t pt-4"><h3 className="text-sm font-semibold">运行健康</h3><ul className="mt-3 grid gap-2 sm:grid-cols-2">{query.data.map((health) => <li className="rounded-md bg-muted/40 p-3 text-sm" key={health.capability}><div className="flex justify-between gap-3"><span>{labelCapability(health.capability)}</span><Badge variant="outline">{statusLabels[health.status] ?? health.status}</Badge></div><p className="mt-2 text-xs text-muted-foreground">连续失败 {health.consecutiveFailures} 次 · P95 {health.p95LatencyMs === null ? "暂无" : `${health.p95LatencyMs} ms`}</p></li>)}</ul></div>
 }
 
 function SettingsFields({ settings, onChange }: { settings: ProviderSettingsInput["settings"]; onChange: (value: ProviderSettingsInput["settings"]) => void }) {
   const numberField = (key: "priority" | "concurrency" | "ratePerSecond" | "timeoutSeconds", value: string) => onChange({ ...settings, [key]: Number(value) })
   return <div className="grid gap-3 sm:grid-cols-2">
-    <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={settings.enabled} onChange={(event) => onChange({ ...settings, enabled: event.target.checked })} />启用数据源</label>
-    <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={settings.autoSwitch} onChange={(event) => onChange({ ...settings, autoSwitch: event.target.checked })} />允许自动切换</label>
+    <label className="flex items-center gap-2 text-sm font-medium"><Checkbox checked={settings.enabled} onCheckedChange={(checked) => onChange({ ...settings, enabled: checked === true })} />启用数据源</label>
+    <label className="flex items-center gap-2 text-sm font-medium"><Checkbox checked={settings.autoSwitch} onCheckedChange={(checked) => onChange({ ...settings, autoSwitch: checked === true })} />允许自动切换</label>
     <label className="grid gap-2 text-sm font-medium">优先级<Input type="number" min={0} max={20} value={settings.priority} onChange={(event) => numberField("priority", event.target.value)} /></label>
     <label className="grid gap-2 text-sm font-medium">并发上限<Input type="number" min={1} max={32} value={settings.concurrency} onChange={(event) => numberField("concurrency", event.target.value)} /></label>
     <label className="grid gap-2 text-sm font-medium">每秒速率<Input type="number" min={0.1} max={100} step={0.1} value={settings.ratePerSecond} onChange={(event) => numberField("ratePerSecond", event.target.value)} /></label>

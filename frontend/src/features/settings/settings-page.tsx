@@ -27,7 +27,9 @@ import type {
   SettingValue,
 } from "@/features/settings/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
 import { Button } from "@/shared/ui/button"
+import { Checkbox } from "@/shared/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -35,7 +37,17 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@/shared/ui/tabs"
+import { Textarea } from "@/shared/ui/textarea"
 
 type SettingOperation =
   | { kind: "save"; setting: SettingItem; value: SettingValue }
@@ -102,12 +114,11 @@ function ChannelPicker({
           ["EMAIL", "邮件"],
         ] as const).map(([channel, name]) => (
           <label className="flex items-center gap-2 text-sm" key={channel}>
-            <input
-              type="checkbox"
+            <Checkbox
               disabled={disabled}
               checked={channels.includes(channel)}
-              onChange={(event) => {
-                onChange(event.target.checked
+              onCheckedChange={(checked) => {
+                onChange(checked === true
                   ? [...channels, channel]
                   : channels.filter((item) => item !== channel))
               }}
@@ -141,11 +152,10 @@ function SettingFields({
     return (
       <div className="grid gap-5">
         <label className="flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
+          <Checkbox
             disabled={disabled}
             checked={enabled}
-            onChange={(event) => update("enabled", event.target.checked)}
+            onCheckedChange={(checked) => update("enabled", checked === true)}
           />
           启用此通知策略
         </label>
@@ -163,11 +173,10 @@ function SettingFields({
     return (
       <div className="grid gap-5">
         <label className="flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
+          <Checkbox
             disabled={disabled}
             checked={enabled}
-            onChange={(event) => update("enabled", event.target.checked)}
+            onCheckedChange={(checked) => update("enabled", checked === true)}
           />
           启用系统告警通知
         </label>
@@ -194,11 +203,10 @@ function SettingFields({
     return (
       <div className="grid gap-5">
         <label className="flex items-center gap-2 text-sm font-medium">
-          <input
-            type="checkbox"
+          <Checkbox
             disabled={disabled}
             checked={enabled}
-            onChange={(event) => update("enabled", event.target.checked)}
+            onCheckedChange={(checked) => update("enabled", checked === true)}
           />
           启用企业微信渠道
         </label>
@@ -221,11 +229,10 @@ function SettingFields({
   return (
     <div className="grid gap-5 sm:grid-cols-2">
       <label className="flex items-center gap-2 text-sm font-medium sm:col-span-2">
-        <input
-          type="checkbox"
+        <Checkbox
           disabled={disabled}
           checked={enabled}
-          onChange={(event) => update("enabled", event.target.checked)}
+          onCheckedChange={(checked) => update("enabled", checked === true)}
         />
         启用邮件渠道
       </label>
@@ -251,15 +258,14 @@ function SettingFields({
       </label>
       <label className="grid gap-2 text-sm font-medium">
         连接安全
-        <select
-          className="h-9 border bg-background px-3"
+        <NativeSelect
           disabled={disabled}
           value={stringValue(value, "security") || "SSL"}
           onChange={(event) => update("security", event.target.value)}
         >
-          <option value="SSL">SSL</option>
-          <option value="STARTTLS">STARTTLS</option>
-        </select>
+          <NativeSelectOption value="SSL">SSL</NativeSelectOption>
+          <NativeSelectOption value="STARTTLS">STARTTLS</NativeSelectOption>
+        </NativeSelect>
       </label>
       <label className="grid gap-2 text-sm font-medium">
         请求超时（1 到 30 秒）
@@ -293,8 +299,8 @@ function SettingFields({
       </label>
       <label className="grid gap-2 text-sm font-medium sm:col-span-2">
         固定收件人（每行一个，最多 5 个）
-        <textarea
-          className="min-h-24 border bg-background p-3 text-sm"
+        <Textarea
+          className="min-h-24"
           disabled={disabled}
           value={channelsAsText(value.recipients)}
           onChange={(event) => update(
@@ -394,11 +400,10 @@ function SettingsPanel({
     <div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
       <nav className="border" aria-label="配置项目">
         {settings.map((item) => (
-          <button
+          <Button
             type="button"
-            className={`block w-full border-b p-4 text-left last:border-b-0 ${
-              item.key === selectedKey ? "bg-muted" : ""
-            }`}
+            variant={item.key === selectedKey ? "secondary" : "ghost"}
+            className="h-auto w-full justify-start rounded-none border-b p-4 text-left last:border-b-0"
             key={item.key}
             onClick={() => {
               setSelectedKey(item.key)
@@ -411,7 +416,7 @@ function SettingsPanel({
             <span className="mt-1 block text-xs text-muted-foreground">
               版本 {item.version}
             </span>
-          </button>
+          </Button>
         ))}
       </nav>
 
@@ -434,10 +439,10 @@ function SettingsPanel({
             onChange={setDraft}
           />
           {validationError ? (
-            <p className="mt-4 text-sm text-destructive" role="alert">{validationError}</p>
+            <Alert className="mt-4" variant="destructive"><AlertDescription>{validationError}</AlertDescription></Alert>
           ) : null}
           {successMessage ? (
-            <p className="mt-4 text-sm text-emerald-700" role="status">{successMessage}</p>
+            <Alert className="mt-4"><AlertDescription role="status">{successMessage}</AlertDescription></Alert>
           ) : null}
           <div className="mt-5 flex justify-end">
             <Button
@@ -445,7 +450,7 @@ function SettingsPanel({
               disabled={!selected.allowedActions.includes("UPDATE") || mutation.isPending}
               onClick={prepareSave}
             >
-              <Save aria-hidden="true" />保存配置
+              <Save data-icon="inline-start" aria-hidden="true" />保存配置
             </Button>
           </div>
 
@@ -463,7 +468,7 @@ function SettingsPanel({
                   variant="outline"
                   onClick={() => void historyQuery.refetch()}
                 >
-                  <RefreshCw aria-hidden="true" />重试
+                  <RefreshCw data-icon="inline-start" aria-hidden="true" />重试
                 </Button>
               </div>
             ) : historyQuery.data.length === 0 ? (
@@ -495,7 +500,7 @@ function SettingsPanel({
                         setOperation({ kind: "rollback", setting: selected, history: item })
                       }}
                     >
-                      <ArchiveRestore aria-hidden="true" />回滚到此版本
+                      <ArchiveRestore data-icon="inline-start" aria-hidden="true" />回滚到此版本
                     </Button>
                   </li>
                 ))}
@@ -610,11 +615,10 @@ function SecretPanel({
     <div className="grid gap-6 lg:grid-cols-[17rem_minmax(0,1fr)]">
       <nav className="border" aria-label="敏感配置项目">
         {secrets.map((item) => (
-          <button
+          <Button
             type="button"
-            className={`block w-full border-b p-4 text-left last:border-b-0 ${
-              item.key === selectedKey ? "bg-muted" : ""
-            }`}
+            variant={item.key === selectedKey ? "secondary" : "ghost"}
+            className="h-auto w-full justify-start rounded-none border-b p-4 text-left last:border-b-0"
             key={item.key}
             onClick={() => {
               setSelectedKey(item.key)
@@ -628,7 +632,7 @@ function SecretPanel({
             <span className="mt-1 block text-xs text-muted-foreground">
               {item.configured ? "已配置" : "未配置"}
             </span>
-          </button>
+          </Button>
         ))}
       </nav>
 
@@ -660,13 +664,12 @@ function SecretPanel({
             </label>
             {selected.configured ? (
               <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={clearSecret}
                   disabled={!selected.allowedActions.includes("CLEAR")}
-                  onChange={(event) => {
-                    setClearSecret(event.target.checked)
-                    if (event.target.checked) setValue("")
+                  onCheckedChange={(checked) => {
+                    setClearSecret(checked === true)
+                    if (checked === true) setValue("")
                   }}
                 />
                 明确清空当前敏感值
@@ -676,7 +679,7 @@ function SecretPanel({
               页面永远不会显示原始敏感值。留空保存会保留当前值，只有勾选清空才会删除。
             </p>
             {successMessage ? (
-              <p className="text-sm text-emerald-700" role="status">{successMessage}</p>
+              <Alert><AlertDescription role="status">{successMessage}</AlertDescription></Alert>
             ) : null}
             <div className="flex justify-end">
               <Button
@@ -687,7 +690,7 @@ function SecretPanel({
                   setConfirming(true)
                 }}
               >
-                <ShieldCheck aria-hidden="true" />
+                <ShieldCheck data-icon="inline-start" aria-hidden="true" />
                 {clearSecret ? "清空敏感值" : "保存敏感配置"}
               </Button>
             </div>
@@ -780,34 +783,16 @@ export function SettingsPage({
           disabled={overviewQuery.isFetching}
           onClick={() => void overviewQuery.refetch()}
         >
-          <RefreshCw className={overviewQuery.isFetching ? "animate-spin" : undefined} />
+          <RefreshCw data-icon="icon" className={overviewQuery.isFetching ? "animate-spin" : undefined} />
         </Button>
       </header>
 
-      <div className="mb-6 flex border-b" role="tablist" aria-label="设置类别">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "settings"}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm ${
-            tab === "settings" ? "border-foreground font-semibold" : "border-transparent"
-          }`}
-          onClick={() => setTab("settings")}
-        >
-          <Settings2 className="size-4" />普通配置
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={tab === "secrets"}
-          className={`flex items-center gap-2 border-b-2 px-4 py-3 text-sm ${
-            tab === "secrets" ? "border-foreground font-semibold" : "border-transparent"
-          }`}
-          onClick={() => setTab("secrets")}
-        >
-          <KeyRound className="size-4" />敏感配置
-        </button>
-      </div>
+      <Tabs className="mb-6" value={tab} onValueChange={(value) => setTab(value as "settings" | "secrets")}>
+        <TabsList aria-label="设置类别">
+          <TabsTrigger value="settings"><Settings2 data-icon="inline-start" />普通配置</TabsTrigger>
+          <TabsTrigger value="secrets"><KeyRound data-icon="inline-start" />敏感配置</TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {overviewQuery.isPending ? (
         <PageState state="loading" title="正在读取系统设置" description="正在读取白名单配置和敏感项状态。" />

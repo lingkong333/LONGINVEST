@@ -18,6 +18,7 @@ import type {
   AuditGateway,
 } from "@/features/audit/types"
 import { ApiError } from "@/shared/api/client"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import {
   Dialog,
@@ -27,6 +28,14 @@ import {
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
 
 interface AuditPageProps {
   gateway?: AuditGateway
@@ -136,30 +145,28 @@ function SummaryChanges({ event }: { event: AuditEvent }) {
   }
 
   return (
-    <div className="overflow-x-auto border">
-      <table className="w-full min-w-[620px] text-sm">
-        <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-          <tr>
-            <th className="px-3 py-2 font-medium">字段</th>
-            <th className="px-3 py-2 font-medium">变更前</th>
-            <th className="px-3 py-2 font-medium">变更后</th>
-          </tr>
-        </thead>
-        <tbody>
+    <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>字段</TableHead>
+            <TableHead>变更前</TableHead>
+            <TableHead>变更后</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {keys.map((key) => (
-            <tr key={key} className="border-t align-top">
-              <th className="px-3 py-2 text-left font-medium">{key}</th>
-              <td className="max-w-[280px] break-words px-3 py-2">
+            <TableRow key={key} className="align-top">
+              <TableHead>{key}</TableHead>
+              <TableCell className="max-w-[280px] break-words">
                 {valueText(event.beforeSummary?.[key])}
-              </td>
-              <td className="max-w-[280px] break-words px-3 py-2">
+              </TableCell>
+              <TableCell className="max-w-[280px] break-words">
                 {valueText(event.afterSummary?.[key])}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+    </Table>
   )
 }
 
@@ -258,10 +265,10 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 text-sm text-muted-foreground">
-            <ShieldCheckIcon className="size-4 text-emerald-700" />
+          <Badge variant="outline">
+            <ShieldCheckIcon data-icon="inline-start" />
             只读 · 无可用操作
-          </span>
+          </Badge>
           <Button
             size="icon-sm"
             variant="outline"
@@ -270,7 +277,7 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
             disabled={eventsQuery.isFetching}
             onClick={() => void eventsQuery.refetch()}
           >
-            <RefreshCwIcon className={eventsQuery.isFetching ? "animate-spin" : ""} />
+            <RefreshCwIcon data-icon="icon" className={eventsQuery.isFetching ? "animate-spin" : ""} />
           </Button>
         </div>
       </header>
@@ -354,7 +361,7 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
               title="清空筛选"
               onClick={clearFilters}
             >
-              <XIcon />
+              <XIcon data-icon="icon" />
             </Button>
           </div>
         </div>
@@ -368,34 +375,33 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
         />
       ) : (
         <>
-          <div className="overflow-x-auto border">
-            <table className="w-full min-w-[980px] text-sm">
-              <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-medium">发生时间</th>
-                  <th className="px-3 py-2 font-medium">操作</th>
-                  <th className="px-3 py-2 font-medium">业务对象</th>
-                  <th className="px-3 py-2 font-medium">用户</th>
-                  <th className="px-3 py-2 font-medium">结果</th>
-                  <th className="px-3 py-2 font-medium">风险</th>
-                  <th className="px-3 py-2 text-right font-medium">详情</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>发生时间</TableHead>
+                  <TableHead>操作</TableHead>
+                  <TableHead>业务对象</TableHead>
+                  <TableHead>用户</TableHead>
+                  <TableHead>结果</TableHead>
+                  <TableHead>风险</TableHead>
+                  <TableHead className="text-right">详情</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {eventsQuery.data.items.map((event) => (
-                  <tr key={event.id} className="border-t">
-                    <td className="px-3 py-2.5">{dateTime(event.occurredAt)}</td>
-                    <td className="px-3 py-2.5 font-medium">{event.actionCode}</td>
-                    <td className="px-3 py-2.5">
+                  <TableRow key={event.id}>
+                    <TableCell>{dateTime(event.occurredAt)}</TableCell>
+                    <TableCell className="font-medium">{event.actionCode}</TableCell>
+                    <TableCell>
                       {event.objectType}
                       <span className="ml-2 text-xs text-muted-foreground">
                         {event.objectId}
                       </span>
-                    </td>
-                    <td className="px-3 py-2.5">{event.actorUserId ?? "系统"}</td>
-                    <td className="px-3 py-2.5">{event.result}</td>
-                    <td className="px-3 py-2.5">{event.riskLevel}</td>
-                    <td className="px-3 py-2.5 text-right">
+                    </TableCell>
+                    <TableCell>{event.actorUserId ?? "系统"}</TableCell>
+                    <TableCell><Badge variant="secondary">{event.result}</Badge></TableCell>
+                    <TableCell><Badge variant="outline">{event.riskLevel}</Badge></TableCell>
+                    <TableCell className="text-right">
                       <Button
                         size="icon-sm"
                         variant="outline"
@@ -403,14 +409,13 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
                         title="查看安全详情"
                         onClick={() => setSelectedEvent(event)}
                       >
-                        <EyeIcon />
+                        <EyeIcon data-icon="icon" />
                       </Button>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
           <footer className="mt-3 flex items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground">
               共 {eventsQuery.data.pagination.total} 条，第 {filters.page} / {totalPages} 页
@@ -423,7 +428,7 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
                 disabled={filters.page <= 1}
                 onClick={() => changePage(filters.page - 1)}
               >
-                <ChevronLeftIcon />
+                <ChevronLeftIcon data-icon="icon" />
               </Button>
               <Button
                 size="icon-sm"
@@ -432,7 +437,7 @@ export function AuditPage({ gateway = auditGateway }: AuditPageProps) {
                 disabled={filters.page >= totalPages}
                 onClick={() => changePage(filters.page + 1)}
               >
-                <ChevronRightIcon />
+                <ChevronRightIcon data-icon="icon" />
               </Button>
             </div>
           </footer>

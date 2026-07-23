@@ -23,6 +23,8 @@ import {
   type JobSummary,
 } from "@/features/jobs/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import {
   Dialog,
@@ -32,7 +34,19 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
 
 interface JobsPageProps {
   gateway?: JobGateway
@@ -93,26 +107,23 @@ function dateTime(value: string | null) {
   }).format(new Date(value))
 }
 
-function statusTone(status: string) {
+function statusVariant(status: string) {
   if (status === "SUCCEEDED") {
-    return "border-emerald-600/30 bg-emerald-600/10 text-emerald-800"
+    return "default" as const
   }
   if (["FAILED", "TIMED_OUT", "LOST", "REJECTED"].includes(status)) {
-    return "border-destructive/30 bg-destructive/10 text-destructive"
+    return "destructive" as const
   }
-  if (["PARTIAL", "PAUSED", "BLOCKED"].includes(status)) {
-    return "border-amber-600/30 bg-amber-600/10 text-amber-800"
-  }
-  return "border-border bg-muted/60 text-muted-foreground"
+  return ["PARTIAL", "PAUSED", "BLOCKED"].includes(status)
+    ? "secondary" as const
+    : "outline" as const
 }
 
 function Status({ value }: { value: JobStatus | string }) {
   return (
-    <span
-      className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${statusTone(value)}`}
-    >
+    <Badge variant={statusVariant(value)}>
       {statusLabels[value as JobStatus] ?? value}
-    </span>
+    </Badge>
   )
 }
 
@@ -246,19 +257,18 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
             value={draftQueue}
             onChange={(event) => setDraftQueue(event.target.value)}
           />
-          <select
+          <NativeSelect
             aria-label="任务状态"
-            className="h-9 rounded-md border bg-background px-3 text-sm"
             value={draftStatus}
             onChange={(event) => {
               setDraftStatus(event.target.value as JobStatus | "")
             }}
           >
-            <option value="">全部状态</option>
+            <NativeSelectOption value="">全部状态</NativeSelectOption>
             {jobStatuses.map((status) => (
-              <option key={status} value={status}>{statusLabels[status]}</option>
+              <NativeSelectOption key={status} value={status}>{statusLabels[status]}</NativeSelectOption>
             ))}
-          </select>
+          </NativeSelect>
           <div className="flex gap-2">
             <Button onClick={applyFilters}>
               <SearchIcon data-icon="inline-start" />
@@ -271,16 +281,14 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
               title="清空筛选"
               onClick={clearFilters}
             >
-              <XIcon />
+              <XIcon data-icon="icon" />
             </Button>
           </div>
         </div>
       </section>
 
       {successMessage ? (
-        <p role="status" className="mb-4 text-sm text-emerald-700">
-          {successMessage}
-        </p>
+        <Alert className="mb-4"><AlertDescription role="status">{successMessage}</AlertDescription></Alert>
       ) : null}
 
       {jobsQuery.isPending ? (
@@ -308,34 +316,33 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
         />
       ) : (
         <>
-          <div className="overflow-x-auto border">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                <tr>
-                  <th className="px-3 py-2 font-medium">任务</th>
-                  <th className="px-3 py-2 font-medium">队列</th>
-                  <th className="px-3 py-2 font-medium">状态</th>
-                  <th className="px-3 py-2 font-medium">进度</th>
-                  <th className="px-3 py-2 font-medium">更新时间</th>
-                  <th className="px-3 py-2 text-right font-medium">操作</th>
-                </tr>
-              </thead>
-              <tbody>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>任务</TableHead>
+                  <TableHead>队列</TableHead>
+                  <TableHead>状态</TableHead>
+                  <TableHead>进度</TableHead>
+                  <TableHead>更新时间</TableHead>
+                  <TableHead className="text-right">操作</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {jobsQuery.data.items.map((job) => (
-                  <tr key={job.id} className="border-t">
-                    <td className="px-3 py-2.5">
+                  <TableRow key={job.id}>
+                    <TableCell>
                       <strong className="block font-medium">{job.jobType}</strong>
                       <span className="font-mono text-xs text-muted-foreground">
                         {job.id}
                       </span>
-                    </td>
-                    <td className="px-3 py-2.5">{job.queue}</td>
-                    <td className="px-3 py-2.5"><Status value={job.status} /></td>
-                    <td className="px-3 py-2.5 tabular-nums">
+                    </TableCell>
+                    <TableCell>{job.queue}</TableCell>
+                    <TableCell><Status value={job.status} /></TableCell>
+                    <TableCell className="tabular-nums">
                       {progressText(job)}
-                    </td>
-                    <td className="px-3 py-2.5">{dateTime(job.updatedAt)}</td>
-                    <td className="px-3 py-2.5 text-right">
+                    </TableCell>
+                    <TableCell>{dateTime(job.updatedAt)}</TableCell>
+                    <TableCell className="text-right">
                       <Button
                         size="sm"
                         variant="outline"
@@ -346,12 +353,11 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
                       >
                         查看详情
                       </Button>
-                    </td>
-                  </tr>
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </TableBody>
+            </Table>
           <footer className="mt-3 flex items-center justify-between gap-3 text-sm">
             <span className="text-muted-foreground">
               共 {jobsQuery.data.pagination.total} 项，第 {filters.page} / {totalPages} 页
@@ -367,7 +373,7 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
                   page: current.page - 1,
                 }))}
               >
-                <ChevronLeftIcon />
+                <ChevronLeftIcon data-icon="icon" />
               </Button>
               <Button
                 size="icon-sm"
@@ -379,7 +385,7 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
                   page: current.page + 1,
                 }))}
               >
-                <ChevronRightIcon />
+                <ChevronRightIcon data-icon="icon" />
               </Button>
             </div>
           </footer>
@@ -477,32 +483,30 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
                 {detailsQuery.data.runs.length === 0 ? (
                   <p className="text-sm text-muted-foreground">暂无运行尝试。</p>
                 ) : (
-                  <div className="overflow-x-auto border">
-                    <table className="w-full min-w-[620px] text-sm">
-                      <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-2 font-medium">次数</th>
-                          <th className="px-3 py-2 font-medium">状态</th>
-                          <th className="px-3 py-2 font-medium">Worker</th>
-                          <th className="px-3 py-2 font-medium">开始</th>
-                          <th className="px-3 py-2 font-medium">结束</th>
-                          <th className="px-3 py-2 font-medium">错误码</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>次数</TableHead>
+                          <TableHead>状态</TableHead>
+                          <TableHead>Worker</TableHead>
+                          <TableHead>开始</TableHead>
+                          <TableHead>结束</TableHead>
+                          <TableHead>错误码</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {detailsQuery.data.runs.map((run) => (
-                          <tr key={run.id} className="border-t">
-                            <td className="px-3 py-2">#{run.attemptNo}</td>
-                            <td className="px-3 py-2"><Status value={run.status} /></td>
-                            <td className="px-3 py-2">{run.workerId ?? "—"}</td>
-                            <td className="px-3 py-2">{dateTime(run.startedAt)}</td>
-                            <td className="px-3 py-2">{dateTime(run.endedAt)}</td>
-                            <td className="px-3 py-2">{run.errorCode ?? "—"}</td>
-                          </tr>
+                          <TableRow key={run.id}>
+                            <TableCell>#{run.attemptNo}</TableCell>
+                            <TableCell><Status value={run.status} /></TableCell>
+                            <TableCell>{run.workerId ?? "—"}</TableCell>
+                            <TableCell>{dateTime(run.startedAt)}</TableCell>
+                            <TableCell>{dateTime(run.endedAt)}</TableCell>
+                            <TableCell>{run.errorCode ?? "—"}</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </TableBody>
+                    </Table>
                 )}
               </section>
 
@@ -516,30 +520,30 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
                 {detailsQuery.data.items.length === 0 ? (
                   <p className="text-sm text-muted-foreground">此任务没有逐项结果。</p>
                 ) : (
-                  <div className="max-h-64 overflow-auto border">
-                    <table className="w-full min-w-[600px] text-sm">
-                      <thead className="sticky top-0 bg-muted text-left text-xs text-muted-foreground">
-                        <tr>
-                          <th className="px-3 py-2 font-medium">项目</th>
-                          <th className="px-3 py-2 font-medium">状态</th>
-                          <th className="px-3 py-2 font-medium">尝试次数</th>
-                          <th className="px-3 py-2 font-medium">错误码</th>
-                          <th className="px-3 py-2 font-medium">更新时间</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                    <div className="max-h-64 overflow-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>项目</TableHead>
+                          <TableHead>状态</TableHead>
+                          <TableHead>尝试次数</TableHead>
+                          <TableHead>错误码</TableHead>
+                          <TableHead>更新时间</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {detailsQuery.data.items.map((item) => (
-                          <tr key={item.id} className="border-t">
-                            <td className="px-3 py-2">{item.itemKey}</td>
-                            <td className="px-3 py-2"><Status value={item.status} /></td>
-                            <td className="px-3 py-2">{item.attemptCount}</td>
-                            <td className="px-3 py-2">{item.errorCode ?? "—"}</td>
-                            <td className="px-3 py-2">{dateTime(item.updatedAt)}</td>
-                          </tr>
+                          <TableRow key={item.id}>
+                            <TableCell>{item.itemKey}</TableCell>
+                            <TableCell><Status value={item.status} /></TableCell>
+                            <TableCell>{item.attemptCount}</TableCell>
+                            <TableCell>{item.errorCode ?? "—"}</TableCell>
+                            <TableCell>{dateTime(item.updatedAt)}</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      </TableBody>
+                    </Table>
+                    </div>
                 )}
               </section>
             </div>

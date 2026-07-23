@@ -14,7 +14,22 @@ import type {
   SystemStatusGateway,
 } from "@/features/system-status/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+} from "@/shared/ui/card"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
 
 const healthLabels: Record<HealthStatus, string> = {
   HEALTHY: "健康",
@@ -118,10 +133,10 @@ function ComponentsRegion({ gateway }: { gateway: SystemStatusGateway }) {
       {query.data && query.data.length > 0 ? (
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {query.data.map((component) => (
-            <article key={`${component.category}-${component.name}`} className="rounded-md border p-4">
+            <article key={`${component.category}-${component.name}`} className="rounded-md bg-muted/40 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div><h3 className="font-medium">{component.name}</h3><p className="mt-1 text-xs text-muted-foreground">{component.category} · {component.source}</p></div>
-                <strong className="text-sm">{statusText(component.status)}</strong>
+                <Badge variant="outline">{statusText(component.status)}</Badge>
               </div>
               {component.message ? <p className="mt-3 text-sm">{component.message}</p> : null}
               {component.details.length > 0 ? <dl className="mt-3 grid gap-1 text-xs text-muted-foreground">{component.details.map((detail) => <div key={detail.key} className="flex justify-between gap-3"><dt>{detail.key}</dt><dd>{detail.value}{detail.unit ? ` ${detail.unit}` : ""}</dd></div>)}</dl> : null}
@@ -157,13 +172,13 @@ function RuntimeRegion({ gateway }: { gateway: SystemStatusGateway }) {
           <div>
             <h3 className="mb-3 text-sm font-semibold">队列</h3>
             {query.data.queues.length === 0 ? <p className="text-sm text-muted-foreground">暂无队列</p> : (
-              <div className="overflow-x-auto"><table className="w-full min-w-[480px] text-left text-sm"><thead className="border-b text-muted-foreground"><tr><th className="py-2 font-medium">名称</th><th className="py-2 font-medium">状态</th><th className="py-2 font-medium">等待任务</th><th className="py-2 font-medium">活动 Worker</th></tr></thead><tbody className="divide-y">{query.data.queues.map((queue) => <tr key={queue.name}><td className="py-3">{queue.name}</td><td className="py-3">{statusText(queue.status)}</td><td className="py-3">{queue.depth}</td><td className="py-3">{queue.activeWorkers}</td></tr>)}</tbody></table></div>
+              <Table><TableHeader><TableRow><TableHead>名称</TableHead><TableHead>状态</TableHead><TableHead>等待任务</TableHead><TableHead>活动 Worker</TableHead></TableRow></TableHeader><TableBody>{query.data.queues.map((queue) => <TableRow key={queue.name}><TableCell>{queue.name}</TableCell><TableCell><Badge variant="outline">{statusText(queue.status)}</Badge></TableCell><TableCell>{queue.depth}</TableCell><TableCell>{queue.activeWorkers}</TableCell></TableRow>)}</TableBody></Table>
             )}
           </div>
           <div>
             <h3 className="mb-3 text-sm font-semibold">Worker</h3>
             {query.data.workers.length === 0 ? <p className="text-sm text-muted-foreground">暂无 Worker</p> : (
-              <div className="overflow-x-auto"><table className="w-full min-w-[520px] text-left text-sm"><thead className="border-b text-muted-foreground"><tr><th className="py-2 font-medium">标识</th><th className="py-2 font-medium">队列</th><th className="py-2 font-medium">状态</th><th className="py-2 font-medium">心跳</th></tr></thead><tbody className="divide-y">{query.data.workers.map((worker) => <tr key={worker.workerId}><td className="py-3 font-mono text-xs">{worker.workerId}</td><td className="py-3">{worker.queue}</td><td className="py-3">{worker.status}</td><td className="py-3">{formatTime(worker.heartbeatAt)}</td></tr>)}</tbody></table></div>
+              <Table><TableHeader><TableRow><TableHead>标识</TableHead><TableHead>队列</TableHead><TableHead>状态</TableHead><TableHead>心跳</TableHead></TableRow></TableHeader><TableBody>{query.data.workers.map((worker) => <TableRow key={worker.workerId}><TableCell className="font-mono text-xs">{worker.workerId}</TableCell><TableCell>{worker.queue}</TableCell><TableCell><Badge variant="outline">{worker.status}</Badge></TableCell><TableCell>{formatTime(worker.heartbeatAt)}</TableCell></TableRow>)}</TableBody></Table>
             )}
           </div>
         </div>
@@ -188,13 +203,13 @@ function SchedulingRegion({ gateway }: { gateway: SystemStatusGateway }) {
     >
       {query.data ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <article className="rounded-md border p-4">
-            <div className="flex justify-between gap-3"><h3 className="font-medium">自动调度</h3><strong>{statusText(query.data.scheduler.status)}</strong></div>
+          <article className="rounded-md bg-muted/40 p-4">
+            <div className="flex justify-between gap-3"><h3 className="font-medium">自动调度</h3><Badge variant="outline">{statusText(query.data.scheduler.status)}</Badge></div>
             <dl className="mt-4 grid gap-2 text-sm"><Row label="扫描间隔" value={`${query.data.scheduler.scanIntervalSeconds} 秒`} /><Row label="最近扫描" value={formatTime(query.data.scheduler.lastScanAt)} /><Row label="自动调度" value={query.data.scheduler.automaticSchedulingPaused ? "已暂停" : "运行中"} /></dl>
             {query.data.scheduler.pauseReason ? <p className="mt-3 text-sm text-destructive">{query.data.scheduler.pauseReason}</p> : null}
           </article>
-          <article className="rounded-md border p-4">
-            <div className="flex justify-between gap-3"><h3 className="font-medium">系统时钟</h3><strong>{statusText(query.data.clock.status)}</strong></div>
+          <article className="rounded-md bg-muted/40 p-4">
+            <div className="flex justify-between gap-3"><h3 className="font-medium">系统时钟</h3><Badge variant="outline">{statusText(query.data.clock.status)}</Badge></div>
             <dl className="mt-4 grid gap-2 text-sm"><Row label="应用时间" value={formatTime(query.data.clock.applicationTime)} /><Row label="数据库时间" value={formatTime(query.data.clock.databaseTime)} /><Row label="最大偏差" value={query.data.clock.maxSkewSeconds === null ? "暂无" : `${query.data.clock.maxSkewSeconds} 秒`} /></dl>
           </article>
         </div>
@@ -219,11 +234,11 @@ function OccurrencesRegion({ gateway }: { gateway: SystemStatusGateway }) {
       errorCode="SCHEDULE_OCCURRENCES_FAILED"
     >
       {query.data && query.data.items.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] text-left text-sm">
-            <thead className="border-b text-muted-foreground"><tr><th className="py-2 font-medium">计划时间</th><th className="py-2 font-medium">类型</th><th className="py-2 font-medium">定义</th><th className="py-2 font-medium">状态</th><th className="py-2 font-medium">说明</th></tr></thead>
-            <tbody className="divide-y">{query.data.items.map((item) => <tr key={item.occurrenceId}><td className="py-3">{formatTime(item.scheduledAt)}</td><td className="py-3">{occurrenceLabels[item.occurrenceType] ?? item.occurrenceType}</td><td className="py-3">{item.definitionId}</td><td className="py-3">{occurrenceLabels[item.status] ?? item.status}</td><td className="py-3">{item.missedReason ?? "暂无"}</td></tr>)}</tbody>
-          </table>
+        <div>
+          <Table>
+            <TableHeader><TableRow><TableHead>计划时间</TableHead><TableHead>类型</TableHead><TableHead>定义</TableHead><TableHead>状态</TableHead><TableHead>说明</TableHead></TableRow></TableHeader>
+            <TableBody>{query.data.items.map((item) => <TableRow key={item.occurrenceId}><TableCell>{formatTime(item.scheduledAt)}</TableCell><TableCell>{occurrenceLabels[item.occurrenceType] ?? item.occurrenceType}</TableCell><TableCell>{item.definitionId}</TableCell><TableCell><Badge variant="outline">{occurrenceLabels[item.status] ?? item.status}</Badge></TableCell><TableCell>{item.missedReason ?? "暂无"}</TableCell></TableRow>)}</TableBody>
+          </Table>
           <p className="mt-3 text-xs text-muted-foreground">共 {query.data.total} 条记录</p>
         </div>
       ) : null}
@@ -259,18 +274,20 @@ function StatusRegion({
   children: ReactNode
 }) {
   return (
-    <section className="rounded-lg border bg-card p-5" aria-label={title}>
-      <header className="flex items-center justify-between gap-4">
+    <Card role="region" aria-label={title}>
+      <CardHeader className="flex-row items-center justify-between">
         <div className="flex items-center gap-3"><span className="text-muted-foreground">{icon}</span><h2 className="font-semibold">{title}</h2></div>
-        <Button size="icon-sm" variant="outline" aria-label={refreshLabel} title={refreshLabel} disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw className={query.isFetching ? "animate-spin" : undefined} /></Button>
-      </header>
-      {query.isPending ? <p className="mt-5 text-sm text-muted-foreground" role="status">正在读取{title}…</p> : query.isError ? <div className="mt-5" role="alert"><p className="text-sm">{errorDiagnostic(query.error, errorCode)}</p><Button className="mt-3" size="sm" variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw />重新加载</Button></div> : empty ? <p className="mt-5 text-sm text-muted-foreground">{emptyText}</p> : <div className="mt-5">{children}</div>}
-    </section>
+        <Button size="icon-sm" variant="outline" aria-label={refreshLabel} title={refreshLabel} disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw data-icon="icon" className={query.isFetching ? "animate-spin" : undefined} /></Button>
+      </CardHeader>
+      <CardContent>
+        {query.isPending ? <p className="text-sm text-muted-foreground" role="status">正在读取{title}…</p> : query.isError ? <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-3"><span>{errorDiagnostic(query.error, errorCode)}</span><Button size="sm" variant="outline" disabled={query.isFetching} onClick={() => void query.refetch()}><RefreshCw data-icon="inline-start" />重新加载</Button></AlertDescription></Alert> : empty ? <p className="text-sm text-muted-foreground">{emptyText}</p> : children}
+      </CardContent>
+    </Card>
   )
 }
 
 function Summary({ label, value }: { label: string; value: string }) {
-  return <div className="rounded-md bg-muted/40 p-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></div>
+  return <div className="border-l-2 border-primary pl-4"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-2 text-xl font-semibold">{value}</p></div>
 }
 
 function Row({ label, value }: { label: string; value: string }) {

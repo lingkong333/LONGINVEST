@@ -190,7 +190,7 @@ describe("通知中心", () => {
     )
     renderPage(gateway({ retryDelivery }))
 
-    await userEvent.click(screen.getByRole("button", { name: "渠道投递" }))
+    await userEvent.click(screen.getByRole("tab", { name: "渠道投递" }))
     await userEvent.click(
       await screen.findByRole("button", { name: "重试 企业微信 投递" }),
     )
@@ -218,7 +218,7 @@ describe("通知中心", () => {
   it("后端未返回允许动作时渠道操作保持禁用且不回显敏感值", async () => {
     renderPage(gateway())
 
-    await userEvent.click(screen.getByRole("button", { name: "通知渠道" }))
+    await userEvent.click(screen.getByRole("tab", { name: "通知渠道" }))
     expect(await screen.findByText("企业微信")).toBeInTheDocument()
     expect(screen.getAllByRole("button", { name: "发送测试" })[0])
       .toBeDisabled()
@@ -242,7 +242,7 @@ describe("通知中心", () => {
     ])
     renderPage(notificationApi)
 
-    await userEvent.click(screen.getByRole("button", { name: "通知渠道" }))
+    await userEvent.click(screen.getByRole("tab", { name: "通知渠道" }))
     await userEvent.click(
       await screen.findByRole("button", { name: "编辑配置" }),
     )
@@ -276,7 +276,7 @@ describe("通知中心", () => {
     ])
     renderPage(notificationApi)
 
-    await userEvent.click(screen.getByRole("button", { name: "通知渠道" }))
+    await userEvent.click(screen.getByRole("tab", { name: "通知渠道" }))
     await userEvent.click(
       await screen.findByRole("button", { name: "编辑配置" }),
     )
@@ -299,7 +299,7 @@ describe("通知中心", () => {
       loadAttempts: vi.fn().mockRejectedValue(new Error("attempt failed")),
     }))
 
-    await userEvent.click(screen.getByRole("button", { name: "渠道投递" }))
+    await userEvent.click(screen.getByRole("tab", { name: "渠道投递" }))
     await userEvent.click(
       await screen.findByRole("button", { name: "查看 企业微信 尝试" }),
     )
@@ -328,7 +328,7 @@ describe("通知中心", () => {
       }),
     }))
 
-    await userEvent.click(screen.getByRole("button", { name: "通知策略" }))
+    await userEvent.click(screen.getByRole("tab", { name: "通知策略" }))
 
     expect(await screen.findByText("该策略暂时无法读取，其他策略不受影响。"))
       .toBeInTheDocument()

@@ -5,11 +5,17 @@ import { Controller, useWatch } from "react-hook-form"
 import { z } from "zod"
 
 import { useZodForm } from "@/shared/forms/use-zod-form"
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
+import { Checkbox } from "@/shared/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog"
+import { Field, FieldLabel, FieldLegend, FieldSet } from "@/shared/ui/field"
 import { FormField } from "@/shared/ui/form-field"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group"
+import { Textarea } from "@/shared/ui/textarea"
 
 import {
   isSaveConflict,
@@ -386,7 +392,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
 
   return (
     <section className="mx-auto grid w-full max-w-7xl gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:p-6">
-      <form className="min-w-0 space-y-4" onSubmit={saveNow}>
+      <form className="flex min-w-0 flex-col gap-4" onSubmit={saveNow}>
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
           <div><p className="text-sm font-medium text-muted-foreground">策略工作台</p><h1 className="m-0 text-2xl font-semibold">{draftQuery.data.name}</h1></div>
           <div className="flex flex-wrap gap-2">
@@ -397,27 +403,27 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
             <OperationButton icon={<Archive size={16} />} label="归档" onClick={() => openAction("archive")} disabled={!allowed("archive") || actionPending || conflict !== null} />
           </div>
         </header>
-        {form.formState.isDirty ? <p className="text-sm text-amber-700">源码已变化，需要重新验证和测试</p> : null}
+        {form.formState.isDirty ? <Alert><AlertDescription>源码已变化，需要重新验证和测试</AlertDescription></Alert> : null}
         <div className="grid gap-4 md:grid-cols-2">
           <FormField control={form.control} name="name" label="策略名称">{({ field }) => <Input {...field} />}</FormField>
           <FormField control={form.control} name="description" label="策略说明">{({ field }) => <Input {...field} />}</FormField>
         </div>
         <Controller control={form.control} name="sourceCode" render={({ field }) => <div className="overflow-hidden border border-border bg-card"><label className="block border-b border-border px-3 py-2 text-sm font-medium">Python 策略源码</label><CodeEditor height="34rem" language="python" ariaLabel="Python 策略源码" value={field.value} onChange={field.onChange} /></div>} />
-        <FormField control={form.control} name="parameterSchema" label="参数 JSON Schema" description="这里只做基础结构预检，完整 JSON Schema 校验由服务端完成。">{({ field }) => <textarea className="min-h-32 w-full border border-input bg-card p-3 font-mono text-sm" {...field} />}</FormField>
-        {saveMutation.isError && !conflict ? <p role="alert" className="text-sm text-destructive">保存失败，请检查网络后重试。</p> : null}
+        <FormField control={form.control} name="parameterSchema" label="参数 JSON Schema" description="这里只做基础结构预检，完整 JSON Schema 校验由服务端完成。">{({ field }) => <Textarea className="min-h-32 font-mono" {...field} />}</FormField>
+        {saveMutation.isError && !conflict ? <Alert variant="destructive"><AlertDescription>保存失败，请检查网络后重试。</AlertDescription></Alert> : null}
         {actionMessage ? <p role="status" className="text-sm text-primary">{actionMessage}</p> : null}
-        {lastActionResult ? <section aria-label="最近操作结果" className="border border-border p-3"><h2 className="text-sm font-semibold">最近操作结果</h2><p role={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "alert" : "status"} className={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "text-destructive" : ""}>{lastActionResult.result.summary ?? `状态：${lastActionResult.result.status}`}</p>{lastActionResult.result.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
-        {(validationResult ?? draftQuery.data.validationResult) ? <section aria-label="验证运行结果"><h2 className="text-sm font-semibold">验证运行结果</h2><p role={(validationResult ?? draftQuery.data.validationResult)?.status === "FAILED" || (validationResult ?? draftQuery.data.validationResult)?.status === "CANCELED" ? "alert" : "status"}>{(validationResult ?? draftQuery.data.validationResult)?.summary}</p>{(validationResult ?? draftQuery.data.validationResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
-        {(testResult ?? draftQuery.data.testResult) ? <section aria-label="测试运行结果"><h2 className="text-sm font-semibold">测试运行结果</h2><p role={(testResult ?? draftQuery.data.testResult)?.status === "FAILED" || (testResult ?? draftQuery.data.testResult)?.status === "CANCELED" ? "alert" : "status"}>{(testResult ?? draftQuery.data.testResult)?.summary}</p>{(testResult ?? draftQuery.data.testResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</section> : null}
+        {lastActionResult ? <Alert variant={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "destructive" : "default"} aria-label="最近操作结果"><AlertTitle>最近操作结果</AlertTitle><AlertDescription><p>{lastActionResult.result.summary ?? `状态：${lastActionResult.result.status}`}</p>{lastActionResult.result.details?.map((detail) => <p key={detail}>{detail}</p>)}</AlertDescription></Alert> : null}
+        {(validationResult ?? draftQuery.data.validationResult) ? <Alert variant={(validationResult ?? draftQuery.data.validationResult)?.status === "FAILED" || (validationResult ?? draftQuery.data.validationResult)?.status === "CANCELED" ? "destructive" : "default"} aria-label="验证运行结果"><AlertTitle>验证运行结果</AlertTitle><AlertDescription><p>{(validationResult ?? draftQuery.data.validationResult)?.summary}</p>{(validationResult ?? draftQuery.data.validationResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</AlertDescription></Alert> : null}
+        {(testResult ?? draftQuery.data.testResult) ? <Alert variant={(testResult ?? draftQuery.data.testResult)?.status === "FAILED" || (testResult ?? draftQuery.data.testResult)?.status === "CANCELED" ? "destructive" : "default"} aria-label="测试运行结果"><AlertTitle>测试运行结果</AlertTitle><AlertDescription><p>{(testResult ?? draftQuery.data.testResult)?.summary}</p>{(testResult ?? draftQuery.data.testResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</AlertDescription></Alert> : null}
       </form>
-      <aside className="space-y-5 border-l border-border pl-0 lg:pl-5">
+      <aside className="flex flex-col gap-5 border-l border-border pl-0 lg:pl-5">
         <section>
           <div className="flex items-center gap-2"><History size={16} /><h2 className="text-sm font-semibold">草稿历史</h2></div>
-          {revisionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载草稿历史……</p> : revisionsQuery.isError ? <p role="alert" className="text-sm text-destructive">草稿历史加载失败，请重试。</p> : revisionsQuery.data?.length ? <ol className="space-y-2">{revisionsQuery.data.map((revision) => <li key={revision.id} className="border border-border p-2 text-sm"><span>修订 {revision.revisionNo}</span><Button type="button" variant="ghost" disabled={!draftQuery.data.canRestoreRevision} title={draftQuery.data.canRestoreRevision ? "应用此草稿修订" : "服务器当前不允许恢复草稿"} onClick={() => openAction("restore", revision.id)}><RotateCcw size={14} />应用回滚</Button></li>)}</ol> : <p className="text-sm text-muted-foreground">暂无历史草稿。</p>}
+          {revisionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载草稿历史……</p> : revisionsQuery.isError ? <Alert variant="destructive"><AlertDescription>草稿历史加载失败，请重试。</AlertDescription></Alert> : revisionsQuery.data?.length ? <ol className="flex flex-col gap-2">{revisionsQuery.data.map((revision) => <li key={revision.id}><Card className="gap-2 py-3"><CardContent className="flex items-center justify-between gap-2 px-3 text-sm"><span>修订 {revision.revisionNo}</span><Button type="button" variant="ghost" disabled={!draftQuery.data.canRestoreRevision} title={draftQuery.data.canRestoreRevision ? "应用此草稿修订" : "服务器当前不允许恢复草稿"} onClick={() => openAction("restore", revision.id)}><RotateCcw data-icon="inline-start" />应用回滚</Button></CardContent></Card></li>)}</ol> : <p className="text-sm text-muted-foreground">暂无历史草稿。</p>}
         </section>
         <section>
           <h2 className="text-sm font-semibold">发布版本</h2>
-          {versionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载版本……</p> : versionsQuery.isError ? <p role="alert" className="text-sm text-destructive">版本列表加载失败，请重试。</p> : versionsQuery.data?.length ? <ul className="space-y-2">{versionsQuery.data.map((version) => <li key={version.id} className="border border-border p-2 text-sm"><span>版本 {version.versionNo} · {versionStatusLabels[version.status]}</span><Button type="button" variant="ghost" onClick={() => setSelectedVersionId(version.id)}>查看差异</Button></li>)}</ul> : <p className="text-sm text-muted-foreground">暂无发布版本。</p>}
+          {versionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载版本……</p> : versionsQuery.isError ? <Alert variant="destructive"><AlertDescription>版本列表加载失败，请重试。</AlertDescription></Alert> : versionsQuery.data?.length ? <ul className="flex flex-col gap-2">{versionsQuery.data.map((version) => <li key={version.id}><Card className="gap-2 py-3"><CardContent className="flex items-center justify-between gap-2 px-3 text-sm"><span>版本 {version.versionNo} · {versionStatusLabels[version.status]}</span><Button type="button" variant="ghost" onClick={() => setSelectedVersionId(version.id)}>查看差异</Button></CardContent></Card></li>)}</ul> : <p className="text-sm text-muted-foreground">暂无发布版本。</p>}
           {versionDiff ? <div className="mt-3"><DiffViewer original={versionDiff.published} modified={versionDiff.current} language="python" originalLabel="所选发布版本" modifiedLabel="当前草稿" /></div> : null}
         </section>
       </aside>
@@ -432,10 +438,10 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
               const server = draftDefaults(conflict.current)[field]
               const resolution = conflict.resolutions[field]
               const customLabel = field === "sourceCode" ? "人工合并结果" : `${label}人工合并结果`
-              return <fieldset key={field} className="grid gap-2 border border-border p-3"><legend className="font-semibold">{label}</legend>{field === "sourceCode" ? <div className="grid gap-3"><DiffViewer original={base} modified={local} language="python" originalLabel="基础版本" modifiedLabel="本地版本" /><DiffViewer original={base} modified={server} language="python" originalLabel="基础版本" modifiedLabel="服务器版本" /></div> : <div className="grid gap-2 sm:grid-cols-3"><div><strong>基础版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{base}</pre></div><div><strong>本地版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{local}</pre></div><div><strong>服务器版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{server}</pre></div></div>}<div className="flex flex-wrap gap-3"><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "server"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "server" } } })} />{label}采用服务器版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "local"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "local" } } })} />{label}采用本地版本</label><label><input type="radio" name={`merge-${field}`} checked={resolution.choice === "custom"} onChange={() => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: "custom" } } })} />人工编辑</label></div><textarea aria-label={customLabel} className="min-h-20 border border-input p-2 font-mono" value={resolution.custom} onChange={(event) => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { choice: "custom", custom: event.target.value } } })} /></fieldset>
+              return <FieldSet key={field}><FieldLegend>{label}</FieldLegend>{field === "sourceCode" ? <div className="grid gap-3"><DiffViewer original={base} modified={local} language="python" originalLabel="基础版本" modifiedLabel="本地版本" /><DiffViewer original={base} modified={server} language="python" originalLabel="基础版本" modifiedLabel="服务器版本" /></div> : <div className="grid gap-2 sm:grid-cols-3"><Card className="gap-2 py-3"><CardContent className="px-3"><strong>基础版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{base}</pre></CardContent></Card><Card className="gap-2 py-3"><CardContent className="px-3"><strong>本地版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{local}</pre></CardContent></Card><Card className="gap-2 py-3"><CardContent className="px-3"><strong>服务器版本</strong><pre className="max-h-24 overflow-auto bg-muted p-2">{server}</pre></CardContent></Card></div>}<RadioGroup value={resolution.choice} onValueChange={(choice) => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { ...resolution, choice: choice as typeof resolution.choice } } })} className="flex flex-wrap"><Field orientation="horizontal"><RadioGroupItem id={`merge-${field}-server`} value="server" /><FieldLabel htmlFor={`merge-${field}-server`}>{label}采用服务器版本</FieldLabel></Field><Field orientation="horizontal"><RadioGroupItem id={`merge-${field}-local`} value="local" /><FieldLabel htmlFor={`merge-${field}-local`}>{label}采用本地版本</FieldLabel></Field><Field orientation="horizontal"><RadioGroupItem id={`merge-${field}-custom`} value="custom" /><FieldLabel htmlFor={`merge-${field}-custom`}>人工编辑</FieldLabel></Field></RadioGroup><Textarea aria-label={customLabel} className="min-h-20 font-mono" value={resolution.custom} onChange={(event) => setConflict({ ...conflict, resolutions: { ...conflict.resolutions, [field]: { choice: "custom", custom: event.target.value } } })} /></FieldSet>
             })}
-            {containsConflictMarker(conflict.resolutions.sourceCode.choice === "local" ? conflict.local.sourceCode : conflict.resolutions.sourceCode.choice === "server" ? conflict.current.sourceCode : conflict.resolutions.sourceCode.custom) ? <p role="alert" className="text-destructive">仍有未解决的冲突标记，不能提交。</p> : null}
-            <label className="flex gap-2"><input type="checkbox" checked={mergeConfirmed} onChange={(event) => setMergeConfirmed(event.target.checked)} />我已核对三方内容</label>
+            {containsConflictMarker(conflict.resolutions.sourceCode.choice === "local" ? conflict.local.sourceCode : conflict.resolutions.sourceCode.choice === "server" ? conflict.current.sourceCode : conflict.resolutions.sourceCode.custom) ? <Alert variant="destructive"><AlertDescription>仍有未解决的冲突标记，不能提交。</AlertDescription></Alert> : null}
+            <Field orientation="horizontal"><Checkbox id="merge-confirmed" checked={mergeConfirmed} onCheckedChange={(checked) => setMergeConfirmed(checked === true)} /><FieldLabel htmlFor="merge-confirmed">我已核对三方内容</FieldLabel></Field>
             <div className="flex flex-wrap gap-2">
               <Button type="button" variant="secondary" onClick={() => void navigator.clipboard?.writeText(JSON.stringify(conflict.local, null, 2))}><Clipboard size={16} />复制本地内容</Button>
               <Button type="button" variant="secondary" onClick={() => { form.reset(draftDefaults(conflict.current)); setExpectedVersion(conflict.current.version); baseDraftRef.current = cloneDraft(conflict.current); setConflict(null) }}>放弃本地修改并采用服务器版本</Button>
@@ -448,22 +454,22 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
         <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => { if (actionPending) event.preventDefault() }}>
           <DialogTitle>{reasonAction === "restore" ? "确认应用回滚" : "确认策略操作"}</DialogTitle>
           <DialogDescription>这是重要操作，请填写原因后确认。</DialogDescription>
-          <label className="grid gap-2 text-sm font-medium">操作原因<Input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
+          <Field><FieldLabel htmlFor="strategy-action-reason">操作原因</FieldLabel><Input id="strategy-action-reason" value={reason} onChange={(event) => setReason(event.target.value)} /></Field>
           {reasonAction === "validate" ? <>
-            <label className="grid gap-2 text-sm font-medium">完整单股回测任务号<Input value={backtestTaskId} onChange={(event) => setBacktestTaskId(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">验证参数<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></label>
+            <Field><FieldLabel htmlFor="validation-backtest-id">完整单股回测任务号</FieldLabel><Input id="validation-backtest-id" value={backtestTaskId} onChange={(event) => setBacktestTaskId(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="validation-parameters">验证参数</FieldLabel><Textarea id="validation-parameters" className="min-h-24 font-mono" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></Field>
           </> : null}
           {reasonAction === "test" ? <div className="grid gap-3 sm:grid-cols-2">
-            <label className="grid gap-2 text-sm font-medium sm:col-span-2">股票代码<Input placeholder="600000.SH" value={testSymbol} onChange={(event) => setTestSymbol(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">训练开始<Input type="date" value={trainingStartDate} onChange={(event) => setTrainingStartDate(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">训练结束<Input type="date" value={trainingEndDate} onChange={(event) => setTrainingEndDate(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">测试开始<Input type="date" value={testStartDate} onChange={(event) => setTestStartDate(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">测试结束<Input type="date" value={testEndDate} onChange={(event) => setTestEndDate(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">初始资金<Input inputMode="decimal" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium sm:col-span-2">参数快照<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></label>
+            <Field className="sm:col-span-2"><FieldLabel htmlFor="test-symbol">股票代码</FieldLabel><Input id="test-symbol" placeholder="600000.SH" value={testSymbol} onChange={(event) => setTestSymbol(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="training-start">训练开始</FieldLabel><Input id="training-start" type="date" value={trainingStartDate} onChange={(event) => setTrainingStartDate(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="training-end">训练结束</FieldLabel><Input id="training-end" type="date" value={trainingEndDate} onChange={(event) => setTrainingEndDate(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="test-start">测试开始</FieldLabel><Input id="test-start" type="date" value={testStartDate} onChange={(event) => setTestStartDate(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="test-end">测试结束</FieldLabel><Input id="test-end" type="date" value={testEndDate} onChange={(event) => setTestEndDate(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="initial-capital">初始资金</FieldLabel><Input id="initial-capital" inputMode="decimal" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} /></Field>
+            <Field className="sm:col-span-2"><FieldLabel htmlFor="test-parameters">参数快照</FieldLabel><Textarea id="test-parameters" className="min-h-24 font-mono" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></Field>
           </div> : null}
-          {reasonAction === "publish" ? <label className="grid gap-2 text-sm font-medium">验证运行号<Input value={validationRunId} onChange={(event) => setValidationRunId(event.target.value)} /></label> : null}
-          {actionError ? <p role="alert" className="text-sm text-destructive">{actionError}</p> : null}
+          {reasonAction === "publish" ? <Field><FieldLabel htmlFor="validation-run-id">验证运行号</FieldLabel><Input id="validation-run-id" value={validationRunId} onChange={(event) => setValidationRunId(event.target.value)} /></Field> : null}
+          {actionError ? <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert> : null}
           {!actionPending ? <Button type="button" variant="secondary" onClick={() => setReasonAction(null)}>取消</Button> : null}
           <Button type="button" onClick={() => void runAction()} disabled={!reason.trim() || !actionDetailsValid || actionPending}>{actionPending ? "处理中" : "确认执行"}</Button>
         </DialogContent>

@@ -2,9 +2,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { createMemoryRouter, RouterProvider } from "react-router-dom"
-import { describe, expect, it, vi } from "vitest"
+import { beforeAll, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/app-shell"
+import { AppearanceProvider } from "@/app/appearance-provider"
 import {
   AuthProvider,
   LoginPage,
@@ -13,6 +14,22 @@ import {
   type AuthState,
 } from "@/features/auth"
 import { ApiError } from "@/shared/api/client"
+
+beforeAll(() => {
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  })
+})
 
 const authenticated: AuthState = {
   user: {
@@ -76,9 +93,11 @@ function renderApp(gateway: AuthGateway, initialPath = "/") {
 
   render(
     <QueryClientProvider client={queryClient}>
-      <AuthProvider gateway={gateway}>
-        <RouterProvider router={router} future={{ v7_startTransition: true }} />
-      </AuthProvider>
+      <AppearanceProvider>
+        <AuthProvider gateway={gateway}>
+          <RouterProvider router={router} future={{ v7_startTransition: true }} />
+        </AuthProvider>
+      </AppearanceProvider>
     </QueryClientProvider>,
   )
 }
@@ -129,7 +148,7 @@ describe("登录和会话启动", () => {
     )
     renderApp(gateway)
 
-    expect(await screen.findByRole("heading", {
+    expect(await screen.findByRole("alert", {
       name: "认证服务暂不可用",
     })).toBeInTheDocument()
     expect(screen.getByText("AUTH_BACKEND_UNAVAILABLE")).toBeInTheDocument()

@@ -4,8 +4,11 @@ import { useState } from "react"
 import { z } from "zod"
 
 import { useZodForm } from "@/shared/forms/use-zod-form"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
 import { Button } from "@/shared/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog"
+import { Card, CardContent } from "@/shared/ui/card"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/shared/ui/dialog"
+import { Field, FieldLabel } from "@/shared/ui/field"
 import { FormField } from "@/shared/ui/form-field"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
@@ -100,7 +103,7 @@ function ResultDetails({ result }: { result: HoldoutBacktestResult }) {
     <section><h2 className="text-lg font-semibold">目标调整记录</h2>{result.adjustments.length ? <DataTable caption="目标调整记录" columns={[{ key: "eventDate", header: "发生日期" }, { key: "before", header: "调整前" }, { key: "after", header: "调整后" }, { key: "factor", header: "调整因子" }, { key: "source", header: "来源" }, { key: "times", header: "发布时间 / 生效时间" }]} rows={result.adjustments.map((item, index) => ({ id: `${item.eventDate}-${index}`, eventDate: `${item.eventDate} (${item.itemId})`, before: targetLine(item.beforeValues), after: targetLine(item.afterValues), factor: item.adjustmentFactor, source: `${item.source} (${item.dataHash})`, times: `${item.publishedAt} / ${item.effectiveAt}` }))} /> : <p className="text-sm text-muted-foreground">测试期间没有发生目标调整</p>}</section>
     <section><h2 className="text-lg font-semibold">模拟订单</h2>{result.orders.length ? <DataTable caption="样本外模拟订单" columns={[{ key: "signalDate", header: "信号日" }, { key: "executeDate", header: "执行日" }, { key: "status", header: "状态" }, { key: "direction", header: "方向" }, { key: "price", header: "成交价" }, { key: "quantity", header: "数量" }, { key: "balances", header: "下单前资金 / 持仓" }, { key: "target", header: "目标 / 区间" }]} rows={result.orders.map((order) => ({ id: order.id, signalDate: order.signalDate, executeDate: order.executeDate ?? "未执行", status: order.status === "FILLED" ? "已成交" : order.status === "PENDING" ? "等待成交" : "期末未成交", direction: order.direction === "BUY" ? "买入" : "卖出", price: order.executionPrice ?? "未成交", quantity: order.quantity, balances: `${order.cashBefore} / ${order.positionBefore}`, target: `${targetLine(order.targetValues)} / ${order.targetZone}` }))} /> : <p className="text-sm text-muted-foreground">测试期间没有产生订单</p>}</section>
     <section><h2 className="text-lg font-semibold">模拟交易</h2>{result.trades.length ? <DataTable caption="样本外模拟交易" columns={[{ key: "executeDate", header: "日期" }, { key: "direction", header: "方向" }, { key: "price", header: "价格" }, { key: "quantity", header: "数量" }, { key: "balances", header: "成交后资金 / 持仓" }, { key: "roundTrip", header: "轮次 / 持有日" }, { key: "returns", header: "已实现收益" }, { key: "target", header: "目标 / 区间" }]} rows={result.trades.map((trade) => ({ id: trade.id, executeDate: trade.executeDate, direction: trade.direction === "BUY" ? "买入" : "卖出", price: trade.price, quantity: trade.quantity, balances: `${trade.cashAfter} / ${trade.positionAfter}`, roundTrip: `${trade.roundTripNo} / ${trade.holdingTradeDays ?? "-"}`, returns: `${trade.realizedReturnAmount ?? "-"} / ${trade.realizedReturnRate ?? "-"}`, target: `${targetLine(trade.targetValues)} / ${trade.targetZone} / ${trade.orderId}` }))} /> : <p className="text-sm text-muted-foreground">测试期间没有产生交易</p>}</section>
-    <section><h2 className="text-lg font-semibold">回测指标</h2>{metricEntries.length ? <div><p className="text-xs text-muted-foreground">单股任务：{result.metrics?.itemId}</p><dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">{metricEntries.map(([label, value]) => <div key={String(label)} className="border border-border bg-card p-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="m-0 font-semibold">{String(value)}</dd></div>)}</dl></div> : <p className="text-sm text-muted-foreground">暂无可展示的回测指标</p>}</section>
+    <section><h2 className="text-lg font-semibold">回测指标</h2>{metricEntries.length ? <div><p className="text-xs text-muted-foreground">单股任务：{result.metrics?.itemId}</p><dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">{metricEntries.map(([label, value]) => <Card key={String(label)} className="py-3"><CardContent><dt className="text-xs text-muted-foreground">{label}</dt><dd className="m-0 font-semibold">{String(value)}</dd></CardContent></Card>)}</dl></div> : <p className="text-sm text-muted-foreground">暂无可展示的回测指标</p>}</section>
     <section><h2 className="text-lg font-semibold">每日权益</h2>{result.dailyResults.length ? <DataTable caption="每日权益结果" columns={[{ key: "tradeDate", header: "交易日" }, { key: "cash", header: "现金" }, { key: "position", header: "持仓数量 / 市值" }, { key: "closePrice", header: "收盘价" }, { key: "equity", header: "权益 / 回撤" }, { key: "target", header: "目标 / 区间 / 状态" }]} rows={result.dailyResults.map((day) => ({ id: `${day.itemId}-${day.tradeDate}`, tradeDate: day.tradeDate, cash: day.cash, position: `${day.positionQuantity} / ${day.positionMarketValue}`, closePrice: day.closePrice, equity: `${day.equity} / ${day.drawdown}`, target: `${targetLine(day.targetValues)} / ${day.zone} / ${day.positionStatus === "HOLDING" ? "持仓" : "空仓"}` }))} /> : <p className="text-sm text-muted-foreground">暂无每日权益结果</p>}</section>
   </div>
 }
@@ -164,15 +167,15 @@ function TaskSummary({ summary }: { summary: BacktestSummaryDto }) {
   const progress = summary.totalItems === 0 ? 0 : Math.round((summary.completedItems / summary.totalItems) * 100)
   const failures = Object.entries(summary.failureCodes)
   const metric = summary.metric
-  return <section aria-label="任务汇总" className="space-y-3 border-y border-border py-4">
+  return <section aria-label="任务汇总" className="space-y-3">
     <div className="flex flex-wrap items-baseline justify-between gap-2"><h2 className="text-lg font-semibold">任务汇总</h2><p className="text-sm text-muted-foreground">{taskStatusLabel(summary.status)} · 已完成 {summary.completedItems}/{summary.totalItems}（{progress}%）</p></div>
-    <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-      {[["成功", summary.succeededItems], ["失败", summary.failedItems], ["取消", summary.canceledItems], ["待处理", summary.pendingItems], ["总数", summary.totalItems]].map(([label, value]) => <div key={String(label)} className="border border-border bg-card p-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="m-0 font-semibold">{value}</dd></div>)}
-    </dl>
-    {metric ? <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-      {[["期末权益", metric.endingEquity], ["总收益率", metric.totalReturn], ["最大回撤", metric.maxDrawdown], ["完整交易轮次", metric.completedRoundTrips]].map(([label, value]) => <div key={String(label)}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="m-0 font-medium">{value}</dd></div>)}
-    </dl> : summary.succeededItems > 0 ? <p className="text-sm text-muted-foreground">任务已成功，暂无指标数据。</p> : null}
-    {failures.length ? <p role="alert" className="text-sm text-destructive">失败原因：{failures.map(([code, count]) => `${code}（${count}）`).join("；")}</p> : null}
+      <dl className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {[["成功", summary.succeededItems], ["失败", summary.failedItems], ["取消", summary.canceledItems], ["待处理", summary.pendingItems], ["总数", summary.totalItems]].map(([label, value]) => <Card key={String(label)} className="py-3"><CardContent><dt className="text-xs text-muted-foreground">{label}</dt><dd className="m-0 font-semibold">{value}</dd></CardContent></Card>)}
+      </dl>
+      {metric ? <dl className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {[["期末权益", metric.endingEquity], ["总收益率", metric.totalReturn], ["最大回撤", metric.maxDrawdown], ["完整交易轮次", metric.completedRoundTrips]].map(([label, value]) => <div key={String(label)}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="m-0 font-medium">{value}</dd></div>)}
+      </dl> : summary.succeededItems > 0 ? <p className="text-sm text-muted-foreground">任务已成功，暂无指标数据。</p> : null}
+      {failures.length ? <Alert variant="destructive"><AlertDescription>失败原因：{failures.map(([code, count]) => `${code}（${count}）`).join("；")}</AlertDescription></Alert> : null}
   </section>
 }
 
@@ -235,35 +238,39 @@ export function StrategyBacktestWorkspace({ strategyId, api }: { strategyId: str
 
   return <section className="mx-auto grid w-full max-w-5xl gap-6 p-4 lg:p-6">
     <header><p className="text-sm font-medium text-muted-foreground">单只股票固定目标样本外验证</p><h1 className="m-0 text-2xl font-semibold">样本外回测</h1><p className="mt-2 max-w-2xl text-sm text-muted-foreground">策略只能读取训练期数据，测试期数据不会进入策略沙箱。训练完成后四档目标在测试期冻结，除权除息只调整价格口径。</p></header>
-    <form className="grid gap-4 rounded border border-border bg-card p-4 md:grid-cols-2" onSubmit={submit}>
-      <FormField control={form.control} name="securitySymbol" label="股票代码">{({ field }) => <Input placeholder="600000.SH" {...field} />}</FormField><div className="hidden md:block" />
-      <FormField control={form.control} name="trainingStartDate" label="训练开始日期">{({ field }) => <Input type="date" {...field} />}</FormField>
-      <FormField control={form.control} name="trainingEndDate" label="训练结束日期">{({ field }) => <Input type="date" {...field} />}</FormField>
-      <FormField control={form.control} name="testStartDate" label="测试开始日期">{({ field }) => <Input type="date" {...field} />}</FormField>
-      <FormField control={form.control} name="testEndDate" label="测试结束日期">{({ field }) => <Input type="date" {...field} />}</FormField>
-      <div className="md:col-span-2"><Button type="submit" disabled={createMutation.isPending}>{createMutation.isPending ? "正在启动回测" : "开始样本外回测"}</Button>{createMutation.isError ? <p role="alert" className="mt-2 text-sm text-destructive">回测启动失败，请稍后重试。</p> : null}</div>
-    </form>
+    <Card>
+      <CardContent>
+        <form className="grid gap-4 md:grid-cols-2" onSubmit={submit}>
+          <FormField control={form.control} name="securitySymbol" label="股票代码">{({ field }) => <Input placeholder="600000.SH" {...field} />}</FormField><div className="hidden md:block" />
+          <FormField control={form.control} name="trainingStartDate" label="训练开始日期">{({ field }) => <Input type="date" {...field} />}</FormField>
+          <FormField control={form.control} name="trainingEndDate" label="训练结束日期">{({ field }) => <Input type="date" {...field} />}</FormField>
+          <FormField control={form.control} name="testStartDate" label="测试开始日期">{({ field }) => <Input type="date" {...field} />}</FormField>
+          <FormField control={form.control} name="testEndDate" label="测试结束日期">{({ field }) => <Input type="date" {...field} />}</FormField>
+          <div className="space-y-2 md:col-span-2"><Button type="submit" disabled={createMutation.isPending}>{createMutation.isPending ? "正在启动回测" : "开始样本外回测"}</Button>{createMutation.isError ? <Alert variant="destructive"><AlertDescription>回测启动失败，请稍后重试。</AlertDescription></Alert> : null}</div>
+        </form>
+      </CardContent>
+    </Card>
     <section aria-label="最近回测任务" className="space-y-3">
       <div className="flex items-center justify-between gap-3"><h2 className="text-lg font-semibold">最近回测任务</h2><Button type="button" size="sm" variant="outline" onClick={() => void listQuery.refetch()} disabled={listQuery.isFetching}><RefreshCw aria-hidden="true" />刷新</Button></div>
-      {listQuery.isError && listQuery.data ? <p role="alert" className="text-sm text-destructive">任务列表刷新失败，当前显示上一次结果。</p> : null}
+      {listQuery.isError && listQuery.data ? <Alert variant="destructive"><AlertDescription>任务列表刷新失败，当前显示上一次结果。</AlertDescription></Alert> : null}
       {listQuery.isError && !listQuery.data ? <PageState state="error" title="回测任务无法加载" description="请重试获取任务列表。" action={{ label: "重试", onClick: () => void listQuery.refetch() }} /> : listQuery.isLoading ? <PageState state="loading" title="正在加载回测任务" description="正在读取当前策略的最近任务。" /> : listQuery.data?.items.length ? <TaskList tasks={listQuery.data.items} selectedTaskId={backtestId} onSelect={selectTask} /> : <p className="text-sm text-muted-foreground">当前策略还没有回测任务。</p>}
     </section>
     {backtestId ? <section aria-label="选中的回测任务" className="space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-semibold">选中的回测任务</h2><p className="break-all text-xs text-muted-foreground">{backtestId}</p></div><div className="flex flex-wrap gap-2">
         {(Object.keys(actionCopy) as BacktestAction[]).map((action) => <Button key={action} type="button" size="sm" variant={action === "CANCEL" ? "destructive" : "outline"} disabled={!allowedActions.includes(action) || controlMutation.isPending} title={allowedActions.includes(action) ? actionCopy[action].description : "当前任务状态不允许此操作"} onClick={() => openAction(action)}><ActionIcon action={action} />{actionCopy[action].label}</Button>)}
       </div></div>
-      {summaryQuery.isError && summaryQuery.data ? <p role="alert" className="text-sm text-destructive">任务汇总刷新失败，当前显示上一次结果。</p> : null}
+      {summaryQuery.isError && summaryQuery.data ? <Alert variant="destructive"><AlertDescription>任务汇总刷新失败，当前显示上一次结果。</AlertDescription></Alert> : null}
       {summaryQuery.isError && !summaryQuery.data ? <PageState state="error" title="任务汇总无法加载" description="请重试获取汇总。" action={{ label: "重试", onClick: () => void summaryQuery.refetch() }} /> : summaryQuery.data ? <TaskSummary summary={summaryQuery.data} /> : <PageState state="loading" title="正在加载任务汇总" description="正在统计任务进度和结果。" />}
-      {resultQuery.isError && displayedResult ? <p role="alert" className="text-sm text-destructive">回测详情刷新失败，当前显示上一次结果。 <Button type="button" size="xs" variant="outline" onClick={() => void resultQuery.refetch()}>重试</Button></p> : null}
+      {resultQuery.isError && displayedResult ? <Alert variant="destructive"><AlertDescription className="flex items-center justify-between gap-2">回测详情刷新失败，当前显示上一次结果。 <Button type="button" size="xs" variant="outline" onClick={() => void resultQuery.refetch()}>重试</Button></AlertDescription></Alert> : null}
       {resultQuery.isError && !displayedResult ? <PageState state="error" title="回测结果无法加载" description="请重试获取结果。" action={{ label: "重试", onClick: () => void resultQuery.refetch() }} /> : displayedResult ? <BacktestResult result={displayedResult} /> : <PageState state="loading" title="正在加载回测详情" description="正在读取任务快照和回测结果。" />}
     </section> : null}
     <Dialog open={pendingAction !== null} onOpenChange={(open) => { if (!open && !controlMutation.isPending) { setPendingAction(null); setReason("") } }}>
       <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => { if (controlMutation.isPending) event.preventDefault() }} onPointerDownOutside={(event) => { if (controlMutation.isPending) event.preventDefault() }}>
         <DialogTitle>{pendingAction ? `确认${actionCopy[pendingAction].label}` : "确认任务操作"}</DialogTitle>
         <DialogDescription>{pendingAction ? actionCopy[pendingAction].description : "请确认本次任务操作。"}</DialogDescription>
-        <label className="grid gap-2 text-sm font-medium">操作原因<Input value={reason} maxLength={200} onChange={(event) => setReason(event.target.value)} /></label>
-        {controlMutation.isError ? <p role="alert" className="text-sm text-destructive">{controlMutation.error instanceof Error ? controlMutation.error.message : "操作失败，请刷新任务状态后重试。"}</p> : null}
-        <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={controlMutation.isPending} onClick={() => { setPendingAction(null); setReason("") }}>返回</Button><Button type="button" disabled={!reason.trim() || controlMutation.isPending} onClick={runAction}>{controlMutation.isPending ? "处理中" : "确认执行"}</Button></div>
+        <Field><FieldLabel htmlFor="backtest-action-reason">操作原因</FieldLabel><Input id="backtest-action-reason" value={reason} maxLength={200} onChange={(event) => setReason(event.target.value)} /></Field>
+        {controlMutation.isError ? <Alert variant="destructive"><AlertDescription>{controlMutation.error instanceof Error ? controlMutation.error.message : "操作失败，请刷新任务状态后重试。"}</AlertDescription></Alert> : null}
+        <DialogFooter><Button type="button" variant="outline" disabled={controlMutation.isPending} onClick={() => { setPendingAction(null); setReason("") }}>返回</Button><Button type="button" disabled={!reason.trim() || controlMutation.isPending} onClick={runAction}>{controlMutation.isPending ? "处理中" : "确认执行"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </section>

@@ -3,9 +3,12 @@ import { ChartNoAxesCombined, Code2, Plus, RefreshCw } from "lucide-react"
 import { useState } from "react"
 
 import { Button } from "@/shared/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/shared/ui/dialog"
+import { Field, FieldGroup, FieldLabel } from "@/shared/ui/field"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs"
 
 import { StrategyBacktestWorkspace } from "./backtest-workspace"
 import { strategyEditorComponents } from "./editor-components"
@@ -83,23 +86,30 @@ export function StrategyOperationsPage({
     </aside>
     <main className="min-w-0">
       {selectedId ? <>
-        <div role="tablist" aria-label="策略视图" className="mb-2 flex w-fit border border-border bg-muted p-1">
-          <Button type="button" role="tab" aria-selected={view === "editor"} size="sm" variant={view === "editor" ? "default" : "ghost"} onClick={() => setView("editor")}><Code2 aria-hidden="true" />编辑</Button>
-          <Button type="button" role="tab" aria-selected={view === "backtest"} size="sm" variant={view === "backtest" ? "default" : "ghost"} onClick={() => setView("backtest")}><ChartNoAxesCombined aria-hidden="true" />回测</Button>
-        </div>
-        {view === "editor"
-          ? <StrategyWorkspace strategyId={selectedId} api={api} editorComponents={editorComponents} />
-          : <StrategyBacktestWorkspace strategyId={selectedId} api={api} />}
+        <Tabs value={view} onValueChange={(value) => setView(value as StrategyView)}>
+          <TabsList aria-label="策略视图">
+            <TabsTrigger value="editor"><Code2 aria-hidden="true" />编辑</TabsTrigger>
+            <TabsTrigger value="backtest"><ChartNoAxesCombined aria-hidden="true" />回测</TabsTrigger>
+          </TabsList>
+          <TabsContent value="editor">
+            <StrategyWorkspace strategyId={selectedId} api={api} editorComponents={editorComponents} />
+          </TabsContent>
+          <TabsContent value="backtest">
+            <StrategyBacktestWorkspace strategyId={selectedId} api={api} />
+          </TabsContent>
+        </Tabs>
       </> : <PageState state="empty" title="暂无策略" description={strategiesQuery.data.canCreate ? "新建策略后可以编辑和运行样本外回测。" : "当前没有可查看的策略。"} />}
     </main>
     <Dialog open={createOpen} onOpenChange={(open) => { if (!createMutation.isPending) setCreateOpen(open) }}>
       <DialogContent showCloseButton={false} onEscapeKeyDown={(event) => { if (createMutation.isPending) event.preventDefault() }} onPointerDownOutside={(event) => { if (createMutation.isPending) event.preventDefault() }}>
         <DialogTitle>新建策略</DialogTitle>
         <DialogDescription>创建空白草稿后进入编辑器。</DialogDescription>
-        <label className="grid gap-2 text-sm font-medium">策略名称<Input maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></label>
-        <label className="grid gap-2 text-sm font-medium">创建原因<Input maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} /></label>
-        {createMutation.isError ? <p role="alert" className="text-sm text-destructive">创建失败，请检查名称和当前权限后重试。</p> : null}
-        <div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={createMutation.isPending} onClick={() => setCreateOpen(false)}>取消</Button><Button type="button" disabled={!name.trim() || !reason.trim() || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "创建中" : "确认创建"}</Button></div>
+        <FieldGroup>
+          <Field><FieldLabel htmlFor="strategy-name">策略名称</FieldLabel><Input id="strategy-name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} /></Field>
+          <Field><FieldLabel htmlFor="strategy-reason">创建原因</FieldLabel><Input id="strategy-reason" maxLength={200} value={reason} onChange={(event) => setReason(event.target.value)} /></Field>
+        </FieldGroup>
+        {createMutation.isError ? <Alert variant="destructive"><AlertDescription>创建失败，请检查名称和当前权限后重试。</AlertDescription></Alert> : null}
+        <DialogFooter><Button type="button" variant="outline" disabled={createMutation.isPending} onClick={() => setCreateOpen(false)}>取消</Button><Button type="button" disabled={!name.trim() || !reason.trim() || createMutation.isPending} onClick={() => createMutation.mutate()}>{createMutation.isPending ? "创建中" : "确认创建"}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   </section>

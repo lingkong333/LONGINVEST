@@ -28,7 +28,16 @@ import type {
   QualityIssueSummary,
 } from "@/features/market-data/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/shared/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -37,7 +46,16 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
+import { NativeSelect, NativeSelectOption } from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
 
 interface MarketDataPageProps {
   gateway?: MarketDataGateway
@@ -75,17 +93,17 @@ function normalizedSymbols(value: string) {
   )]
 }
 
-function statusTone(status: string) {
+function statusVariant(status: string): "default" | "destructive" | "secondary" | "outline" {
   if (["READY", "COMPLETED", "SUCCEEDED", "CURRENT", "FRESH", "RESOLVED"].includes(status)) {
-    return "border-emerald-600/30 bg-emerald-600/10 text-emerald-800"
+    return "default"
   }
   if (["FAILED", "CONFLICT", "CRITICAL", "STALE"].includes(status)) {
-    return "border-destructive/30 bg-destructive/10 text-destructive"
+    return "destructive"
   }
   if (["PARTIAL", "WARNING", "PAUSED", "OPEN"].includes(status)) {
-    return "border-amber-600/30 bg-amber-600/10 text-amber-800"
+    return "secondary"
   }
-  return "border-border bg-muted/60 text-muted-foreground"
+  return "outline"
 }
 
 const statusLabels: Record<string, string> = {
@@ -124,9 +142,9 @@ const issueTypeLabels: Record<string, string> = {
 
 function Status({ value }: { value: string }) {
   return (
-    <span className={`inline-flex rounded border px-2 py-0.5 text-xs font-medium ${statusTone(value)}`}>
+    <Badge variant={statusVariant(value)}>
       {statusLabels[value] ?? value}
-    </span>
+    </Badge>
   )
 }
 
@@ -142,18 +160,18 @@ function Panel({
   children: ReactNode
 }) {
   return (
-    <section className="min-w-0 border-t pt-5">
-      <header className="mb-4 flex items-start gap-3">
+    <Card className="min-w-0">
+      <CardHeader className="grid-cols-[auto_1fr]">
         <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded border bg-muted/50">
           <Icon className="size-4" aria-hidden="true" />
         </div>
         <div className="min-w-0">
-          <h2 className="text-base font-semibold">{title}</h2>
-          <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+          <CardTitle>{title}</CardTitle>
+          <CardDescription>{description}</CardDescription>
         </div>
-      </header>
-      {children}
-    </section>
+      </CardHeader>
+      <CardContent>{children}</CardContent>
+    </Card>
   )
 }
 
@@ -393,34 +411,34 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : (
             <>
               <div className="overflow-x-auto border">
-              <table className="w-full min-w-[620px] text-sm">
-                <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">代码 / 名称</th>
-                    <th className="px-3 py-2 font-medium">市场</th>
-                    <th className="px-3 py-2 font-medium">状态</th>
-                    <th className="px-3 py-2 text-right font-medium">版本</th>
-                    <th className="px-3 py-2 text-right font-medium">更新时间</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table className="min-w-[620px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>代码 / 名称</TableHead>
+                    <TableHead>市场</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead className="text-right">版本</TableHead>
+                    <TableHead className="text-right">更新时间</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {securities.data.items.slice(0, 8).map((item) => (
-                    <tr key={item.id} className="border-t">
-                      <td className="px-3 py-2.5">
+                    <TableRow key={item.id}>
+                      <TableCell>
                         <strong className="font-medium">{item.symbol}</strong>
                         <span className="ml-2 text-muted-foreground">{item.name}</span>
                         {item.isSt || item.isSuspended ? (
                           <AlertTriangleIcon className="ml-2 inline size-3.5 text-amber-700" aria-label="存在特别状态" />
                         ) : null}
-                      </td>
-                      <td className="px-3 py-2.5">{item.market}</td>
-                      <td className="px-3 py-2.5"><Status value={item.listingStatus} /></td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">v{item.masterVersion}</td>
-                      <td className="px-3 py-2.5 text-right text-muted-foreground">{dateTime(item.updatedAt)}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{item.market}</TableCell>
+                      <TableCell><Status value={item.listingStatus} /></TableCell>
+                      <TableCell className="text-right tabular-nums">v{item.masterVersion}</TableCell>
+                      <TableCell className="text-right text-muted-foreground">{dateTime(item.updatedAt)}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
               <p className="border-t px-3 py-2 text-xs text-muted-foreground">
                 共 {securities.data.pagination.total} 只，当前显示前 {Math.min(8, securities.data.items.length)} 只
               </p>
@@ -473,10 +491,11 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : (
             <div className="space-y-2">
               {quoteCycles.data.items.slice(0, 5).map((cycle) => (
-                <button
+                <Button
                   type="button"
                   key={cycle.id}
-                  className="flex w-full items-center gap-3 border px-3 py-2.5 text-left hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  variant="outline"
+                  className="h-auto w-full justify-start whitespace-normal px-3 py-2.5 text-left"
                   aria-label={`查看批次 ${cycle.id} 明细`}
                   onClick={() => setSelectedCycleId(cycle.id)}
                 >
@@ -488,7 +507,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                     </span>
                   </span>
                   <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                </button>
+                </Button>
               ))}
               {selectedCycleId ? (
                 <div className="mt-3 border border-dashed p-3">
@@ -499,7 +518,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                   {quoteItems.isPending ? (
                     <p className="text-sm text-muted-foreground">正在读取批次明细…</p>
                   ) : quoteItems.isError ? (
-                    <p role="alert" className="text-sm text-destructive">批次明细读取失败，主列表不受影响。</p>
+                    <Alert variant="destructive"><AlertDescription>批次明细读取失败，主列表不受影响。</AlertDescription></Alert>
                   ) : quoteItems.data?.length === 0 ? (
                     <p className="text-sm text-muted-foreground">该批次没有逐股记录。</p>
                   ) : (
@@ -532,26 +551,26 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
             <PageState state="empty" title="还没有日线批次" description="当前没有可展示的全市场日线任务。" />
           ) : (
             <div className="overflow-x-auto border">
-              <table className="w-full min-w-[600px] text-sm">
-                <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
-                  <tr>
-                    <th className="px-3 py-2 font-medium">交易日</th>
-                    <th className="px-3 py-2 font-medium">状态</th>
-                    <th className="px-3 py-2 text-right font-medium">抓取</th>
-                    <th className="px-3 py-2 text-right font-medium">入库</th>
-                    <th className="px-3 py-2 text-right font-medium">缺失 / 失败</th>
-                    <th className="px-3 py-2 text-right font-medium">操作</th>
-                  </tr>
-                </thead>
-                <tbody>
+              <Table className="min-w-[600px]">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>交易日</TableHead>
+                    <TableHead>状态</TableHead>
+                    <TableHead className="text-right">抓取</TableHead>
+                    <TableHead className="text-right">入库</TableHead>
+                    <TableHead className="text-right">缺失 / 失败</TableHead>
+                    <TableHead className="text-right">操作</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {dailyBatches.data.items.slice(0, 8).map((batch) => (
-                    <tr key={batch.id} className="border-t">
-                      <td className="px-3 py-2.5 font-medium">{batch.tradingDate}</td>
-                      <td className="px-3 py-2.5"><Status value={batch.status} /></td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{batch.fetchedCount}/{batch.expectedCount}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{batch.committedCount}</td>
-                      <td className="px-3 py-2.5 text-right tabular-nums">{batch.missingCount} / {batch.failedCount}</td>
-                      <td className="px-3 py-2.5 text-right">
+                    <TableRow key={batch.id}>
+                      <TableCell className="font-medium">{batch.tradingDate}</TableCell>
+                      <TableCell><Status value={batch.status} /></TableCell>
+                      <TableCell className="text-right tabular-nums">{batch.fetchedCount}/{batch.expectedCount}</TableCell>
+                      <TableCell className="text-right tabular-nums">{batch.committedCount}</TableCell>
+                      <TableCell className="text-right tabular-nums">{batch.missingCount} / {batch.failedCount}</TableCell>
+                      <TableCell className="text-right">
                         {batch.allowedActions.includes("RETRY_MISSING") ? (
                           <Button
                             size="sm"
@@ -567,11 +586,11 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                         ) : (
                           <span className="text-xs text-muted-foreground">—</span>
                         )}
-                      </td>
-                    </tr>
+                      </TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
         </Panel>
@@ -830,35 +849,35 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
             </>
           ) : null}
           {marketCommand?.kind === "DAILY_RETRY" ? (
-            <p className="border bg-muted/40 p-3 text-sm">
+            <Alert><AlertDescription>
               {marketCommand.batch.tradingDate} · 缺失{" "}
               {marketCommand.batch.missingCount} · 失败{" "}
               {marketCommand.batch.failedCount}
-            </p>
+            </AlertDescription></Alert>
           ) : null}
           {marketCommand?.kind === "QFQ_REFRESH" ? (
-            <p className="border bg-muted/40 p-3 text-sm">
+            <Alert><AlertDescription>
               {marketCommand.dataset.symbol} ·{" "}
               {marketCommand.dataset.actualStart} 至{" "}
               {marketCommand.dataset.actualEnd} · 当前版本 v
               {marketCommand.dataset.version}
-            </p>
+            </AlertDescription></Alert>
           ) : null}
           {marketCommand?.kind === "BACKFILL_CREATE" ? (
             <>
               <label className="grid gap-2 text-sm font-medium">
                 回填范围
-                <select
-                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                <NativeSelect
+                  className="w-full"
                   value={backfillScope}
                   onChange={(event) => setBackfillScope(
                     event.target.value as typeof backfillScope,
                   )}
                 >
-                  <option value="SINGLE">单只股票</option>
-                  <option value="SELECTED">选择多只股票</option>
-                  <option value="ALL">全部股票</option>
-                </select>
+                  <NativeSelectOption value="SINGLE">单只股票</NativeSelectOption>
+                  <NativeSelectOption value="SELECTED">选择多只股票</NativeSelectOption>
+                  <NativeSelectOption value="ALL">全部股票</NativeSelectOption>
+                </NativeSelect>
               </label>
               {backfillScope !== "ALL" ? (
                 <label className="grid gap-2 text-sm font-medium">
@@ -905,11 +924,11 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
             </>
           ) : null}
           {marketCommand?.kind === "BACKFILL_CONTROL" ? (
-            <p className="border bg-muted/40 p-3 text-sm">
+            <Alert><AlertDescription>
               任务 {marketCommand.job.id} · 当前状态{" "}
               {statusLabels[marketCommand.job.status] ?? marketCommand.job.status}
               {" "}· 版本 v{marketCommand.job.version}
-            </p>
+            </AlertDescription></Alert>
           ) : null}
           <label className="grid gap-2 text-sm font-medium">
             操作原因
@@ -967,15 +986,15 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           {qualityCommand?.action === "SELECT_SOURCE" ? (
             <label className="grid gap-2 text-sm font-medium">
               数据来源
-              <select
-                className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+              <NativeSelect
+                className="w-full"
                 value={selectedSource}
                 onChange={(event) => setSelectedSource(event.target.value)}
               >
                 {qualityCommand.issue.sourceCandidates.map((source) => (
-                  <option key={source} value={source}>{source}</option>
+                  <NativeSelectOption key={source} value={source}>{source}</NativeSelectOption>
                 ))}
-              </select>
+              </NativeSelect>
             </label>
           ) : null}
           <label className="grid gap-2 text-sm font-medium">

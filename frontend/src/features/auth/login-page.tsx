@@ -6,6 +6,7 @@ import { z } from "zod"
 import { useAuth } from "@/features/auth/auth-context"
 import { toErrorDiagnostic } from "@/shared/errors/error-diagnostic"
 import { useZodForm } from "@/shared/forms/use-zod-form"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
 import { Button } from "@/shared/ui/button"
 import { FormField } from "@/shared/ui/form-field"
 import { Input } from "@/shared/ui/input"
@@ -117,9 +118,9 @@ export function LoginPage() {
             </FormField>
 
             {submitError ? (
-              <div className="login-error" role="alert">
-                <code>{toErrorDiagnostic(submitError).code}</code>
-              </div>
+              <Alert variant="destructive">
+                <AlertDescription><code>{toErrorDiagnostic(submitError).code}</code></AlertDescription>
+              </Alert>
             ) : null}
 
             <Button

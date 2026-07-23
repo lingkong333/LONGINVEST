@@ -118,6 +118,7 @@ def get_provider_resources() -> ProviderResources:
                     "np-anotice-stock.eastmoney.com",
                     "np-cnotice-stock.eastmoney.com",
                     "hq.sinajs.cn",
+                    "vip.stock.finance.sina.com.cn",
                 }
             ),
         )

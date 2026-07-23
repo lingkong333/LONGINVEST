@@ -13,6 +13,7 @@ from long_invest.modules.providers.contracts import (
     ProviderCode,
     ProviderItemFailure,
     RealtimeQuote,
+    SecurityMasterRecord,
 )
 from long_invest.modules.providers.resilience import (
     InMemoryProviderRuntimeState,
@@ -59,6 +60,8 @@ class FakeProvider:
         self.quote_requests: list[tuple[str, ...]] = []
         self.bar_requests: list[DailyBarRequest] = []
         self.action_requests: list[CorporateActionRequest] = []
+        self.master_requests = 0
+        self.master_result: tuple[SecurityMasterRecord, ...] = ()
         self.error: Exception | None = None
 
     async def realtime_quotes(self, symbols, deadline):
@@ -77,6 +80,13 @@ class FakeProvider:
         del deadline
         self.action_requests.append(request)
         return self.result
+
+    async def security_master(self, deadline):
+        del deadline
+        self.master_requests += 1
+        if self.error:
+            raise self.error
+        return self.master_result
 
 
 @async_test
@@ -181,6 +191,52 @@ async def test_corporate_actions_use_dedicated_eastmoney_route() -> None:
     assert result is east.result
     assert east.action_requests == [request]
     assert sina.action_requests == []
+
+
+@async_test
+async def test_security_master_switches_to_sina_when_eastmoney_fails() -> None:
+    east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
+    east.error = RuntimeError("blocked upstream")
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    sina.master_result = (
+        SecurityMasterRecord(
+            "600000.SH",
+            "浦发银行",
+            "SH",
+            "A_SHARE",
+            None,
+            None,
+            True,
+            False,
+            None,
+            ProviderCode.SINA,
+            datetime.now(UTC),
+        ),
+    )
+    config = StaticProviderConfiguration(
+        {
+            ProviderCapability.SECURITY_MASTER: (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY,
+                    ProviderCapability.SECURITY_MASTER,
+                    priority=0,
+                    auto_switch=True,
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA,
+                    ProviderCapability.SECURITY_MASTER,
+                    priority=1,
+                    auto_switch=False,
+                ),
+            )
+        }
+    )
+
+    result = await ProviderRouter(east, sina, config=config).security_master(deadline())
+
+    assert result == sina.master_result
+    assert east.master_requests == 1
+    assert sina.master_requests == 1
 
 
 @async_test

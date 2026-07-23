@@ -264,7 +264,7 @@ async def security_master_refresh(context: JobExecutionContext) -> JobResult:
     try:
         async with database.session() as session:
             records = await build_provider_service(session).security_master(
-                datetime.now(UTC) + timedelta(seconds=30)
+                datetime.now(UTC) + timedelta(seconds=180)
             )
     except Exception:
         return JobResult.failure(
@@ -279,9 +279,16 @@ async def security_master_refresh(context: JobExecutionContext) -> JobResult:
             retryable=True,
         )
 
+    sources = {record.source for record in records}
+    if len(sources) != 1:
+        return JobResult.failure(
+            code="SECURITY_MASTER_SOURCE_MIXED",
+            message="股票主数据来源混合，已拒绝提交",
+            retryable=True,
+        )
     observed_at = max(record.observed_at for record in records)
     snapshot = SecurityMasterSnapshot(
-        source=str(config["source"]),
+        source=next(iter(sources)).value.lower(),
         source_version=observed_at.isoformat(),
         idempotency_key=str(config["idempotency_key"]),
         items=tuple(_security_item(record) for record in records),

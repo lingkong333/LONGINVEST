@@ -183,8 +183,8 @@ class SecurityApplication:
             },
             business_object_type="security_master",
             created_by_user_id=created_by_user_id,
-            soft_timeout_seconds=30,
-            hard_timeout_seconds=60,
+            soft_timeout_seconds=180,
+            hard_timeout_seconds=240,
         )
         try:
             async with self._database.transaction() as session:

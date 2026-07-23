@@ -14,12 +14,55 @@ def load(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def test_sina_declares_only_realtime_and_real_endpoint() -> None:
+def test_sina_declares_realtime_and_security_master_endpoints() -> None:
     assert SinaRealtimeProvider.code is ProviderCode.SINA
     assert SinaRealtimeProvider.capabilities == frozenset(
-        {ProviderCapability.REALTIME_QUOTE_BATCH}
+        {
+            ProviderCapability.SECURITY_MASTER,
+            ProviderCapability.REALTIME_QUOTE_BATCH,
+        }
     )
     assert SinaRealtimeProvider.REALTIME_URL.startswith("https://hq.sinajs.cn/")
+    assert SinaRealtimeProvider.MASTER_PAGE_URL.startswith(
+        "https://vip.stock.finance.sina.com.cn/"
+    )
+
+
+def test_sina_parses_security_master_page_for_three_markets() -> None:
+    records = SinaRealtimeProvider.parse_security_master_page(
+        """[
+          {"symbol":"sh600000","code":"600000","name":"浦发银行"},
+          {"symbol":"sz000001","code":"000001","name":"平安银行"},
+          {"symbol":"bj920000","code":"920000","name":"安徽凤凰"}
+        ]""",
+        observed_at=datetime.now(UTC),
+    )
+
+    assert [record.symbol for record in records] == [
+        "600000.SH",
+        "000001.SZ",
+        "920000.BJ",
+    ]
+    assert all(record.security_type == "A_SHARE" for record in records)
+    assert all(record.source is ProviderCode.SINA for record in records)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "[]",
+        '[{"symbol":"sh600000","code":"000001","name":"错误映射"}]',
+        (
+            '[{"symbol":"sh600000","code":"600000","name":"浦发银行"},'
+            '{"symbol":"sh600000","code":"600000","name":"重复"}]'
+        ),
+    ],
+)
+def test_sina_rejects_empty_invalid_or_duplicate_security_master(payload: str) -> None:
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        SinaRealtimeProvider.parse_security_master_page(
+            payload, observed_at=datetime.now(UTC)
+        )
 
 
 def test_sina_normalizes_quotes_and_multiple_markets() -> None:

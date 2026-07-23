@@ -186,15 +186,23 @@ class ProviderRouter:
         operation: Any,
     ):
         routes = await self._config.routes(capability)
+        last_error: Exception | None = None
         for setting in routes:
             if not setting.enabled:
                 continue
             provider = self._providers.get(setting.provider)
             if provider is None:
                 continue
-            return await self._pipeline.call(
-                setting,
-                lambda p=provider: operation(p),
-                deadline=deadline,
-            )
+            try:
+                return await self._pipeline.call(
+                    setting,
+                    lambda p=provider: operation(p),
+                    deadline=deadline,
+                )
+            except Exception as error:
+                last_error = error
+                if not setting.auto_switch:
+                    raise
+        if last_error is not None:
+            raise last_error
         raise RuntimeError("PROVIDER_UNAVAILABLE")

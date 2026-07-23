@@ -190,6 +190,16 @@ class StaticProviderConfiguration:
                 ProviderRouteSetting(
                     ProviderCode.EASTMONEY,
                     ProviderCapability.SECURITY_MASTER,
+                    priority=0,
+                    auto_switch=True,
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA,
+                    ProviderCapability.SECURITY_MASTER,
+                    priority=1,
+                    rate_per_second=1.0,
+                    timeout_seconds=180.0,
+                    auto_switch=False,
                 ),
             ),
             ProviderCapability.DAILY_BAR_UNADJUSTED: (

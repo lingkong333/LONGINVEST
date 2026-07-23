@@ -25,7 +25,7 @@ class ProviderHttpRequest:
 def create_async_client(
     *,
     connect_timeout: float = 3,
-    read_timeout: float = 5,
+    read_timeout: float = 10,
     write_timeout: float = 3,
     pool_timeout: float = 1,
 ) -> httpx.AsyncClient:
@@ -124,6 +124,7 @@ class ProviderHttpClient:
                             frozenset(
                                 {
                                     "text/plain",
+                                    "application/json",
                                     "application/javascript",
                                     "text/javascript",
                                 }

@@ -41,13 +41,18 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 
 const PAGE_SIZE = 20
+const ALL_FILTER_VALUE = "__all__"
 const allActions: AlertAllowedAction[] = ["ACKNOWLEDGE", "RESOLVE", "RETRY"]
 
 const severityLabels: Record<AlertSeverity, string> = {
@@ -529,30 +534,38 @@ export function AlertsPage({
       <section className="mb-5 flex flex-wrap items-end gap-3" aria-label="告警筛选">
         <label className="grid gap-1 text-sm">
           <span>状态</span>
-          <NativeSelect
-            aria-label="按状态筛选"
-            value={status}
-            onChange={(event) => updateStatus(event.target.value as AlertStatus | "")}
+          <Select
+            value={status || ALL_FILTER_VALUE}
+            onValueChange={(value) => updateStatus(
+              value === ALL_FILTER_VALUE ? "" : value as AlertStatus,
+            )}
           >
-            <NativeSelectOption value="">全部状态</NativeSelectOption>
-            <NativeSelectOption value="OPEN">待处理</NativeSelectOption>
-            <NativeSelectOption value="ACKNOWLEDGED">已确认</NativeSelectOption>
-            <NativeSelectOption value="RESOLVED">已解决</NativeSelectOption>
-          </NativeSelect>
+            <SelectTrigger aria-label="按状态筛选"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectGroup>
+              <SelectItem value={ALL_FILTER_VALUE}>全部状态</SelectItem>
+              <SelectItem value="OPEN">待处理</SelectItem>
+              <SelectItem value="ACKNOWLEDGED">已确认</SelectItem>
+              <SelectItem value="RESOLVED">已解决</SelectItem>
+            </SelectGroup></SelectContent>
+          </Select>
         </label>
         <label className="grid gap-1 text-sm">
           <span>严重程度</span>
-          <NativeSelect
-            aria-label="按严重程度筛选"
-            value={severity}
-            onChange={(event) => updateSeverity(event.target.value as AlertSeverity | "")}
+          <Select
+            value={severity || ALL_FILTER_VALUE}
+            onValueChange={(value) => updateSeverity(
+              value === ALL_FILTER_VALUE ? "" : value as AlertSeverity,
+            )}
           >
-            <NativeSelectOption value="">全部级别</NativeSelectOption>
-            <NativeSelectOption value="INFO">提示</NativeSelectOption>
-            <NativeSelectOption value="WARNING">警告</NativeSelectOption>
-            <NativeSelectOption value="ERROR">错误</NativeSelectOption>
-            <NativeSelectOption value="CRITICAL">严重</NativeSelectOption>
-          </NativeSelect>
+            <SelectTrigger aria-label="按严重程度筛选"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectGroup>
+              <SelectItem value={ALL_FILTER_VALUE}>全部级别</SelectItem>
+              <SelectItem value="INFO">提示</SelectItem>
+              <SelectItem value="WARNING">警告</SelectItem>
+              <SelectItem value="ERROR">错误</SelectItem>
+              <SelectItem value="CRITICAL">严重</SelectItem>
+            </SelectGroup></SelectContent>
+          </Select>
         </label>
         <form
           className="flex min-w-64 flex-1 gap-2"

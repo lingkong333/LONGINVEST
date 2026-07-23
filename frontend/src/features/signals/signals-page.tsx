@@ -41,9 +41,13 @@ import {
 } from "@/shared/ui/empty"
 import { Input } from "@/shared/ui/input"
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/shared/ui/native-select"
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import {
   Table,
   TableBody,
@@ -55,6 +59,7 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs"
 
 const PAGE_SIZE = 20
+const ALL_FILTER_VALUE = "__all__"
 
 const zoneLabels: Record<SignalZone, string> = {
   UNKNOWN: "尚未判断",
@@ -291,16 +296,20 @@ function StatesSection({
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <NativeSelect
-          aria-label="按信号区间筛选"
-          value={zone}
-          onChange={(event) => setZone(event.target.value)}
+        <Select
+          value={zone || ALL_FILTER_VALUE}
+          onValueChange={(value) => setZone(
+            value === ALL_FILTER_VALUE ? "" : value,
+          )}
         >
-          <NativeSelectOption value="">全部区间</NativeSelectOption>
-          {Object.entries(zoneLabels).map(([value, label]) => (
-            <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
-          ))}
-        </NativeSelect>
+          <SelectTrigger aria-label="按信号区间筛选"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value={ALL_FILTER_VALUE}>全部区间</SelectItem>
+            {Object.entries(zoneLabels).map(([value, label]) => (
+              <SelectItem value={value} key={value}>{label}</SelectItem>
+            ))}
+          </SelectGroup></SelectContent>
+        </Select>
         </CardContent>
       </Card>
       {query.data.items.length === 0 ? (
@@ -394,25 +403,33 @@ function EventsSection({
         </Alert>
       ) : null}
       <Card><CardContent className="flex flex-wrap gap-3">
-        <NativeSelect
-          aria-label="按判断原因筛选事件"
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
+        <Select
+          value={reason || ALL_FILTER_VALUE}
+          onValueChange={(value) => setReason(
+            value === ALL_FILTER_VALUE ? "" : value,
+          )}
         >
-          <NativeSelectOption value="">全部原因</NativeSelectOption>
-          {Object.entries(reasonLabels).map(([value, label]) => (
-            <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <NativeSelect
-          aria-label="按通知资格筛选"
-          value={eligibility}
-          onChange={(event) => setEligibility(event.target.value)}
+          <SelectTrigger aria-label="按判断原因筛选事件"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value={ALL_FILTER_VALUE}>全部原因</SelectItem>
+            {Object.entries(reasonLabels).map(([value, label]) => (
+              <SelectItem value={value} key={value}>{label}</SelectItem>
+            ))}
+          </SelectGroup></SelectContent>
+        </Select>
+        <Select
+          value={eligibility || ALL_FILTER_VALUE}
+          onValueChange={(value) => setEligibility(
+            value === ALL_FILTER_VALUE ? "" : value,
+          )}
         >
-          <NativeSelectOption value="">全部通知资格</NativeSelectOption>
-          <NativeSelectOption value="true">符合通知条件</NativeSelectOption>
-          <NativeSelectOption value="false">不发送通知</NativeSelectOption>
-        </NativeSelect>
+          <SelectTrigger aria-label="按通知资格筛选"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value={ALL_FILTER_VALUE}>全部通知资格</SelectItem>
+            <SelectItem value="true">符合通知条件</SelectItem>
+            <SelectItem value="false">不发送通知</SelectItem>
+          </SelectGroup></SelectContent>
+        </Select>
       </CardContent></Card>
       {query.data.items.length === 0 ? (
         <EmptyState title="暂无信号事件" description="只有真实区间转换才会形成信号事件。" />
@@ -503,16 +520,20 @@ function EvaluationsSection({
   return (
     <section aria-label="信号判断记录" className="space-y-4">
       <Card><CardContent>
-        <NativeSelect
-          aria-label="按判断结果筛选"
-          value={result}
-          onChange={(event) => setResult(event.target.value)}
+        <Select
+          value={result || ALL_FILTER_VALUE}
+          onValueChange={(value) => setResult(
+            value === ALL_FILTER_VALUE ? "" : value,
+          )}
         >
-          <NativeSelectOption value="">全部判断结果</NativeSelectOption>
-          {Object.entries(resultLabels).map(([value, label]) => (
-            <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
-          ))}
-        </NativeSelect>
+          <SelectTrigger aria-label="按判断结果筛选"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value={ALL_FILTER_VALUE}>全部判断结果</SelectItem>
+            {Object.entries(resultLabels).map(([value, label]) => (
+              <SelectItem value={value} key={value}>{label}</SelectItem>
+            ))}
+          </SelectGroup></SelectContent>
+        </Select>
       </CardContent></Card>
       {query.data.items.length === 0 ? (
         <EmptyState title="暂无判断记录" description="每次正式比较都会保留在这里，包括状态未变化和跳过。" />

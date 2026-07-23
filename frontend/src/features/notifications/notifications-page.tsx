@@ -57,8 +57,15 @@ import {
   FieldSet,
 } from "@/shared/ui/field"
 import { Input } from "@/shared/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import {
   Table,
   TableBody,
@@ -483,13 +490,16 @@ function ChannelsView({ gateway, onUnauthorized }: { gateway: NotificationGatewa
                     SMTP 端口
                     <Input type="number" min="1" max="65535" value={editing.smtpPort ?? 465} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, smtpPort: Number(event.target.value) })} />
                   </label>
-                  <label className="grid gap-2 text-sm font-medium">
-                    安全方式
-                    <NativeSelect value={editing.security ?? "SSL"} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, security: event.target.value })}>
-                      <NativeSelectOption value="SSL">SSL</NativeSelectOption>
-                      <NativeSelectOption value="STARTTLS">STARTTLS</NativeSelectOption>
-                    </NativeSelect>
-                  </label>
+                  <div className="grid gap-2 text-sm font-medium">
+                    <span>安全方式</span>
+                    <Select value={editing.security ?? "SSL"} disabled={updateMutation.isPending} onValueChange={(value) => setEditing({ ...editing, security: value })}>
+                      <SelectTrigger className="w-full" aria-label="安全方式"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectGroup>
+                        <SelectItem value="SSL">SSL</SelectItem>
+                        <SelectItem value="STARTTLS">STARTTLS</SelectItem>
+                      </SelectGroup></SelectContent>
+                    </Select>
+                  </div>
                 </div>
               ) : null}
               <label className="grid gap-2 text-sm font-medium">

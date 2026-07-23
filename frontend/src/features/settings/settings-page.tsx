@@ -37,11 +37,15 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import {
   Tabs,
   TabsList,
@@ -256,17 +260,20 @@ function SettingFields({
           onChange={(event) => update("smtp_port", Number(event.target.value))}
         />
       </label>
-      <label className="grid gap-2 text-sm font-medium">
-        连接安全
-        <NativeSelect
+      <div className="grid gap-2 text-sm font-medium">
+        <span>连接安全</span>
+        <Select
           disabled={disabled}
           value={stringValue(value, "security") || "SSL"}
-          onChange={(event) => update("security", event.target.value)}
+          onValueChange={(nextValue) => update("security", nextValue)}
         >
-          <NativeSelectOption value="SSL">SSL</NativeSelectOption>
-          <NativeSelectOption value="STARTTLS">STARTTLS</NativeSelectOption>
-        </NativeSelect>
-      </label>
+          <SelectTrigger className="w-full" aria-label="连接安全"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value="SSL">SSL</SelectItem>
+            <SelectItem value="STARTTLS">STARTTLS</SelectItem>
+          </SelectGroup></SelectContent>
+        </Select>
+      </div>
       <label className="grid gap-2 text-sm font-medium">
         请求超时（1 到 30 秒）
         <Input

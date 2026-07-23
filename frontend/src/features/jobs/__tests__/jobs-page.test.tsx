@@ -140,13 +140,15 @@ describe("任务管理页面", () => {
 
   it("筛选条件提交到网关并从第一页重新读取", async () => {
     const api = gateway()
+    const user = userEvent.setup()
     renderPage(api)
     await screen.findByText("BULK_HISTORY")
 
-    await userEvent.type(screen.getByLabelText("任务类型"), "QFQ_REFRESH")
-    await userEvent.type(screen.getByLabelText("队列"), "qfq-refresh")
-    await userEvent.selectOptions(screen.getByLabelText("任务状态"), "FAILED")
-    await userEvent.click(screen.getByRole("button", { name: "查询" }))
+    await user.type(screen.getByLabelText("任务类型"), "QFQ_REFRESH")
+    await user.type(screen.getByLabelText("队列"), "qfq-refresh")
+    await user.click(screen.getByLabelText("任务状态"))
+    await user.click(screen.getByRole("option", { name: "失败" }))
+    await user.click(screen.getByRole("button", { name: "查询" }))
 
     expect(api.loadJobs).toHaveBeenLastCalledWith({
       page: 1,

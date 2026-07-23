@@ -172,10 +172,10 @@ describe("信号中心页面", () => {
 
     expect(await screen.findByText("¥ 8.10")).toBeInTheDocument()
     expect(screen.getByText("¥ 13.50")).toBeInTheDocument()
-    await userEvent.selectOptions(
+    await userEvent.click(
       screen.getByRole("combobox", { name: "按信号区间筛选" }),
-      "LOW",
     )
+    await userEvent.click(screen.getByRole("option", { name: "低位" }))
     expect(screen.getByText("¥ 8.10")).toBeInTheDocument()
     expect(screen.queryByText("¥ 13.50")).not.toBeInTheDocument()
   })
@@ -188,8 +188,8 @@ describe("信号中心页面", () => {
 
     expect(screen.getByText("正常区间")).toBeInTheDocument()
     expect(screen.getByText("低位")).toBeInTheDocument()
-    expect(screen.getAllByText("定时行情")).toHaveLength(2)
-    expect(screen.getAllByText("符合通知条件")).toHaveLength(2)
+    expect(screen.getByText("定时行情")).toBeInTheDocument()
+    expect(screen.getByText("符合通知条件")).toBeInTheDocument()
     expect(screen.getByText("已送达")).toBeInTheDocument()
     expect(screen.getByText("企业微信：已发送")).toBeInTheDocument()
   })
@@ -200,15 +200,15 @@ describe("信号中心页面", () => {
 
     await userEvent.click(screen.getByRole("tab", { name: /判断记录/ }))
 
-    expect(screen.getAllByText("仍在同一区间")).toHaveLength(2)
-    expect(screen.getAllByText("已过期")).toHaveLength(2)
+    expect(screen.getByText("仍在同一区间")).toBeInTheDocument()
+    expect(screen.getByText("已过期")).toBeInTheDocument()
     expect(screen.getByText("跳过原因：STALE_QUOTE")).toBeInTheDocument()
     expect(screen.getByText("使用了待更新目标")).toBeInTheDocument()
-    await userEvent.selectOptions(
+    await userEvent.click(
       screen.getByRole("combobox", { name: "按判断结果筛选" }),
-      "SUPERSEDED",
     )
-    expect(screen.getAllByText("仍在同一区间")).toHaveLength(1)
+    await userEvent.click(screen.getByRole("option", { name: "已过期" }))
+    expect(screen.queryByText("仍在同一区间")).not.toBeInTheDocument()
     expect(screen.getAllByText("已过期")).toHaveLength(2)
   })
 

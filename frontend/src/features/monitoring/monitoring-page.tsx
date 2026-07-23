@@ -33,10 +33,6 @@ import {
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/shared/ui/native-select"
-import {
   Empty,
   EmptyDescription,
   EmptyHeader,
@@ -44,6 +40,14 @@ import {
   EmptyTitle,
 } from "@/shared/ui/empty"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import { Skeleton } from "@/shared/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group"
 
@@ -55,6 +59,7 @@ const subscriptionLabels: Record<string, string> = {
   CONFIGURING: "待配置",
   ARCHIVED: "已归档",
 }
+const ALL_FILTER_VALUE = "__all__"
 
 const targetLabels: Record<string, string> = {
   READY: "正常",
@@ -362,44 +367,47 @@ export function MonitoringPage({
             ))}
           </ToggleGroup>
           <div className="grid flex-1 gap-2 sm:grid-cols-3">
-            <label>
-            <span className="sr-only">按分组筛选</span>
-            <NativeSelect
-              aria-label="按分组筛选"
-              value={groupFilter}
-              onChange={(event) => setGroupFilter(event.target.value)}
+            <Select
+              value={groupFilter || ALL_FILTER_VALUE}
+              onValueChange={(value) => setGroupFilter(
+                value === ALL_FILTER_VALUE ? "" : value,
+              )}
             >
-              <NativeSelectOption value="">全部分组</NativeSelectOption>
-              {groupOptions.map((group) => (
-                <NativeSelectOption value={group} key={group}>{group}</NativeSelectOption>
-              ))}
-            </NativeSelect>
-            </label>
-            <label>
-            <span className="sr-only">按目标模式筛选</span>
-            <NativeSelect
-              aria-label="按目标模式筛选"
-              value={modeFilter}
-              onChange={(event) => setModeFilter(event.target.value)}
+              <SelectTrigger className="w-full" aria-label="按分组筛选"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectGroup>
+                <SelectItem value={ALL_FILTER_VALUE}>全部分组</SelectItem>
+                {groupOptions.map((group) => (
+                  <SelectItem value={group} key={group}>{group}</SelectItem>
+                ))}
+              </SelectGroup></SelectContent>
+            </Select>
+            <Select
+              value={modeFilter || ALL_FILTER_VALUE}
+              onValueChange={(value) => setModeFilter(
+                value === ALL_FILTER_VALUE ? "" : value,
+              )}
             >
-              <NativeSelectOption value="">全部模式</NativeSelectOption>
-              <NativeSelectOption value="MANUAL">手工目标</NativeSelectOption>
-              <NativeSelectOption value="STRATEGY">策略目标</NativeSelectOption>
-            </NativeSelect>
-            </label>
-            <label>
-            <span className="sr-only">按价格区间筛选</span>
-            <NativeSelect
-              aria-label="按价格区间筛选"
-              value={zoneFilter}
-              onChange={(event) => setZoneFilter(event.target.value)}
+              <SelectTrigger className="w-full" aria-label="按目标模式筛选"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectGroup>
+                <SelectItem value={ALL_FILTER_VALUE}>全部模式</SelectItem>
+                <SelectItem value="MANUAL">手工目标</SelectItem>
+                <SelectItem value="STRATEGY">策略目标</SelectItem>
+              </SelectGroup></SelectContent>
+            </Select>
+            <Select
+              value={zoneFilter || ALL_FILTER_VALUE}
+              onValueChange={(value) => setZoneFilter(
+                value === ALL_FILTER_VALUE ? "" : value,
+              )}
             >
-              <NativeSelectOption value="">全部区间</NativeSelectOption>
-              {Object.entries(zoneLabels).map(([value, label]) => (
-                <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
-              ))}
-            </NativeSelect>
-            </label>
+              <SelectTrigger className="w-full" aria-label="按价格区间筛选"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectGroup>
+                <SelectItem value={ALL_FILTER_VALUE}>全部区间</SelectItem>
+                {Object.entries(zoneLabels).map(([value, label]) => (
+                  <SelectItem value={value} key={value}>{label}</SelectItem>
+                ))}
+              </SelectGroup></SelectContent>
+            </Select>
           </div>
           <label className="relative min-w-60 flex-1">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />

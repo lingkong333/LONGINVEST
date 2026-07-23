@@ -34,11 +34,15 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
-import {
-  NativeSelect,
-  NativeSelectOption,
-} from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import {
   Table,
   TableBody,
@@ -69,6 +73,7 @@ const statusLabels: Record<JobStatus, string> = {
   BLOCKED: "已阻塞",
   REJECTED: "已拒绝",
 }
+const ALL_FILTER_VALUE = "__all__"
 
 const actionLabels: Record<JobAction, string> = {
   cancel: "取消",
@@ -257,18 +262,20 @@ export function JobsPage({ gateway = jobGateway }: JobsPageProps) {
             value={draftQueue}
             onChange={(event) => setDraftQueue(event.target.value)}
           />
-          <NativeSelect
-            aria-label="任务状态"
-            value={draftStatus}
-            onChange={(event) => {
-              setDraftStatus(event.target.value as JobStatus | "")
+          <Select
+            value={draftStatus || ALL_FILTER_VALUE}
+            onValueChange={(value) => {
+              setDraftStatus(value === ALL_FILTER_VALUE ? "" : value as JobStatus)
             }}
           >
-            <NativeSelectOption value="">全部状态</NativeSelectOption>
-            {jobStatuses.map((status) => (
-              <NativeSelectOption key={status} value={status}>{statusLabels[status]}</NativeSelectOption>
-            ))}
-          </NativeSelect>
+            <SelectTrigger aria-label="任务状态"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectGroup>
+              <SelectItem value={ALL_FILTER_VALUE}>全部状态</SelectItem>
+              {jobStatuses.map((status) => (
+                <SelectItem key={status} value={status}>{statusLabels[status]}</SelectItem>
+              ))}
+            </SelectGroup></SelectContent>
+          </Select>
           <div className="flex gap-2">
             <Button onClick={applyFilters}>
               <SearchIcon data-icon="inline-start" />

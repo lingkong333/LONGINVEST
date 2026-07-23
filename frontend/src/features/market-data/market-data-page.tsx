@@ -46,8 +46,15 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/shared/ui/native-select"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/shared/ui/select"
 import {
   Table,
   TableBody,
@@ -865,20 +872,22 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : null}
           {marketCommand?.kind === "BACKFILL_CREATE" ? (
             <>
-              <label className="grid gap-2 text-sm font-medium">
-                回填范围
-                <NativeSelect
-                  className="w-full"
+              <div className="grid gap-2 text-sm font-medium">
+                <span>回填范围</span>
+                <Select
                   value={backfillScope}
-                  onChange={(event) => setBackfillScope(
-                    event.target.value as typeof backfillScope,
+                  onValueChange={(value) => setBackfillScope(
+                    value as typeof backfillScope,
                   )}
                 >
-                  <NativeSelectOption value="SINGLE">单只股票</NativeSelectOption>
-                  <NativeSelectOption value="SELECTED">选择多只股票</NativeSelectOption>
-                  <NativeSelectOption value="ALL">全部股票</NativeSelectOption>
-                </NativeSelect>
-              </label>
+                  <SelectTrigger className="w-full" aria-label="回填范围"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectGroup>
+                    <SelectItem value="SINGLE">单只股票</SelectItem>
+                    <SelectItem value="SELECTED">选择多只股票</SelectItem>
+                    <SelectItem value="ALL">全部股票</SelectItem>
+                  </SelectGroup></SelectContent>
+                </Select>
+              </div>
               {backfillScope !== "ALL" ? (
                 <label className="grid gap-2 text-sm font-medium">
                   股票代码
@@ -984,18 +993,20 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
               : ""}
           </DialogDescription>
           {qualityCommand?.action === "SELECT_SOURCE" ? (
-            <label className="grid gap-2 text-sm font-medium">
-              数据来源
-              <NativeSelect
-                className="w-full"
+            <div className="grid gap-2 text-sm font-medium">
+              <span>数据来源</span>
+              <Select
                 value={selectedSource}
-                onChange={(event) => setSelectedSource(event.target.value)}
+                onValueChange={setSelectedSource}
               >
-                {qualityCommand.issue.sourceCandidates.map((source) => (
-                  <NativeSelectOption key={source} value={source}>{source}</NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </label>
+                <SelectTrigger className="w-full" aria-label="数据来源"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectGroup>
+                  {qualityCommand.issue.sourceCandidates.map((source) => (
+                    <SelectItem key={source} value={source}>{source}</SelectItem>
+                  ))}
+                </SelectGroup></SelectContent>
+              </Select>
+            </div>
           ) : null}
           <label className="grid gap-2 text-sm font-medium">
             操作原因

@@ -192,10 +192,11 @@ describe("行情数据中心", () => {
     const dialog = screen.getByRole("dialog")
     const sourceSelect = within(dialog).getByRole("combobox", { name: "数据来源" })
     expect(sourceSelect).toHaveTextContent("tushare")
-    expect(sourceSelect).toHaveTextContent("akshare")
     expect(screen.queryByRole("textbox", { name: "价格" })).not.toBeInTheDocument()
 
-    await userEvent.selectOptions(sourceSelect, "akshare")
+    await userEvent.click(sourceSelect)
+    expect(screen.getByRole("option", { name: "tushare" })).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("option", { name: "akshare" }))
     await userEvent.type(
       within(dialog).getByRole("textbox", { name: "操作原因" }),
       "人工核对来源",

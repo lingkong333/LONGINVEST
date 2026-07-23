@@ -137,11 +137,10 @@ describe("系统告警页面", () => {
     finish?.({ items: [alert()], total: 1, page: 1, pageSize: 20 })
     expect(await screen.findByText("行情进程超时")).toBeInTheDocument()
 
-    await userEvent.selectOptions(screen.getByRole("combobox", { name: "按状态筛选" }), "OPEN")
-    await userEvent.selectOptions(
-      screen.getByRole("combobox", { name: "按严重程度筛选" }),
-      "ERROR",
-    )
+    await userEvent.click(screen.getByRole("combobox", { name: "按状态筛选" }))
+    await userEvent.click(screen.getByRole("option", { name: "待处理" }))
+    await userEvent.click(screen.getByRole("combobox", { name: "按严重程度筛选" }))
+    await userEvent.click(screen.getByRole("option", { name: "错误" }))
     await userEvent.type(
       screen.getByRole("textbox", { name: "按告警类型筛选" }),
       "WORKER_TIMEOUT",

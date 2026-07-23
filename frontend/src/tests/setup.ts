@@ -17,4 +17,23 @@ Object.defineProperty(window, "matchMedia", {
   })),
 })
 
+Object.defineProperties(HTMLElement.prototype, {
+  hasPointerCapture: {
+    configurable: true,
+    value: vi.fn(() => false),
+  },
+  releasePointerCapture: {
+    configurable: true,
+    value: vi.fn(),
+  },
+  scrollIntoView: {
+    configurable: true,
+    value: vi.fn(),
+  },
+  setPointerCapture: {
+    configurable: true,
+    value: vi.fn(),
+  },
+})
+
 afterEach(cleanup)

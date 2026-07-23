@@ -23,7 +23,7 @@ def upgrade() -> None:
         WITH next_version AS (
             SELECT COALESCE(MAX(version), 0) + 1 AS version
             FROM provider_config_version
-            WHERE provider_code = 'eastmoney'
+            WHERE provider_code = 'EASTMONEY'
         ),
         inserted AS (
             INSERT INTO provider_config_version
@@ -31,7 +31,7 @@ def upgrade() -> None:
             SELECT
                 '{EASTMONEY_CONFIG_ID}',
                 version,
-                'eastmoney',
+                'EASTMONEY',
                 'enable security master fallback'
             FROM next_version
             RETURNING version
@@ -39,7 +39,7 @@ def upgrade() -> None:
         INSERT INTO provider_capability_setting
             (id, config_version, provider_code, capability, enabled, priority,
              concurrency, rate_per_second, timeout_seconds, auto_switch)
-        SELECT route_values.id::uuid, inserted.version, 'eastmoney',
+        SELECT route_values.id::uuid, inserted.version, 'EASTMONEY',
                route_values.capability, TRUE, 0, 2, 2.0, 5.0,
                route_values.auto_switch
         FROM inserted
@@ -65,7 +65,7 @@ def upgrade() -> None:
         WITH next_version AS (
             SELECT COALESCE(MAX(version), 0) + 1 AS version
             FROM provider_config_version
-            WHERE provider_code = 'sina'
+            WHERE provider_code = 'SINA'
         ),
         inserted AS (
             INSERT INTO provider_config_version
@@ -73,7 +73,7 @@ def upgrade() -> None:
             SELECT
                 '{SINA_CONFIG_ID}',
                 version,
-                'sina',
+                'SINA',
                 'add low frequency security master fallback'
             FROM next_version
             RETURNING version
@@ -81,7 +81,7 @@ def upgrade() -> None:
         INSERT INTO provider_capability_setting
             (id, config_version, provider_code, capability, enabled, priority,
              concurrency, rate_per_second, timeout_seconds, auto_switch)
-        SELECT route_values.id::uuid, inserted.version, 'sina',
+        SELECT route_values.id::uuid, inserted.version, 'SINA',
                route_values.capability, TRUE, route_values.priority,
                2, 1.0, 180.0, FALSE
         FROM inserted
@@ -106,8 +106,8 @@ def downgrade() -> None:
         "DISABLE TRIGGER provider_config_version_append_only"
     )
     for provider, config_id in (
-        ("eastmoney", EASTMONEY_CONFIG_ID),
-        ("sina", SINA_CONFIG_ID),
+        ("EASTMONEY", EASTMONEY_CONFIG_ID),
+        ("SINA", SINA_CONFIG_ID),
     ):
         op.execute(
             f"""

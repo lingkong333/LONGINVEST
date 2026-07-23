@@ -231,9 +231,13 @@ describe("应用错误边界和入口", () => {
     consoleError.mockRestore()
   })
 
-  it("入口只显示中性的基础工程状态", () => {
+  it("工作台入口明确当前建设状态且不伪造业务数据", () => {
     render(<FoundationPage />)
-    expect(screen.getByRole("heading", { name: "LongInvest 前端基础工程" })).toBeInTheDocument()
-    expect(screen.getByText("基础组件与应用运行环境已就绪")).toBeInTheDocument()
+    expect(screen.getByRole("heading", {
+      name: "把长周期判断，建立在可验证的数据上。",
+    })).toBeInTheDocument()
+    expect(screen.getByRole("region", { name: "当前建设状态" })).toHaveTextContent(
+      "使用真实接口展示系统状态和监控股票，不使用演示数据。",
+    )
   })
 })

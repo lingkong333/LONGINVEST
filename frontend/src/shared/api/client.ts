@@ -49,8 +49,8 @@ interface ApiClientOptions {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 
-interface ApiOperationResult<T> {
-  data?: ApiEnvelope<T>
+interface ApiOperationResult {
+  data?: unknown
   error?: unknown
   response: Response
 }
@@ -190,8 +190,8 @@ export function createApiClient<Paths extends object>({
 
   const client = createClient<Paths>({ baseUrl, fetch: guardedFetch })
 
-  async function request<T>(operation: Promise<ApiOperationResult<T>>) {
-    let result: ApiOperationResult<T>
+  async function request<T = unknown>(operation: Promise<ApiOperationResult>): Promise<T> {
+    let result: ApiOperationResult
     try {
       result = await operation
     } catch (error) {
@@ -216,7 +216,7 @@ export function createApiClient<Paths extends object>({
         status: result.response.status,
       })
     }
-    return unwrapEnvelope(result.data, result.response.status)
+    return unwrapEnvelope(result.data as ApiEnvelope<T> | undefined, result.response.status)
   }
 
   function resetUnauthorized() {

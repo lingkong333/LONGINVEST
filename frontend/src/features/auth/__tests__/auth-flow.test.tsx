@@ -108,8 +108,8 @@ describe("登录和会话启动", () => {
     renderApp(gateway)
 
     expect(await screen.findByRole("heading", { name: "登录工作台" })).toBeInTheDocument()
-    await userEvent.type(screen.getByRole("textbox", { name: "Username" }), "admin")
-    await userEvent.type(screen.getByLabelText("Password"), "correct-password")
+    await userEvent.type(screen.getByRole("textbox", { name: "用户名" }), "admin")
+    await userEvent.type(screen.getByLabelText("密码"), "correct-password")
     await userEvent.click(screen.getByRole("button", { name: "登录" }))
 
     expect(login).toHaveBeenCalledWith({

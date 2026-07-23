@@ -12,8 +12,8 @@ import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
 
 const loginSchema = z.object({
-  username: z.string().trim().min(1, "REQUIRED").max(128),
-  password: z.string().min(1, "REQUIRED").max(128),
+  username: z.string().trim().min(1, "必填").max(128),
+  password: z.string().min(1, "必填").max(128),
 })
 
 export function LoginPage() {
@@ -95,23 +95,23 @@ export function LoginPage() {
           <h1 id="login-title" className="sr-only">登录工作台</h1>
 
           <form onSubmit={submit} className="login-form" noValidate>
-            <FormField control={form.control} name="username" label="Username">
+            <FormField control={form.control} name="username" label="用户名">
               {({ field }) => (
                 <Input
                   {...field}
                   autoComplete="username"
                   autoFocus
-                  placeholder="Username"
+              placeholder="用户名"
                 />
               )}
             </FormField>
-            <FormField control={form.control} name="password" label="Password">
+            <FormField control={form.control} name="password" label="密码">
               {({ field }) => (
                 <Input
                   {...field}
                   type="password"
                   autoComplete="current-password"
-                  placeholder="Password"
+              placeholder="密码"
                 />
               )}
             </FormField>
@@ -128,7 +128,7 @@ export function LoginPage() {
               disabled={auth.isSubmitting}
               aria-label={auth.isSubmitting ? "正在登录" : "登录"}
             >
-              <span>{auth.isSubmitting ? "CONNECTING" : "ENTER"}</span>
+            <span>{auth.isSubmitting ? "登录中" : "登录"}</span>
               <ArrowRight aria-hidden="true" />
             </Button>
           </form>

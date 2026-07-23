@@ -30,24 +30,39 @@ interface MetricDefinition {
   section: keyof DashboardSummary["sections"]
   field: string
   label: string
-  code: string
   icon: LucideIcon
 }
 
 const metrics: MetricDefinition[] = [
-  { section: "monitoring", field: "active", label: "启用监控", code: "MON", icon: Radar },
-  { section: "positions", field: "held", label: "当前持仓", code: "POS", icon: BriefcaseBusiness },
-  { section: "signals", field: "today", label: "今日信号", code: "SIG", icon: Crosshair },
-  { section: "targets", field: "attention", label: "目标关注", code: "TGT", icon: Target },
-  { section: "jobs", field: "active", label: "活动任务", code: "JOB", icon: Activity },
-  { section: "notifications", field: "pending", label: "待发通知", code: "MSG", icon: Bell },
-  { section: "providers", field: "healthy", label: "健康数据源", code: "API", icon: Server },
-  { section: "alerts", field: "unresolved", label: "未解决告警", code: "ALT", icon: ShieldAlert },
-  { section: "daily_data", field: "committed_count", label: "日线提交", code: "DAY", icon: Database },
-  { section: "infrastructure", field: "active_workers", label: "活动进程", code: "WRK", icon: HeartPulse },
-  { section: "system", field: "critical_alerts", label: "严重告警", code: "CRT", icon: CircleAlert },
-  { section: "quote_batches", field: "valid_count", label: "有效行情", code: "QTE", icon: Activity },
+  { section: "monitoring", field: "active", label: "启用监控", icon: Radar },
+  { section: "positions", field: "held", label: "当前持仓", icon: BriefcaseBusiness },
+  { section: "signals", field: "today", label: "今日信号", icon: Crosshair },
+  { section: "targets", field: "attention", label: "目标关注", icon: Target },
+  { section: "jobs", field: "active", label: "活动任务", icon: Activity },
+  { section: "notifications", field: "pending", label: "待发通知", icon: Bell },
+  { section: "providers", field: "healthy", label: "健康数据源", icon: Server },
+  { section: "alerts", field: "unresolved", label: "未解决告警", icon: ShieldAlert },
+  { section: "daily_data", field: "committed_count", label: "日线提交", icon: Database },
+  { section: "infrastructure", field: "active_workers", label: "活动进程", icon: HeartPulse },
+  { section: "system", field: "critical_alerts", label: "严重告警", icon: CircleAlert },
+  { section: "quote_batches", field: "valid_count", label: "有效行情", icon: Activity },
 ]
+
+const healthLabels: Record<DashboardSummary["status"], string> = {
+  HEALTHY: "运行正常",
+  DEGRADED: "部分降级",
+  UNHEALTHY: "运行异常",
+}
+
+const sectionStatusLabels: Record<DashboardSection["status"], string> = {
+  OK: "正常",
+  EMPTY: "暂无数据",
+  WAITING: "等待中",
+  NON_TRADING_DAY: "非交易日",
+  DEGRADED: "部分降级",
+  ERROR: "异常",
+  TIMEOUT: "超时",
+}
 
 function metricValue(section: DashboardSection, field: string) {
   const value = section.data[field]
@@ -68,7 +83,7 @@ function DashboardSkeleton() {
   return (
     <main className="dashboard-page" aria-label="仪表盘加载中">
       <div className="dashboard-loading">
-        {metrics.map(({ code }) => <span key={code} />)}
+        {metrics.map(({ section }) => <span key={section} />)}
       </div>
     </main>
   )
@@ -130,9 +145,9 @@ export function DashboardPage({
       <header className="dashboard-header">
         <div className={`dashboard-health dashboard-health--${summary.status.toLowerCase()}`}>
           <span aria-hidden="true" />
-          <strong>{summary.status}</strong>
+          <strong>{healthLabels[summary.status]}</strong>
         </div>
-        <time dateTime={summary.generated_at}>{generatedAt} CST</time>
+        <time dateTime={summary.generated_at}>{generatedAt} 上海时间</time>
         <Button
           variant="ghost"
           size="icon-sm"
@@ -145,7 +160,7 @@ export function DashboardPage({
       </header>
 
       <section className="dashboard-metrics" aria-label="系统实时指标">
-        {metrics.map(({ section, field, label, code, icon: Icon }) => {
+        {metrics.map(({ section, field, label, icon: Icon }) => {
           const snapshot = summary.sections[section]
           const value = metricValue(snapshot, field)
           const tone = statusTone(snapshot.status)
@@ -153,12 +168,12 @@ export function DashboardPage({
             <article
               className={`metric-card metric-card--${tone}`}
               key={`${section}-${field}`}
-              aria-label={`${label}：${value ?? "无数据"}，状态 ${snapshot.status}`}
+              aria-label={`${label}：${value ?? "无数据"}，状态${sectionStatusLabels[snapshot.status]}`}
               title={snapshot.error ?? label}
             >
               <div className="metric-card__icon"><Icon aria-hidden="true" /></div>
               <strong>{value ?? "—"}</strong>
-              <span>{code}</span>
+              <span>{label}</span>
               <i aria-hidden="true" />
             </article>
           )

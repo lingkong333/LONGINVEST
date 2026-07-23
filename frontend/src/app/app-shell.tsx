@@ -17,14 +17,13 @@ import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
 
 const futureNavigation = [
-  { label: "监控", title: "Monitor", icon: Radar },
-  { label: "策略", title: "Strategy", icon: FlaskConical },
-  { label: "回测", title: "Backtest", icon: ChartNoAxesCombined },
-  { label: "通知", title: "Notifications", icon: BellRing },
-  { label: "任务", title: "Jobs", icon: Activity },
-  { label: "告警", title: "Alerts", icon: ShieldAlert },
-  { label: "日历", title: "Calendar", icon: CalendarDays },
-  { label: "设置", title: "Settings", icon: Settings2 },
+  { label: "策略", icon: FlaskConical },
+  { label: "回测", icon: ChartNoAxesCombined },
+  { label: "通知", icon: BellRing },
+  { label: "任务", icon: Activity },
+  { label: "告警", icon: ShieldAlert },
+  { label: "日历", icon: CalendarDays },
+  { label: "设置", icon: Settings2 },
 ]
 
 export function AppShell() {
@@ -38,16 +37,19 @@ export function AppShell() {
         </span>
 
         <nav className="workspace-nav" aria-label="主导航">
-          <NavLink to="/" end aria-label="仪表盘" title="Dashboard">
+          <NavLink to="/" end aria-label="仪表盘" title="仪表盘">
             <CircleGauge aria-hidden="true" />
           </NavLink>
-          {futureNavigation.map(({ label, title, icon: Icon }) => (
+          <NavLink to="/monitoring" aria-label="监控列表" title="监控列表">
+            <Radar aria-hidden="true" />
+          </NavLink>
+          {futureNavigation.map(({ label, icon: Icon }) => (
             <span
               className="workspace-nav__future"
               key={label}
               aria-disabled="true"
               aria-label={label}
-              title={title}
+              title={label}
             >
               <Icon aria-hidden="true" />
             </span>
@@ -75,9 +77,9 @@ export function AppShell() {
         <header className="workspace-topbar">
           <div>
             <span className="status-indicator" aria-hidden="true" />
-            <span>LIVE</span>
+            <span>运行中</span>
           </div>
-          <span className="workspace-topbar__market">CN · ASIA/SHANGHAI</span>
+          <span className="workspace-topbar__market">中国 A 股 · 上海时间</span>
         </header>
         <Outlet />
       </div>

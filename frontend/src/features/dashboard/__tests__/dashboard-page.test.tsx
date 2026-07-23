@@ -89,10 +89,10 @@ describe("真实仪表盘", () => {
   it("只显示接口返回的指标，并保留图标卡的无障碍名称", async () => {
     renderDashboard({ loadSummary: vi.fn().mockResolvedValue(summary()) })
 
-    expect(await screen.findByText("HEALTHY")).toBeInTheDocument()
-    expect(screen.getByLabelText("启用监控：12，状态 OK")).toHaveTextContent("12MON")
-    expect(screen.getByLabelText("日线提交：5100，状态 OK")).toHaveTextContent("5100DAY")
-    expect(screen.getByLabelText("严重告警：1，状态 OK")).toHaveTextContent("1CRT")
+    expect(await screen.findByText("运行正常")).toBeInTheDocument()
+    expect(screen.getByLabelText("启用监控：12，状态正常")).toHaveTextContent("12启用监控")
+    expect(screen.getByLabelText("日线提交：5100，状态正常")).toHaveTextContent("5100日线提交")
+    expect(screen.getByLabelText("严重告警：1，状态正常")).toHaveTextContent("1严重告警")
   })
 
   it("单个分区超时只降级对应卡片，不阻断其他指标", async () => {
@@ -104,9 +104,9 @@ describe("真实仪表盘", () => {
     })
     renderDashboard({ loadSummary: vi.fn().mockResolvedValue(value) })
 
-    expect(await screen.findByText("DEGRADED")).toBeInTheDocument()
-    expect(screen.getByLabelText("待发通知：无数据，状态 TIMEOUT")).toHaveTextContent("—MSG")
-    expect(screen.getByLabelText("启用监控：12，状态 OK")).toBeInTheDocument()
+    expect(await screen.findByText("部分降级")).toBeInTheDocument()
+    expect(screen.getByLabelText("待发通知：无数据，状态超时")).toHaveTextContent("—待发通知")
+    expect(screen.getByLabelText("启用监控：12，状态正常")).toBeInTheDocument()
   })
 
   it("整体请求失败显示稳定错误码并允许重试", async () => {
@@ -122,7 +122,7 @@ describe("真实仪表盘", () => {
     expect(await screen.findByText("DASHBOARD_UNAVAILABLE")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "重试仪表盘" }))
 
-    expect(await screen.findByText("HEALTHY")).toBeInTheDocument()
+    expect(await screen.findByText("运行正常")).toBeInTheDocument()
     expect(loadSummary).toHaveBeenCalledTimes(2)
   })
 })

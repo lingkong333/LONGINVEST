@@ -3,6 +3,23 @@ from pathlib import Path
 import yaml
 
 
+def test_compose_backend_runtime_services_share_one_image() -> None:
+    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
+    backend_services = {
+        name: service
+        for name, service in services.items()
+        if service.get("build", {}).get("dockerfile")
+        == "deploy/docker/backend.Dockerfile"
+        and service["build"].get("target") == "runtime"
+    }
+
+    assert len(backend_services) == 18
+    assert {service["image"] for service in backend_services.values()} == {
+        "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
+    }
+
+
 def test_compose_workers_listen_only_to_their_role_queue() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
@@ -29,7 +46,9 @@ def test_compose_publishes_only_the_frontend_on_public_port() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
 
-    assert services["frontend"]["ports"] == ["15173:8080"]
+    assert services["frontend"]["ports"] == [
+        "${LONGINVEST_FRONTEND_BIND:-15173:8080}"
+    ]
     assert services["api"]["ports"] == ["127.0.0.1:18080:8000"]
     assert "ports" not in services["postgres"]
     assert "ports" not in services["redis"]

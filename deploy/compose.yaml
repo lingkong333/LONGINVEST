@@ -1,5 +1,12 @@
 name: longinvest
 
+x-backend-image: &backend-image
+  image: ${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}
+  build:
+    context: ..
+    dockerfile: deploy/docker/backend.Dockerfile
+    target: runtime
+
 services:
   strategy-runner-image:
     profiles: ["strategy-runner-build"]
@@ -62,10 +69,7 @@ services:
       - no-new-privileges:true
 
   migrate:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.migrate"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -85,10 +89,7 @@ services:
       - no-new-privileges:true
 
   api:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     environment:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
@@ -165,10 +166,7 @@ services:
         max-file: "3"
 
   dispatcher:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.dispatcher"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -198,10 +196,7 @@ services:
         max-file: "7"
 
   watchdog:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.watchdog"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -228,10 +223,7 @@ services:
         max-file: "7"
 
   monitor-scheduler:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.monitor_scheduler"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -258,10 +250,7 @@ services:
         max-file: "7"
 
   worker-maintenance:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -292,10 +281,7 @@ services:
         max-file: "7"
 
   worker-realtime-quotes:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -326,10 +312,7 @@ services:
         max-file: "7"
 
   worker-daily-market-data:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -360,10 +343,7 @@ services:
         max-file: "7"
 
   worker-qfq-refresh:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -394,10 +374,7 @@ services:
         max-file: "7"
 
   signal-projector:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.signal_projector"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -424,10 +401,7 @@ services:
         max-file: "7"
 
   notification-wecom:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.notification_worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -456,10 +430,7 @@ services:
         max-file: "7"
 
   notification-email:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.notification_worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -489,10 +460,7 @@ services:
         max-file: "7"
 
   worker-signals:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -523,10 +491,7 @@ services:
         max-file: "7"
 
   worker-strategy:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -563,10 +528,7 @@ services:
         max-file: "7"
 
   worker-strategy-targets:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -603,10 +565,7 @@ services:
         max-file: "7"
 
   worker-backtest-single:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -643,10 +602,7 @@ services:
         max-file: "7"
 
   worker-backtest-bulk:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.bulk_backtest_worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -684,10 +640,7 @@ services:
         max-file: "7"
 
   worker-bulk-history:
-    build:
-      context: ..
-      dockerfile: deploy/docker/backend.Dockerfile
-      target: runtime
+    <<: *backend-image
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
@@ -719,6 +672,7 @@ services:
 
   test:
     profiles: ["test"]
+    image: ${LONGINVEST_BACKEND_TEST_IMAGE:-longinvest-backend-test:local}
     build:
       context: ..
       dockerfile: deploy/docker/backend.Dockerfile

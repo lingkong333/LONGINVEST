@@ -35,7 +35,7 @@ describe("实时事件连接", () => {
       })
       expect(url).toBe("/api/v1/events/stream")
       expect(options.credentials).toBe("include")
-      expect(options.openWhenHidden).toBe(false)
+      expect(options.openWhenHidden).toBe(true)
     })
 
     await connectResourceEventStream({

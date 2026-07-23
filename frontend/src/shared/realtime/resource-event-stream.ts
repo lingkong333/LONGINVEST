@@ -57,7 +57,7 @@ export const connectResourceEventStream: ResourceEventConnector = async ({
       await fetchEventSource("/api/v1/events/stream", {
         credentials: "include",
         signal,
-        openWhenHidden: false,
+        openWhenHidden: true,
         async onopen(response) {
           if (response.ok && isEventStream(response)) {
             retryAttempt = 0

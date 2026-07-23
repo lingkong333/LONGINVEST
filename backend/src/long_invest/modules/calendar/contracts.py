@@ -21,6 +21,12 @@ class CalendarDayStatus(StrEnum):
     MISSING = "MISSING"
 
 
+class CalendarAction(StrEnum):
+    IMPORT = "IMPORT"
+    OVERRIDE = "OVERRIDE"
+    RESTORE = "RESTORE"
+
+
 class CalendarAuditContext(StrictContract):
     request_id: str = Field(min_length=1, max_length=64)
     idempotency_key: str = Field(min_length=1, max_length=200)

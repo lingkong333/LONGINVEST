@@ -13,6 +13,7 @@ from long_invest.modules.auth.dependencies import (
     require_verified_write_request,
 )
 from long_invest.modules.calendar.contracts import (
+    CalendarAction,
     CalendarAuditContext,
     CalendarDayInput,
     CalendarImport,
@@ -100,7 +101,12 @@ async def list_calendar(
     market: str = "CN_A",
 ) -> dict:
     items = await service.list_days(from_date, through_date, market)
-    return success_response(data={"items": [_day_data(item) for item in items]})
+    return success_response(
+        data={
+            "items": [_day_data(item) for item in items],
+            "allowed_actions": _calendar_actions(),
+        }
+    )
 
 
 @router.get("/coverage")
@@ -111,7 +117,12 @@ async def calendar_coverage(
     market: str = "CN_A",
 ) -> dict:
     value = await service.coverage(from_date, market)
-    return success_response(data=value.model_dump(mode="json"))
+    return success_response(
+        data={
+            **value.model_dump(mode="json"),
+            "allowed_actions": _calendar_actions(),
+        }
+    )
 
 
 @router.get("/next-trading-day")
@@ -145,7 +156,19 @@ async def versions(
     market: str = "CN_A",
 ) -> dict:
     items = await service.list_versions(market)
-    return success_response(data={"items": [_version_data(item) for item in items]})
+    current_version = max(
+        (item.version_number for item in items),
+        default=None,
+    )
+    return success_response(
+        data={
+            "items": [
+                _version_data(item, is_current=item.version_number == current_version)
+                for item in items
+            ],
+            "allowed_actions": _calendar_actions(),
+        }
+    )
 
 
 @router.get("/{date}")
@@ -286,10 +309,11 @@ def _day_data(item) -> dict | None:
             {"starts_at": value.starts_at, "ends_at": value.ends_at}
             for value in item.sessions
         ],
+        "allowed_actions": [CalendarAction.OVERRIDE.value],
     }
 
 
-def _version_data(item) -> dict:
+def _version_data(item, *, is_current: bool = False) -> dict:
     return {
         "id": str(item.id),
         "market": item.market,
@@ -301,4 +325,12 @@ def _version_data(item) -> dict:
         else None,
         "reason": item.reason,
         "created_at": item.created_at,
+        "is_current": is_current,
+        "allowed_actions": []
+        if is_current
+        else [CalendarAction.RESTORE.value],
     }
+
+
+def _calendar_actions() -> list[str]:
+    return [CalendarAction.IMPORT.value, CalendarAction.OVERRIDE.value]

@@ -10,8 +10,11 @@ from long_invest.modules.auth.dependencies import (
     require_verified_write_request,
 )
 from long_invest.modules.calendar.api import (
+    _calendar_actions,
     _calendar_context,
+    _day_data,
     _result_data,
+    _version_data,
     get_calendar_service,
     router,
 )
@@ -206,3 +209,32 @@ def test_invalid_import_is_returned_as_http_422_with_all_issues() -> None:
     assert [
         item["code"] for item in response.json()["details"]["issues"]
     ] == ["ONE", "TWO"]
+
+
+def test_calendar_views_expose_backend_allowed_actions() -> None:
+    day = SimpleNamespace(
+        trade_date="2026-07-23",
+        is_trading_day=True,
+        status="CONFIRMED",
+        source="SSE",
+        note=None,
+        override_reason=None,
+        sessions=(),
+    )
+    version = SimpleNamespace(
+        id="version-1",
+        market="CN_A",
+        version_number=2,
+        source="SSE",
+        source_version="2026",
+        based_on_version_id=None,
+        reason="年度日历",
+        created_at="2026-01-01T00:00:00Z",
+    )
+
+    assert _calendar_actions() == ["IMPORT", "OVERRIDE"]
+    assert _day_data(day)["allowed_actions"] == ["OVERRIDE"]
+    assert _version_data(version, is_current=False)["allowed_actions"] == [
+        "RESTORE"
+    ]
+    assert _version_data(version, is_current=True)["allowed_actions"] == []

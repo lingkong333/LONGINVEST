@@ -35,6 +35,10 @@ const AlertsPage = lazy(async () => {
   const module = await import("@/features/alerts")
   return { default: module.AlertsPage }
 })
+const CalendarPage = lazy(async () => {
+  const module = await import("@/features/calendar")
+  return { default: module.CalendarPage }
+})
 
 function deferredPage(element: ReactNode) {
   return (
@@ -106,6 +110,10 @@ export const appRouter = createBrowserRouter([
           {
             path: "/alerts",
             element: deferredPage(<AlertsPage />),
+          },
+          {
+            path: "/calendar",
+            element: deferredPage(<CalendarPage />),
           },
         ],
       },

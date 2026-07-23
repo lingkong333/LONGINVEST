@@ -22,7 +22,6 @@ import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
 
 const futureNavigation = [
-  { label: "日历", icon: CalendarDays },
   { label: "设置", icon: Settings2 },
 ]
 
@@ -72,6 +71,9 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/alerts" aria-label="系统告警" title="系统告警">
             <ShieldAlert aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/calendar" aria-label="交易日历" title="交易日历">
+            <CalendarDays aria-hidden="true" />
           </NavLink>
           {futureNavigation.map(({ label, icon: Icon }) => (
             <span

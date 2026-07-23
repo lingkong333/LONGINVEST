@@ -1,4 +1,4 @@
-import { ArrowRight, CandlestickChart, ShieldCheck } from "lucide-react"
+import { ArrowRight, CandlestickChart } from "lucide-react"
 import { useState } from "react"
 import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import { z } from "zod"
@@ -12,8 +12,8 @@ import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
 
 const loginSchema = z.object({
-  username: z.string().trim().min(1, "请输入用户名").max(128),
-  password: z.string().min(1, "请输入密码").max(128),
+  username: z.string().trim().min(1, "REQUIRED").max(128),
+  password: z.string().min(1, "REQUIRED").max(128),
 })
 
 export function LoginPage() {
@@ -74,63 +74,61 @@ export function LoginPage() {
 
   return (
     <main className="login-page">
-      <section className="login-page__story" aria-label="LongInvest 简介">
-        <div className="login-brand">
-          <span className="login-brand__mark"><CandlestickChart aria-hidden="true" /></span>
-          <span>LONGINVEST</span>
+      <section className="login-visual" aria-hidden="true">
+        <div className="login-visual__orbit">
+          <CandlestickChart />
+          <i />
+          <i />
+          <i />
         </div>
-        <div className="login-page__headline">
-          <p className="eyebrow">A 股长波段决策工作台</p>
-          <h1>让价格区间，成为可复核的行动依据。</h1>
-          <p>
-            将行情、目标、信号、策略与回测放进同一条证据链，
-            每一次变化都有来源，每一个动作都能追溯。
-          </p>
-        </div>
-        <div className="login-page__trust">
-          <ShieldCheck aria-hidden="true" />
-          <span>会话与安全凭据仅保存在受保护的服务端 Cookie 和内存中</span>
+        <div className="login-visual__bars">
+          {Array.from({ length: 18 }, (_, index) => <i key={index} />)}
         </div>
       </section>
 
       <section className="login-panel" aria-labelledby="login-title">
         <div className="login-panel__inner">
-          <p className="eyebrow">安全入口</p>
-          <h2 id="login-title">登录工作台</h2>
-          <p className="login-panel__intro">使用服务器管理员创建的账户继续。</p>
+          <div className="login-brand">
+            <span className="login-brand__mark"><CandlestickChart aria-hidden="true" /></span>
+            <span>LONGINVEST</span>
+          </div>
+          <h1 id="login-title" className="sr-only">登录工作台</h1>
 
           <form onSubmit={submit} className="login-form" noValidate>
-            <FormField control={form.control} name="username" label="用户名">
+            <FormField control={form.control} name="username" label="Username">
               {({ field }) => (
                 <Input
                   {...field}
                   autoComplete="username"
                   autoFocus
-                  placeholder="请输入用户名"
+                  placeholder="Username"
                 />
               )}
             </FormField>
-            <FormField control={form.control} name="password" label="密码">
+            <FormField control={form.control} name="password" label="Password">
               {({ field }) => (
                 <Input
                   {...field}
                   type="password"
                   autoComplete="current-password"
-                  placeholder="请输入密码"
+                  placeholder="Password"
                 />
               )}
             </FormField>
 
             {submitError ? (
               <div className="login-error" role="alert">
-                <strong>登录未成功</strong>
-                <span>请检查用户名和密码，或稍后重试。</span>
                 <code>{toErrorDiagnostic(submitError).code}</code>
               </div>
             ) : null}
 
-            <Button type="submit" size="lg" disabled={auth.isSubmitting}>
-              {auth.isSubmitting ? "正在登录…" : "进入工作台"}
+            <Button
+              type="submit"
+              size="lg"
+              disabled={auth.isSubmitting}
+              aria-label={auth.isSubmitting ? "正在登录" : "登录"}
+            >
+              <span>{auth.isSubmitting ? "CONNECTING" : "ENTER"}</span>
               <ArrowRight aria-hidden="true" />
             </Button>
           </form>

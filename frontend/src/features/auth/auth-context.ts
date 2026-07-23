@@ -13,6 +13,7 @@ export interface AuthContextValue {
   auth: AuthState | null
   error: unknown
   isSubmitting: boolean
+  invalidate(): void
   login(input: LoginInput): Promise<void>
   logout(): Promise<void>
   retry(): Promise<void>

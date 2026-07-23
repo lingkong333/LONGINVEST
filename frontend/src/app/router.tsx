@@ -3,7 +3,7 @@ import { createBrowserRouter } from "react-router-dom"
 import { AppShell } from "@/app/app-shell"
 import { RouteErrorPage } from "@/app/route-error-page"
 import { LoginPage, ProtectedRoute } from "@/features/auth"
-import { FoundationPage } from "@/pages/foundation-page"
+import { DashboardPage } from "@/features/dashboard"
 
 export const appRouter = createBrowserRouter([
   {
@@ -20,7 +20,7 @@ export const appRouter = createBrowserRouter([
         children: [
           {
             path: "/",
-            element: <FoundationPage />,
+            element: <DashboardPage />,
           },
         ],
       },

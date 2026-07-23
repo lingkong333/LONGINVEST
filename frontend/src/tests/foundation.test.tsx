@@ -6,7 +6,6 @@ import { createMemoryRouter, RouterProvider } from "react-router-dom"
 
 import { AppErrorBoundary } from "@/app/app-error-boundary"
 import { RouteErrorPage } from "@/app/route-error-page"
-import { FoundationPage } from "@/pages/foundation-page"
 import { ApiError } from "@/shared/api/client"
 import { useZodForm } from "@/shared/forms/use-zod-form"
 import { Button } from "@/shared/ui/button"
@@ -231,13 +230,4 @@ describe("应用错误边界和入口", () => {
     consoleError.mockRestore()
   })
 
-  it("工作台入口明确当前建设状态且不伪造业务数据", () => {
-    render(<FoundationPage />)
-    expect(screen.getByRole("heading", {
-      name: "把长周期判断，建立在可验证的数据上。",
-    })).toBeInTheDocument()
-    expect(screen.getByRole("region", { name: "当前建设状态" })).toHaveTextContent(
-      "使用真实接口展示系统状态和监控股票，不使用演示数据。",
-    )
-  })
 })

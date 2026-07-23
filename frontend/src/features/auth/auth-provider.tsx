@@ -41,13 +41,15 @@ export function AuthProvider({
     enabled: !sessionInvalidated,
   })
 
+  const invalidate = useCallback(() => {
+    setSessionInvalidated(true)
+    queryClient.removeQueries({ queryKey: AUTH_QUERY_KEY })
+  }, [queryClient])
+
   useEffect(() => {
-    gateway.setUnauthorizedHandler(() => {
-      setSessionInvalidated(true)
-      queryClient.removeQueries({ queryKey: AUTH_QUERY_KEY })
-    })
+    gateway.setUnauthorizedHandler(invalidate)
     return () => gateway.setUnauthorizedHandler(undefined)
-  }, [gateway, queryClient])
+  }, [gateway, invalidate])
 
   const loginMutation = useMutation({
     mutationFn: (input: LoginInput) => gateway.login(input),
@@ -101,12 +103,14 @@ export function AuthProvider({
     auth: phase === "authenticated" ? (authQuery.data ?? null) : null,
     error: authQuery.error,
     isSubmitting: loginMutation.isPending || logoutMutation.isPending,
+    invalidate,
     login,
     logout,
     retry,
   }), [
     authQuery.data,
     authQuery.error,
+    invalidate,
     login,
     loginMutation.isPending,
     logout,

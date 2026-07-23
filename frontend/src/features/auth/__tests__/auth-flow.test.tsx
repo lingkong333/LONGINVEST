@@ -12,7 +12,6 @@ import {
   type AuthGateway,
   type AuthState,
 } from "@/features/auth"
-import { FoundationPage } from "@/pages/foundation-page"
 import { ApiError } from "@/shared/api/client"
 
 const authenticated: AuthState = {
@@ -66,7 +65,7 @@ function renderApp(gateway: AuthGateway, initialPath = "/") {
       children: [
         {
           element: <AppShell />,
-          children: [{ path: "/", element: <FoundationPage /> }],
+          children: [{ path: "/", element: <p>Workspace ready</p> }],
         },
       ],
     },
@@ -89,10 +88,7 @@ describe("登录和会话启动", () => {
     const { gateway } = createGateway(vi.fn().mockResolvedValue(authenticated))
     renderApp(gateway)
 
-    expect(await screen.findByRole("heading", {
-      name: "把长周期判断，建立在可验证的数据上。",
-    })).toBeInTheDocument()
-    expect(screen.getByText("admin")).toBeInTheDocument()
+    expect(await screen.findByText("Workspace ready")).toBeInTheDocument()
 
     await userEvent.click(screen.getByRole("button", { name: "退出登录" }))
 
@@ -112,15 +108,15 @@ describe("登录和会话启动", () => {
     renderApp(gateway)
 
     expect(await screen.findByRole("heading", { name: "登录工作台" })).toBeInTheDocument()
-    await userEvent.type(screen.getByRole("textbox", { name: "用户名" }), "admin")
-    await userEvent.type(screen.getByLabelText("密码"), "correct-password")
-    await userEvent.click(screen.getByRole("button", { name: "进入工作台" }))
+    await userEvent.type(screen.getByRole("textbox", { name: "Username" }), "admin")
+    await userEvent.type(screen.getByLabelText("Password"), "correct-password")
+    await userEvent.click(screen.getByRole("button", { name: "登录" }))
 
     expect(login).toHaveBeenCalledWith({
       username: "admin",
       password: "correct-password",
     })
-    expect(await screen.findByText("核心闭环已完成")).toBeInTheDocument()
+    expect(await screen.findByText("Workspace ready")).toBeInTheDocument()
   })
 
   it("认证服务不可用时显示故障，不误判成退出登录", async () => {
@@ -146,7 +142,7 @@ describe("登录和会话启动", () => {
     )
     renderApp(gateway)
 
-    expect(await screen.findByText("核心闭环已完成")).toBeInTheDocument()
+    expect(await screen.findByText("Workspace ready")).toBeInTheDocument()
     expireSession()
 
     expect(await screen.findByRole("heading", { name: "登录工作台" })).toBeInTheDocument()

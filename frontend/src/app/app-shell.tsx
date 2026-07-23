@@ -4,7 +4,6 @@ import {
   CalendarDays,
   CandlestickChart,
   ChartNoAxesCombined,
-  ChevronRight,
   CircleGauge,
   FlaskConical,
   LogOut,
@@ -18,14 +17,14 @@ import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
 
 const futureNavigation = [
-  { label: "监控", icon: Radar },
-  { label: "策略", icon: FlaskConical },
-  { label: "回测", icon: ChartNoAxesCombined },
-  { label: "通知", icon: BellRing },
-  { label: "任务", icon: Activity },
-  { label: "告警", icon: ShieldAlert },
-  { label: "日历", icon: CalendarDays },
-  { label: "设置", icon: Settings2 },
+  { label: "监控", title: "Monitor", icon: Radar },
+  { label: "策略", title: "Strategy", icon: FlaskConical },
+  { label: "回测", title: "Backtest", icon: ChartNoAxesCombined },
+  { label: "通知", title: "Notifications", icon: BellRing },
+  { label: "任务", title: "Jobs", icon: Activity },
+  { label: "告警", title: "Alerts", icon: ShieldAlert },
+  { label: "日历", title: "Calendar", icon: CalendarDays },
+  { label: "设置", title: "Settings", icon: Settings2 },
 ]
 
 export function AppShell() {
@@ -34,28 +33,23 @@ export function AppShell() {
   return (
     <div className="workspace-shell">
       <aside className="workspace-sidebar">
-        <div className="workspace-brand">
-          <span className="workspace-brand__mark">
-            <CandlestickChart aria-hidden="true" />
-          </span>
-          <span>
-            <strong>LongInvest</strong>
-            <small>长波段工作台</small>
-          </span>
-        </div>
+        <span className="workspace-brand__mark" title="LongInvest">
+          <CandlestickChart aria-hidden="true" />
+        </span>
 
         <nav className="workspace-nav" aria-label="主导航">
-          <p>工作区</p>
-          <NavLink to="/" end>
+          <NavLink to="/" end aria-label="仪表盘" title="Dashboard">
             <CircleGauge aria-hidden="true" />
-            <span>仪表盘</span>
-            <ChevronRight className="workspace-nav__arrow" aria-hidden="true" />
           </NavLink>
-          {futureNavigation.map(({ label, icon: Icon }) => (
-            <span className="workspace-nav__future" key={label} aria-disabled="true">
+          {futureNavigation.map(({ label, title, icon: Icon }) => (
+            <span
+              className="workspace-nav__future"
+              key={label}
+              aria-disabled="true"
+              aria-label={label}
+              title={title}
+            >
               <Icon aria-hidden="true" />
-              <span>{label}</span>
-              <small>待接入</small>
             </span>
           ))}
         </nav>
@@ -63,10 +57,6 @@ export function AppShell() {
         <div className="workspace-user">
           <div className="workspace-user__avatar" aria-hidden="true">
             {auth.auth?.user.username.slice(0, 1).toUpperCase()}
-          </div>
-          <div>
-            <strong>{auth.auth?.user.username}</strong>
-            <span>安全会话已连接</span>
           </div>
           <Button
             type="button"
@@ -85,9 +75,9 @@ export function AppShell() {
         <header className="workspace-topbar">
           <div>
             <span className="status-indicator" aria-hidden="true" />
-            <span>系统连接正常</span>
+            <span>LIVE</span>
           </div>
-          <span className="workspace-topbar__market">CN · A 股 · Asia/Shanghai</span>
+          <span className="workspace-topbar__market">CN · ASIA/SHANGHAI</span>
         </header>
         <Outlet />
       </div>

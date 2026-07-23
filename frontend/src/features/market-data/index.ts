@@ -1,3 +1,5 @@
 export { createMarketDataGateway, marketDataGateway } from "./gateway"
 export { MarketDataPage } from "./market-data-page"
+export { SecurityDetailPage } from "./security-detail-page"
+export { SecurityListPage } from "./security-list-page"
 export type * from "./types"

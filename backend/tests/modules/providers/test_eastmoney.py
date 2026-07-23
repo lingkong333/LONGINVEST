@@ -397,7 +397,7 @@ def test_eastmoney_rejects_descending_bars() -> None:
         EastmoneyProvider(None).parse_bars(payload, request=request)
 
 
-def test_eastmoney_marks_empty_or_missing_weekdays_for_suspension_check() -> None:
+def test_eastmoney_marks_empty_daily_history_as_missing() -> None:
     request = DailyBarRequest(
         "600000.SH",
         date(2025, 7, 14),
@@ -409,7 +409,35 @@ def test_eastmoney_marks_empty_or_missing_weekdays_for_suspension_check() -> Non
         request=request,
     )
     assert result.items == ()
-    assert result.failures[0].code == "PROVIDER_TRADING_DATES_MISSING"
+    assert result.failures[0].code == "PROVIDER_ITEM_MISSING"
+
+
+def test_eastmoney_does_not_treat_weekdays_as_trading_calendar() -> None:
+    request = DailyBarRequest(
+        "600000.SH",
+        date(2025, 1, 1),
+        date(2025, 1, 3),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+    result = EastmoneyProvider(None).parse_bars(
+        {
+            "rc": 0,
+            "data": {
+                "code": "600000",
+                "klines": [
+                    "2025-01-02,9,10,10,9,1,1",
+                    "2025-01-03,10,11,11,10,1,1",
+                ],
+            },
+        },
+        request=request,
+    )
+
+    assert [item.trading_date for item in result.items] == [
+        date(2025, 1, 2),
+        date(2025, 1, 3),
+    ]
+    assert result.failures == ()
 
 
 def test_security_master_preserves_unknown_status_instead_of_fabricating_normal() -> (
@@ -418,6 +446,7 @@ def test_security_master_preserves_unknown_status_instead_of_fabricating_normal(
     payload = {
         "rc": 0,
         "data": {
+            "total": 2,
             "diff": [
                 {"f12": "600000", "f14": "浦发银行", "f26": "19991110", "f2": "-"},
                 {"f12": "000001", "f14": "平安银行", "f26": "-", "f2": "-"},
@@ -429,6 +458,7 @@ def test_security_master_preserves_unknown_status_instead_of_fabricating_normal(
     )
     assert records[0].listed is True
     assert records[0].suspended is True
+    assert records[0].security_type == "A_SHARE"
     assert records[1].listed is None
     assert records[1].suspended is None
 
@@ -437,6 +467,7 @@ def test_security_master_recognizes_star_st_and_explicit_delisting_date() -> Non
     payload = {
         "rc": 0,
         "data": {
+            "total": 1,
             "diff": [
                 {
                     "f12": "600000",
@@ -455,3 +486,96 @@ def test_security_master_recognizes_star_st_and_explicit_delisting_date() -> Non
     assert record.delisted_on == date(2025, 7, 14)
     assert record.listed is False
     assert record.suspended is None
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {"diff": [{"f12": "600000", "f14": "浦发银行"}]},
+        {"total": 2, "diff": [{"f12": "600000", "f14": "浦发银行"}]},
+        {
+            "total": 2,
+            "diff": [
+                {"f12": "600000", "f14": "浦发银行"},
+                {"f12": "600000", "f14": "重复股票"},
+            ],
+        },
+    ],
+)
+def test_security_master_rejects_missing_total_truncation_and_duplicates(data) -> None:
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        EastmoneyProvider(None).parse_security_master(
+            {"rc": 0, "data": data},
+            observed_at=datetime(2025, 7, 15, tzinfo=UTC),
+        )
+
+
+class RecordingJsonClient:
+    def __init__(self, response) -> None:
+        self.response = response
+        self.requests = []
+
+    async def request_json(self, request, *, deadline):
+        del deadline
+        self.requests.append(request)
+        return self.response
+
+
+def test_security_master_uses_complete_query_and_fixed_browser_headers() -> None:
+    client = RecordingJsonClient(
+        {
+            "rc": 0,
+            "data": {
+                "total": 1,
+                "diff": [
+                    {
+                        "f12": "600000",
+                        "f14": "浦发银行",
+                        "f26": "19991110",
+                        "f2": "10",
+                    }
+                ],
+            },
+        }
+    )
+    provider = EastmoneyProvider(client)
+
+    records = asyncio.run(
+        provider.security_master(datetime.now(UTC) + timedelta(seconds=5))
+    )
+
+    assert len(records) == 1
+    request = client.requests[0]
+    assert request.url == EastmoneyProvider.MASTER_URL
+    assert request.params == {
+        "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+        "fields": "f2,f12,f14,f26,f80",
+        "fid": "f3",
+        "fltt": "2",
+        "invt": "2",
+        "np": "1",
+        "pn": "1",
+        "po": "1",
+        "pz": "10000",
+        "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+    }
+    assert request.headers == EastmoneyProvider.REQUEST_HEADERS
+
+
+def test_all_eastmoney_json_requests_merge_fixed_headers() -> None:
+    client = RecordingJsonClient({"rc": 0, "data": {}})
+    provider = EastmoneyProvider(client)
+
+    asyncio.run(
+        provider._json(
+            EastmoneyProvider.REALTIME_URL,
+            {"secids": "1.600000"},
+            datetime.now(UTC) + timedelta(seconds=5),
+            headers={"X-Test": "value"},
+        )
+    )
+
+    assert client.requests[0].headers == {
+        **EastmoneyProvider.REQUEST_HEADERS,
+        "X-Test": "value",
+    }

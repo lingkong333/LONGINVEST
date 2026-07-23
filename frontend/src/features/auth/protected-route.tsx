@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom"
 
+import { readLastVisitedPage } from "@/app/client-preferences"
 import { useAuth } from "@/features/auth/auth-context"
 import { toErrorDiagnostic } from "@/shared/errors/error-diagnostic"
 import { PageState } from "@/shared/ui/page-state"
@@ -35,7 +36,17 @@ export function ProtectedRoute() {
   }
 
   if (auth.phase === "unauthenticated") {
-    return <Navigate to="/login" replace state={{ from: location.pathname }} />
+    return (
+      <Navigate
+        to="/login"
+        replace
+        state={{ from: `${location.pathname}${location.search}` }}
+      />
+    )
+  }
+
+  if (location.pathname === "/login") {
+    return <Navigate to={readLastVisitedPage()} replace />
   }
 
   return <Outlet />

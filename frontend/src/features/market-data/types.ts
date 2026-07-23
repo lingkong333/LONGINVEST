@@ -32,6 +32,39 @@ export interface SecuritySummary {
   updatedAt: string
 }
 
+export interface SecurityDetail extends SecuritySummary {
+  exchangeCode: string
+  securityType: string
+  listedOn: string | null
+  delistedOn: string | null
+}
+
+export interface SecurityListFilters {
+  query?: string
+  page: number
+  pageSize: number
+}
+
+export type DailyPriceMode = "UNADJUSTED" | "QFQ"
+
+export interface DailyPriceBar {
+  tradeDate: string
+  open: string
+  high: string
+  low: string
+  close: string
+  volume: number
+  amount: string
+}
+
+export interface DailyPriceSeries {
+  symbol: string
+  mode: DailyPriceMode
+  items: DailyPriceBar[]
+  total: number
+  dataset?: QfqDatasetSummary
+}
+
 export interface QuoteCycleSummary {
   id: string
   status: string
@@ -128,6 +161,16 @@ export interface PagedResult<Item> {
 
 export interface MarketDataGateway {
   loadSecurities(): Promise<ActionPage<SecuritySummary, SecurityMasterAction>>
+  loadSecurityList(
+    filters: SecurityListFilters,
+  ): Promise<PagedResult<SecuritySummary>>
+  loadSecurity(symbol: string): Promise<SecurityDetail>
+  loadDailyPrices(command: {
+    symbol: string
+    mode: DailyPriceMode
+    startDate: string
+    endDate: string
+  }): Promise<DailyPriceSeries>
   refreshSecurities(reason: string): Promise<void>
   loadQuoteCycles(): Promise<ActionPage<QuoteCycleSummary, QuoteOperationAction>>
   loadQuoteItems(cycleId: string): Promise<QuoteItemSummary[]>

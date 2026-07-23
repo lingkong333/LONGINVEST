@@ -44,6 +44,99 @@ const issue = {
 }
 
 describe("行情数据中心请求边界", () => {
+  it("股票列表搜索提交服务端分页参数", async () => {
+    server.use(
+      http.get("http://localhost/api/v1/securities/search", ({ request }) => {
+        const url = new URL(request.url)
+        expect(url.searchParams.get("q")).toBe("茅台")
+        expect(url.searchParams.get("page")).toBe("2")
+        expect(url.searchParams.get("page_size")).toBe("50")
+        return HttpResponse.json(envelope({
+          items: [{
+            symbol: "600519.SH",
+            exchange_code: "600519",
+            name: "贵州茅台",
+            market: "SH",
+            security_type: "A_SHARE",
+            listed_on: "2001-08-27",
+            delisted_on: null,
+            listing_status: "LISTED",
+            is_st: false,
+            is_suspended: false,
+            provider_codes: {},
+            master_version: 3,
+            updated_at: "2026-07-23T03:00:00Z",
+          }],
+          pagination: { page: 2, page_size: 50, total: 51 },
+          allowed_actions: [],
+        }))
+      }),
+    )
+
+    const result = await createMarketDataGateway("http://localhost")
+      .loadSecurityList({ query: " 茅台 ", page: 2, pageSize: 50 })
+
+    expect(result.items[0]).toEqual(expect.objectContaining({
+      symbol: "600519.SH",
+      name: "贵州茅台",
+    }))
+    expect(result.pagination).toEqual({ page: 2, pageSize: 50, total: 51 })
+  })
+
+  it("日线超过接口上限时读取全部分页且按日期返回", async () => {
+    const firstPage = Array.from({ length: 500 }, (_, index) => ({
+      security_id: "00000000-0000-4000-8000-000000000001",
+      trade_date: `2024-${String(Math.floor(index / 28) + 1).padStart(2, "0")}-${String((index % 28) + 1).padStart(2, "0")}`,
+      symbol: "600519.SH",
+      open: "10.00",
+      high: "11.00",
+      low: "9.00",
+      close: "10.50",
+      previous_close: "10.00",
+      volume: 100,
+      amount: "1050.00",
+      source: "EASTMONEY",
+      data_version: 1,
+      created_at: "2026-07-23T03:00:00Z",
+      updated_at: "2026-07-23T03:00:00Z",
+    }))
+    server.use(
+      http.get(
+        "http://localhost/api/v1/daily-bars/:symbol",
+        ({ request }) => {
+          const page = Number(new URL(request.url).searchParams.get("page"))
+          return HttpResponse.json(envelope({
+            items: page === 1
+              ? firstPage
+              : [{
+                  ...firstPage[0],
+                  trade_date: "2026-01-02",
+                  open: "20.00",
+                  close: "21.00",
+                }],
+            pagination: { page, page_size: 500, total: 501 },
+          }))
+        },
+      ),
+    )
+
+    const result = await createMarketDataGateway("http://localhost")
+      .loadDailyPrices({
+        symbol: "600519.sh",
+        mode: "UNADJUSTED",
+        startDate: "2024-01-01",
+        endDate: "2026-01-02",
+      })
+
+    expect(result.total).toBe(501)
+    expect(result.items).toHaveLength(501)
+    expect(result.items.at(-1)).toEqual(expect.objectContaining({
+      tradeDate: "2026-01-02",
+      open: "20.00",
+      close: "21.00",
+    }))
+  })
+
   it("主数据刷新和行情任务提交人工原因", async () => {
     const received: unknown[] = []
     server.use(

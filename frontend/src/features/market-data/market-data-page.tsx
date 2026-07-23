@@ -15,6 +15,7 @@ import {
   ShieldCheckIcon,
   XIcon,
 } from "lucide-react"
+import { Link } from "react-router-dom"
 
 import { marketDataGateway } from "@/features/market-data/gateway"
 import type {
@@ -395,8 +396,14 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           description="当前股票身份、上市状态和主数据版本"
           icon={DatabaseIcon}
         >
-          {securities.data?.allowedActions.includes("REFRESH") ? (
-            <div className="mb-3 flex justify-end">
+          <div className="mb-3 flex flex-wrap justify-end gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link to="/market-data/stocks">
+                <SearchIcon data-icon="inline-start" />
+                查看全部股票
+              </Link>
+            </Button>
+            {securities.data?.allowedActions.includes("REFRESH") ? (
               <Button
                 size="sm"
                 variant="outline"
@@ -407,8 +414,8 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                 <RefreshCwIcon data-icon="inline-start" />
                 刷新主数据
               </Button>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
           {securities.isPending ? (
             <PageState state="loading" title="正在读取证券主数据" description="正在加载最新主数据版本。" />
           ) : securities.isError ? (

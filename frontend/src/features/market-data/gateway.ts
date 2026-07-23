@@ -3,6 +3,9 @@ import { z } from "zod"
 import type {
   BackfillSummary,
   DailyBatchSummary,
+  DailyPriceBar,
+  DailyPriceMode,
+  DailyPriceSeries,
   MarketDataGateway,
   QfqDatasetSummary,
   QualityIssueSummary,
@@ -23,19 +26,40 @@ const paginationSchema = z.object({
   total: z.number().int().nonnegative(),
 })
 
-const securityPageSchema = z.object({
-  items: z.array(z.object({
+const securitySchema = z.object({
     symbol: z.string().min(1),
+    exchange_code: z.string().min(1),
     name: z.string().min(1),
     market: z.string().min(1),
+    security_type: z.string().min(1),
+    listed_on: z.string().nullable(),
+    delisted_on: z.string().nullable(),
     listing_status: z.string().min(1),
     is_st: z.boolean(),
     is_suspended: z.boolean(),
     master_version: z.number().int().nonnegative(),
     updated_at: z.string().min(1),
-  })),
+})
+
+const securityPageSchema = z.object({
+  items: z.array(securitySchema),
   pagination: paginationSchema,
   allowed_actions: z.array(z.literal("REFRESH")).default([]),
+})
+
+const dailyBarSchema = z.object({
+  trade_date: z.string().min(1),
+  open: z.string().min(1),
+  high: z.string().min(1),
+  low: z.string().min(1),
+  close: z.string().min(1),
+  volume: z.number().int().nonnegative(),
+  amount: z.string().min(1),
+})
+
+const dailyBarPageSchema = z.object({
+  items: z.array(dailyBarSchema),
+  pagination: paginationSchema,
 })
 
 const quoteCyclePageSchema = z.object({
@@ -104,6 +128,8 @@ const qfqSchema = z.object({
     activated_at: z.string().nullable(),
     allowed_actions: z.array(z.literal("REFRESH")).default([]),
   }),
+  items: z.array(dailyBarSchema).default([]),
+  pagination: paginationSchema.optional(),
 })
 
 const qualityPageSchema = z.object({
@@ -169,6 +195,75 @@ function pageInfo(value: z.infer<typeof paginationSchema>) {
   }
 }
 
+function securitySummary(
+  item: z.infer<typeof securitySchema>,
+): SecuritySummary {
+  return {
+    id: item.symbol,
+    symbol: item.symbol,
+    name: item.name,
+    market: item.market,
+    listingStatus: item.listing_status,
+    isSt: item.is_st,
+    isSuspended: item.is_suspended,
+    masterVersion: item.master_version,
+    updatedAt: item.updated_at,
+  }
+}
+
+function priceBar(item: z.infer<typeof dailyBarSchema>): DailyPriceBar {
+  return {
+    tradeDate: item.trade_date,
+    open: item.open,
+    high: item.high,
+    low: item.low,
+    close: item.close,
+    volume: item.volume,
+    amount: item.amount,
+  }
+}
+
+function qfqDataset(
+  dataset: z.infer<typeof qfqSchema>["dataset"],
+): QfqDatasetSummary {
+  return {
+    id: dataset.id,
+    symbol: dataset.symbol,
+    version: dataset.version,
+    actualStart: dataset.actual_start,
+    actualEnd: dataset.actual_end,
+    asOfDate: dataset.as_of_date,
+    provider: dataset.provider,
+    rowCount: dataset.row_count,
+    lifecycle: dataset.lifecycle,
+    freshness: dataset.freshness,
+    staleReason: dataset.stale_reason,
+    activatedAt: dataset.activated_at,
+    allowedActions: dataset.allowed_actions,
+  }
+}
+
+function ensureCompleteSeries(
+  symbol: string,
+  mode: DailyPriceMode,
+  pages: Array<{ items: DailyPriceBar[]; total: number }>,
+): DailyPriceSeries {
+  const total = pages[0]?.total ?? 0
+  const items = pages.flatMap((page) => page.items)
+  const dates = new Set(items.map((item) => item.tradeDate))
+  if (
+    pages.some((page) => page.total !== total)
+    || items.length !== total
+    || dates.size !== items.length
+  ) {
+    throw new ApiError("日线数据没有完整返回，请重试。", {
+      code: "DAILY_SERIES_INCOMPLETE",
+    })
+  }
+  items.sort((left, right) => left.tradeDate.localeCompare(right.tradeDate))
+  return { symbol, mode, items, total }
+}
+
 export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
   const api = createApiClient<paths>({ baseUrl })
 
@@ -179,20 +274,122 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
       }))
       const page = parse(securityPageSchema, value, "SECURITY_LIST_INVALID")
       return {
-        items: page.items.map((item): SecuritySummary => ({
-          id: item.symbol,
-          symbol: item.symbol,
-          name: item.name,
-          market: item.market,
-          listingStatus: item.listing_status,
-          isSt: item.is_st,
-          isSuspended: item.is_suspended,
-          masterVersion: item.master_version,
-          updatedAt: item.updated_at,
-        })),
+        items: page.items.map(securitySummary),
         pagination: pageInfo(page.pagination),
         allowedActions: page.allowed_actions,
       }
+    },
+
+    async loadSecurityList(filters) {
+      const query = filters.query?.trim()
+      const operation = query
+        ? api.client.GET("/api/v1/securities/search", {
+            params: {
+              query: {
+                q: query,
+                page: filters.page,
+                page_size: filters.pageSize,
+              },
+            },
+          })
+        : api.client.GET("/api/v1/securities", {
+            params: {
+              query: {
+                page: filters.page,
+                page_size: filters.pageSize,
+              },
+            },
+          })
+      const value = await api.request<unknown>(operation)
+      const page = parse(securityPageSchema, value, "SECURITY_LIST_INVALID")
+      return {
+        items: page.items.map(securitySummary),
+        pagination: pageInfo(page.pagination),
+      }
+    },
+
+    async loadSecurity(symbol) {
+      const value = await api.request<unknown>(
+        api.client.GET("/api/v1/securities/{symbol}", {
+          params: { path: { symbol: symbol.trim().toUpperCase() } },
+        }),
+      )
+      const item = parse(securitySchema, value, "SECURITY_DETAIL_INVALID")
+      return {
+        ...securitySummary(item),
+        exchangeCode: item.exchange_code,
+        securityType: item.security_type,
+        listedOn: item.listed_on,
+        delistedOn: item.delisted_on,
+      }
+    },
+
+    async loadDailyPrices(command) {
+      const symbol = command.symbol.trim().toUpperCase()
+      const pageSize = 500
+      const loadPage = async (page: number) => {
+        if (command.mode === "UNADJUSTED") {
+          const value = await api.request<unknown>(
+            api.client.GET("/api/v1/daily-bars/{symbol}", {
+              params: {
+                path: { symbol },
+                query: {
+                  start: command.startDate,
+                  end: command.endDate,
+                  page,
+                  page_size: pageSize,
+                },
+              },
+            }),
+          )
+          const parsed = parse(
+            dailyBarPageSchema,
+            value,
+            "DAILY_SERIES_INVALID",
+          )
+          return {
+            items: parsed.items.map(priceBar),
+            total: parsed.pagination.total,
+          }
+        }
+
+        const value = await api.request<unknown>(
+          api.client.GET("/api/v1/qfq-data/{symbol}", {
+            params: {
+              path: { symbol },
+              query: {
+                start: command.startDate,
+                end: command.endDate,
+                page,
+                page_size: pageSize,
+              },
+            },
+          }),
+        )
+        const parsed = parse(qfqSchema, value, "QFQ_SERIES_INVALID")
+        return {
+          items: parsed.items.map(priceBar),
+          total: parsed.pagination?.total ?? parsed.items.length,
+          dataset: qfqDataset(parsed.dataset),
+        }
+      }
+
+      const firstPage = await loadPage(1)
+      const pageCount = Math.ceil(firstPage.total / pageSize)
+      const remainingPages = pageCount > 1
+        ? await Promise.all(
+            Array.from(
+              { length: pageCount - 1 },
+              (_, index) => loadPage(index + 2),
+            ),
+          )
+        : []
+      const pages = [firstPage, ...remainingPages]
+      const result = ensureCompleteSeries(symbol, command.mode, pages)
+      if (command.mode === "QFQ") {
+        result.dataset = firstPage.dataset
+      }
+      return result
     },
 
     async refreshSecurities(reason) {
@@ -327,21 +524,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
         }),
       )
       const dataset = parse(qfqSchema, value, "QFQ_DATASET_INVALID").dataset
-      return {
-        id: dataset.id,
-        symbol: dataset.symbol,
-        version: dataset.version,
-        actualStart: dataset.actual_start,
-        actualEnd: dataset.actual_end,
-        asOfDate: dataset.as_of_date,
-        provider: dataset.provider,
-        rowCount: dataset.row_count,
-        lifecycle: dataset.lifecycle,
-        freshness: dataset.freshness,
-        staleReason: dataset.stale_reason,
-        activatedAt: dataset.activated_at,
-        allowedActions: dataset.allowed_actions,
-      } satisfies QfqDatasetSummary
+      return qfqDataset(dataset)
     },
 
     async refreshQfq(command) {

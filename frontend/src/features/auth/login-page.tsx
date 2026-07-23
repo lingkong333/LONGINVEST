@@ -3,6 +3,7 @@ import { useState } from "react"
 import { Navigate, useLocation, useNavigate } from "react-router-dom"
 import { z } from "zod"
 
+import { readLastVisitedPage } from "@/app/client-preferences"
 import { useAuth } from "@/features/auth/auth-context"
 import { AppearanceMenu } from "@/app/appearance-menu"
 import { toErrorDiagnostic } from "@/shared/errors/error-diagnostic"
@@ -35,7 +36,7 @@ export function LoginPage() {
   })
 
   if (auth.phase === "authenticated") {
-    return <Navigate to="/" replace />
+    return <Navigate to={readLastVisitedPage()} replace />
   }
 
   if (auth.phase === "bootstrapping") {
@@ -69,7 +70,7 @@ export function LoginPage() {
     && "from" in location.state
     && typeof location.state.from === "string"
     ? location.state.from
-    : "/"
+    : readLastVisitedPage()
 
   const submit = form.handleSubmit(async (input) => {
     setSubmitError(undefined)

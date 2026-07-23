@@ -12,8 +12,16 @@ import { TargetManagementPage } from "@/features/targets"
 import { PageState } from "@/shared/ui/page-state"
 
 const MarketDataPage = lazy(async () => {
-  const module = await import("@/features/market-data")
+  const module = await import("@/features/market-data/market-data-page")
   return { default: module.MarketDataPage }
+})
+const SecurityListPage = lazy(async () => {
+  const module = await import("@/features/market-data/security-list-page")
+  return { default: module.SecurityListPage }
+})
+const SecurityDetailPage = lazy(async () => {
+  const module = await import("@/features/market-data/security-detail-page")
+  return { default: module.SecurityDetailPage }
 })
 const NotificationsPage = lazy(async () => {
   const module = await import("@/features/notifications")
@@ -106,6 +114,14 @@ export const appRouter = createBrowserRouter([
           {
             path: "/market-data",
             element: deferredPage(<MarketDataPage />),
+          },
+          {
+            path: "/market-data/stocks",
+            element: deferredPage(<SecurityListPage />),
+          },
+          {
+            path: "/market-data/stocks/:symbol",
+            element: deferredPage(<SecurityDetailPage />),
           },
           {
             path: "/notifications",

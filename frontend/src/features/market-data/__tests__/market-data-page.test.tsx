@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
+import { MemoryRouter } from "react-router-dom"
 import { describe, expect, it, vi } from "vitest"
 
 import {
@@ -31,6 +32,14 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       updatedAt: "2026-07-23T02:00:00Z",
       }]),
       allowedActions: ["REFRESH"],
+    }),
+    loadSecurityList: vi.fn().mockResolvedValue(page([])),
+    loadSecurity: vi.fn().mockRejectedValue(new Error("not used")),
+    loadDailyPrices: vi.fn().mockResolvedValue({
+      symbol: "600519.SH",
+      mode: "UNADJUSTED",
+      items: [],
+      total: 0,
     }),
     refreshSecurities: vi.fn().mockResolvedValue(undefined),
     loadQuoteCycles: vi.fn().mockResolvedValue({
@@ -131,9 +140,11 @@ function renderPage(marketGateway: MarketDataGateway) {
     },
   })
   render(
-    <QueryClientProvider client={queryClient}>
-      <MarketDataPage gateway={marketGateway} />
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={queryClient}>
+        <MarketDataPage gateway={marketGateway} />
+      </QueryClientProvider>
+    </MemoryRouter>,
   )
 }
 

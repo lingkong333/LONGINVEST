@@ -19,9 +19,15 @@ import {
   Target,
   type LucideIcon,
 } from "lucide-react"
+import { useEffect, useState } from "react"
 import { NavLink, Outlet, useLocation } from "react-router-dom"
 
 import { AppearanceMenu } from "@/app/appearance-menu"
+import {
+  readSidebarOpen,
+  writeLastVisitedPage,
+  writeSidebarOpen,
+} from "@/app/client-preferences"
 import { useAuth } from "@/features/auth"
 import { Button } from "@/shared/ui/button"
 import {
@@ -69,9 +75,20 @@ const navigation: NavigationItem[] = [
 export function AppShell() {
   const auth = useAuth()
   const location = useLocation()
+  const [sidebarOpen, setSidebarOpen] = useState(readSidebarOpen)
+
+  useEffect(() => {
+    writeLastVisitedPage(location.pathname, location.search)
+  }, [location.pathname, location.search])
 
   return (
-    <SidebarProvider defaultOpen={false}>
+    <SidebarProvider
+      open={sidebarOpen}
+      onOpenChange={(open) => {
+        setSidebarOpen(open)
+        writeSidebarOpen(open)
+      }}
+    >
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <SidebarMenu>

@@ -153,9 +153,7 @@ async def test_market_data_schema_and_year_partition_exist() -> None:
                 ).all()
             )
             assert partitions == {
-                "daily_bar_unadjusted_2025",
-                "daily_bar_unadjusted_2026",
-                "daily_bar_unadjusted_2027",
+                f"daily_bar_unadjusted_{year}" for year in range(1990, 2028)
             }
 
             for table_name in EXPECTED_TABLES:
@@ -165,7 +163,7 @@ async def test_market_data_schema_and_year_partition_exist() -> None:
                         {"table": table_name, "privilege": privilege},
                     )
 
-            for year in (2025, 2026, 2027):
+            for year in (1990, 2000, 2014, 2024, 2025, 2027):
                 row_security_id = uuid4()
                 trade_date = date(year, 7, 16)
                 await session.execute(

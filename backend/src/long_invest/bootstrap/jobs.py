@@ -323,18 +323,23 @@ def _security_item(record) -> SecurityMasterItem:
         status = ListingStatus.LISTED
     else:
         status = ListingStatus.DATA_MISSING
+    code = record.symbol[:6]
+    market = Market(record.market)
     return SecurityMasterItem(
         symbol=record.symbol,
-        exchange_code=record.symbol[:6],
+        exchange_code=code,
         name=record.name,
-        market=Market(record.market),
+        market=market,
         security_type=SecurityType(record.security_type),
         listing_status=status,
         listed_on=record.listed_on,
         delisted_on=record.delisted_on,
         is_st=record.is_st,
         is_suspended=record.suspended is True,
-        provider_codes={record.source.value: record.symbol[:6]},
+        provider_codes={
+            "eastmoney": f"{'1' if market is Market.SH else '0'}.{code}",
+            "sina": f"{market.value.lower()}{code}",
+        },
     )
 
 

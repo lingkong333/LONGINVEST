@@ -72,6 +72,15 @@ class EastmoneyProvider:
     ANNOUNCEMENT_CONTENT_URL = (
         "https://np-cnotice-stock.eastmoney.com/api/content/ann"
     )
+    REQUEST_HEADERS = {
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "zh-CN,zh;q=0.9",
+        "Referer": "https://quote.eastmoney.com/",
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36"
+        ),
+    }
     _CHINA = ZoneInfo("Asia/Shanghai")
 
     def __init__(self, client: ProviderHttpClient | None) -> None:
@@ -85,7 +94,14 @@ class EastmoneyProvider:
             {
                 "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
                 "fields": "f2,f12,f14,f26,f80",
+                "fid": "f3",
+                "fltt": "2",
+                "invt": "2",
+                "np": "1",
+                "pn": "1",
+                "po": "1",
                 "pz": "10000",
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
             },
             deadline,
         )
@@ -135,16 +151,6 @@ class EastmoneyProvider:
                 "fields2": "f51,f52,f53,f54,f55,f56,f57",
             },
             deadline,
-            headers={
-                "Accept": "application/json, text/plain, */*",
-                "Accept-Language": "zh-CN,zh;q=0.9",
-                "Connection": "close",
-                "Referer": "https://quote.eastmoney.com/",
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36"
-                ),
-            },
         )
         try:
             return self.parse_bars(payload, request=request)
@@ -761,7 +767,10 @@ class EastmoneyProvider:
                 if not isinstance(payload.get("data"), dict):
                     raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
                 self.parse_security_master(
-                    {"rc": payload.get("rc"), "data": {"diff": [payload["data"]]}},
+                    {
+                        "rc": payload.get("rc"),
+                        "data": {"diff": [payload["data"]], "total": 1},
+                    },
                     observed_at=datetime.now(UTC),
                 )
             elif capability is ProviderCapability.CORPORATE_ACTIONS:
@@ -803,8 +812,9 @@ class EastmoneyProvider:
     ) -> dict[str, Any]:
         if self._client is None:
             raise RuntimeError("provider client is not configured")
+        request_headers = {**self.REQUEST_HEADERS, **(headers or {})}
         return await self._client.request_json(
-            ProviderHttpRequest(url, params, headers or {}), deadline=deadline
+            ProviderHttpRequest(url, params, request_headers), deadline=deadline
         )
 
     @staticmethod
@@ -908,20 +918,13 @@ class EastmoneyProvider:
                 )
         except (AttributeError, ValueError, TypeError) as error:
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
-        expected_weekdays: set[date] = set()
-        cursor = request.start
-        while cursor <= request.end:
-            if cursor.weekday() < 5:
-                expected_weekdays.add(cursor)
-            cursor += timedelta(days=1)
-        missing_dates = sorted(expected_weekdays - seen_dates)
         failures = ()
-        if missing_dates:
+        if not items:
             failures = (
                 ProviderItemFailure(
                     request.symbol,
-                    "PROVIDER_TRADING_DATES_MISSING",
-                    "请求期内缺少交易日数据；需结合停牌或交易日历确认",
+                    "PROVIDER_ITEM_MISSING",
+                    "上游未返回该股票的日线数据",
                     self.code,
                 ),
             )
@@ -930,11 +933,16 @@ class EastmoneyProvider:
     def parse_security_master(
         self, payload: Any, *, observed_at: datetime
     ) -> tuple[SecurityMasterRecord, ...]:
+        rows = self._security_master_rows(payload)
         records = []
-        for row in self._rows(payload, "diff"):
+        seen_symbols: set[str] = set()
+        for row in rows:
             if not isinstance(row, dict) or not {"f12", "f14"} <= row.keys():
                 raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
             symbol = _symbol(str(row["f12"]))
+            if symbol in seen_symbols:
+                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+            seen_symbols.add(symbol)
             listed_on = None
             delisted_on = None
             listing_value = row.get("f26")
@@ -973,7 +981,7 @@ class EastmoneyProvider:
                     symbol,
                     str(row["f14"]),
                     symbol[-2:],
-                    "STOCK",
+                    "A_SHARE",
                     listed_on,
                     delisted_on,
                     listed,
@@ -984,3 +992,22 @@ class EastmoneyProvider:
                 )
             )
         return tuple(records)
+
+    @staticmethod
+    def _security_master_rows(payload: Any) -> list[Any]:
+        if not isinstance(payload, dict) or payload.get("rc") != 0:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        rows = data.get("diff")
+        total = data.get("total")
+        if (
+            not isinstance(rows, list)
+            or isinstance(total, bool)
+            or not isinstance(total, int)
+            or total <= 0
+            or len(rows) != total
+        ):
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        return rows

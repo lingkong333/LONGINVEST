@@ -13,6 +13,7 @@ from long_invest.bootstrap.jobs import (
     _daily_item_job,
     _known_daily_absence,
     _quote_command,
+    _security_item,
     daily_data_coordinate,
     daily_data_finalize,
     daily_data_item,
@@ -26,6 +27,7 @@ from long_invest.bootstrap.jobs import (
 )
 from long_invest.entrypoints.job_worker import HANDLERS
 from long_invest.modules.daily_data.contracts import DailyMissingReason
+from long_invest.modules.providers.contracts import ProviderCode, SecurityMasterRecord
 from long_invest.platform.jobs.contracts import JobExecutionContext
 
 
@@ -48,6 +50,39 @@ def test_market_data_handlers_are_registered_on_the_real_worker() -> None:
         "SIGNAL_REEVALUATE": signal_reevaluate,
     }
     assert expected.items() <= HANDLERS.items()
+
+
+@pytest.mark.parametrize(
+    ("symbol", "market", "eastmoney", "sina"),
+    [
+        ("600000.SH", "SH", "1.600000", "sh600000"),
+        ("000001.SZ", "SZ", "0.000001", "sz000001"),
+        ("430047.BJ", "BJ", "0.430047", "bj430047"),
+    ],
+)
+def test_security_refresh_builds_complete_provider_codes(
+    symbol, market, eastmoney, sina
+) -> None:
+    item = _security_item(
+        SecurityMasterRecord(
+            symbol=symbol,
+            name="示例股票",
+            market=market,
+            security_type="A_SHARE",
+            listed_on=date(2020, 1, 1),
+            delisted_on=None,
+            listed=True,
+            is_st=False,
+            suspended=False,
+            source=ProviderCode.EASTMONEY,
+            observed_at=datetime(2026, 7, 23, tzinfo=UTC),
+        )
+    )
+
+    assert item.provider_codes == {
+        "eastmoney": eastmoney,
+        "sina": sina,
+    }
 
 
 @pytest.mark.parametrize(

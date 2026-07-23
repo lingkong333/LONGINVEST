@@ -108,11 +108,11 @@ describe("监控列表页面", () => {
     expect(screen.getAllByText("正常区间")).toHaveLength(2)
     expect(screen.getAllByText("策略目标")).toHaveLength(2)
 
-    await userEvent.click(screen.getByRole("button", { name: "持仓" }))
+    await userEvent.click(screen.getByRole("radio", { name: "持仓" }))
     expect(screen.getByText("浦发银行")).toBeInTheDocument()
     expect(screen.queryByText("贵州茅台")).not.toBeInTheDocument()
 
-    await userEvent.click(screen.getByRole("button", { name: "全部" }))
+    await userEvent.click(screen.getByRole("radio", { name: "全部" }))
     await userEvent.type(
       screen.getByRole("textbox", { name: "搜索股票、名称或分组" }),
       "长期",

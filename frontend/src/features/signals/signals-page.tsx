@@ -28,7 +28,31 @@ import type {
   SignalZone,
 } from "@/features/signals/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/shared/ui/empty"
+import { Input } from "@/shared/ui/input"
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/shared/ui/native-select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs"
 
 const PAGE_SIZE = 20
 
@@ -118,24 +142,19 @@ function shortId(value: string) {
   return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value
 }
 
-function zoneTone(zone: SignalZone) {
-  if (zone === "STRONG_LOW" || zone === "LOW") {
-    return "border-emerald-400/40 bg-emerald-500/10 text-emerald-700"
-  }
-  if (zone === "STRONG_HIGH" || zone === "HIGH") {
-    return "border-rose-400/40 bg-rose-500/10 text-rose-700"
-  }
-  if (zone === "UNKNOWN") {
-    return "border-border bg-muted text-muted-foreground"
-  }
-  return "border-sky-400/40 bg-sky-500/10 text-sky-700"
-}
-
 function ZoneBadge({ zone }: { zone: SignalZone }) {
   return (
-    <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-medium ${zoneTone(zone)}`}>
+    <Badge
+      variant={
+        zone === "STRONG_HIGH" || zone === "HIGH"
+          ? "destructive"
+          : zone === "STRONG_LOW" || zone === "LOW"
+            ? "default"
+            : zone === "UNKNOWN" ? "outline" : "secondary"
+      }
+    >
       {zoneLabels[zone]}
-    </span>
+    </Badge>
   )
 }
 
@@ -150,38 +169,41 @@ function SectionFailure({
 }) {
   const code = error instanceof ApiError ? error.code : "SIGNALS_UNAVAILABLE"
   return (
-    <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-8 text-center">
+    <Alert variant="destructive" className="min-h-52 content-center">
       <CircleAlert className="text-destructive" aria-hidden="true" />
-      <strong>{title}暂时无法读取</strong>
-      <code className="text-xs text-muted-foreground">{code}</code>
-      <Button variant="outline" onClick={retry}>
-        <RefreshCw aria-hidden="true" />
-        重新加载
-      </Button>
-    </div>
+      <AlertTitle>{title}暂时无法读取</AlertTitle>
+      <AlertDescription>
+        <code>{code}</code>
+        <Button variant="outline" onClick={retry}>
+          <RefreshCw data-icon="inline-start" aria-hidden="true" />重新加载
+        </Button>
+      </AlertDescription>
+    </Alert>
   )
 }
 
 function SectionLoading({ label }: { label: string }) {
   return (
-    <div
-      className="grid min-h-52 place-items-center rounded-lg border border-border bg-card"
+    <Card
+      className="min-h-52"
       aria-label={`${label}加载中`}
     >
-      <RefreshCw className="animate-spin text-muted-foreground" aria-hidden="true" />
-    </div>
+      <CardContent className="grid flex-1 place-items-center">
+        <RefreshCw className="animate-spin text-muted-foreground" aria-hidden="true" />
+      </CardContent>
+    </Card>
   )
 }
 
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
-    <div className="grid min-h-52 place-items-center rounded-lg border border-dashed border-border bg-muted/20 p-8 text-center">
-      <div>
-        <History className="mx-auto mb-3 text-muted-foreground" aria-hidden="true" />
-        <h2 className="font-semibold">{title}</h2>
-        <p className="mt-1 text-sm text-muted-foreground">{description}</p>
-      </div>
-    </div>
+    <Empty className="min-h-52 border">
+      <EmptyHeader>
+        <EmptyMedia variant="icon"><History aria-hidden="true" /></EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription>{description}</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
   )
 }
 
@@ -260,26 +282,27 @@ function StatesSection({
 
   return (
     <section aria-label="当前信号状态" className="space-y-4">
-      <div className="flex flex-wrap gap-3 rounded-lg border border-border bg-card p-3">
-        <input
-          className="h-9 min-w-60 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-ring/40"
+      <Card>
+        <CardContent className="flex flex-wrap gap-3">
+        <Input
+          className="min-w-60 flex-1"
           aria-label="搜索订阅编号"
           placeholder="搜索订阅编号"
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+        <NativeSelect
           aria-label="按信号区间筛选"
           value={zone}
           onChange={(event) => setZone(event.target.value)}
         >
-          <option value="">全部区间</option>
+          <NativeSelectOption value="">全部区间</NativeSelectOption>
           {Object.entries(zoneLabels).map(([value, label]) => (
-            <option value={value} key={value}>{label}</option>
+            <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
           ))}
-        </select>
-      </div>
+        </NativeSelect>
+        </CardContent>
+      </Card>
       {query.data.items.length === 0 ? (
         <EmptyState title="暂无当前状态" description="首次正式判断后，信号状态会显示在这里。" />
       ) : items.length === 0 ? (
@@ -287,7 +310,8 @@ function StatesSection({
       ) : (
         <div className="grid gap-3 xl:grid-cols-2">
           {items.map((item) => (
-            <article className="rounded-lg border border-border bg-card p-4 shadow-sm" key={item.subscription_id}>
+            <Card key={item.subscription_id}>
+              <CardContent>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="text-xs text-muted-foreground">订阅</p>
@@ -308,7 +332,8 @@ function StatesSection({
               <div className="mt-4 border-t border-border pt-3 text-xs text-muted-foreground">
                 行情时间：{formatShanghaiTime(item.last_price_at)}
               </div>
-            </article>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
@@ -363,34 +388,32 @@ function EventsSection({
   return (
     <section aria-label="信号事件" className="space-y-4">
       {query.data.warningCodes.length > 0 ? (
-        <aside className="flex items-start gap-2 rounded-lg border border-amber-400/40 bg-amber-500/10 p-3 text-sm" role="status">
-          <ShieldAlert className="mt-0.5 size-4 shrink-0 text-amber-700" aria-hidden="true" />
-          <span>通知投递数据暂时不完整，信号事件仍可正常查看。</span>
-        </aside>
+        <Alert>
+          <ShieldAlert aria-hidden="true" />
+          <AlertDescription>通知投递数据暂时不完整，信号事件仍可正常查看。</AlertDescription>
+        </Alert>
       ) : null}
-      <div className="flex flex-wrap gap-3 rounded-lg border border-border bg-card p-3">
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+      <Card><CardContent className="flex flex-wrap gap-3">
+        <NativeSelect
           aria-label="按判断原因筛选事件"
           value={reason}
           onChange={(event) => setReason(event.target.value)}
         >
-          <option value="">全部原因</option>
+          <NativeSelectOption value="">全部原因</NativeSelectOption>
           {Object.entries(reasonLabels).map(([value, label]) => (
-            <option value={value} key={value}>{label}</option>
+            <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
           ))}
-        </select>
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+        </NativeSelect>
+        <NativeSelect
           aria-label="按通知资格筛选"
           value={eligibility}
           onChange={(event) => setEligibility(event.target.value)}
         >
-          <option value="">全部通知资格</option>
-          <option value="true">符合通知条件</option>
-          <option value="false">不发送通知</option>
-        </select>
-      </div>
+          <NativeSelectOption value="">全部通知资格</NativeSelectOption>
+          <NativeSelectOption value="true">符合通知条件</NativeSelectOption>
+          <NativeSelectOption value="false">不发送通知</NativeSelectOption>
+        </NativeSelect>
+      </CardContent></Card>
       {query.data.items.length === 0 ? (
         <EmptyState title="暂无信号事件" description="只有真实区间转换才会形成信号事件。" />
       ) : items.length === 0 ? (
@@ -398,7 +421,8 @@ function EventsSection({
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <article className="rounded-lg border border-border bg-card p-4 shadow-sm" key={item.id}>
+            <Card key={item.id}>
+              <CardContent>
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-2">
                   <ZoneBadge zone={item.before_zone} />
@@ -439,7 +463,8 @@ function EventsSection({
                   )) : null}
                 </div>
               </div>
-            </article>
+              </CardContent>
+            </Card>
           ))}
         </div>
       )}
@@ -477,60 +502,61 @@ function EvaluationsSection({
   }
   return (
     <section aria-label="信号判断记录" className="space-y-4">
-      <div className="flex rounded-lg border border-border bg-card p-3">
-        <select
-          className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+      <Card><CardContent>
+        <NativeSelect
           aria-label="按判断结果筛选"
           value={result}
           onChange={(event) => setResult(event.target.value)}
         >
-          <option value="">全部判断结果</option>
+          <NativeSelectOption value="">全部判断结果</NativeSelectOption>
           {Object.entries(resultLabels).map(([value, label]) => (
-            <option value={value} key={value}>{label}</option>
+            <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
           ))}
-        </select>
-      </div>
+        </NativeSelect>
+      </CardContent></Card>
       {query.data.items.length === 0 ? (
         <EmptyState title="暂无判断记录" description="每次正式比较都会保留在这里，包括状态未变化和跳过。" />
       ) : items.length === 0 ? (
         <EmptyState title="没有符合条件的判断" description="请调整判断结果筛选。" />
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table className="w-full min-w-[850px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
-              <tr>
-                <th className="p-3 font-medium">判断时间</th>
-                <th className="p-3 font-medium">区间变化</th>
-                <th className="p-3 font-medium">结果</th>
-                <th className="p-3 font-medium">价格</th>
-                <th className="p-3 font-medium">原因</th>
-                <th className="p-3 font-medium">附加信息</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
+        <Card className="overflow-hidden py-0">
+          <CardContent className="p-0">
+          <Table className="min-w-[850px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead>判断时间</TableHead>
+                <TableHead>区间变化</TableHead>
+                <TableHead>结果</TableHead>
+                <TableHead>价格</TableHead>
+                <TableHead>原因</TableHead>
+                <TableHead>附加信息</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {items.map((item) => (
-                <tr key={item.id} className="align-top hover:bg-muted/20">
-                  <td className="p-3">
+                <TableRow key={item.id} className="align-top">
+                  <TableCell>
                     <time dateTime={item.created_at}>{formatShanghaiTime(item.created_at)}</time>
                     <code className="mt-1 block text-xs text-muted-foreground" title={item.subscription_id}>
                       {shortId(item.subscription_id)}
                     </code>
-                  </td>
-                  <td className="p-3">{zoneLabels[item.before_zone]} → {zoneLabels[item.after_zone]}</td>
-                  <td className="p-3 font-medium">{resultLabels[item.result]}</td>
-                  <td className="p-3">{item.price ? `¥ ${item.price}` : "无有效价格"}</td>
-                  <td className="p-3">{reasonLabels[item.reason]}</td>
-                  <td className="p-3 text-xs text-muted-foreground">
+                  </TableCell>
+                  <TableCell>{zoneLabels[item.before_zone]} → {zoneLabels[item.after_zone]}</TableCell>
+                  <TableCell className="font-medium">{resultLabels[item.result]}</TableCell>
+                  <TableCell>{item.price ? `¥ ${item.price}` : "无有效价格"}</TableCell>
+                  <TableCell>{reasonLabels[item.reason]}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
                     {item.skip_code ? <span className="block">跳过原因：{item.skip_code}</span> : null}
                     {item.hysteresis_applied ? <span className="block">已应用区间缓冲</span> : null}
                     {item.used_stale_target ? <span className="block text-amber-700">使用了待更新目标</span> : null}
                     {!item.skip_code && !item.hysteresis_applied && !item.used_stale_target ? "无" : null}
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
+            </TableBody>
+          </Table>
+          </CardContent>
+        </Card>
       )}
       <Pagination {...query.data} onChange={setPage} />
     </section>
@@ -604,24 +630,16 @@ export function SignalsPage({
         </Button>
       </header>
 
-      <nav className="grid gap-2 sm:grid-cols-3" aria-label="信号中心分区">
-        {sections.map(({ key, label, icon: Icon, count }) => (
-          <button
-            type="button"
-            key={key}
-            aria-current={section === key ? "page" : undefined}
-            className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${
-              section === key
-                ? "border-foreground bg-foreground text-background"
-                : "border-border bg-card hover:bg-muted/50"
-            }`}
-            onClick={() => setSection(key)}
-          >
-            <span className="flex items-center gap-2 font-medium"><Icon className="size-4" aria-hidden="true" />{label}</span>
-            <strong className="text-sm tabular-nums">{count ?? "—"}</strong>
-          </button>
-        ))}
-      </nav>
+      <Tabs value={section} onValueChange={(value) => setSection(value as SectionKey)}>
+        <TabsList className="grid h-auto w-full grid-cols-1 sm:grid-cols-3" aria-label="信号中心分区">
+          {sections.map(({ key, label, icon: Icon, count }) => (
+            <TabsTrigger className="justify-between px-4 py-3" value={key} key={key}>
+              <span className="flex items-center gap-2"><Icon aria-hidden="true" />{label}</span>
+              <strong className="tabular-nums">{count ?? "—"}</strong>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
       {section === "states" ? (
         <StatesSection setPage={setStatePage} query={statesQuery} />

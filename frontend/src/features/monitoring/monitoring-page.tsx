@@ -22,7 +22,10 @@ import type {
   MonitoringOverviewItem,
 } from "@/features/monitoring/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -30,6 +33,18 @@ import {
   DialogTitle,
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "@/shared/ui/native-select"
+import {
+  Empty,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/shared/ui/empty"
+import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group"
 
 type MonitorFilter = "全部" | "已启用" | "持仓" | "需关注"
 
@@ -306,74 +321,81 @@ export function MonitoringPage({
       </header>
 
       <section className="monitoring-summary" aria-label="监控概况">
-        <div><strong>{overview.items.length}</strong><span>全部股票</span></div>
-        <div><strong>{enabledCount}</strong><span>已启用</span></div>
-        <div><strong>{holdingCount}</strong><span>当前持仓</span></div>
-        <div className={attentionCount > 0 ? "is-attention" : ""}>
-          <strong>{attentionCount}</strong><span>需要关注</span>
-        </div>
+        <Card><CardContent><strong>{overview.items.length}</strong><span>全部股票</span></CardContent></Card>
+        <Card><CardContent><strong>{enabledCount}</strong><span>已启用</span></CardContent></Card>
+        <Card><CardContent><strong>{holdingCount}</strong><span>当前持仓</span></CardContent></Card>
+        <Card className={attentionCount > 0 ? "is-attention" : ""}>
+          <CardContent><strong>{attentionCount}</strong><span>需要关注</span></CardContent>
+        </Card>
       </section>
 
       {overview.warningCodes.length > 0 ? (
-        <aside className="monitoring-warning" role="status">
+        <Alert className="monitoring-warning">
           <TriangleAlert aria-hidden="true" />
-          <span>部分辅助数据暂不可用，股票订阅仍可正常查看。</span>
-          <code>{overview.warningCodes.join(" · ")}</code>
-        </aside>
+          <AlertDescription>
+            <span>部分辅助数据暂不可用，股票订阅仍可正常查看。</span>
+            <code>{overview.warningCodes.join(" · ")}</code>
+          </AlertDescription>
+        </Alert>
       ) : null}
 
       <section className="monitoring-toolbar" aria-label="监控筛选">
-        <div className="monitoring-filters">
+        <ToggleGroup
+          className="monitoring-filters"
+          type="single"
+          variant="outline"
+          value={filter}
+          onValueChange={(value) => {
+            if (value) setFilter(value as MonitorFilter)
+          }}
+        >
           {(["全部", "已启用", "持仓", "需关注"] as const).map((option) => (
-            <button
-              type="button"
+            <ToggleGroupItem
               key={option}
-              className={filter === option ? "is-active" : ""}
-              aria-pressed={filter === option}
-              onClick={() => setFilter(option)}
+              value={option}
             >
               {option}
-            </button>
+            </ToggleGroupItem>
           ))}
-        </div>
+        </ToggleGroup>
         <div className="monitoring-selects">
           <label>
             <span className="sr-only">按分组筛选</span>
-            <select
+            <NativeSelect
               aria-label="按分组筛选"
               value={groupFilter}
               onChange={(event) => setGroupFilter(event.target.value)}
             >
-              <option value="">全部分组</option>
+              <NativeSelectOption value="">全部分组</NativeSelectOption>
               {groupOptions.map((group) => (
-                <option value={group} key={group}>{group}</option>
+                <NativeSelectOption value={group} key={group}>{group}</NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           </label>
           <label>
             <span className="sr-only">按目标模式筛选</span>
-            <select
+            <NativeSelect
               aria-label="按目标模式筛选"
               value={modeFilter}
               onChange={(event) => setModeFilter(event.target.value)}
             >
-              <option value="">全部模式</option>
-              <option value="MANUAL">手工目标</option>
-              <option value="STRATEGY">策略目标</option>
-            </select>
+              <NativeSelectOption value="">全部模式</NativeSelectOption>
+              <NativeSelectOption value="MANUAL">手工目标</NativeSelectOption>
+              <NativeSelectOption value="STRATEGY">策略目标</NativeSelectOption>
+            </NativeSelect>
           </label>
           <label>
             <span className="sr-only">按价格区间筛选</span>
-            <select
+            <NativeSelect
               aria-label="按价格区间筛选"
               value={zoneFilter}
               onChange={(event) => setZoneFilter(event.target.value)}
             >
-              <option value="">全部区间</option>
+              <NativeSelectOption value="">全部区间</NativeSelectOption>
               {Object.entries(zoneLabels).map(([value, label]) => (
-                <option value={value} key={value}>{label}</option>
+                <NativeSelectOption value={value} key={value}>{label}</NativeSelectOption>
               ))}
-            </select>
+            </NativeSelect>
           </label>
         </div>
         <label className="monitoring-search">
@@ -388,17 +410,21 @@ export function MonitoringPage({
       </section>
 
       {overview.items.length === 0 ? (
-        <section className="monitoring-empty">
-          <Radar aria-hidden="true" />
-          <h2>还没有监控股票</h2>
-          <p>创建监控订阅后，股票会显示在这里。</p>
-        </section>
+        <Empty className="monitoring-empty">
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><Radar aria-hidden="true" /></EmptyMedia>
+            <EmptyTitle>还没有监控股票</EmptyTitle>
+            <EmptyDescription>创建监控订阅后，股票会显示在这里。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : visibleItems.length === 0 ? (
-        <section className="monitoring-empty">
-          <Search aria-hidden="true" />
-          <h2>没有符合条件的股票</h2>
-          <p>请调整筛选条件或搜索内容。</p>
-        </section>
+        <Empty className="monitoring-empty">
+          <EmptyHeader>
+            <EmptyMedia variant="icon"><Search aria-hidden="true" /></EmptyMedia>
+            <EmptyTitle>没有符合条件的股票</EmptyTitle>
+            <EmptyDescription>请调整筛选条件或搜索内容。</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
       ) : (
         <section className="monitoring-list" aria-label="监控股票">
           <div className="monitoring-list__head" aria-hidden="true">
@@ -410,20 +436,21 @@ export function MonitoringPage({
             <span>操作</span>
           </div>
           {visibleItems.map((item) => (
-            <article className="monitoring-row" key={item.subscriptionId}>
+            <Card className="monitoring-row" key={item.subscriptionId}>
+              <CardContent className="contents">
               <div className="monitoring-stock">
                 <strong>{item.securityName ?? "名称暂缺"}</strong>
                 <code>{item.symbol}</code>
               </div>
               <div className="monitoring-groups">
                 {item.groups.length > 0
-                  ? item.groups.map((group) => <span key={group}>{group}</span>)
-                  : <span>未分组</span>}
+                  ? item.groups.map((group) => <Badge variant="secondary" key={group}>{group}</Badge>)
+                  : <Badge variant="outline">未分组</Badge>}
               </div>
               <div className="monitoring-state">
-                <span className={`status-dot status-dot--${item.subscriptionStatus.toLowerCase()}`}>
+                <Badge variant="outline" className={`status-dot status-dot--${item.subscriptionStatus.toLowerCase()}`}>
                   {translated(subscriptionLabels, item.subscriptionStatus)}
-                </span>
+                </Badge>
                 {item.isHolding ? (
                   <span><BriefcaseBusiness aria-hidden="true" />持仓</span>
                 ) : <span>未持仓</span>}
@@ -462,7 +489,8 @@ export function MonitoringPage({
                   aria-label="该股票部分数据暂不可用"
                 />
               ) : null}
-            </article>
+              </CardContent>
+            </Card>
           ))}
         </section>
       )}

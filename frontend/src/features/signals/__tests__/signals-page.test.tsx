@@ -184,7 +184,7 @@ describe("信号中心页面", () => {
     renderPage(gateway())
     await screen.findByText("¥ 8.10")
 
-    await userEvent.click(screen.getByRole("button", { name: /信号事件/ }))
+    await userEvent.click(screen.getByRole("tab", { name: /信号事件/ }))
 
     expect(screen.getByText("正常区间")).toBeInTheDocument()
     expect(screen.getByText("低位")).toBeInTheDocument()
@@ -198,7 +198,7 @@ describe("信号中心页面", () => {
     renderPage(gateway())
     await screen.findByText("¥ 8.10")
 
-    await userEvent.click(screen.getByRole("button", { name: /判断记录/ }))
+    await userEvent.click(screen.getByRole("tab", { name: /判断记录/ }))
 
     expect(screen.getAllByText("仍在同一区间")).toHaveLength(2)
     expect(screen.getAllByText("已过期")).toHaveLength(2)
@@ -229,7 +229,7 @@ describe("信号中心页面", () => {
     renderPage(gateway({ loadEvents }))
 
     expect(await screen.findByText("¥ 8.10")).toBeInTheDocument()
-    await userEvent.click(screen.getByRole("button", { name: /信号事件/ }))
+    await userEvent.click(screen.getByRole("tab", { name: /信号事件/ }))
     expect(await screen.findByText("信号事件暂时无法读取")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "重新加载" }))
     expect(await screen.findByText("暂无信号事件")).toBeInTheDocument()
@@ -248,7 +248,7 @@ describe("信号中心页面", () => {
     }))
     await screen.findByText("¥ 8.10")
 
-    await userEvent.click(screen.getByRole("button", { name: /信号事件/ }))
+    await userEvent.click(screen.getByRole("tab", { name: /信号事件/ }))
 
     expect(screen.getByText("通知投递数据暂时不完整，信号事件仍可正常查看。"))
       .toBeInTheDocument()

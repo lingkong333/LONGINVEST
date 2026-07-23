@@ -14,7 +14,11 @@ import {
 import { useMemo, useState } from "react"
 
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
+import { Checkbox } from "@/shared/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -24,6 +28,16 @@ import {
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs"
+import { Textarea } from "@/shared/ui/textarea"
 
 import { createTargetManagementApi } from "./gateway"
 import type {
@@ -123,29 +137,36 @@ function TargetCard({ item, selected, onSelect }: {
   onSelect: () => void
 }) {
   return (
-    <button
-      type="button"
-      onClick={onSelect}
-      aria-pressed={selected}
-      className="w-full rounded-lg border bg-card p-4 text-left transition hover:border-primary/50 aria-pressed:border-primary aria-pressed:ring-2 aria-pressed:ring-primary/10"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-mono text-sm font-semibold">{item.subscription_id.slice(0, 8)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">目标日期 {formatDate(item.target_date)}</p>
-        </div>
-        <span className="rounded-full bg-muted px-2 py-1 text-xs font-medium">
-          {statusLabels[item.status] ?? item.status}
-        </span>
-      </div>
-      <div className="mt-4 flex items-end justify-between">
-        <div>
-          <p className="text-xs text-muted-foreground">当前价格区间</p>
-          <p className="mt-1 font-mono text-sm">¥ {item.values.low_strong} — {item.values.high_strong}</p>
-        </div>
-        <span className="text-xs text-muted-foreground">{sourceLabels[item.source] ?? item.source}</span>
-      </div>
-    </button>
+    <Card>
+      <CardContent className="p-0">
+        <Button
+          type="button"
+          variant={selected ? "secondary" : "ghost"}
+          onClick={onSelect}
+          aria-pressed={selected}
+          className="h-auto w-full items-stretch p-4 text-left whitespace-normal"
+        >
+          <div className="w-full">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-mono text-sm font-semibold">{item.subscription_id.slice(0, 8)}</p>
+                <p className="mt-1 text-xs text-muted-foreground">目标日期 {formatDate(item.target_date)}</p>
+              </div>
+              <Badge variant="secondary">
+                {statusLabels[item.status] ?? item.status}
+              </Badge>
+            </div>
+            <div className="mt-4 flex items-end justify-between">
+              <div>
+                <p className="text-xs text-muted-foreground">当前价格区间</p>
+                <p className="mt-1 font-mono text-sm">¥ {item.values.low_strong} — {item.values.high_strong}</p>
+              </div>
+              <span className="text-xs text-muted-foreground">{sourceLabels[item.source] ?? item.source}</span>
+            </div>
+          </div>
+        </Button>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -211,7 +232,8 @@ export function TargetManagementPage({
         <Button variant="outline" onClick={() => void refresh()}><RefreshCw />刷新</Button>
       </header>
 
-      <nav aria-label="目标管理视图" className="mt-5 flex gap-1 overflow-x-auto rounded-lg border bg-card p-1">
+      <Tabs className="mt-5" value={view} onValueChange={(value) => setView(value as View)}>
+        <TabsList className="h-auto w-full overflow-x-auto" aria-label="目标管理视图">
         {([
           ["overview", "总览", ListFilter],
           ["detail", "股票详情", PencilLine],
@@ -219,19 +241,18 @@ export function TargetManagementPage({
           ["runs", "计算运行", Calculator],
           ["reviews", "待复核", ShieldAlert],
         ] as const).map(([key, label, Icon]) => (
-          <Button
+          <TabsTrigger
             key={key}
-            type="button"
-            variant={view === key ? "secondary" : "ghost"}
-            onClick={() => setView(key)}
+            value={key}
             className="flex-1"
           >
             <Icon />{label}
-          </Button>
+          </TabsTrigger>
         ))}
-      </nav>
+        </TabsList>
+      </Tabs>
 
-      {notice ? <p role="status" className="mt-4 rounded-lg border border-primary/20 bg-accent px-4 py-3 text-sm">{notice}</p> : null}
+      {notice ? <Alert className="mt-4"><AlertDescription>{notice}</AlertDescription></Alert> : null}
 
       {view === "overview" ? (
         targets.data.length === 0
@@ -278,7 +299,8 @@ function TargetDetail({ item, onOperation }: { item: TargetItem; onOperation: (o
   const hasCapabilities = item.allowedActions.length > 0
   return (
     <section className="mt-5 space-y-5" aria-label="股票目标详情">
-      <div className="rounded-lg border bg-card p-5">
+      <Card>
+        <CardContent>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="font-mono text-sm text-muted-foreground">订阅 {item.subscription_id}</p>
@@ -295,11 +317,12 @@ function TargetDetail({ item, onOperation }: { item: TargetItem; onOperation: (o
           <div><dt className="text-muted-foreground">数据版本</dt><dd className="mt-1">{item.data_version ?? "—"}</dd></div>
           <div><dt className="text-muted-foreground">策略版本</dt><dd className="mt-1 break-all">{item.strategy_version_id ?? "不适用"}</dd></div>
         </dl>
-      </div>
+        </CardContent>
+      </Card>
       {!hasCapabilities ? (
-        <p className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+        <Alert><AlertDescription>
           后端尚未返回本目标的允许操作，当前仅可查看，避免绕过权限和状态校验。
-        </p>
+        </AlertDescription></Alert>
       ) : null}
       <div className="flex flex-wrap gap-2">
         <Button disabled={!hasAction(item.allowedActions, "MANUAL_EDIT")} onClick={() => onOperation({ kind: "manual", target: item })}><PencilLine />手工编辑</Button>
@@ -324,7 +347,8 @@ function HistoryView({ item, history, loading, error, onRetry, onRestore }: {
   return (
     <section className="mt-5 space-y-3" aria-label="目标版本历史">
       {history.map((revision) => (
-        <article key={revision.id} className="rounded-lg border bg-card p-4">
+        <Card key={revision.id}>
+          <CardContent>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 className="font-semibold">第 {revision.revision_no} 版 · {sourceLabels[revision.source] ?? revision.source}</h2>
@@ -340,7 +364,8 @@ function HistoryView({ item, history, loading, error, onRetry, onRestore }: {
             </Button>
           </div>
           <div className="mt-4"><ValuesStrip values={revision.values} compare={item.values} /></div>
-        </article>
+          </CardContent>
+        </Card>
       ))}
     </section>
   )
@@ -358,26 +383,26 @@ function RunsView({ query }: { query: QueryResult<Awaited<ReturnType<TargetManag
   if (query.error) return <ErrorState error={query.error} retry={() => void query.refetch()} />
   if (!query.data?.length) return <PageState state="empty" title="暂无计算记录" description="策略目标开始计算后会显示在这里。" />
   return (
-    <section className="mt-5 overflow-hidden rounded-lg border bg-card" aria-label="目标计算运行">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[48rem] text-left text-sm">
-          <thead className="border-b bg-muted/60 text-xs text-muted-foreground">
-            <tr><th className="p-3">创建时间</th><th>订阅</th><th>训练区间</th><th>状态</th><th>错误摘要</th></tr>
-          </thead>
-          <tbody>
+    <Card className="mt-5 overflow-hidden py-0" aria-label="目标计算运行">
+      <CardContent className="p-0">
+        <Table className="min-w-[48rem]">
+          <TableHeader>
+            <TableRow><TableHead>创建时间</TableHead><TableHead>订阅</TableHead><TableHead>训练区间</TableHead><TableHead>状态</TableHead><TableHead>错误摘要</TableHead></TableRow>
+          </TableHeader>
+          <TableBody>
             {query.data.map((run) => (
-              <tr key={run.id} className="border-b last:border-0">
-                <td className="p-3">{formatDate(run.created_at, true)}</td>
-                <td className="font-mono">{run.subscription_id.slice(0, 8)}</td>
-                <td>{run.training_start_date ?? "—"} 至 {run.training_end_date ?? "—"}</td>
-                <td>{statusLabels[run.status] ?? run.status}</td>
-                <td className="max-w-xs truncate text-muted-foreground">{run.error_summary ?? "—"}</td>
-              </tr>
+              <TableRow key={run.id}>
+                <TableCell>{formatDate(run.created_at, true)}</TableCell>
+                <TableCell className="font-mono">{run.subscription_id.slice(0, 8)}</TableCell>
+                <TableCell>{run.training_start_date ?? "—"} 至 {run.training_end_date ?? "—"}</TableCell>
+                <TableCell>{statusLabels[run.status] ?? run.status}</TableCell>
+                <TableCell className="max-w-xs truncate text-muted-foreground">{run.error_summary ?? "—"}</TableCell>
+              </TableRow>
             ))}
-          </tbody>
-        </table>
-      </div>
-    </section>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -394,13 +419,14 @@ function ReviewsView({ query, onReview }: {
       {pending.map((review) => {
         const canDecide = review.version !== null && review.baseline !== null && review.candidate !== null
         return (
-          <article key={review.id} className="rounded-lg border bg-card p-5">
+          <Card key={review.id}>
+            <CardContent>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="font-semibold">候选目标复核</h2>
                 <p className="mt-1 text-xs text-muted-foreground">建立于 {formatDate(review.created_at, true)} · {review.reason}</p>
               </div>
-              <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900">待逐项核对</span>
+              <Badge variant="secondary">待逐项核对</Badge>
             </div>
             {review.candidate && review.baseline ? (
               <div className="mt-4">
@@ -412,9 +438,9 @@ function ReviewsView({ query, onReview }: {
                 </dl>
               </div>
             ) : (
-              <p className="mt-4 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <Alert className="mt-4"><AlertDescription>
                 候选或基准版本详情不完整，不能进行复核决定。
-              </p>
+              </AlertDescription></Alert>
             )}
             <div className="mt-4 flex flex-wrap gap-2">
               <Button disabled={!canDecide || !hasAction(review.allowedActions, "APPROVE")} onClick={() => onReview("approve", review)}><CheckCircle2 />确认通过</Button>
@@ -424,7 +450,8 @@ function ReviewsView({ query, onReview }: {
             {review.allowedActions.length === 0 || review.version === null ? (
               <p className="mt-3 text-xs text-muted-foreground">后端未提供允许操作或复核版本，操作已安全禁用。</p>
             ) : null}
-          </article>
+            </CardContent>
+          </Card>
         )
       })}
     </section>
@@ -557,7 +584,7 @@ function OperationDialog({ operation, api, onClose, onDone }: {
               <label className="text-sm">目标日期<Input className="mt-1" type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
             </div>
             <ValuesStrip values={currentValues} compare={operation.target.values} />
-            {largeChange ? <p className="rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-900">至少一档变化超过 30%，请仔细核对后再确认。</p> : null}
+            {largeChange ? <Alert variant="destructive"><AlertDescription>至少一档变化超过 30%，请仔细核对后再确认。</AlertDescription></Alert> : null}
           </div>
         ) : null}
         {operation?.kind === "calculate" ? (
@@ -572,16 +599,16 @@ function OperationDialog({ operation, api, onClose, onDone }: {
           <ValuesStrip values={operation.review.candidate.values} compare={operation.review.baseline.values} />
         ) : null}
         <label className="text-sm">操作原因
-          <textarea className="mt-1 min-h-20 w-full rounded-md border bg-background px-3 py-2 text-sm" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} />
+          <Textarea className="mt-1 min-h-20" value={reason} onChange={(event) => setReason(event.target.value)} maxLength={500} />
         </label>
         {requiresModeConfirmation ? (
-          <label className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950">
-            <input className="mt-1" type="checkbox" checked={modeConfirmed} onChange={(event) => setModeConfirmed(event.target.checked)} />
+          <label className="flex items-start gap-2 rounded-lg border p-3 text-sm">
+            <Checkbox className="mt-1" checked={modeConfirmed} onCheckedChange={(checked) => setModeConfirmed(checked === true)} />
             我确认订阅将切换为手工目标模式，后续策略计算不会自动覆盖本次目标。
           </label>
         ) : null}
         <label className="flex items-start gap-2 text-sm">
-          <input className="mt-1" type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+          <Checkbox className="mt-1" checked={confirmed} onCheckedChange={(checked) => setConfirmed(checked === true)} />
           我已逐项核对上述变化，并确认执行此操作。
         </label>
         {mutation.isError ? <p role="alert" className="text-sm text-destructive">{mutation.error instanceof Error ? mutation.error.message : "操作失败，请重试。"}</p> : null}

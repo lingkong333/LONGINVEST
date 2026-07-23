@@ -20,7 +20,11 @@ import type {
   PositionItem,
 } from "@/features/positions/types"
 import { ApiError } from "@/shared/api/client"
+import { Alert, AlertDescription } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
+import { Checkbox } from "@/shared/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -30,6 +34,16 @@ import {
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/shared/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/shared/ui/tabs"
+import { Textarea } from "@/shared/ui/textarea"
 
 const PAGE_SIZE = 12
 
@@ -216,40 +230,29 @@ export function PositionsPage({
             持仓变化会保留独立历史，且不能回填过去的生效时间。
           </p>
         </div>
-        <div className="flex rounded-lg border bg-muted/40 p-1" role="tablist" aria-label="持仓视图">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "current"}
-            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium aria-selected:bg-background aria-selected:shadow-sm"
-            onClick={() => setActiveTab("current")}
-          >
-            <BriefcaseBusiness className="size-4" aria-hidden="true" />
-            当前状态
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeTab === "history"}
-            className="flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium aria-selected:bg-background aria-selected:shadow-sm"
-            onClick={() => setActiveTab("history")}
-          >
-            <History className="size-4" aria-hidden="true" />
-            修改历史
-          </button>
-        </div>
+        <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as "current" | "history")}>
+          <TabsList aria-label="持仓视图">
+            <TabsTrigger value="current">
+              <BriefcaseBusiness aria-hidden="true" />当前状态
+            </TabsTrigger>
+            <TabsTrigger value="history">
+              <History aria-hidden="true" />修改历史
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       </header>
 
       {successMessage ? (
-        <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900" role="status">
-          <CheckCircle2 className="size-4" aria-hidden="true" />
-          {successMessage}
-        </div>
+        <Alert>
+          <CheckCircle2 aria-hidden="true" />
+          <AlertDescription>{successMessage}</AlertDescription>
+        </Alert>
       ) : null}
 
       {activeTab === "current" ? (
         <section className="grid gap-4" aria-label="当前持仓状态">
-          <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+          <Card>
+            <CardContent className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <label className="relative block w-full md:max-w-sm">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <span className="sr-only">搜索股票代码或名称</span>
@@ -279,7 +282,8 @@ export function PositionsPage({
                 批量标记清仓
               </Button>
             </div>
-          </div>
+            </CardContent>
+          </Card>
 
           {currentQuery.isPending ? (
             <PageState
@@ -310,10 +314,10 @@ export function PositionsPage({
           ) : (
             <>
               {currentQuery.data.warningCodes.length > 0 ? (
-                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950" role="status">
-                  <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-                  监控关系暂时无法核对，持仓状态仍可正常查看。
-                </div>
+                <Alert>
+                  <CircleAlert aria-hidden="true" />
+                  <AlertDescription>监控关系暂时无法核对，持仓状态仍可正常查看。</AlertDescription>
+                </Alert>
               ) : null}
               {visibleItems.length === 0 ? (
                 <PageState
@@ -322,35 +326,33 @@ export function PositionsPage({
                   description="请调整股票代码或名称后重试。"
                 />
               ) : (
-                <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[940px] text-left text-sm">
-                      <thead className="border-b bg-muted/40 text-muted-foreground">
-                        <tr>
-                          <th className="w-12 px-4 py-3">
+                <Card className="overflow-hidden py-0">
+                  <CardContent className="p-0">
+                    <Table className="min-w-[940px]">
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-12 px-4">
                             <span className="sr-only">选择</span>
-                          </th>
-                          <th className="px-4 py-3 font-medium">股票</th>
-                          <th className="px-4 py-3 font-medium">当前状态</th>
-                          <th className="px-4 py-3 font-medium">监控关系</th>
-                          <th className="px-4 py-3 font-medium">最近修改</th>
-                          <th className="px-4 py-3 font-medium">版本</th>
-                          <th className="px-4 py-3 text-right font-medium">操作</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y">
+                          </TableHead>
+                          <TableHead className="px-4">股票</TableHead>
+                          <TableHead className="px-4">当前状态</TableHead>
+                          <TableHead className="px-4">监控关系</TableHead>
+                          <TableHead className="px-4">最近修改</TableHead>
+                          <TableHead className="px-4">版本</TableHead>
+                          <TableHead className="px-4 text-right">操作</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
                         {visibleItems.map((item) => (
-                          <tr key={item.securityId} className="hover:bg-muted/25">
-                            <td className="px-4 py-4">
-                              <input
-                                type="checkbox"
-                                className="size-4 accent-current"
+                          <TableRow key={item.securityId}>
+                            <TableCell className="px-4 py-4">
+                              <Checkbox
                                 aria-label={`选择 ${item.symbol}`}
                                 checked={selectedSymbols.has(item.symbol)}
-                                onChange={(event) => {
+                                onCheckedChange={(checked) => {
                                   setSelectedSymbols((current) => {
                                     const next = new Set(current)
-                                    if (event.target.checked) {
+                                    if (checked === true) {
                                       next.add(item.symbol)
                                     } else {
                                       next.delete(item.symbol)
@@ -359,24 +361,21 @@ export function PositionsPage({
                                   })
                                 }}
                               />
-                            </td>
-                            <td className="px-4 py-4">
+                            </TableCell>
+                            <TableCell className="px-4 py-4">
                               <strong className="block font-semibold">
                                 {item.securityName ?? item.symbol}
                               </strong>
                               <span className="mt-1 block font-mono text-xs text-muted-foreground">
                                 {item.symbol}
                               </span>
-                            </td>
-                            <td className="px-4 py-4">
-                              <span className={item.status === "HOLDING"
-                                ? "rounded-full bg-emerald-100 px-2.5 py-1 font-medium text-emerald-900"
-                                : "rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700"
-                              }>
+                            </TableCell>
+                            <TableCell className="px-4 py-4">
+                              <Badge variant={item.status === "HOLDING" ? "default" : "secondary"}>
                                 {statusLabel[item.status]}
-                              </span>
-                            </td>
-                            <td className="px-4 py-4">
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="px-4 py-4">
                               {item.isMonitored === true ? (
                                 <span className="text-muted-foreground">已加入监控</span>
                               ) : item.isMonitored === false && item.status === "HOLDING" ? (
@@ -394,15 +393,15 @@ export function PositionsPage({
                               ) : (
                                 <span className="text-muted-foreground">未监控</span>
                               )}
-                            </td>
-                            <td className="px-4 py-4">
+                            </TableCell>
+                            <TableCell className="px-4 py-4">
                               <span className="block">{formatShanghaiTime(item.updatedAt)}</span>
                               <span className="mt-1 block text-xs text-muted-foreground">
                                 {item.source ? sourceLabel(item.source) : "暂无来源"}
                               </span>
-                            </td>
-                            <td className="px-4 py-4 font-mono">v{item.version}</td>
-                            <td className="px-4 py-4 text-right">
+                            </TableCell>
+                            <TableCell className="px-4 py-4 font-mono">v{item.version}</TableCell>
+                            <TableCell className="px-4 py-4 text-right">
                               <div className="flex justify-end gap-2">
                                 {item.allowedActions.includes("HOLD") ? (
                                   <Button size="sm" onClick={() => beginChange("HOLD", [item])}>
@@ -419,13 +418,13 @@ export function PositionsPage({
                                   </Button>
                                 ) : null}
                               </div>
-                            </td>
-                          </tr>
+                            </TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
+                      </TableBody>
+                    </Table>
+                  </CardContent>
+                </Card>
               )}
             </>
           )}
@@ -459,39 +458,39 @@ export function PositionsPage({
               description="持仓状态发生真实变化后，记录会显示在这里。"
             />
           ) : (
-            <div className="overflow-hidden rounded-lg border bg-card shadow-sm">
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[900px] text-left text-sm">
-                  <thead className="border-b bg-muted/40 text-muted-foreground">
-                    <tr>
-                      <th className="px-4 py-3 font-medium">生效时间</th>
-                      <th className="px-4 py-3 font-medium">股票</th>
-                      <th className="px-4 py-3 font-medium">状态变化</th>
-                      <th className="px-4 py-3 font-medium">版本</th>
-                      <th className="px-4 py-3 font-medium">备注</th>
-                      <th className="px-4 py-3 font-medium">来源</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
+            <Card className="overflow-hidden py-0">
+              <CardContent className="p-0">
+                <Table className="min-w-[900px]">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="px-4">生效时间</TableHead>
+                      <TableHead className="px-4">股票</TableHead>
+                      <TableHead className="px-4">状态变化</TableHead>
+                      <TableHead className="px-4">版本</TableHead>
+                      <TableHead className="px-4">备注</TableHead>
+                      <TableHead className="px-4">来源</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
                     {visibleHistory.map((item) => (
-                      <tr key={item.id}>
-                        <td className="px-4 py-4">{formatShanghaiTime(item.effectiveAt)}</td>
-                        <td className="px-4 py-4 font-mono">{item.symbol}</td>
-                        <td className="px-4 py-4">
+                      <TableRow key={item.id}>
+                        <TableCell className="px-4 py-4">{formatShanghaiTime(item.effectiveAt)}</TableCell>
+                        <TableCell className="px-4 py-4 font-mono">{item.symbol}</TableCell>
+                        <TableCell className="px-4 py-4">
                           {item.beforeStatus ? statusLabel[item.beforeStatus] : "首次记录"}
                           <span className="mx-2 text-muted-foreground">→</span>
                           <strong>{statusLabel[item.afterStatus]}</strong>
-                        </td>
-                        <td className="px-4 py-4 font-mono">v{item.version}</td>
-                        <td className="max-w-xs whitespace-normal px-4 py-4">
+                        </TableCell>
+                        <TableCell className="px-4 py-4 font-mono">v{item.version}</TableCell>
+                        <TableCell className="max-w-xs whitespace-normal px-4 py-4">
                           {item.note || "无备注"}
-                        </td>
-                        <td className="px-4 py-4">{sourceLabel(item.source)}</td>
-                      </tr>
+                        </TableCell>
+                        <TableCell className="px-4 py-4">{sourceLabel(item.source)}</TableCell>
+                      </TableRow>
                     ))}
-                  </tbody>
-                </table>
-              </div>
+                  </TableBody>
+                </Table>
+              </CardContent>
               <footer className="flex items-center justify-between border-t px-4 py-3">
                 <span className="text-sm text-muted-foreground">
                   共 {historyItems.length} 条，第 {historyPage} / {totalHistoryPages} 页
@@ -519,7 +518,7 @@ export function PositionsPage({
                   </Button>
                 </div>
               </footer>
-            </div>
+            </Card>
           )}
         </section>
       )}
@@ -556,8 +555,8 @@ export function PositionsPage({
           </label>
           <label className="grid gap-2 text-sm font-medium">
             备注（可选）
-            <textarea
-              className="min-h-24 w-full resize-y rounded-md border bg-transparent px-3 py-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            <Textarea
+              className="min-h-24 resize-y"
               value={note}
               maxLength={500}
               placeholder="可补充持仓判断依据，不要填写数量或成本"
@@ -565,7 +564,8 @@ export function PositionsPage({
             />
           </label>
           {changeMutation.isError ? (
-            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm" role="alert">
+            <Alert variant="destructive">
+              <AlertDescription>
               {changeMutation.error instanceof ApiError
                 && changeMutation.error.code === "POSITION_VERSION_CONFLICT"
                 ? "持仓状态已被其他操作修改。请关闭窗口并重新加载后再试。"
@@ -575,7 +575,8 @@ export function PositionsPage({
                   错误码：{changeMutation.error.code}
                 </span>
               ) : null}
-            </div>
+              </AlertDescription>
+            </Alert>
           ) : null}
           <DialogFooter>
             <Button

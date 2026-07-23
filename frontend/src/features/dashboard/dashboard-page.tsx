@@ -24,7 +24,9 @@ import type {
   DashboardSummary,
 } from "@/features/dashboard/types"
 import { ApiError } from "@/shared/api/client"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Card, CardContent } from "@/shared/ui/card"
 
 interface MetricDefinition {
   section: keyof DashboardSummary["sections"]
@@ -143,10 +145,13 @@ export function DashboardPage({
   return (
     <main className="dashboard-page">
       <header className="dashboard-header">
-        <div className={`dashboard-health dashboard-health--${summary.status.toLowerCase()}`}>
+        <Badge
+          variant={summary.status === "UNHEALTHY" ? "destructive" : "secondary"}
+          className={`dashboard-health dashboard-health--${summary.status.toLowerCase()}`}
+        >
           <span aria-hidden="true" />
           <strong>{healthLabels[summary.status]}</strong>
-        </div>
+        </Badge>
         <time dateTime={summary.generated_at}>{generatedAt} 上海时间</time>
         <Button
           variant="ghost"
@@ -165,17 +170,19 @@ export function DashboardPage({
           const value = metricValue(snapshot, field)
           const tone = statusTone(snapshot.status)
           return (
-            <article
+            <Card
               className={`metric-card metric-card--${tone}`}
               key={`${section}-${field}`}
               aria-label={`${label}：${value ?? "无数据"}，状态${sectionStatusLabels[snapshot.status]}`}
               title={snapshot.error ?? label}
             >
+              <CardContent className="contents">
               <div className="metric-card__icon"><Icon aria-hidden="true" /></div>
               <strong>{value ?? "—"}</strong>
               <span>{label}</span>
               <i aria-hidden="true" />
-            </article>
+              </CardContent>
+            </Card>
           )
         })}
       </section>

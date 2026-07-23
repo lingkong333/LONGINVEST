@@ -8,14 +8,24 @@ from sqlalchemy.exc import SQLAlchemyError
 from long_invest.modules.quotes.contracts import (
     QuoteCycleStatus,
     QuoteItemStatus,
+    QuoteOperationAction,
     SignalQuoteSnapshot,
 )
 from long_invest.modules.quotes.repository import QuoteCycleRepository
-from long_invest.modules.quotes.service import _item_view, _summary
+from long_invest.modules.quotes.service import (
+    _item_view,
+    _summary,
+    quote_operation_allowed_actions,
+)
 from long_invest.modules.securities.application import get_security_application
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import SubmitJob
+from long_invest.platform.jobs.admin import JobAdminService
+from long_invest.platform.jobs.contracts import (
+    TERMINAL_JOB_STATUSES,
+    JobStatus,
+    SubmitJob,
+)
 from long_invest.platform.jobs.service import JobService
 
 
@@ -26,10 +36,12 @@ class QuoteApplication:
         *,
         job_service_factory: Callable[..., JobService] = JobService,
         universe_freezer: Callable[[tuple[str, ...]], Awaitable[Any]] | None = None,
+        job_admin_factory: Callable[..., Any] = JobAdminService,
     ) -> None:
         self._database = database
         self._job_service_factory = job_service_factory
         self._universe_freezer = universe_freezer
+        self._job_admin_factory = job_admin_factory
 
     async def list_cycles(
         self,
@@ -79,6 +91,27 @@ class QuoteApplication:
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
 
+    async def allowed_actions(self) -> tuple[QuoteOperationAction, ...]:
+        try:
+            async with self._database.session() as session:
+                admin = self._job_admin_factory(session)
+                manual = await _has_active_job(
+                    admin,
+                    job_type="REALTIME_QUOTE_CYCLE",
+                    queue="realtime-quotes",
+                )
+                diagnosis = await _has_active_job(
+                    admin,
+                    job_type="QUOTE_DIAGNOSTIC",
+                    queue="realtime-quotes",
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return quote_operation_allowed_actions(
+            manual_collection_in_progress=manual,
+            diagnosis_in_progress=diagnosis,
+        )
+
     async def submit_manual(
         self,
         *,
@@ -87,7 +120,9 @@ class QuoteApplication:
         idempotency_key: str,
         request_id: str,
         created_by_user_id: str,
+        reason: str,
     ) -> Any:
+        reason = _operation_reason(reason)
         return await self._submit(
             job_type="REALTIME_QUOTE_CYCLE",
             queue="realtime-quotes",
@@ -96,7 +131,7 @@ class QuoteApplication:
             idempotency_key=idempotency_key,
             request_id=request_id,
             created_by_user_id=created_by_user_id,
-            extra={"timeout_seconds": timeout_seconds},
+            extra={"timeout_seconds": timeout_seconds, "reason": reason},
             soft_timeout_seconds=timeout_seconds + 5,
             hard_timeout_seconds=timeout_seconds + 15,
         )
@@ -110,7 +145,9 @@ class QuoteApplication:
         created_by_user_id: str,
         session_id: str,
         trusted_ip: str,
+        reason: str,
     ) -> Any:
+        reason = _operation_reason(reason)
         return await self._submit(
             job_type="QUOTE_DIAGNOSTIC",
             queue="realtime-quotes",
@@ -126,7 +163,7 @@ class QuoteApplication:
                     "actor_user_id": created_by_user_id,
                     "session_id": session_id,
                     "trusted_ip": trusted_ip,
-                    "reason": "manual quote diagnostic",
+                    "reason": reason,
                 }
             },
             soft_timeout_seconds=45,
@@ -254,3 +291,32 @@ def _backend_unavailable() -> AppError:
         message="实时行情服务暂时不可用",
         status_code=503,
     )
+
+
+def _operation_reason(reason: str) -> str:
+    normalized = reason.strip()
+    if not normalized or len(normalized) > 500:
+        raise AppError(
+            code="QUOTE_OPERATION_REASON_INVALID",
+            message="行情操作原因必须为 1 到 500 个字符",
+            status_code=422,
+        )
+    return normalized
+
+
+async def _has_active_job(
+    admin: Any, *, job_type: str, queue: str
+) -> bool:
+    for status in JobStatus:
+        if status in TERMINAL_JOB_STATUSES:
+            continue
+        page = await admin.list_jobs(
+            page=1,
+            page_size=1,
+            status=status,
+            job_type=job_type,
+            queue=queue,
+        )
+        if page.total > 0:
+            return True
+    return False

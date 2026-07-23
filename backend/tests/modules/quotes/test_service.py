@@ -13,10 +13,34 @@ from long_invest.modules.quotes.contracts import (
     QuoteItemStatus,
     QuoteSubmission,
 )
-from long_invest.modules.quotes.service import QuoteCycleService
+from long_invest.modules.quotes.service import (
+    QuoteCycleService,
+    quote_operation_allowed_actions,
+)
 from long_invest.platform.errors import AppError
 
 NOW = datetime(2026, 7, 15, 2, 0, tzinfo=UTC)
+
+
+def test_quote_operations_are_isolated_by_active_job_type() -> None:
+    assert [
+        item.value
+        for item in quote_operation_allowed_actions(
+            manual_collection_in_progress=False,
+            diagnosis_in_progress=False,
+        )
+    ] == ["MANUAL_COLLECT", "DIAGNOSE"]
+    assert [
+        item.value
+        for item in quote_operation_allowed_actions(
+            manual_collection_in_progress=True,
+            diagnosis_in_progress=False,
+        )
+    ] == ["DIAGNOSE"]
+    assert quote_operation_allowed_actions(
+        manual_collection_in_progress=True,
+        diagnosis_in_progress=True,
+    ) == ()
 
 
 def symbols(count: int) -> tuple[str, ...]:

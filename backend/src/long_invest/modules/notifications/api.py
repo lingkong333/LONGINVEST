@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 from uuid import UUID
 
@@ -23,6 +23,11 @@ from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
     NotificationDeliveryStatus,
     NotificationEventStatus,
+)
+from long_invest.modules.notifications.permissions import (
+    notification_channel_allowed_actions,
+    notification_policy_allowed_actions,
+    notification_template_allowed_actions,
 )
 from long_invest.modules.notifications.template_catalog import GIT_TEMPLATE_REGISTRY
 from long_invest.modules.notifications.templates import StrictTemplateRenderer
@@ -97,10 +102,12 @@ class TemplateVersionData(BaseModel):
     active: bool
     source: str
     created_at: datetime
+    allowed_actions: list[str]
 
 
 class TemplateListData(BaseModel):
     items: list[TemplateVersionData]
+    allowed_actions: list[str]
 
 
 class TemplateListResponse(SuccessEnvelope):
@@ -363,7 +370,21 @@ async def retry_batch(
 @router.get("/api/v1/notification-templates", response_model=TemplateListResponse)
 @router.get("/api/v1/notifications/templates", response_model=TemplateListResponse)
 async def list_templates(application: Application, _identity: ReadIdentity):
-    return success_response(data={"items": await application.list_templates()})
+    items = await application.list_templates()
+    return success_response(
+        data={
+            "items": [
+                {
+                    **item,
+                    "allowed_actions": list(
+                        notification_template_allowed_actions(active=item["active"])
+                    ),
+                }
+                for item in items
+            ],
+            "allowed_actions": ["PREVIEW"],
+        }
+    )
 
 
 @router.get("/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope)
@@ -373,9 +394,9 @@ async def get_policy(
     settings: SettingsApplicationDependency,
     _identity: ReadIdentity,
 ):
-    return success_response(
-        data=await settings.read("get_setting", _POLICY_KEYS[scope])
-    )
+    setting = dict(await settings.read("get_setting", _POLICY_KEYS[scope]))
+    setting["allowed_actions"] = list(notification_policy_allowed_actions())
+    return success_response(data=setting)
 
 
 @router.patch("/api/v1/notification-policies/{scope}", response_model=SuccessEnvelope)
@@ -403,6 +424,7 @@ async def update_policy(
 @router.get("/api/v1/notifications/channels", response_model=SuccessEnvelope)
 async def get_channels(
     settings: SettingsApplicationDependency,
+    application: Application,
     _identity: ReadIdentity,
 ):
     configured = await settings.read("list_settings")
@@ -410,13 +432,38 @@ async def get_channels(
         item for item in configured if item["key"] in _CHANNEL_KEYS.values()
     ]
     secrets = await settings.read("secret_statuses")
-    return success_response(data={"channels": channel_settings, "secrets": secrets})
+    snapshots = await application.channel_circuit_snapshots()
+    secrets_by_key = {item["key"]: item for item in secrets}
+    settings_by_key = {item["key"]: item for item in channel_settings}
+    now = datetime.now(UTC)
+    channels = []
+    circuits = []
+    for channel in DeliveryChannel:
+        snapshot = snapshots[channel]
+        configured_setting = settings_by_key.get(_CHANNEL_KEYS[channel])
+        if configured_setting is not None:
+            setting = dict(configured_setting)
+            secret = secrets_by_key.get(_CHANNEL_SECRET_KEYS[channel], {})
+            setting["allowed_actions"] = list(
+                notification_channel_allowed_actions(
+                    enabled=bool(setting["value"].get("enabled")),
+                    secret_configured=bool(secret.get("configured")),
+                    circuit=snapshot,
+                    now=now,
+                )
+            )
+            channels.append(setting)
+        circuits.append(_circuit(channel, snapshot))
+    return success_response(
+        data={"channels": channels, "secrets": secrets, "circuits": circuits}
+    )
 
 
 @router.get("/api/v1/notification-channels/{channel}", response_model=SuccessEnvelope)
 async def get_channel(
     channel: DeliveryChannel,
     settings: SettingsApplicationDependency,
+    application: Application,
     _identity: ReadIdentity,
 ):
     configured = await settings.read("get_setting", _CHANNEL_KEYS[channel])
@@ -429,8 +476,25 @@ async def get_channel(
         ),
         None,
     )
+    snapshot = (await application.channel_circuit_snapshots())[channel]
+    setting = dict(configured)
+    setting["allowed_actions"] = list(
+        notification_channel_allowed_actions(
+            enabled=bool(setting["value"].get("enabled")),
+            secret_configured=bool(
+                secret_status is not None and secret_status.get("configured")
+            ),
+            circuit=snapshot,
+            now=datetime.now(UTC),
+        )
+    )
     return success_response(
-        data={"channel": channel, "setting": configured, "secret": secret_status}
+        data={
+            "channel": channel,
+            "setting": setting,
+            "secret": secret_status,
+            "circuit": _circuit(channel, snapshot),
+        }
     )
 
 
@@ -611,6 +675,16 @@ def _page(value, serializer):
         "page": value.page,
         "page_size": value.page_size,
         "total": value.total,
+    }
+
+
+def _circuit(channel: DeliveryChannel, snapshot) -> dict[str, Any]:
+    return {
+        "channel": channel,
+        "state": snapshot.state,
+        "consecutive_failures": snapshot.consecutive_failures,
+        "cooldown_level": snapshot.cooldown_level,
+        "retry_at": snapshot.retry_at,
     }
 
 

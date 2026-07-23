@@ -19,6 +19,11 @@ class QuoteCycleStatus(StrEnum):
     CANCELED = "CANCELED"
 
 
+class QuoteOperationAction(StrEnum):
+    MANUAL_COLLECT = "MANUAL_COLLECT"
+    DIAGNOSE = "DIAGNOSE"
+
+
 class QuoteItemStatus(StrEnum):
     VALID = "VALID"
     MISSING = "MISSING"

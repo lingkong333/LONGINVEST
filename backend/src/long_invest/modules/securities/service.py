@@ -12,6 +12,7 @@ from long_invest.modules.securities.contracts import (
     Market,
     SecurityAuditContext,
     SecurityEligibility,
+    SecurityMasterAction,
     SecurityMasterItem,
     SecurityMasterSnapshot,
     SecurityType,
@@ -50,6 +51,14 @@ _MUTABLE_FIELDS = (
     "provider_codes",
 )
 _REQUIRED_PROVIDERS = {"eastmoney", "sina"}
+
+
+def security_master_allowed_actions(
+    *, refresh_in_progress: bool
+) -> tuple[SecurityMasterAction, ...]:
+    if refresh_in_progress:
+        return ()
+    return (SecurityMasterAction.REFRESH,)
 
 
 class SecurityMasterService:

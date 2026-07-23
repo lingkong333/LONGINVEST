@@ -3496,6 +3496,8 @@ export interface components {
             /** Items */
             items: components["schemas"]["BackfillView"][];
             pagination: components["schemas"]["Pagination"];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** BackfillPageResponse */
         BackfillPageResponse: {
@@ -3639,6 +3641,8 @@ export interface components {
             updated_at: string;
             /** Terminal At */
             terminal_at: string | null;
+            /** Allowed Actions */
+            allowed_actions: string[];
             scope_snapshot?: components["schemas"]["BackfillScopeSnapshot"] | null;
         };
         /**
@@ -4760,6 +4764,8 @@ export interface components {
             deadline_at: string | null;
             /** Completed At */
             completed_at: string | null;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** DailyData */
         DailyData: {
@@ -5190,6 +5196,8 @@ export interface components {
             symbols: string[];
             /** Confirm */
             confirm: boolean;
+            /** Reason */
+            reason: string;
         };
         /**
          * EvaluationReason
@@ -5416,6 +5424,8 @@ export interface components {
             timeout_seconds: number;
             /** Confirm */
             confirm: boolean;
+            /** Reason */
+            reason: string;
         };
         /** ManualTargetRequest */
         ManualTargetRequest: {
@@ -5982,6 +5992,8 @@ export interface components {
             activated_at: string | null;
             /** Superseded At */
             superseded_at: string | null;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /**
          * QfqFreshness
@@ -6201,6 +6213,8 @@ export interface components {
             page: number;
             /** Page Size */
             page_size: number;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** QuoteCyclePageResponse */
         QuoteCyclePageResponse: {
@@ -6593,6 +6607,14 @@ export interface components {
             reason: string;
             /** Source Code */
             source_code: string;
+            /** Metadata */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /** Parameter Schema */
+            parameter_schema: {
+                [key: string]: unknown;
+            };
             /** Expected Version */
             expected_version: number;
         };
@@ -7987,6 +8009,8 @@ export interface components {
         TemplateListData: {
             /** Items */
             items: components["schemas"]["TemplateVersionData"][];
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** TemplateListResponse */
         TemplateListResponse: {
@@ -8053,6 +8077,8 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
         };
         /** TestStrategyRequest */
         TestStrategyRequest: {
@@ -8160,14 +8186,6 @@ export interface components {
              * Format: uuid
              */
             backtest_task_id: string;
-            /** Metadata */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /** Parameter Schema */
-            parameter_schema: {
-                [key: string]: unknown;
-            };
             /** Params */
             params: {
                 [key: string]: unknown;
@@ -8464,11 +8482,15 @@ export interface components {
             confirm: boolean;
             /** Reason */
             reason: string;
+            /** Expected Version */
+            expected_version: number | null;
         };
         /** RefreshRequest */
         long_invest__modules__securities__api__RefreshRequest: {
             /** Confirm */
             confirm: boolean;
+            /** Reason */
+            reason: string;
         };
     };
     responses: never;

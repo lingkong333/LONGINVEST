@@ -16,6 +16,24 @@ from long_invest.modules.daily_data.contracts import DailyRetryAuditContext
 from long_invest.platform.errors import AppError
 
 
+def test_allowed_actions_use_the_listed_batch_counts_and_status() -> None:
+    retryable = SimpleNamespace(
+        status="PARTIAL",
+        missing_count=1,
+        failed_count=0,
+    )
+    complete = SimpleNamespace(
+        status="SUCCEEDED",
+        missing_count=0,
+        failed_count=0,
+    )
+
+    assert [
+        item.value for item in DailyDataApplication.allowed_actions(retryable)
+    ] == ["RETRY_MISSING"]
+    assert DailyDataApplication.allowed_actions(complete) == ()
+
+
 def async_test(function):
     @wraps(function)
     def run(*args, **kwargs):

@@ -22,6 +22,10 @@ class DailyBatchStatus(StrEnum):
     FAILED = "FAILED"
 
 
+class DailyBatchAction(StrEnum):
+    RETRY_MISSING = "RETRY_MISSING"
+
+
 class DailyStageStatus(StrEnum):
     FETCHED = "FETCHED"
     VALID = "VALID"

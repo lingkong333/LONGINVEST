@@ -11,6 +11,7 @@ from long_invest.modules.quotes.application import (
 )
 from long_invest.modules.quotes.collection import DEFAULT_CLEANUP_TIMEOUT_SECONDS
 from long_invest.modules.quotes.contracts import QuoteItemStatus, SignalQuoteSnapshot
+from long_invest.platform.jobs.contracts import JobStatus
 
 
 class Transaction:
@@ -32,6 +33,9 @@ class Database:
         value = Transaction()
         self.transactions.append(value)
         return value
+
+    def session(self):
+        return Transaction()
 
 
 class Jobs:
@@ -89,6 +93,7 @@ async def test_manual_and_diagnostic_use_distinct_idempotent_job_types() -> None
         "idempotency_key": "same",
         "request_id": "req-1",
         "created_by_user_id": "user-1",
+        "reason": "人工核对行情",
     }
     await app.submit_manual(timeout_seconds=30, **common)
     await app.submit_diagnostic(
@@ -118,10 +123,44 @@ async def test_manual_and_diagnostic_use_distinct_idempotent_job_types() -> None
         "actor_user_id": "user-1",
         "session_id": "session-1",
         "trusted_ip": "127.0.0.1",
-        "reason": "manual quote diagnostic",
+        "reason": "人工核对行情",
     }
     assert Jobs.sessions == [
         transaction.session for transaction in database.transactions
+    ]
+
+
+@pytest.mark.anyio
+async def test_allowed_actions_isolate_manual_and_diagnostic_active_jobs() -> None:
+    class Admin:
+        def __init__(self, _session, active_type: str | None) -> None:
+            self.active_type = active_type
+
+        async def list_jobs(self, **filters):
+            total = int(
+                filters["status"] is JobStatus.RUNNING
+                and filters["job_type"] == self.active_type
+            )
+            return SimpleNamespace(total=total)
+
+    database = Database()
+    available = QuoteApplication(
+        database,
+        job_admin_factory=lambda session: Admin(session, None),
+    )
+    collecting = QuoteApplication(
+        database,
+        job_admin_factory=lambda session: Admin(
+            session, "REALTIME_QUOTE_CYCLE"
+        ),
+    )
+
+    assert [item.value for item in await available.allowed_actions()] == [
+        "MANUAL_COLLECT",
+        "DIAGNOSE",
+    ]
+    assert [item.value for item in await collecting.allowed_actions()] == [
+        "DIAGNOSE"
     ]
 
 
@@ -140,6 +179,7 @@ async def test_idempotent_replay_reuses_the_original_universe_snapshot() -> None
         "idempotency_key": "same",
         "request_id": "request-1",
         "created_by_user_id": "user-1",
+        "reason": "补采行情",
     }
     first = await app.submit_manual(**values)
     values["request_id"] = "request-2"

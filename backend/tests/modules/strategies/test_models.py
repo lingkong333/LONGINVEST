@@ -36,6 +36,16 @@ def test_strategy_module_owns_all_lifecycle_records() -> None:
         "published_at",
     } <= set(StrategyVersion.__table__.c.keys())
     assert {
+        "metadata",
+        "parameter_schema",
+        "source_code",
+    } <= set(StrategyDraft.__table__.c.keys())
+    assert {
+        "metadata",
+        "parameter_schema",
+        "source_code",
+    } <= set(StrategyDraftRevision.__table__.c.keys())
+    assert {
         "strategy_id",
         "strategy_version_id",
         "draft_version",

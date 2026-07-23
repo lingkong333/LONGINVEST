@@ -266,6 +266,7 @@ class MonitorSubscriptionApplication:
         idempotency_key: str,
         request_id: str,
         actor_user_id: str,
+        reason: str,
     ):
         owner = await self._manual_action_owner(
             subscription_id,
@@ -280,6 +281,7 @@ class MonitorSubscriptionApplication:
             ),
             request_id=request_id,
             created_by_user_id=actor_user_id,
+            reason=reason,
         )
 
     async def diagnose(
@@ -292,6 +294,7 @@ class MonitorSubscriptionApplication:
         actor_user_id: str,
         session_id: str,
         trusted_ip: str,
+        reason: str,
     ):
         owner = await self._manual_action_owner(
             subscription_id,
@@ -307,6 +310,7 @@ class MonitorSubscriptionApplication:
             created_by_user_id=actor_user_id,
             session_id=session_id,
             trusted_ip=trusted_ip,
+            reason=reason,
         )
 
     async def _manual_action_owner(

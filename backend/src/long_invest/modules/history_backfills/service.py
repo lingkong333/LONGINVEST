@@ -7,6 +7,7 @@ from uuid import UUID
 
 from long_invest.modules.history_backfills.contracts import (
     CreateHistoryBackfill,
+    HistoryBackfillAction,
     HistoryBackfillAuditContext,
     HistoryScopeSnapshotPort,
 )
@@ -143,6 +144,27 @@ class HistoryBackfillService:
         if mapped not in {"pause", "resume", "cancel", "retry-failed-items"}:
             raise ValueError("unsupported history backfill action")
         return await self._admin.command(job_id, mapped, context)
+
+    async def allowed_actions(
+        self, job_id: UUID
+    ) -> tuple[HistoryBackfillAction, ...]:
+        await self.get(job_id)
+        actions = await self._admin.allowed_actions(job_id)
+        mapped = {
+            "pause": HistoryBackfillAction.PAUSE,
+            "resume": HistoryBackfillAction.RESUME,
+            "cancel": HistoryBackfillAction.CANCEL,
+            "retry-failed-items": HistoryBackfillAction.RETRY_FAILED,
+        }
+        return tuple(mapped[action] for action in actions if action in mapped)
+
+    async def allowed_actions_many(
+        self, job_ids: tuple[UUID, ...]
+    ) -> dict[UUID, tuple[HistoryBackfillAction, ...]]:
+        result: dict[UUID, tuple[HistoryBackfillAction, ...]] = {}
+        for job_id in job_ids:
+            result[job_id] = await self.allowed_actions(job_id)
+        return result
 
 
 def _submit_command(

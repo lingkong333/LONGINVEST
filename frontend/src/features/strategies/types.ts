@@ -47,6 +47,7 @@ export interface StrategyDraft {
   strategyId: string
   name: string
   description: string
+  metadata: Record<string, unknown>
   sourceCode: string
   parameterSchema: string
   version: number
@@ -62,7 +63,10 @@ export interface StrategyDraft {
 export interface DraftRevision {
   id: string
   revisionNo: number
+  description: string
+  metadata: Record<string, unknown>
   sourceCode: string
+  parameterSchema: string
   createdAt: string
 }
 
@@ -135,8 +139,6 @@ export interface BacktestDateRangeDto {
 export interface StrategyValidationInput {
   reason: string
   backtestTaskId: string
-  metadata: Record<string, unknown>
-  parameterSchema: Record<string, unknown>
   params: Record<string, unknown>
 }
 

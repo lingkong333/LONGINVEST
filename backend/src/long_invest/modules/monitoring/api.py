@@ -378,6 +378,7 @@ async def check_now(
         idempotency_key=key.strip(),
         request_id=identity.audit_context.request_id,
         actor_user_id=str(identity.user.id),
+        reason=body.reason,
     )
     return success_response(
         data={
@@ -408,6 +409,7 @@ async def diagnose(
         actor_user_id=str(identity.user.id),
         session_id=str(identity.session.id),
         trusted_ip=identity.audit_context.trusted_ip or "unknown",
+        reason=body.reason,
     )
     return success_response(
         data={

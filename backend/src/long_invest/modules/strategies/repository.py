@@ -37,7 +37,12 @@ class StrategyRepository:
 
     @staticmethod
     def update_draft_statement(
-        strategy_id: UUID, *, source_code: str, expected_version: int
+        strategy_id: UUID,
+        *,
+        source_code: str,
+        metadata: dict,
+        parameter_schema: dict,
+        expected_version: int,
     ):
         return (
             update(StrategyDraft)
@@ -47,6 +52,8 @@ class StrategyRepository:
             )
             .values(
                 source_code=source_code,
+                strategy_metadata=metadata,
+                parameter_schema=parameter_schema,
                 draft_version=StrategyDraft.draft_version + 1,
             )
             .returning(StrategyDraft)
@@ -94,12 +101,20 @@ class StrategyRepository:
         await self.session.flush()
 
     async def update_draft(
-        self, strategy_id: UUID, *, source_code: str, expected_version: int
+        self,
+        strategy_id: UUID,
+        *,
+        source_code: str,
+        metadata: dict,
+        parameter_schema: dict,
+        expected_version: int,
     ) -> StrategyDraft | None:
         return await self.session.scalar(
             self.update_draft_statement(
                 strategy_id,
                 source_code=source_code,
+                metadata=metadata,
+                parameter_schema=parameter_schema,
                 expected_version=expected_version,
             )
         )

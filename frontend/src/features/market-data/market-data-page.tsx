@@ -7,13 +7,23 @@ import {
   ChevronRightIcon,
   DatabaseIcon,
   HistoryIcon,
+  PauseIcon,
+  PlayIcon,
+  RefreshCwIcon,
+  RotateCcwIcon,
   SearchIcon,
   ShieldCheckIcon,
+  XIcon,
 } from "lucide-react"
 
 import { marketDataGateway } from "@/features/market-data/gateway"
 import type {
   MarketDataGateway,
+  BackfillAction,
+  BackfillSummary,
+  DailyBatchSummary,
+  QfqDatasetSummary,
+  QuoteOperationAction,
   QualityIssueAction,
   QualityIssueSummary,
 } from "@/features/market-data/types"
@@ -33,6 +43,18 @@ interface MarketDataPageProps {
   gateway?: MarketDataGateway
 }
 
+type MarketCommand =
+  | { kind: "SECURITY_REFRESH" }
+  | { kind: "QUOTE"; action: QuoteOperationAction }
+  | { kind: "DAILY_RETRY"; batch: DailyBatchSummary }
+  | { kind: "QFQ_REFRESH"; dataset: QfqDatasetSummary }
+  | { kind: "BACKFILL_CREATE" }
+  | {
+    kind: "BACKFILL_CONTROL"
+    action: Exclude<BackfillAction, "CREATE">
+    job: BackfillSummary
+  }
+
 function dateTime(value: string | null) {
   if (!value) return "—"
   return new Intl.DateTimeFormat("zh-CN", {
@@ -42,6 +64,15 @@ function dateTime(value: string | null) {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value))
+}
+
+function normalizedSymbols(value: string) {
+  return [...new Set(
+    value
+      .split(/[\s,，]+/)
+      .map((item) => item.trim().toUpperCase())
+      .filter(Boolean),
+  )]
 }
 
 function statusTone(status: string) {
@@ -160,6 +191,16 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
   } | null>(null)
   const [qualityReason, setQualityReason] = useState("")
   const [selectedSource, setSelectedSource] = useState("")
+  const [marketCommand, setMarketCommand] = useState<MarketCommand | null>(null)
+  const [commandReason, setCommandReason] = useState("")
+  const [commandSymbols, setCommandSymbols] = useState("")
+  const [quoteTimeout, setQuoteTimeout] = useState(30)
+  const [backfillScope, setBackfillScope] = useState<
+    "SINGLE" | "SELECTED" | "ALL"
+  >("SINGLE")
+  const [backfillStart, setBackfillStart] = useState("")
+  const [backfillEnd, setBackfillEnd] = useState("")
+  const [backfillConcurrency, setBackfillConcurrency] = useState(4)
 
   const securities = useQuery({
     queryKey: ["market-data", "securities"],
@@ -213,6 +254,68 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
       })
     },
   })
+  const marketMutation = useMutation({
+    mutationFn: async () => {
+      if (!marketCommand) return
+      if (marketCommand.kind === "SECURITY_REFRESH") {
+        return gateway.refreshSecurities(commandReason.trim())
+      }
+      if (marketCommand.kind === "QUOTE") {
+        return gateway.runQuoteOperation({
+          action: marketCommand.action,
+          symbols: normalizedSymbols(commandSymbols),
+          timeoutSeconds: quoteTimeout,
+          reason: commandReason.trim(),
+        })
+      }
+      if (marketCommand.kind === "DAILY_RETRY") {
+        return gateway.retryDailyBatch({
+          batchId: marketCommand.batch.id,
+          reason: commandReason.trim(),
+        })
+      }
+      if (marketCommand.kind === "QFQ_REFRESH") {
+        return gateway.refreshQfq({
+          dataset: marketCommand.dataset,
+          reason: commandReason.trim(),
+        })
+      }
+      if (marketCommand.kind === "BACKFILL_CREATE") {
+        return gateway.createBackfill({
+          scope: backfillScope,
+          symbols: backfillScope === "ALL"
+            ? []
+            : normalizedSymbols(commandSymbols),
+          startDate: backfillStart,
+          endDate: backfillEnd,
+          concurrency: backfillConcurrency,
+          reason: commandReason.trim(),
+        })
+      }
+      return gateway.runBackfillAction({
+        job: marketCommand.job,
+        action: marketCommand.action,
+        reason: commandReason.trim(),
+      })
+    },
+    onSuccess: async () => {
+      const command = marketCommand
+      setMarketCommand(null)
+      if (!command) return
+      const query = command.kind === "SECURITY_REFRESH"
+        ? "securities"
+        : command.kind === "QUOTE"
+          ? "quote-cycles"
+          : command.kind === "DAILY_RETRY"
+            ? "daily-batches"
+            : command.kind === "QFQ_REFRESH"
+              ? "qfq"
+              : "backfills"
+      await queryClient.invalidateQueries({
+        queryKey: ["market-data", query],
+      })
+    },
+  })
 
   function openQualityCommand(
     issue: QualityIssueSummary,
@@ -223,6 +326,31 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
     setSelectedSource(issue.sourceCandidates[0] ?? "")
     qualityMutation.reset()
   }
+
+  function openMarketCommand(command: MarketCommand) {
+    setMarketCommand(command)
+    setCommandReason("")
+    setCommandSymbols("")
+    setQuoteTimeout(30)
+    marketMutation.reset()
+  }
+
+  const commandNeedsSymbols = marketCommand?.kind === "QUOTE"
+    || (
+      marketCommand?.kind === "BACKFILL_CREATE"
+      && backfillScope !== "ALL"
+    )
+  const commandInvalid = !commandReason.trim()
+    || (commandNeedsSymbols && normalizedSymbols(commandSymbols).length === 0)
+    || (
+      marketCommand?.kind === "BACKFILL_CREATE"
+      && backfillScope === "SINGLE"
+      && normalizedSymbols(commandSymbols).length !== 1
+    )
+    || (
+      marketCommand?.kind === "BACKFILL_CREATE"
+      && (!backfillStart || !backfillEnd || backfillStart > backfillEnd)
+    )
 
   return (
     <main className="mx-auto w-full max-w-[1500px] px-4 py-5 sm:px-6">
@@ -242,6 +370,20 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           description="当前股票身份、上市状态和主数据版本"
           icon={DatabaseIcon}
         >
+          {securities.data?.allowedActions.includes("REFRESH") ? (
+            <div className="mb-3 flex justify-end">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => openMarketCommand({
+                  kind: "SECURITY_REFRESH",
+                })}
+              >
+                <RefreshCwIcon data-icon="inline-start" />
+                刷新主数据
+              </Button>
+            </div>
+          ) : null}
           {securities.isPending ? (
             <PageState state="loading" title="正在读取证券主数据" description="正在加载最新主数据版本。" />
           ) : securities.isError ? (
@@ -249,7 +391,8 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : securities.data.items.length === 0 ? (
             <PageState state="empty" title="还没有证券主数据" description="系统尚未形成可展示的证券清单。" />
           ) : (
-            <div className="overflow-x-auto border">
+            <>
+              <div className="overflow-x-auto border">
               <table className="w-full min-w-[620px] text-sm">
                 <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
@@ -281,7 +424,8 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
               <p className="border-t px-3 py-2 text-xs text-muted-foreground">
                 共 {securities.data.pagination.total} 只，当前显示前 {Math.min(8, securities.data.items.length)} 只
               </p>
-            </div>
+              </div>
+            </>
           )}
         </Panel>
 
@@ -290,6 +434,36 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           description="批次屏障状态及逐股有效性诊断"
           icon={ActivityIcon}
         >
+          {quoteCycles.data ? (
+            <div className="mb-3 flex flex-wrap justify-end gap-2">
+              {quoteCycles.data.allowedActions.includes("MANUAL_COLLECT") ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openMarketCommand({
+                    kind: "QUOTE",
+                    action: "MANUAL_COLLECT",
+                  })}
+                >
+                  <PlayIcon data-icon="inline-start" />
+                  手动采集
+                </Button>
+              ) : null}
+              {quoteCycles.data.allowedActions.includes("DIAGNOSE") ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => openMarketCommand({
+                    kind: "QUOTE",
+                    action: "DIAGNOSE",
+                  })}
+                >
+                  <ActivityIcon data-icon="inline-start" />
+                  行情诊断
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
           {quoteCycles.isPending ? (
             <PageState state="loading" title="正在读取实时采集周期" description="正在加载最近批次。" />
           ) : quoteCycles.isError ? (
@@ -366,6 +540,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                     <th className="px-3 py-2 text-right font-medium">抓取</th>
                     <th className="px-3 py-2 text-right font-medium">入库</th>
                     <th className="px-3 py-2 text-right font-medium">缺失 / 失败</th>
+                    <th className="px-3 py-2 text-right font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -376,6 +551,23 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                       <td className="px-3 py-2.5 text-right tabular-nums">{batch.fetchedCount}/{batch.expectedCount}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{batch.committedCount}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{batch.missingCount} / {batch.failedCount}</td>
+                      <td className="px-3 py-2.5 text-right">
+                        {batch.allowedActions.includes("RETRY_MISSING") ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openMarketCommand({
+                              kind: "DAILY_RETRY",
+                              batch,
+                            })}
+                          >
+                            <RotateCcwIcon data-icon="inline-start" />
+                            重试缺失
+                          </Button>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -415,7 +607,23 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : qfq.isError ? (
             <SectionError error={qfq.error} retry={() => void qfq.refetch()} label="前复权数据" />
           ) : (
-            <dl className="grid grid-cols-2 gap-px border bg-border text-sm sm:grid-cols-3">
+            <div>
+              {qfq.data.allowedActions.includes("REFRESH") ? (
+                <div className="mb-3 flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => openMarketCommand({
+                      kind: "QFQ_REFRESH",
+                      dataset: qfq.data,
+                    })}
+                  >
+                    <RefreshCwIcon data-icon="inline-start" />
+                    刷新前复权
+                  </Button>
+                </div>
+              ) : null}
+              <dl className="grid grid-cols-2 gap-px border bg-border text-sm sm:grid-cols-3">
               {[
                 ["股票", qfq.data.symbol],
                 ["数据版本", `v${qfq.data.version}`],
@@ -429,7 +637,8 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                   <dd className="mt-1 break-words font-medium">{value}</dd>
                 </div>
               ))}
-            </dl>
+              </dl>
+            </div>
           )}
         </Panel>
 
@@ -488,6 +697,17 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           description="全市场或指定范围的历史日线补齐进度"
           icon={HistoryIcon}
         >
+          {backfills.data?.allowedActions.includes("CREATE") ? (
+            <div className="mb-3 flex justify-end">
+              <Button
+                size="sm"
+                onClick={() => openMarketCommand({ kind: "BACKFILL_CREATE" })}
+              >
+                <PlayIcon data-icon="inline-start" />
+                新建回填
+              </Button>
+            </div>
+          ) : null}
           {backfills.isPending ? (
             <PageState state="loading" title="正在读取历史回填" description="正在加载任务进度。" />
           ) : backfills.isError ? (
@@ -512,6 +732,38 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                     <p className="mt-1.5 text-xs text-muted-foreground">
                       {job.completed}/{job.total} · 成功 {job.succeeded ?? "—"} · 失败 {job.failed ?? "—"} · 更新于 {dateTime(job.updatedAt)}
                     </p>
+                    {job.allowedActions.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap justify-end gap-2 border-t pt-2">
+                        {job.allowedActions.map((action) => (
+                          <Button
+                            key={action}
+                            size="sm"
+                            variant={action === "CANCEL" ? "ghost" : "outline"}
+                            onClick={() => openMarketCommand({
+                              kind: "BACKFILL_CONTROL",
+                              action,
+                              job,
+                            })}
+                          >
+                            {action === "PAUSE" ? (
+                              <PauseIcon data-icon="inline-start" />
+                            ) : action === "CANCEL" ? (
+                              <XIcon data-icon="inline-start" />
+                            ) : action === "RESUME" ? (
+                              <PlayIcon data-icon="inline-start" />
+                            ) : (
+                              <RotateCcwIcon data-icon="inline-start" />
+                            )}
+                            {{
+                              PAUSE: "暂停",
+                              RESUME: "继续",
+                              CANCEL: "取消",
+                              RETRY_FAILED: "重试失败项",
+                            }[action]}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 )
               })}
@@ -519,6 +771,180 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           )}
         </Panel>
       </div>
+      <Dialog
+        open={marketCommand !== null}
+        onOpenChange={(open) => {
+          if (!open && !marketMutation.isPending) setMarketCommand(null)
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>
+            {marketCommand?.kind === "SECURITY_REFRESH"
+              ? "刷新证券主数据"
+              : marketCommand?.kind === "QUOTE"
+                ? marketCommand.action === "MANUAL_COLLECT"
+                  ? "手动采集实时行情"
+                  : "诊断实时行情"
+                : marketCommand?.kind === "DAILY_RETRY"
+                  ? "重试日线缺失项"
+                  : marketCommand?.kind === "QFQ_REFRESH"
+                    ? "刷新前复权数据"
+                    : marketCommand?.kind === "BACKFILL_CREATE"
+                      ? "新建历史回填"
+                      : marketCommand?.kind === "BACKFILL_CONTROL"
+                        ? {
+                          PAUSE: "暂停历史回填",
+                          RESUME: "继续历史回填",
+                          CANCEL: "取消历史回填",
+                          RETRY_FAILED: "重试失败股票",
+                        }[marketCommand.action]
+                        : ""}
+          </DialogTitle>
+          <DialogDescription>
+            操作将创建后台任务。确认后请在当前区域查看最新状态。
+          </DialogDescription>
+          {marketCommand?.kind === "QUOTE" ? (
+            <>
+              <label className="grid gap-2 text-sm font-medium">
+                股票代码
+                <Input
+                  value={commandSymbols}
+                  placeholder="多个代码用逗号或空格分隔"
+                  onChange={(event) => setCommandSymbols(event.target.value)}
+                />
+              </label>
+              {marketCommand.action === "MANUAL_COLLECT" ? (
+                <label className="grid gap-2 text-sm font-medium">
+                  截止时间（秒）
+                  <Input
+                    type="number"
+                    min={10}
+                    max={60}
+                    value={quoteTimeout}
+                    onChange={(event) => setQuoteTimeout(
+                      Math.min(60, Math.max(10, Number(event.target.value))),
+                    )}
+                  />
+                </label>
+              ) : null}
+            </>
+          ) : null}
+          {marketCommand?.kind === "DAILY_RETRY" ? (
+            <p className="border bg-muted/40 p-3 text-sm">
+              {marketCommand.batch.tradingDate} · 缺失{" "}
+              {marketCommand.batch.missingCount} · 失败{" "}
+              {marketCommand.batch.failedCount}
+            </p>
+          ) : null}
+          {marketCommand?.kind === "QFQ_REFRESH" ? (
+            <p className="border bg-muted/40 p-3 text-sm">
+              {marketCommand.dataset.symbol} ·{" "}
+              {marketCommand.dataset.actualStart} 至{" "}
+              {marketCommand.dataset.actualEnd} · 当前版本 v
+              {marketCommand.dataset.version}
+            </p>
+          ) : null}
+          {marketCommand?.kind === "BACKFILL_CREATE" ? (
+            <>
+              <label className="grid gap-2 text-sm font-medium">
+                回填范围
+                <select
+                  className="h-9 w-full rounded-md border bg-background px-3 text-sm"
+                  value={backfillScope}
+                  onChange={(event) => setBackfillScope(
+                    event.target.value as typeof backfillScope,
+                  )}
+                >
+                  <option value="SINGLE">单只股票</option>
+                  <option value="SELECTED">选择多只股票</option>
+                  <option value="ALL">全部股票</option>
+                </select>
+              </label>
+              {backfillScope !== "ALL" ? (
+                <label className="grid gap-2 text-sm font-medium">
+                  股票代码
+                  <Input
+                    value={commandSymbols}
+                    placeholder={backfillScope === "SINGLE"
+                      ? "例如 600519.SH"
+                      : "多个代码用逗号或空格分隔"}
+                    onChange={(event) => setCommandSymbols(event.target.value)}
+                  />
+                </label>
+              ) : null}
+              <div className="grid grid-cols-2 gap-3">
+                <label className="grid gap-2 text-sm font-medium">
+                  开始日期
+                  <Input
+                    type="date"
+                    value={backfillStart}
+                    onChange={(event) => setBackfillStart(event.target.value)}
+                  />
+                </label>
+                <label className="grid gap-2 text-sm font-medium">
+                  结束日期
+                  <Input
+                    type="date"
+                    value={backfillEnd}
+                    onChange={(event) => setBackfillEnd(event.target.value)}
+                  />
+                </label>
+              </div>
+              <label className="grid gap-2 text-sm font-medium">
+                并发数
+                <Input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={backfillConcurrency}
+                  onChange={(event) => setBackfillConcurrency(
+                    Math.min(8, Math.max(1, Number(event.target.value))),
+                  )}
+                />
+              </label>
+            </>
+          ) : null}
+          {marketCommand?.kind === "BACKFILL_CONTROL" ? (
+            <p className="border bg-muted/40 p-3 text-sm">
+              任务 {marketCommand.job.id} · 当前状态{" "}
+              {statusLabels[marketCommand.job.status] ?? marketCommand.job.status}
+              {" "}· 版本 v{marketCommand.job.version}
+            </p>
+          ) : null}
+          <label className="grid gap-2 text-sm font-medium">
+            操作原因
+            <Input
+              value={commandReason}
+              maxLength={marketCommand?.kind === "QFQ_REFRESH" ? 64 : 500}
+              placeholder="请说明本次操作原因"
+              onChange={(event) => setCommandReason(event.target.value)}
+            />
+          </label>
+          {marketMutation.isError ? (
+            <p role="alert" className="text-sm text-destructive">
+              操作未受理，请刷新当前区域后核对状态。
+              {marketMutation.error instanceof ApiError
+                ? ` 错误码：${marketMutation.error.code}`
+                : ""}
+            </p>
+          ) : null}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              disabled={marketMutation.isPending}
+              onClick={() => setMarketCommand(null)}
+            >
+              取消
+            </Button>
+            <Button
+              disabled={marketMutation.isPending || commandInvalid}
+              onClick={() => marketMutation.mutate()}
+            >
+              {marketMutation.isPending ? "正在提交" : "确认执行"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={qualityCommand !== null}
         onOpenChange={(open) => {

@@ -73,6 +73,7 @@ class DailyBatchRecord(BaseModel):
     started_at: datetime | None
     deadline_at: datetime | None
     completed_at: datetime | None
+    allowed_actions: list[str]
 
 
 class DailyMissingRecord(BaseModel):
@@ -174,7 +175,13 @@ async def list_batches(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
     items, total = await application.list_batches(page=page, page_size=page_size)
-    return _page(items, page=page, page_size=page_size, total=total)
+    return _page(
+        items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        serializer=lambda item: _batch_record(application, item),
+    )
 
 
 @router.get(
@@ -276,10 +283,18 @@ async def list_bars(
     return _page(items, page=page, page_size=page_size, total=total)
 
 
-def _page(items, *, page: int, page_size: int, total: int) -> dict[str, Any]:
+def _page(
+    items,
+    *,
+    page: int,
+    page_size: int,
+    total: int,
+    serializer=None,
+) -> dict[str, Any]:
+    serialize = serializer or _record
     return success_response(
         data={
-            "items": [_record(item) for item in items],
+            "items": [serialize(item) for item in items],
             "pagination": {"page": page, "page_size": page_size, "total": total},
         }
     )
@@ -293,4 +308,12 @@ def _record(item: object) -> dict[str, Any]:
         if isinstance(value, Decimal):
             value = str(value)
         result[name] = value
+    return result
+
+
+def _batch_record(application: DailyDataApplication, item: object) -> dict[str, Any]:
+    result = _record(item)
+    result["allowed_actions"] = [
+        action.value for action in application.allowed_actions(item)
+    ]
     return result

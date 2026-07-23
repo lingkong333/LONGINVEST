@@ -88,6 +88,9 @@ class Admin:
         self.action = action
         return self.job
 
+    async def allowed_actions(self, _job_id):
+        return ("pause", "cancel", "retry-failed-items", "retry")
+
 
 class Audit:
     def __init__(self) -> None:
@@ -216,3 +219,47 @@ async def test_retry_failed_maps_to_job_item_control() -> None:
         ),
     )
     assert admin.action == "retry-failed-items"
+
+
+@pytest.mark.anyio
+async def test_allowed_actions_use_job_state_and_hide_generic_retry() -> None:
+    job = SimpleNamespace(job_type=JOB_TYPE, queue=QUEUE)
+    service = HistoryBackfillService(
+        scope_snapshots=ScopeSnapshots(),
+        jobs=Jobs(),
+        admin=Admin(job),
+        audit=Audit(),
+    )
+
+    actions = await service.allowed_actions(uuid4())
+
+    assert [item.value for item in actions] == [
+        "PAUSE",
+        "CANCEL",
+        "RETRY_FAILED",
+    ]
+
+
+@pytest.mark.anyio
+async def test_allowed_actions_many_reuses_the_same_admin_service() -> None:
+    job = SimpleNamespace(job_type=JOB_TYPE, queue=QUEUE)
+    service = HistoryBackfillService(
+        scope_snapshots=ScopeSnapshots(),
+        jobs=Jobs(),
+        admin=Admin(job),
+        audit=Audit(),
+    )
+    first_id = uuid4()
+    second_id = uuid4()
+
+    actions = await service.allowed_actions_many((first_id, second_id))
+
+    assert set(actions) == {first_id, second_id}
+    assert all(
+        [item.value for item in value] == [
+            "PAUSE",
+            "CANCEL",
+            "RETRY_FAILED",
+        ]
+        for value in actions.values()
+    )

@@ -15,10 +15,32 @@ from long_invest.modules.daily_data.contracts import (
     DailyStageStatus,
     StageDailyBar,
 )
-from long_invest.modules.daily_data.service import DailyDataService
+from long_invest.modules.daily_data.service import (
+    DailyDataService,
+    daily_batch_allowed_actions,
+)
 
 NOW = datetime(2026, 7, 15, 17, tzinfo=UTC)
 DAY = date(2026, 7, 15)
+
+
+@pytest.mark.parametrize("status", ["PARTIAL", "FAILED"])
+def test_daily_retry_requires_terminal_batch_with_real_failures(status: str) -> None:
+    assert [
+        item.value
+        for item in daily_batch_allowed_actions(
+            status, missing_count=1, failed_count=0
+        )
+    ] == ["RETRY_MISSING"]
+    assert daily_batch_allowed_actions(
+        status, missing_count=0, failed_count=0
+    ) == ()
+
+
+def test_daily_retry_is_hidden_while_batch_is_active() -> None:
+    assert daily_batch_allowed_actions(
+        "VALIDATING", missing_count=1, failed_count=1
+    ) == ()
 
 
 def async_test(function):

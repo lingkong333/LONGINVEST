@@ -13,6 +13,7 @@ from long_invest.modules.securities.contracts import (
     Market,
     SecurityAuditContext,
     SecurityIdentity,
+    SecurityMasterAction,
     SecurityMasterSnapshot,
     SecurityType,
     SignalSecuritySnapshot,
@@ -28,10 +29,18 @@ from long_invest.modules.securities.integrations import (
 )
 from long_invest.modules.securities.models import Security
 from long_invest.modules.securities.repository import SecurityRepository
-from long_invest.modules.securities.service import SecurityMasterService
+from long_invest.modules.securities.service import (
+    SecurityMasterService,
+    security_master_allowed_actions,
+)
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import SubmitJob
+from long_invest.platform.jobs.admin import JobAdminService
+from long_invest.platform.jobs.contracts import (
+    TERMINAL_JOB_STATUSES,
+    JobStatus,
+    SubmitJob,
+)
 from long_invest.platform.jobs.service import JobService
 
 
@@ -45,6 +54,7 @@ class SecurityApplication:
         audit_factory: Callable[..., Any] = SecurityAuditAdapter,
         event_factory: Callable[..., Any] = TransactionalSecurityEventAdapter,
         master_service_factory: Callable[..., Any] = SecurityMasterService,
+        job_admin_factory: Callable[..., Any] = JobAdminService,
     ) -> None:
         self._database = database
         self._job_service_factory = job_service_factory
@@ -52,6 +62,7 @@ class SecurityApplication:
         self._audit_factory = audit_factory
         self._event_factory = event_factory
         self._master_service_factory = master_service_factory
+        self._job_admin_factory = job_admin_factory
 
     async def list(
         self, *, page: int, page_size: int
@@ -148,7 +159,15 @@ class SecurityApplication:
         idempotency_key: str,
         request_id: str,
         created_by_user_id: str,
+        reason: str,
     ) -> Any:
+        reason = reason.strip()
+        if not reason or len(reason) > 500:
+            raise AppError(
+                code="SECURITY_REFRESH_REASON_INVALID",
+                message="刷新原因必须为 1 到 500 个字符",
+                status_code=422,
+            )
         command = SubmitJob(
             job_type="SECURITY_MASTER_REFRESH",
             queue="maintenance",
@@ -160,6 +179,7 @@ class SecurityApplication:
                 "idempotency_key": idempotency_key,
                 "request_id": request_id,
                 "created_by_user_id": created_by_user_id,
+                "reason": reason,
             },
             business_object_type="security_master",
             created_by_user_id=created_by_user_id,
@@ -173,6 +193,18 @@ class SecurityApplication:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
+
+    async def allowed_actions(self) -> tuple[SecurityMasterAction, ...]:
+        try:
+            async with self._database.session() as session:
+                active = await _has_active_job(
+                    self._job_admin_factory(session),
+                    job_type="SECURITY_MASTER_REFRESH",
+                    queue="maintenance",
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return security_master_allowed_actions(refresh_in_progress=active)
 
     async def freeze_symbols(self, symbols: tuple[str, ...]):
         try:
@@ -296,3 +328,21 @@ def _backend_unavailable() -> AppError:
         message="股票主数据服务暂时不可用",
         status_code=503,
     )
+
+
+async def _has_active_job(
+    admin: Any, *, job_type: str, queue: str
+) -> bool:
+    for status in JobStatus:
+        if status in TERMINAL_JOB_STATUSES:
+            continue
+        page = await admin.list_jobs(
+            page=1,
+            page_size=1,
+            status=status,
+            job_type=job_type,
+            queue=queue,
+        )
+        if page.total > 0:
+            return True
+    return False

@@ -52,6 +52,7 @@ def test_list_and_search_return_server_pagination() -> None:
     application = Mock()
     application.list = AsyncMock(return_value=([security()], 51))
     application.search = AsyncMock(return_value=([], 0))
+    application.allowed_actions = AsyncMock(return_value=())
     client, _identity = client_for(application)
 
     listed = client.get("/api/v1/securities?page=3&page_size=25")
@@ -105,11 +106,12 @@ def test_refresh_requires_confirmation_and_idempotency_key() -> None:
 
     unconfirmed = client.post(
         "/api/v1/securities/refresh",
-        json={"confirm": False},
+        json={"confirm": False, "reason": "刷新主数据"},
         headers={"Idempotency-Key": "refresh-1"},
     )
     missing_key = client.post(
-        "/api/v1/securities/refresh", json={"confirm": True}
+        "/api/v1/securities/refresh",
+        json={"confirm": True, "reason": "刷新主数据"},
     )
 
     assert unconfirmed.status_code == 422
@@ -129,7 +131,7 @@ def test_refresh_creates_job_for_verified_identity() -> None:
 
     response = client.post(
         "/api/v1/securities/refresh",
-        json={"confirm": True},
+        json={"confirm": True, "reason": "刷新主数据"},
         headers={"Idempotency-Key": "refresh-1"},
     )
 
@@ -138,6 +140,7 @@ def test_refresh_creates_job_for_verified_identity() -> None:
     arguments = application.refresh.await_args.kwargs
     assert arguments["idempotency_key"] == "refresh-1"
     assert arguments["created_by_user_id"] == str(identity.user.id)
+    assert arguments["reason"] == "刷新主数据"
 
 
 def test_database_unavailable_error_is_exposed_as_stable_503() -> None:

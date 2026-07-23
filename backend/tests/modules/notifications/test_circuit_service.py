@@ -9,7 +9,7 @@ from long_invest.modules.notifications.contracts import (
     DeliveryChannel,
     NotificationDeliveryStatus,
 )
-from long_invest.modules.notifications.delivery import CircuitState
+from long_invest.modules.notifications.delivery import CircuitSnapshot, CircuitState
 
 
 class Repository:
@@ -54,6 +54,18 @@ async def test_new_delivery_does_not_create_or_lock_a_missing_circuit() -> None:
     )
 
     assert state.status is NotificationDeliveryStatus.PENDING
+
+
+@pytest.mark.anyio
+async def test_snapshot_defaults_to_closed_without_creating_a_row() -> None:
+    repository = Repository()
+    repository.row = None
+
+    result = await NotificationCircuitService(repository).snapshot(
+        DeliveryChannel.WECOM
+    )
+
+    assert result == CircuitSnapshot.closed()
 
 
 @pytest.mark.anyio

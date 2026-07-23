@@ -30,6 +30,8 @@ describe("策略接口映射", () => {
         strategy_id: "strategy-1",
         draft_version: 3,
         source_code: "def calculate_targets(): pass",
+        metadata: { description: "服务器说明", category: "长波段" },
+        parameter_schema: { type: "object" },
       },
       {
         id: "strategy-1",
@@ -44,6 +46,9 @@ describe("策略接口映射", () => {
       allowedActions: ["validate", "archive"],
       canSave: true,
       canRestoreRevision: true,
+      description: "服务器说明",
+      metadata: { description: "服务器说明", category: "长波段" },
+      parameterSchema: '{\n  "type": "object"\n}',
     })
   })
 

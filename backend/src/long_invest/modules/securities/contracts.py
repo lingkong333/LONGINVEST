@@ -32,6 +32,10 @@ class ListingStatus(StrEnum):
     DATA_MISSING = "DATA_MISSING"
 
 
+class SecurityMasterAction(StrEnum):
+    REFRESH = "REFRESH"
+
+
 _SYMBOL_PATTERN = re.compile(r"^[0-9]{6}\.(SH|SZ|BJ)$")
 
 

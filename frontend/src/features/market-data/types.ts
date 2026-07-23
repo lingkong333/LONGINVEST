@@ -4,6 +4,22 @@ export interface PageInfo {
   total: number
 }
 
+export type SecurityMasterAction = "REFRESH"
+export type QuoteOperationAction = "MANUAL_COLLECT" | "DIAGNOSE"
+export type DailyBatchAction = "RETRY_MISSING"
+export type QfqDatasetAction = "REFRESH"
+export type BackfillAction =
+  | "CREATE"
+  | "PAUSE"
+  | "RESUME"
+  | "CANCEL"
+  | "RETRY_FAILED"
+
+export interface ActionPage<Item, Action extends string>
+  extends PagedResult<Item> {
+  allowedActions: Action[]
+}
+
 export interface SecuritySummary {
   id: string
   symbol: string
@@ -50,6 +66,7 @@ export interface DailyBatchSummary {
   failedCount: number
   createdAt: string
   completedAt: string | null
+  allowedActions: DailyBatchAction[]
 }
 
 export interface QfqDatasetSummary {
@@ -65,6 +82,7 @@ export interface QfqDatasetSummary {
   freshness: string
   staleReason: string | null
   activatedAt: string | null
+  allowedActions: QfqDatasetAction[]
 }
 
 export interface QualityIssueSummary {
@@ -100,6 +118,7 @@ export interface BackfillSummary {
   failed: number | null
   updatedAt: string
   terminalAt: string | null
+  allowedActions: Exclude<BackfillAction, "CREATE">[]
 }
 
 export interface PagedResult<Item> {
@@ -108,12 +127,40 @@ export interface PagedResult<Item> {
 }
 
 export interface MarketDataGateway {
-  loadSecurities(): Promise<PagedResult<SecuritySummary>>
-  loadQuoteCycles(): Promise<PagedResult<QuoteCycleSummary>>
+  loadSecurities(): Promise<ActionPage<SecuritySummary, SecurityMasterAction>>
+  refreshSecurities(reason: string): Promise<void>
+  loadQuoteCycles(): Promise<ActionPage<QuoteCycleSummary, QuoteOperationAction>>
   loadQuoteItems(cycleId: string): Promise<QuoteItemSummary[]>
+  runQuoteOperation(command: {
+    action: QuoteOperationAction
+    symbols: string[]
+    reason: string
+    timeoutSeconds?: number
+  }): Promise<void>
   loadDailyBatches(): Promise<PagedResult<DailyBatchSummary>>
+  retryDailyBatch(command: {
+    batchId: string
+    reason: string
+  }): Promise<void>
   loadQfq(symbol: string): Promise<QfqDatasetSummary>
+  refreshQfq(command: {
+    dataset: QfqDatasetSummary
+    reason: string
+  }): Promise<void>
   loadQualityIssues(): Promise<PagedResult<QualityIssueSummary>>
   runQualityAction(command: QualityIssueCommand): Promise<void>
-  loadBackfills(): Promise<PagedResult<BackfillSummary>>
+  loadBackfills(): Promise<ActionPage<BackfillSummary, BackfillAction>>
+  createBackfill(command: {
+    scope: "SINGLE" | "SELECTED" | "ALL"
+    symbols: string[]
+    startDate: string
+    endDate: string
+    concurrency: number
+    reason: string
+  }): Promise<void>
+  runBackfillAction(command: {
+    job: BackfillSummary
+    action: Exclude<BackfillAction, "CREATE">
+    reason: string
+  }): Promise<void>
 }

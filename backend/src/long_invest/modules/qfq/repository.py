@@ -9,6 +9,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from long_invest.modules.qfq.contracts import QfqRefreshStatus
 from long_invest.modules.qfq.models import (
     QfqDataset,
     QfqDatasetBar,
@@ -104,6 +105,23 @@ class QfqRepository:
                 QfqRefreshRun.request_hash == request_hash,
             )
         )
+
+    async def has_active_refresh(self, security_id: UUID) -> bool:
+        active_statuses = (
+            QfqRefreshStatus.PENDING,
+            QfqRefreshStatus.FETCHING,
+            QfqRefreshStatus.VALIDATING,
+            QfqRefreshStatus.COMMITTING,
+        )
+        count = await self.session.scalar(
+            select(func.count())
+            .select_from(QfqRefreshRun)
+            .where(
+                QfqRefreshRun.security_id == security_id,
+                QfqRefreshRun.status.in_(active_statuses),
+            )
+        )
+        return bool(count)
 
     async def current_dataset(
         self, security_id: UUID, *, for_update: bool = False

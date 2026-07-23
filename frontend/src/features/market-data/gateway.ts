@@ -35,6 +35,7 @@ const securityPageSchema = z.object({
     updated_at: z.string().min(1),
   })),
   pagination: paginationSchema,
+  allowed_actions: z.array(z.literal("REFRESH")).default([]),
 })
 
 const quoteCyclePageSchema = z.object({
@@ -52,6 +53,9 @@ const quoteCyclePageSchema = z.object({
   total: z.number().int().nonnegative(),
   page: z.number().int().positive(),
   page_size: z.number().int().positive(),
+  allowed_actions: z.array(
+    z.enum(["MANUAL_COLLECT", "DIAGNOSE"]),
+  ).default([]),
 })
 
 const quoteItemsSchema = z.object({
@@ -79,6 +83,7 @@ const dailyBatchPageSchema = z.object({
     failed_count: z.number().int().nonnegative(),
     created_at: z.string().min(1),
     completed_at: z.string().nullable(),
+    allowed_actions: z.array(z.literal("RETRY_MISSING")).default([]),
   })),
   pagination: paginationSchema,
 })
@@ -97,6 +102,7 @@ const qfqSchema = z.object({
     freshness: z.string().min(1),
     stale_reason: z.string().nullable(),
     activated_at: z.string().nullable(),
+    allowed_actions: z.array(z.literal("REFRESH")).default([]),
   }),
 })
 
@@ -134,8 +140,14 @@ const backfillPageSchema = z.object({
     version: z.number().int().positive(),
     updated_at: z.string().min(1),
     terminal_at: z.string().nullable(),
+    allowed_actions: z.array(
+      z.enum(["PAUSE", "RESUME", "CANCEL", "RETRY_FAILED"]),
+    ).default([]),
   })),
   pagination: paginationSchema,
+  allowed_actions: z.array(
+    z.enum(["CREATE", "PAUSE", "RESUME", "CANCEL", "RETRY_FAILED"]),
+  ).default([]),
 })
 
 function parse<T>(schema: z.ZodType<T>, value: unknown, code: string): T {
@@ -179,7 +191,17 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
           updatedAt: item.updated_at,
         })),
         pagination: pageInfo(page.pagination),
+        allowedActions: page.allowed_actions,
       }
+    },
+
+    async refreshSecurities(reason) {
+      await api.request(api.client.POST("/api/v1/securities/refresh", {
+        params: {
+          header: { "Idempotency-Key": createClientRequestId() },
+        },
+        body: { confirm: true, reason },
+      }))
     },
 
     async loadQuoteCycles() {
@@ -204,6 +226,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
           pageSize: page.page_size,
           total: page.total,
         },
+        allowedActions: page.allowed_actions,
       }
     },
 
@@ -229,6 +252,30 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
         }))
     },
 
+    async runQuoteOperation(command) {
+      const request = {
+        params: {
+          header: { "Idempotency-Key": createClientRequestId() },
+        },
+        body: {
+          symbols: command.symbols,
+          confirm: true as const,
+          reason: command.reason,
+        },
+      }
+      if (command.action === "MANUAL_COLLECT") {
+        await api.request(api.client.POST("/api/v1/quote-cycles/manual", {
+          ...request,
+          body: {
+            ...request.body,
+            timeout_seconds: command.timeoutSeconds ?? 30,
+          },
+        }))
+        return
+      }
+      await api.request(api.client.POST("/api/v1/quotes/diagnose", request))
+    },
+
     async loadDailyBatches() {
       const value = await api.request<unknown>(
         api.client.GET("/api/v1/daily-data/batches", {
@@ -248,9 +295,26 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
           failedCount: item.failed_count,
           createdAt: item.created_at,
           completedAt: item.completed_at,
+          allowedActions: item.allowed_actions,
         })),
         pagination: pageInfo(page.pagination),
       }
+    },
+
+    async retryDailyBatch(command) {
+      await api.request(api.client.POST(
+        "/api/v1/daily-data/batches/{batch_id}/retry",
+        {
+          params: {
+            path: { batch_id: command.batchId },
+            header: { "Idempotency-Key": createClientRequestId() },
+          },
+          body: {
+            confirm: true,
+            reason: command.reason,
+          },
+        },
+      ))
     },
 
     async loadQfq(symbol) {
@@ -276,7 +340,25 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
         freshness: dataset.freshness,
         staleReason: dataset.stale_reason,
         activatedAt: dataset.activated_at,
+        allowedActions: dataset.allowed_actions,
       } satisfies QfqDatasetSummary
+    },
+
+    async refreshQfq(command) {
+      await api.request(api.client.POST("/api/v1/qfq-data/{symbol}/refresh", {
+        params: {
+          path: { symbol: command.dataset.symbol },
+          header: { "Idempotency-Key": createClientRequestId() },
+        },
+        body: {
+          start: command.dataset.actualStart,
+          end: command.dataset.actualEnd,
+          as_of_date: command.dataset.asOfDate,
+          confirm: true,
+          reason: command.reason,
+          expected_version: command.dataset.version,
+        },
+      }))
     },
 
     async loadQualityIssues() {
@@ -364,9 +446,50 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
           failed: item.result_summary?.data?.failed ?? null,
           updatedAt: item.updated_at,
           terminalAt: item.terminal_at,
+          allowedActions: item.allowed_actions,
         })),
         pagination: pageInfo(page.pagination),
+        allowedActions: page.allowed_actions,
       }
+    },
+
+    async createBackfill(command) {
+      await api.request(api.client.POST("/api/v1/market-history/backfills", {
+        params: {
+          header: { "Idempotency-Key": createClientRequestId() },
+        },
+        body: {
+          scope: command.scope,
+          symbols: command.symbols,
+          start_date: command.startDate,
+          end_date: command.endDate,
+          concurrency: command.concurrency,
+          watchlist_id: null,
+          confirm: true,
+          reason: command.reason,
+        },
+      }))
+    },
+
+    async runBackfillAction(command) {
+      const path = {
+        PAUSE: "/api/v1/market-history/backfills/{job_id}/pause",
+        RESUME: "/api/v1/market-history/backfills/{job_id}/resume",
+        CANCEL: "/api/v1/market-history/backfills/{job_id}/cancel",
+        RETRY_FAILED:
+          "/api/v1/market-history/backfills/{job_id}/retry-failed",
+      } as const
+      await api.request(api.client.POST(path[command.action], {
+        params: {
+          path: { job_id: command.job.id },
+          header: { "Idempotency-Key": createClientRequestId() },
+        },
+        body: {
+          confirm: true,
+          reason: command.reason,
+          expected_version: command.job.version,
+        },
+      }))
     },
   }
 }

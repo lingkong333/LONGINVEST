@@ -109,6 +109,7 @@ def test_batch_and_missing_pages_are_exposed() -> None:
     application = Mock()
     application.list_batches = AsyncMock(return_value=([batch], 1))
     application.list_missing = AsyncMock(return_value=([missing_item], 1))
+    application.allowed_actions = lambda _batch: ()
     client, _ = _client(application)
     batches = client.get("/api/v1/daily-data/batches?page=2&page_size=20")
     missing = client.get(

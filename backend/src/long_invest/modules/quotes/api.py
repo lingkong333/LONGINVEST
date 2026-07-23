@@ -40,6 +40,7 @@ class ManualQuoteRequest(StrictRequest):
     symbols: tuple[str, ...] = Field(min_length=1, max_length=200)
     timeout_seconds: int = Field(default=30, ge=10, le=60)
     confirm: bool
+    reason: str = Field(min_length=1, max_length=500)
 
     @field_validator("symbols")
     @classmethod
@@ -50,6 +51,7 @@ class ManualQuoteRequest(StrictRequest):
 class DiagnoseQuoteRequest(StrictRequest):
     symbols: tuple[str, ...] = Field(min_length=1, max_length=200)
     confirm: bool
+    reason: str = Field(min_length=1, max_length=500)
 
     @field_validator("symbols")
     @classmethod
@@ -80,6 +82,7 @@ class QuoteCyclePageData(BaseModel):
     total: int
     page: int
     page_size: int
+    allowed_actions: list[str]
 
 
 class QuoteItemRecord(BaseModel):
@@ -138,7 +141,13 @@ async def list_cycles(
     result = await application.list_cycles(
         status=status_filter, page=page, page_size=page_size
     )
-    return success_response(data=_json_data(result))
+    actions = await application.allowed_actions()
+    return success_response(
+        data={
+            **_json_data(result),
+            "allowed_actions": [action.value for action in actions],
+        }
+    )
 
 
 @router.get(
@@ -174,6 +183,7 @@ async def submit_manual_cycle(
         idempotency_key=_idempotency_key(idempotency_key),
         request_id=authenticated.audit_context.request_id,
         created_by_user_id=str(authenticated.user.id),
+        reason=body.reason,
     )
     return success_response(data=_job_data(job), code="JOB_ACCEPTED")
 
@@ -197,6 +207,7 @@ async def diagnose_quotes(
         created_by_user_id=str(authenticated.user.id),
         session_id=str(authenticated.session.id),
         trusted_ip=authenticated.audit_context.trusted_ip or "unknown",
+        reason=body.reason,
     )
     return success_response(data=_job_data(job), code="JOB_ACCEPTED")
 

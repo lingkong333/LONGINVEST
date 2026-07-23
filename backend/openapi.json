@@ -12651,12 +12651,20 @@
           },
           "pagination": {
             "$ref": "#/components/schemas/Pagination"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
           "items",
-          "pagination"
+          "pagination",
+          "allowed_actions"
         ],
         "title": "BackfillPageData"
       },
@@ -13006,6 +13014,13 @@
             ],
             "title": "Terminal At"
           },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          },
           "scope_snapshot": {
             "anyOf": [
               {
@@ -13026,7 +13041,8 @@
           "version",
           "created_at",
           "updated_at",
-          "terminal_at"
+          "terminal_at",
+          "allowed_actions"
         ],
         "title": "BackfillView"
       },
@@ -15946,6 +15962,13 @@
               }
             ],
             "title": "Completed At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
@@ -15968,7 +15991,8 @@
           "created_at",
           "started_at",
           "deadline_at",
-          "completed_at"
+          "completed_at",
+          "allowed_actions"
         ],
         "title": "DailyBatchRecord"
       },
@@ -17041,13 +17065,20 @@
           "confirm": {
             "type": "boolean",
             "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "symbols",
-          "confirm"
+          "confirm",
+          "reason"
         ],
         "title": "DiagnoseQuoteRequest"
       },
@@ -17635,13 +17666,20 @@
           "confirm": {
             "type": "boolean",
             "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
           }
         },
         "additionalProperties": false,
         "type": "object",
         "required": [
           "symbols",
-          "confirm"
+          "confirm",
+          "reason"
         ],
         "title": "ManualQuoteRequest"
       },
@@ -18998,6 +19036,13 @@
               }
             ],
             "title": "Superseded At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
@@ -19022,7 +19067,8 @@
           "stale_reason",
           "created_at",
           "activated_at",
-          "superseded_at"
+          "superseded_at",
+          "allowed_actions"
         ],
         "title": "QfqDatasetRecord"
       },
@@ -19606,6 +19652,13 @@
           "page_size": {
             "type": "integer",
             "title": "Page Size"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
@@ -19613,7 +19666,8 @@
           "items",
           "total",
           "page",
-          "page_size"
+          "page_size",
+          "allowed_actions"
         ],
         "title": "QuoteCyclePageData"
       },
@@ -20709,6 +20763,16 @@
             "type": "string",
             "title": "Source Code"
           },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          },
+          "parameter_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameter Schema"
+          },
           "expected_version": {
             "type": "integer",
             "minimum": 1.0,
@@ -20721,6 +20785,8 @@
           "confirm",
           "reason",
           "source_code",
+          "metadata",
+          "parameter_schema",
           "expected_version"
         ],
         "title": "SaveDraftRequest"
@@ -24290,11 +24356,19 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "allowed_actions"
         ],
         "title": "TemplateListData"
       },
@@ -24420,6 +24494,13 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
           }
         },
         "type": "object",
@@ -24428,7 +24509,8 @@
           "version",
           "active",
           "source",
-          "created_at"
+          "created_at",
+          "allowed_actions"
         ],
         "title": "TemplateVersionData"
       },
@@ -24679,16 +24761,6 @@
             "format": "uuid",
             "title": "Backtest Task Id"
           },
-          "metadata": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Metadata"
-          },
-          "parameter_schema": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parameter Schema"
-          },
           "params": {
             "additionalProperties": true,
             "type": "object",
@@ -24701,8 +24773,6 @@
           "confirm",
           "reason",
           "backtest_task_id",
-          "metadata",
-          "parameter_schema",
           "params"
         ],
         "title": "ValidateStrategyRequest"
@@ -25389,6 +25459,18 @@
             "maxLength": 64,
             "minLength": 1,
             "title": "Reason"
+          },
+          "expected_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expected Version"
           }
         },
         "additionalProperties": false,
@@ -25398,7 +25480,8 @@
           "end",
           "as_of_date",
           "confirm",
-          "reason"
+          "reason",
+          "expected_version"
         ],
         "title": "RefreshRequest"
       },
@@ -25407,11 +25490,18 @@
           "confirm": {
             "type": "boolean",
             "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
           }
         },
         "type": "object",
         "required": [
-          "confirm"
+          "confirm",
+          "reason"
         ],
         "title": "RefreshRequest"
       }

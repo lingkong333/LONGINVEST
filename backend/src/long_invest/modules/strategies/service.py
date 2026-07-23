@@ -279,7 +279,12 @@ class StrategyService:
             return StrategyCreated(strategy=existing, draft=draft)
         strategy = Strategy(id=strategy_id, name=name, status="DRAFT")
         draft = StrategyDraft(
-            id=uuid4(), strategy_id=strategy.id, source_code="", draft_version=1
+            id=uuid4(),
+            strategy_id=strategy.id,
+            source_code="",
+            strategy_metadata={},
+            parameter_schema={},
+            draft_version=1,
         )
         await self._repository.create_strategy(strategy, draft)
         await self._record(
@@ -299,6 +304,8 @@ class StrategyService:
         expected_version: int,
         create_revision: bool,
         context: StrategyCommandContext,
+        metadata: dict[str, Any] | None = None,
+        parameter_schema: dict[str, Any] | None = None,
     ) -> StrategyDraft:
         _require_context(context)
         _validate_source(source_code)
@@ -307,6 +314,14 @@ class StrategyService:
         current = await self._repository.get_draft(strategy_id, for_update=True)
         if current is None:
             raise _not_found()
+        metadata = _json_snapshot(
+            current.strategy_metadata if metadata is None else metadata
+        )
+        parameter_schema = _json_snapshot(
+            current.parameter_schema
+            if parameter_schema is None
+            else parameter_schema
+        )
         topic = (
             "strategy.draft_revision_created"
             if create_revision
@@ -318,12 +333,21 @@ class StrategyService:
             after = replay.after_summary or {}
             if (
                 after.get("source_code_hash") != self.hash_source(source_code)
+                or after.get("metadata_hash") != _json_hash(metadata)
+                or after.get("parameter_schema_hash")
+                != _json_hash(parameter_schema)
                 or (replay.before_summary or {}).get("draft_version")
                 != expected_version
                 or bool(after.get("manual_revision")) != create_revision
             ):
                 raise _idempotency_conflict()
-            if self.hash_source(current.source_code) != after.get("source_code_hash"):
+            if (
+                self.hash_source(current.source_code) != after.get("source_code_hash")
+                or _json_hash(current.strategy_metadata)
+                != after.get("metadata_hash")
+                or _json_hash(current.parameter_schema)
+                != after.get("parameter_schema_hash")
+            ):
                 raise _idempotency_conflict()
             return current
         if current.draft_version != expected_version:
@@ -331,10 +355,14 @@ class StrategyService:
         before = {
             "draft_version": current.draft_version,
             "source_code_hash": self.hash_source(current.source_code),
+            "metadata_hash": _json_hash(current.strategy_metadata),
+            "parameter_schema_hash": _json_hash(current.parameter_schema),
         }
         changed = await self._repository.update_draft(
             strategy_id,
             source_code=source_code,
+            metadata=metadata,
+            parameter_schema=parameter_schema,
             expected_version=expected_version,
         )
         if changed is None:
@@ -348,6 +376,8 @@ class StrategyService:
                 draft_id=changed.id,
                 revision_no=await self._repository.next_revision_no(changed.id),
                 source_code=changed.source_code,
+                strategy_metadata=changed.strategy_metadata,
+                parameter_schema=changed.parameter_schema,
             )
             await self._repository.add_revision(revision)
         await self._record(
@@ -358,6 +388,8 @@ class StrategyService:
             after={
                 "draft_version": changed.draft_version,
                 "source_code_hash": self.hash_source(changed.source_code),
+                "metadata_hash": _json_hash(changed.strategy_metadata),
+                "parameter_schema_hash": _json_hash(changed.parameter_schema),
                 "manual_revision": create_revision,
             },
         )
@@ -438,6 +470,8 @@ class StrategyService:
         return await self.save_draft(
             strategy_id,
             source_code=source.source_code,
+            metadata=source.strategy_metadata,
+            parameter_schema=source.parameter_schema,
             expected_version=expected_version,
             create_revision=True,
             context=context,
@@ -466,16 +500,16 @@ class StrategyService:
         strategy_id: UUID,
         *,
         backtest_task_id: UUID,
-        metadata: dict[str, Any],
-        parameter_schema: dict[str, Any],
         params: dict[str, Any],
         environment_version: str,
         runner_image_digest: str,
         context: StrategyCommandContext,
+        metadata: dict[str, Any] | None = None,
+        parameter_schema: dict[str, Any] | None = None,
     ) -> StrategyValidationRun:
         _require_context(context)
-        metadata = _json_snapshot(metadata)
-        parameter_schema = _json_snapshot(parameter_schema)
+        # Kept as ignored compatibility inputs until the HTTP contract is regenerated.
+        del metadata, parameter_schema
         params = _json_snapshot(params)
         _validate_environment(environment_version, runner_image_digest)
         strategy = await self._locked_strategy(strategy_id)
@@ -490,6 +524,8 @@ class StrategyService:
         draft = await self._repository.get_draft(strategy_id, for_update=True)
         if draft is None:
             raise _not_found()
+        metadata = _json_snapshot(draft.strategy_metadata)
+        parameter_schema = _json_snapshot(draft.parameter_schema)
         source_code_hash = self.hash_source(draft.source_code)
         frozen_facts = {
             "schema_version": 1,
@@ -622,6 +658,10 @@ class StrategyService:
         is_current = (
             draft.draft_version == run.draft_version
             and self.hash_source(draft.source_code) == run.source_code_hash
+            and _json_hash(draft.strategy_metadata)
+            == run.evidence_snapshot.get("metadata_hash")
+            and _json_hash(draft.parameter_schema)
+            == run.evidence_snapshot.get("parameter_schema_hash")
         )
         strategy_status = str(strategy.status)
         if is_current:
@@ -690,6 +730,16 @@ class StrategyService:
                 status_code=409,
             )
         release = _validated_release_snapshot(validation.evidence_snapshot)
+        if (
+            _json_hash(draft.strategy_metadata) != release["metadata_hash"]
+            or _json_hash(draft.parameter_schema)
+            != release["parameter_schema_hash"]
+        ):
+            raise AppError(
+                code="STRATEGY_VALIDATION_STALE",
+                message="验证证据未绑定当前草稿元数据或参数结构",
+                status_code=409,
+            )
         snapshot_hash = _json_hash(validation.evidence_snapshot)
         if evidence.evidence_hash != snapshot_hash:
             raise AppError(
@@ -1462,6 +1512,8 @@ def _version_conflict(draft: StrategyDraft) -> AppError:
         details={
             "server_draft_version": draft.draft_version,
             "server_source_code": draft.source_code,
+            "server_metadata": draft.strategy_metadata,
+            "server_parameter_schema": draft.parameter_schema,
         },
     )
 

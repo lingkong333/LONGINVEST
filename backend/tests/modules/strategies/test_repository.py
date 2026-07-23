@@ -24,11 +24,17 @@ def test_list_statement_is_stably_paginated_and_hides_archived_by_default():
 
 def test_draft_update_uses_expected_version_condition():
     statement = StrategyRepository.update_draft_statement(
-        uuid4(), source_code="changed", expected_version=4
+        uuid4(),
+        source_code="changed",
+        metadata={"description": "说明"},
+        parameter_schema={"type": "object"},
+        expected_version=4,
     )
     rendered = sql(statement)
 
     assert "strategy_draft.draft_version =" in rendered
+    assert "metadata=" in rendered
+    assert "parameter_schema=" in rendered
     assert "draft_version=(strategy_draft.draft_version +" in rendered
     assert "returning" in rendered
 

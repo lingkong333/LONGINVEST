@@ -184,7 +184,6 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
   const [testStartDate, setTestStartDate] = useState("")
   const [testEndDate, setTestEndDate] = useState("")
   const [parameterSnapshot, setParameterSnapshot] = useState("{}")
-  const [strategyMetadata, setStrategyMetadata] = useState("{}")
   const [initialCapital, setInitialCapital] = useState("100000")
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -316,8 +315,6 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
           result = await api.validateDraft(strategyId, {
             reason: reason.trim(),
             backtestTaskId: backtestTaskId.trim(),
-            metadata: parseJsonRecord(strategyMetadata),
-            parameterSchema: parseJsonRecord(actionDraft.parameterSchema),
             params: parseJsonRecord(parameterSnapshot),
           })
         } else if (reasonAction === "test") {
@@ -375,7 +372,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
   }
 
   const actionDetailsValid = reasonAction === "validate"
-    ? Boolean(backtestTaskId.trim() && isJsonObject(strategyMetadata) && isJsonObject(parameterSnapshot))
+    ? Boolean(backtestTaskId.trim() && isJsonObject(parameterSnapshot))
     : reasonAction === "test"
       ? Boolean(
         /^[0-9]{6}\.(SH|SZ|BJ)$/.test(testSymbol.trim().toUpperCase())
@@ -454,7 +451,6 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
           <label className="grid gap-2 text-sm font-medium">操作原因<Input value={reason} onChange={(event) => setReason(event.target.value)} /></label>
           {reasonAction === "validate" ? <>
             <label className="grid gap-2 text-sm font-medium">完整单股回测任务号<Input value={backtestTaskId} onChange={(event) => setBacktestTaskId(event.target.value)} /></label>
-            <label className="grid gap-2 text-sm font-medium">策略元数据<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={strategyMetadata} onChange={(event) => setStrategyMetadata(event.target.value)} /></label>
             <label className="grid gap-2 text-sm font-medium">验证参数<textarea className="min-h-24 border border-input p-2 font-mono text-sm" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></label>
           </> : null}
           {reasonAction === "test" ? <div className="grid gap-3 sm:grid-cols-2">

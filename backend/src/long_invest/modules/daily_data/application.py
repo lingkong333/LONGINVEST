@@ -10,10 +10,14 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from long_invest.modules.daily_data.contracts import (
     DailyBarSnapshot,
+    DailyBatchAction,
     DailyRetryAuditContext,
 )
 from long_invest.modules.daily_data.repository import DailyDataRepository
-from long_invest.modules.daily_data.service import DailyDataService
+from long_invest.modules.daily_data.service import (
+    DailyDataService,
+    daily_batch_allowed_actions,
+)
 from long_invest.modules.providers.contracts import validate_symbol
 from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.audit.service import AuditService
@@ -38,6 +42,14 @@ class DailyDataApplication:
         self._repository_factory = repository_factory
         self._domain_service_factory = domain_service_factory
         self._audit_service_factory = audit_service_factory
+
+    @staticmethod
+    def allowed_actions(batch: Any) -> tuple[DailyBatchAction, ...]:
+        return daily_batch_allowed_actions(
+            batch.status,
+            missing_count=batch.missing_count,
+            failed_count=batch.failed_count,
+        )
 
     async def list_batches(self, *, page: int, page_size: int):
         try:

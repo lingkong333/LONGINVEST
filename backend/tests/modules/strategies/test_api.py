@@ -28,6 +28,8 @@ class Application:
                 strategy_id=strategy_id,
                 draft_version=1,
                 source_code="",
+                strategy_metadata={},
+                parameter_schema={},
             ),
         )
 
@@ -200,8 +202,6 @@ def test_validation_passes_the_selected_backtest_task_unchanged():
         headers={"Idempotency-Key": "validate-1"},
         json={
             "backtest_task_id": str(backtest_task_id),
-            "metadata": {"name": "策略"},
-            "parameter_schema": {"type": "object"},
             "params": {"window": 20},
             "confirm": True,
             "reason": "验证",

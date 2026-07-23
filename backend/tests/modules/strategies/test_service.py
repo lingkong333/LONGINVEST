@@ -62,11 +62,21 @@ class FakeRepository:
         self.strategies[strategy.id] = strategy
         self.drafts[strategy.id] = draft
 
-    async def update_draft(self, strategy_id, *, source_code, expected_version):
+    async def update_draft(
+        self,
+        strategy_id,
+        *,
+        source_code,
+        metadata,
+        parameter_schema,
+        expected_version,
+    ):
         draft = self.drafts[strategy_id]
         if draft.draft_version != expected_version:
             return None
         draft.source_code = source_code
+        draft.strategy_metadata = metadata
+        draft.parameter_schema = parameter_schema
         draft.draft_version += 1
         return draft
 
@@ -252,8 +262,8 @@ def succeeded_validation(
     params=None,
 ):
     validation_id = uuid4()
-    metadata = metadata or {"name": "策略"}
-    parameter_schema = parameter_schema or {"type": "object"}
+    metadata = {} if metadata is None else metadata
+    parameter_schema = {} if parameter_schema is None else parameter_schema
     params = params or {}
     source_facts = {
         "source_code_hash": source_code_hash,
@@ -364,6 +374,8 @@ async def test_create_initializes_empty_server_draft_and_records_event():
     result = await subject.create("均线策略", context())
 
     assert result.draft.source_code == ""
+    assert result.draft.strategy_metadata == {}
+    assert result.draft.parameter_schema == {}
     assert result.draft.draft_version == 1
     assert repository.strategies[result.strategy.id].status == "DRAFT"
     assert audit.items[-1].action_code == "strategy.created"
@@ -392,12 +404,16 @@ async def test_autosave_updates_draft_without_creating_revision():
     result = await subject.save_draft(
         created.strategy.id,
         source_code="def calculate_targets(): pass",
+        metadata={"description": "页面说明"},
+        parameter_schema={"type": "object"},
         expected_version=1,
         create_revision=False,
         context=context("save-1"),
     )
 
     assert result.draft_version == 2
+    assert result.strategy_metadata == {"description": "页面说明"}
+    assert result.parameter_schema == {"type": "object"}
     assert repository.revisions == {}
 
 
@@ -432,6 +448,8 @@ async def test_manual_save_creates_immutable_revision():
     draft = await subject.save_draft(
         created.strategy.id,
         source_code="print('v1')",
+        metadata={"description": "第一版"},
+        parameter_schema={"type": "object", "properties": {"window": {}}},
         expected_version=1,
         create_revision=True,
         context=context("save-1"),
@@ -440,6 +458,11 @@ async def test_manual_save_creates_immutable_revision():
     revision = next(iter(repository.revisions.values()))
     assert draft.draft_version == 2
     assert revision.source_code == "print('v1')"
+    assert revision.strategy_metadata == {"description": "第一版"}
+    assert revision.parameter_schema == {
+        "type": "object",
+        "properties": {"window": {}},
+    }
     assert revision.revision_no == 1
 
 
@@ -500,6 +523,12 @@ async def test_save_rejects_stale_expected_version():
 
     assert raised.value.code == "STRATEGY_VERSION_CONFLICT"
     assert raised.value.status_code == 409
+    assert raised.value.details == {
+        "server_draft_version": 2,
+        "server_source_code": "v1",
+        "server_metadata": {},
+        "server_parameter_schema": {},
+    }
 
 
 @async_test
@@ -509,6 +538,8 @@ async def test_restore_copies_revision_into_new_draft_version():
     await subject.save_draft(
         created.strategy.id,
         source_code="first",
+        metadata={"description": "第一版"},
+        parameter_schema={"type": "object"},
         expected_version=1,
         create_revision=True,
         context=context("save-1"),
@@ -517,6 +548,8 @@ async def test_restore_copies_revision_into_new_draft_version():
     await subject.save_draft(
         created.strategy.id,
         source_code="second",
+        metadata={"description": "第二版"},
+        parameter_schema={"type": "string"},
         expected_version=2,
         create_revision=False,
         context=context("save-2"),
@@ -530,6 +563,8 @@ async def test_restore_copies_revision_into_new_draft_version():
     )
 
     assert restored.source_code == "first"
+    assert restored.strategy_metadata == {"description": "第一版"}
+    assert restored.parameter_schema == {"type": "object"}
     assert restored.draft_version == 4
 
 
@@ -590,6 +625,62 @@ async def test_validation_lifecycle_binds_current_draft_and_marks_validated():
     assert repository.strategies[created.strategy.id].status == "VALIDATED"
     assert audit.items[-1].action_code == "strategy.validation_completed"
     assert events.items[-1].topic == "strategy.validation_completed"
+
+
+@async_test
+async def test_validation_uses_saved_metadata_and_schema_not_request_overrides():
+    subject, *_ = service()
+    created = await subject.create("策略", context())
+    await subject.save_draft(
+        created.strategy.id,
+        source_code="source",
+        metadata={"description": "服务器说明"},
+        parameter_schema={"type": "object"},
+        expected_version=1,
+        create_revision=False,
+        context=context("save-1"),
+    )
+
+    run = await subject.request_validation(
+        created.strategy.id,
+        backtest_task_id=uuid4(),
+        metadata={"description": "伪造说明"},
+        parameter_schema={"type": "string"},
+        params={},
+        environment_version="python-3.12",
+        runner_image_digest="sha256:" + "a" * 64,
+        context=context("validate-1"),
+    )
+
+    assert run.evidence_snapshot["metadata"] == {"description": "服务器说明"}
+    assert run.evidence_snapshot["parameter_schema"] == {"type": "object"}
+
+
+@async_test
+async def test_validation_completion_does_not_validate_changed_saved_metadata():
+    subject, repository, *_ = service()
+    created = await subject.create("策略", context())
+    run = await subject.request_validation(
+        created.strategy.id,
+        backtest_task_id=uuid4(),
+        params={},
+        environment_version="python-3.12",
+        runner_image_digest="sha256:" + "a" * 64,
+        context=context("validate-1"),
+    )
+    repository.drafts[created.strategy.id].strategy_metadata = {
+        "description": "并发变化"
+    }
+
+    await subject.complete_validation(
+        run.id,
+        succeeded=True,
+        error_code=None,
+        evidence_snapshot=checks_for_run(run),
+        context=context("validate-complete-1"),
+    )
+
+    assert repository.strategies[created.strategy.id].status == "VALIDATING"
 
 
 @async_test
@@ -901,15 +992,14 @@ async def test_publish_rejects_non_json_or_non_finite_snapshots():
     subject, *_ = service()
     created = await subject.create("策略", context())
     with pytest.raises(AppError) as raised:
-        await subject.request_validation(
+        await subject.save_draft(
             created.strategy.id,
-            backtest_task_id=uuid4(),
             metadata={"bad": float("nan")},
             parameter_schema={"type": "object"},
-            params={},
-            environment_version="python-3.12",
-            runner_image_digest="sha256:" + "a" * 64,
-            context=context("validate-1"),
+            source_code="source",
+            expected_version=1,
+            create_revision=False,
+            context=context("save-1"),
         )
 
     assert raised.value.code == "STRATEGY_INPUT_INVALID"

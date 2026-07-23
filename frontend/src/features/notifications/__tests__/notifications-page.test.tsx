@@ -96,11 +96,15 @@ function gateway(
         smtpHost: null,
         smtpPort: null,
         security: null,
+        username: null,
         sender: null,
         recipients: [],
         version: 2,
         secretConfigured: true,
         secretFingerprint: "sensitive-fingerprint",
+        circuitState: "CLOSED",
+        circuitFailures: 0,
+        circuitRetryAt: null,
         allowedActions: [],
       },
       {
@@ -110,14 +114,19 @@ function gateway(
         smtpHost: "smtp.example.com",
         smtpPort: 465,
         security: "SSL",
+        username: "mailer",
         sender: "sender@example.com",
         recipients: ["secret-recipient@example.com"],
         version: 1,
         secretConfigured: false,
         secretFingerprint: null,
+        circuitState: "OPEN",
+        circuitFailures: 3,
+        circuitRetryAt: "2026-07-23T01:30:00Z",
         allowedActions: [],
       },
     ]),
+    updateChannel: vi.fn().mockResolvedValue(undefined),
     runChannelAction: vi.fn().mockResolvedValue(undefined),
     loadPolicy: vi.fn().mockImplementation(async (scope) => ({
       scope,
@@ -217,6 +226,72 @@ describe("通知中心", () => {
     expect(screen.queryByText("sensitive-fingerprint")).not.toBeInTheDocument()
     expect(screen.queryByText("secret-recipient@example.com"))
       .not.toBeInTheDocument()
+  })
+
+  it("渠道配置按许可保存且提交期间阻止重复提交", async () => {
+    let finish: (() => void) | undefined
+    const updateChannel = vi.fn().mockImplementation(
+      () => new Promise<void>((resolve) => { finish = resolve }),
+    )
+    const notificationApi = gateway({ updateChannel })
+    vi.mocked(notificationApi.loadChannels).mockResolvedValue([
+      {
+        ...(await gateway().loadChannels())[0],
+        allowedActions: ["UPDATE"],
+      },
+    ])
+    renderPage(notificationApi)
+
+    await userEvent.click(screen.getByRole("button", { name: "通知渠道" }))
+    await userEvent.click(
+      await screen.findByRole("button", { name: "编辑配置" }),
+    )
+    const dialog = screen.getByRole("dialog")
+    await userEvent.clear(within(dialog).getByLabelText("连接超时（秒）"))
+    await userEvent.type(within(dialog).getByLabelText("连接超时（秒）"), "8")
+    await userEvent.type(within(dialog).getByLabelText("修改原因"), "调整超时")
+    const submit = within(dialog).getByRole("button", { name: "保存配置" })
+    await userEvent.click(submit)
+    await userEvent.click(submit)
+
+    expect(updateChannel).toHaveBeenCalledTimes(1)
+    expect(updateChannel).toHaveBeenCalledWith(
+      expect.objectContaining({ channel: "WECOM", timeoutSeconds: 8, version: 2 }),
+      "调整超时",
+    )
+    expect(submit).toBeDisabled()
+    finish?.()
+  })
+
+  it("渠道版本冲突后保留用户输入供再次处理", async () => {
+    const updateChannel = vi.fn().mockRejectedValue(
+      new Error("配置已被其他操作更新"),
+    )
+    const notificationApi = gateway({ updateChannel })
+    vi.mocked(notificationApi.loadChannels).mockResolvedValue([
+      {
+        ...(await gateway().loadChannels())[0],
+        allowedActions: ["UPDATE"],
+      },
+    ])
+    renderPage(notificationApi)
+
+    await userEvent.click(screen.getByRole("button", { name: "通知渠道" }))
+    await userEvent.click(
+      await screen.findByRole("button", { name: "编辑配置" }),
+    )
+    const dialog = screen.getByRole("dialog")
+    await userEvent.clear(within(dialog).getByLabelText("连接超时（秒）"))
+    await userEvent.type(within(dialog).getByLabelText("连接超时（秒）"), "9")
+    await userEvent.type(within(dialog).getByLabelText("修改原因"), "调整超时")
+    await userEvent.click(
+      within(dialog).getByRole("button", { name: "保存配置" }),
+    )
+
+    expect(await within(dialog).findByText("配置已被其他操作更新"))
+      .toBeInTheDocument()
+    expect(within(dialog).getByLabelText("连接超时（秒）")).toHaveValue(9)
+    expect(within(dialog).getByLabelText("修改原因")).toHaveValue("调整超时")
   })
 
   it("发送尝试读取失败只影响详情区", async () => {

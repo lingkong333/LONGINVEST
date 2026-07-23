@@ -29,6 +29,9 @@ class FakeApplication:
         self.calls.append(("items", cycle_id, kwargs))
         return []
 
+    async def allowed_actions(self):
+        return ()
+
     async def submit_manual(self, **kwargs):
         self.calls.append(("manual", kwargs))
         return self.job
@@ -95,7 +98,12 @@ def test_read_and_write_routes_use_published_auth_dependencies() -> None:
 
 def test_manual_requires_confirmation_and_idempotency_key() -> None:
     http, application = client()
-    body = {"symbols": ["600000.SH"], "confirm": False, "timeout_seconds": 30}
+    body = {
+        "symbols": ["600000.SH"],
+        "confirm": False,
+        "timeout_seconds": 30,
+        "reason": "手动采集",
+    }
     unconfirmed = http.post(
         "/api/v1/quote-cycles/manual",
         json=body,
@@ -119,7 +127,12 @@ def test_manual_submits_job_without_creating_cycle_or_waiting_for_provider() -> 
     http, application = client()
     response = http.post(
         "/api/v1/quote-cycles/manual",
-        json={"symbols": ["600000.SH"], "confirm": True, "timeout_seconds": 45},
+        json={
+            "symbols": ["600000.SH"],
+            "confirm": True,
+            "timeout_seconds": 45,
+            "reason": "手动采集",
+        },
         headers={"Idempotency-Key": "manual-1"},
     )
     assert response.status_code == 202
@@ -128,19 +141,25 @@ def test_manual_submits_job_without_creating_cycle_or_waiting_for_provider() -> 
     assert call[0] == "manual"
     assert call[1]["symbols"] == ("600000.SH",)
     assert call[1]["idempotency_key"] == "manual-1"
+    assert call[1]["reason"] == "手动采集"
 
 
 def test_diagnostic_submits_separate_job_and_does_not_call_manual() -> None:
     http, application = client()
     response = http.post(
         "/api/v1/quotes/diagnose",
-        json={"symbols": ["600000.SH"], "confirm": True},
+        json={
+            "symbols": ["600000.SH"],
+            "confirm": True,
+            "reason": "诊断行情",
+        },
         headers={"Idempotency-Key": "diagnose-1"},
     )
     assert response.status_code == 202
     assert [call[0] for call in application.calls] == ["diagnostic"]
     assert application.calls[0][1]["session_id"] == "session-1"
     assert application.calls[0][1]["trusted_ip"] == "127.0.0.1"
+    assert application.calls[0][1]["reason"] == "诊断行情"
 
 
 def test_cycle_and_item_queries_forward_stable_pagination() -> None:

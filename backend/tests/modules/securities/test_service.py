@@ -14,8 +14,19 @@ from long_invest.modules.securities.contracts import (
     UniverseQuery,
 )
 from long_invest.modules.securities.models import Security, SecurityMasterVersion
-from long_invest.modules.securities.service import SecurityMasterService
+from long_invest.modules.securities.service import (
+    SecurityMasterService,
+    security_master_allowed_actions,
+)
 from long_invest.platform.errors import AppError
+
+
+def test_master_refresh_is_hidden_while_refresh_is_in_progress() -> None:
+    assert [
+        item.value
+        for item in security_master_allowed_actions(refresh_in_progress=False)
+    ] == ["REFRESH"]
+    assert security_master_allowed_actions(refresh_in_progress=True) == ()
 
 
 def item(

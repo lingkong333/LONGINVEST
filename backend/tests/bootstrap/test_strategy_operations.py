@@ -38,6 +38,8 @@ async def test_stock_test_adapter_preserves_frozen_draft_and_dates() -> None:
         strategy_id=uuid4(),
         draft_version=3,
         source_code="def strategy(): pass",
+        metadata={},
+        parameter_schema={},
     )
     request = StrategyStockTestRequest(
         strategy_id=draft.strategy_id,

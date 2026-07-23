@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 
 from long_invest.modules.daily_data.contracts import (
     CreateDailyBatch,
+    DailyBatchAction,
     DailyBatchStatus,
     DailyBatchSummary,
     DailyMissingReason,
@@ -29,6 +30,21 @@ from long_invest.modules.daily_data.quality import (
 )
 from long_invest.modules.market_data.contracts import OpenQualityIssue, QualitySeverity
 from long_invest.platform.errors import AppError
+
+
+def daily_batch_allowed_actions(
+    status: DailyBatchStatus | str,
+    *,
+    missing_count: int,
+    failed_count: int,
+) -> tuple[DailyBatchAction, ...]:
+    normalized = DailyBatchStatus(str(status))
+    if (
+        normalized in {DailyBatchStatus.PARTIAL, DailyBatchStatus.FAILED}
+        and missing_count + failed_count > 0
+    ):
+        return (DailyBatchAction.RETRY_MISSING,)
+    return ()
 
 
 class DailyEventPort(Protocol):

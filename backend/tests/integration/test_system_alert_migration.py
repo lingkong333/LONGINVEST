@@ -17,7 +17,7 @@ def test_system_alert_migration_is_single_head() -> None:
     config = Config(str(BACKEND / "alembic.ini"))
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260722_0021"]
+    assert scripts.get_heads() == ["20260723_0022"]
     assert scripts.get_revision("20260722_0016").down_revision == "20260722_0015"
 
 

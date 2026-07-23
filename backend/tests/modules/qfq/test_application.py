@@ -47,6 +47,7 @@ class FakeDatabase:
         self.state = {"jobs": [], "runs": [], "audits": []}
         self.job_objects = {}
         self.request_locks = []
+        self.security_locks = []
         self.read_session = FakeSession(self)
         self.write_session = FakeSession(self)
         self.rolled_back = False
@@ -104,6 +105,7 @@ class FakeDailyApplication:
 
 class FakeRepository:
     current = None
+    active_refresh = False
     bars = []
     total = 0
     calls = []
@@ -124,9 +126,15 @@ class FakeRepository:
             None,
         )
 
-    async def current_dataset(self, security_id):
+    async def lock_security(self, security_id):
+        self.session.database.security_locks.append(security_id)
+
+    async def current_dataset(self, security_id, *, for_update=False):
         type(self).calls.append(("current", self.session, security_id))
         return self.current
+
+    async def has_active_refresh(self, _security_id):
+        return self.active_refresh
 
     async def list_current_bars(self, dataset_id, *, start, end, page, page_size):
         type(self).calls.append(
@@ -250,6 +258,7 @@ class FakeDomainService:
 @pytest.fixture(autouse=True)
 def reset_fakes() -> None:
     FakeRepository.current = None
+    FakeRepository.active_refresh = False
     FakeRepository.bars = []
     FakeRepository.total = 0
     FakeRepository.calls = []
@@ -367,6 +376,59 @@ async def test_submit_freezes_inputs_and_audits_atomically() -> None:
     assert audit.action_code == "qfq.refresh_requested"
     assert audit.risk_level == "HIGH"
     assert audit.object_id == str(security.security_id)
+
+
+@pytest.mark.anyio
+async def test_allowed_actions_hide_refresh_while_run_is_active() -> None:
+    security = identity()
+    FakeRepository.current = SimpleNamespace(
+        id=uuid4(),
+        version=4,
+        lifecycle="CURRENT",
+    )
+    app = application(FakeDatabase(), security=security)
+
+    assert [item.value for item in await app.allowed_actions(
+        security.symbol
+    )] == ["REFRESH"]
+
+    FakeRepository.active_refresh = True
+    assert await app.allowed_actions(security.symbol) == ()
+
+
+@pytest.mark.anyio
+async def test_submit_refresh_rejects_stale_dataset_version_under_lock() -> None:
+    database = FakeDatabase()
+    security = identity()
+    FakeRepository.current = SimpleNamespace(
+        id=uuid4(),
+        version=4,
+        lifecycle="CURRENT",
+    )
+    app = application(database, security=security, daily=daily_snapshot(security))
+
+    with pytest.raises(AppError) as conflict:
+        await app.submit_refresh(
+            symbol=security.symbol,
+            start=date(2026, 7, 14),
+            end=TODAY,
+            as_of_date=TODAY,
+            reason="manual refresh",
+            idempotency_key="qfq-stale",
+            request_id="req-qfq-stale",
+            actor_user_id="user-1",
+            session_id="session-1",
+            trusted_ip="127.0.0.1",
+            expected_version=3,
+        )
+
+    assert conflict.value.code == "QFQ_DATASET_VERSION_CONFLICT"
+    assert conflict.value.details == {
+        "expected_version": 3,
+        "current_version": 4,
+    }
+    assert database.state["jobs"] == []
+    assert database.security_locks == [security.security_id]
 
 
 @pytest.mark.anyio
@@ -513,6 +575,7 @@ async def test_concurrent_content_replay_returns_original_job() -> None:
     assert len(database.state["runs"]) == 1
     assert len(database.state["audits"]) == 1
     assert len(database.request_locks) == 2
+    assert len(database.security_locks) == 1
 
 
 @pytest.mark.anyio

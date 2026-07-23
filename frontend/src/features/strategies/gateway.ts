@@ -96,12 +96,14 @@ function runResult(value: unknown, sourceVersion: number): StrategyRunResult {
 function draft(value: unknown, strategyValue: unknown): StrategyDraft {
   const source = record(value)
   const strategy = record(strategyValue)
+  const metadata = record(source.metadata)
   const actionSource = array(source.allowed_actions).length ? source : strategy
   return {
     id: text(source.id),
     strategyId: text(source.strategy_id, text(strategy.id)),
     name: text(source.name, text(strategy.name, "未命名策略")),
-    description: text(source.description),
+    description: text(metadata.description, text(source.description)),
+    metadata,
     sourceCode: text(source.source_code),
     parameterSchema: jsonText(source.parameter_schema),
     version: integer(source.draft_version, integer(source.version, 1)),
@@ -117,10 +119,14 @@ function draft(value: unknown, strategyValue: unknown): StrategyDraft {
 
 function revision(value: unknown): DraftRevision {
   const source = record(value)
+  const metadata = record(source.metadata)
   return {
     id: text(source.id),
     revisionNo: integer(source.revision_no),
+    description: text(metadata.description),
+    metadata,
     sourceCode: text(source.source_code),
+    parameterSchema: jsonText(source.parameter_schema),
     createdAt: text(source.created_at),
   }
 }
@@ -337,12 +343,8 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
     async saveDraft(strategyId, input) {
       try {
         const current = await loadDraft(api, strategyId)
-        if (
-          input.name !== current.name
-          || input.description !== current.description
-          || input.parameterSchema !== current.parameterSchema
-        ) {
-          throw new ApiError("当前服务端只支持保存策略源码，名称、说明或参数结构尚不能保存。", {
+        if (input.name !== current.name) {
+          throw new ApiError("策略名称需要通过重命名操作修改。", {
             code: "STRATEGY_DRAFT_FIELDS_UNSUPPORTED",
           })
         }
@@ -354,6 +356,8 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
             confirm: true,
             reason: "保存策略草稿",
             source_code: input.sourceCode,
+            metadata: { ...current.metadata, description: input.description },
+            parameter_schema: parseJsonObject(input.parameterSchema),
             expected_version: input.expectedVersion,
           },
         }))
@@ -388,7 +392,7 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
         },
         body: {
           confirm: true, reason: input.reason, backtest_task_id: input.backtestTaskId,
-          metadata: input.metadata, parameter_schema: input.parameterSchema, params: input.params,
+          params: input.params,
         },
       }))
       return runResult(value, current.version)
@@ -446,7 +450,7 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
             test_start_date: input.testStartDate, test_end_date: input.testEndDate,
           },
           draft_id: current.id, draft_version: current.version,
-          strategy_metadata: {}, parameter_schema: parseJsonObject(current.parameterSchema),
+          strategy_metadata: current.metadata, parameter_schema: parseJsonObject(current.parameterSchema),
           parameter_snapshot: input.parameterSnapshot ?? {}, initial_capital: input.initialCapital ?? "100000",
           confirm: true, reason: "创建单股样本外回测",
         },

@@ -82,6 +82,15 @@ class NotificationCircuitService:
             )
         return NewDeliveryState(NotificationDeliveryStatus.PENDING, None, None)
 
+    async def snapshot(
+        self,
+        channel: DeliveryChannel,
+        *,
+        instance: str = "primary",
+    ) -> CircuitSnapshot:
+        row = await self._repository.read_channel_circuit(channel, instance)
+        return _snapshot(row) if row is not None else CircuitSnapshot.closed()
+
     async def grant_probe(
         self,
         channel: DeliveryChannel,

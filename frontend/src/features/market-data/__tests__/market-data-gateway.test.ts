@@ -44,6 +44,116 @@ const issue = {
 }
 
 describe("行情数据中心请求边界", () => {
+  it("主数据刷新和行情任务提交人工原因", async () => {
+    const received: unknown[] = []
+    server.use(
+      http.post(
+        "http://localhost/api/v1/securities/refresh",
+        async ({ request }) => {
+          received.push(await request.json())
+          return HttpResponse.json(envelope({
+            job_id: "00000000-0000-4000-8000-000000000010",
+            job_type: "SECURITY_MASTER_REFRESH",
+            status: "PENDING_DISPATCH",
+          }))
+        },
+      ),
+      http.post(
+        "http://localhost/api/v1/quote-cycles/manual",
+        async ({ request }) => {
+          received.push(await request.json())
+          return HttpResponse.json(envelope({
+            job_id: "00000000-0000-4000-8000-000000000011",
+            status: "PENDING_DISPATCH",
+          }))
+        },
+      ),
+      http.post(
+        "http://localhost/api/v1/quotes/diagnose",
+        async ({ request }) => {
+          received.push(await request.json())
+          return HttpResponse.json(envelope({
+            job_id: "00000000-0000-4000-8000-000000000012",
+            status: "PENDING_DISPATCH",
+          }))
+        },
+      ),
+    )
+    const gateway = createMarketDataGateway("http://localhost")
+
+    await gateway.refreshSecurities("核对上市状态")
+    await gateway.runQuoteOperation({
+      action: "MANUAL_COLLECT",
+      symbols: ["600000.SH"],
+      reason: "补采监控股票",
+      timeoutSeconds: 45,
+    })
+    await gateway.runQuoteOperation({
+      action: "DIAGNOSE",
+      symbols: ["600000.SH"],
+      reason: "排查来源差异",
+    })
+
+    expect(received).toEqual([
+      { confirm: true, reason: "核对上市状态" },
+      {
+        confirm: true,
+        reason: "补采监控股票",
+        symbols: ["600000.SH"],
+        timeout_seconds: 45,
+      },
+      {
+        confirm: true,
+        reason: "排查来源差异",
+        symbols: ["600000.SH"],
+      },
+    ])
+  })
+
+  it("前复权刷新提交当前数据集版本", async () => {
+    server.use(
+      http.post(
+        "http://localhost/api/v1/qfq-data/:symbol/refresh",
+        async ({ request, params }) => {
+          expect(params.symbol).toBe("600519.SH")
+          expect(request.headers.get("Idempotency-Key")).toMatch(/^web_/)
+          expect(await request.json()).toEqual({
+            start: "2010-01-01",
+            end: "2026-07-22",
+            as_of_date: "2026-07-22",
+            confirm: true,
+            reason: "刷新公司行为",
+            expected_version: 4,
+          })
+          return HttpResponse.json(envelope({
+            job_id: "00000000-0000-4000-8000-000000000013",
+            job_type: "QFQ_REFRESH",
+            status: "PENDING_DISPATCH",
+          }))
+        },
+      ),
+    )
+
+    await expect(createMarketDataGateway("http://localhost").refreshQfq({
+      dataset: {
+        id: "00000000-0000-4000-8000-000000000014",
+        symbol: "600519.SH",
+        version: 4,
+        actualStart: "2010-01-01",
+        actualEnd: "2026-07-22",
+        asOfDate: "2026-07-22",
+        provider: "eastmoney",
+        rowCount: 4000,
+        lifecycle: "CURRENT",
+        freshness: "FRESH",
+        staleReason: null,
+        activatedAt: "2026-07-22T09:00:00Z",
+        allowedActions: ["REFRESH"],
+      },
+      reason: "刷新公司行为",
+    })).resolves.toBeUndefined()
+  })
+
   it("读取后端提供的质量候选来源和允许操作", async () => {
     server.use(
       http.get("http://localhost/api/v1/data-quality/issues", () => (
@@ -91,6 +201,77 @@ describe("行情数据中心请求边界", () => {
       action: "SELECT_SOURCE",
       reason: "交叉核对",
       selectedSource: "akshare",
+    })).resolves.toBeUndefined()
+  })
+
+  it("日线重试提交确认、原因和独立幂等键", async () => {
+    server.use(
+      http.post(
+        "http://localhost/api/v1/daily-data/batches/:batchId/retry",
+        async ({ request, params }) => {
+          expect(params.batchId).toBe(
+            "00000000-0000-4000-8000-000000000002",
+          )
+          expect(request.headers.get("Idempotency-Key")).toMatch(/^web_/)
+          expect(await request.json()).toEqual({
+            confirm: true,
+            reason: "仅重试缺失股票",
+          })
+          return HttpResponse.json(envelope({
+            job_id: "00000000-0000-4000-8000-000000000003",
+            job_type: "DAILY_DATA_RETRY",
+            status: "PENDING_DISPATCH",
+          }))
+        },
+      ),
+    )
+
+    await expect(createMarketDataGateway("http://localhost").retryDailyBatch({
+      batchId: "00000000-0000-4000-8000-000000000002",
+      reason: "仅重试缺失股票",
+    })).resolves.toBeUndefined()
+  })
+
+  it("历史回填控制提交页面读取到的任务版本", async () => {
+    server.use(
+      http.post(
+        "http://localhost/api/v1/market-history/backfills/:jobId/pause",
+        async ({ request }) => {
+          expect(request.headers.get("Idempotency-Key")).toMatch(/^web_/)
+          expect(await request.json()).toEqual({
+            confirm: true,
+            reason: "释放当日日线资源",
+            expected_version: 7,
+          })
+          return HttpResponse.json(envelope({
+            job_id: "00000000-0000-4000-8000-000000000004",
+            status: "PAUSING",
+            progress: null,
+            result_summary: null,
+            version: 8,
+            created_at: "2026-07-23T03:00:00Z",
+            updated_at: "2026-07-23T03:01:00Z",
+            terminal_at: null,
+          }))
+        },
+      ),
+    )
+
+    await expect(createMarketDataGateway("http://localhost").runBackfillAction({
+      job: {
+        id: "00000000-0000-4000-8000-000000000004",
+        status: "RUNNING",
+        version: 7,
+        completed: 10,
+        total: 100,
+        succeeded: null,
+        failed: null,
+        updatedAt: "2026-07-23T03:00:00Z",
+        terminalAt: null,
+        allowedActions: ["PAUSE"],
+      },
+      action: "PAUSE",
+      reason: "释放当日日线资源",
     })).resolves.toBeUndefined()
   })
 })

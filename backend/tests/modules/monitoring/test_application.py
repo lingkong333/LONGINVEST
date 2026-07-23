@@ -182,6 +182,7 @@ async def test_check_now_submits_one_symbol_formal_quote_job() -> None:
         idempotency_key="check-1",
         request_id="req-1",
         actor_user_id="user-1",
+        reason="立即检查",
     )
 
     assert result is job
@@ -194,6 +195,7 @@ async def test_check_now_submits_one_symbol_formal_quote_job() -> None:
         ),
         request_id="req-1",
         created_by_user_id="user-1",
+        reason="立即检查",
     )
 
 
@@ -216,6 +218,7 @@ async def test_check_now_rejects_paused_subscription_without_submitting() -> Non
             idempotency_key="check-1",
             request_id="req-1",
             actor_user_id="user-1",
+            reason="立即检查",
         )
 
     assert caught.value.code == "MONITOR_SUBSCRIPTION_NOT_ENABLED"
@@ -243,6 +246,7 @@ async def test_diagnostic_allows_paused_subscription_and_isolated_job() -> None:
         actor_user_id="user-1",
         session_id="session-1",
         trusted_ip="127.0.0.1",
+        reason="排查异常",
     )
 
     assert result is job

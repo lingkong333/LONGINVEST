@@ -11,6 +11,7 @@ import {
   ListChecks,
   Mail,
   MessageSquareText,
+  Pencil,
   RefreshCw,
   RotateCcw,
   Save,
@@ -25,6 +26,7 @@ import type {
   NotificationAction,
   NotificationDelivery,
   NotificationGateway,
+  NotificationChannel,
   NotificationPolicy,
   NotificationTemplate,
   PolicyScope,
@@ -342,24 +344,42 @@ type ChannelOperation = {
 function ChannelsView({ gateway, onUnauthorized }: { gateway: NotificationGateway; onUnauthorized: () => void }) {
   const queryClient = useQueryClient()
   const [operation, setOperation] = useState<ChannelOperation | null>(null)
+  const [editing, setEditing] = useState<NotificationChannel | null>(null)
   const [reason, setReason] = useState("")
   const [message, setMessage] = useState("LongInvest 通知渠道连通性测试")
   const query = useQuery({ queryKey: ["notifications", "channels"], queryFn: gateway.loadChannels })
-  const mutation = useMutation({
+  const actionMutation = useMutation({
     mutationFn: () => gateway.runChannelAction({ ...operation!, reason: reason.trim(), message: message.trim() }),
     onSuccess: async () => {
-      close()
+      closeAction()
       await queryClient.invalidateQueries({ queryKey: ["notifications", "channels"] })
     },
   })
-  useUnauthorized(query.error ?? mutation.error, onUnauthorized)
+  const updateMutation = useMutation({
+    mutationFn: () => gateway.updateChannel(editing!, reason.trim()),
+    onSuccess: async () => {
+      closeEdit()
+      await queryClient.invalidateQueries({ queryKey: ["notifications", "channels"] })
+    },
+  })
+  useUnauthorized(
+    query.error ?? actionMutation.error ?? updateMutation.error,
+    onUnauthorized,
+  )
 
-  function close() {
-    if (mutation.isPending) return
+  function closeAction() {
+    if (actionMutation.isPending) return
     setOperation(null)
     setReason("")
     setMessage("LongInvest 通知渠道连通性测试")
-    mutation.reset()
+    actionMutation.reset()
+  }
+
+  function closeEdit() {
+    if (updateMutation.isPending) return
+    setEditing(null)
+    setReason("")
+    updateMutation.reset()
   }
 
   if (query.isPending) return <PageState state="loading" title="正在读取通知渠道" description="正在核对运行参数和密钥配置状态。" />
@@ -379,10 +399,14 @@ function ChannelsView({ gateway, onUnauthorized }: { gateway: NotificationGatewa
               <dl className="mt-5 grid gap-3 text-sm sm:grid-cols-2">
                 <div><dt className="text-muted-foreground">密钥状态</dt><dd className="mt-1">{channel.secretConfigured ? "已配置" : "未配置"}</dd></div>
                 <div><dt className="text-muted-foreground">连接超时</dt><dd className="mt-1">{channel.timeoutSeconds || "—"} 秒</dd></div>
+                <div><dt className="text-muted-foreground">熔断状态</dt><dd className="mt-1">{circuitLabel(channel.circuitState)}</dd></div>
+                <div><dt className="text-muted-foreground">连续失败</dt><dd className="mt-1">{channel.circuitFailures} 次</dd></div>
+                {channel.circuitRetryAt ? <div className="sm:col-span-2"><dt className="text-muted-foreground">可探测时间</dt><dd className="mt-1">{formatTime(channel.circuitRetryAt)}</dd></div> : null}
                 {channel.channel === "EMAIL" ? <><div><dt className="text-muted-foreground">服务器</dt><dd className="mt-1">{channel.smtpHost ? `${channel.smtpHost}:${channel.smtpPort}` : "未配置"}</dd></div><div><dt className="text-muted-foreground">安全方式</dt><dd className="mt-1">{channel.security ?? "—"}</dd></div><div className="sm:col-span-2"><dt className="text-muted-foreground">固定收件人</dt><dd className="mt-1">{channel.recipients.length > 0 ? `${channel.recipients.length} 个已配置地址` : "未配置"}</dd></div></> : null}
               </dl>
               <p className="mt-4 rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">页面只显示是否已配置。密钥、密码和完整目标地址永远不会回显。</p>
               <div className="mt-4 flex flex-wrap gap-2">
+                <Button size="sm" variant="outline" disabled={!hasAction(channel.allowedActions, "UPDATE")} onClick={() => { setReason(""); setEditing({ ...channel }) }}><Pencil />编辑配置</Button>
                 <Button size="sm" variant="outline" disabled={!hasAction(channel.allowedActions, "TEST")} onClick={() => setOperation({ channel: channel.channel, action: "TEST" })}><FlaskConical />发送测试</Button>
                 <Button size="sm" variant="outline" disabled={!hasAction(channel.allowedActions, "PROBE")} onClick={() => setOperation({ channel: channel.channel, action: "PROBE" })}><Cable />连接探测</Button>
                 <Button size="sm" variant="outline" disabled={!hasAction(channel.allowedActions, "RESET_CIRCUIT")} onClick={() => setOperation({ channel: channel.channel, action: "RESET_CIRCUIT" })}><RotateCcw />重置熔断</Button>
@@ -392,14 +416,57 @@ function ChannelsView({ gateway, onUnauthorized }: { gateway: NotificationGatewa
           )
         })}
       </section>
-      <Dialog open={operation !== null} onOpenChange={(open) => { if (!open) close() }}>
+      <Dialog open={operation !== null} onOpenChange={(open) => { if (!open) closeAction() }}>
         <DialogContent>
           <DialogTitle>{operation ? `${channelLabels[operation.channel]} · ${channelActionLabel(operation.action)}` : "渠道操作"}</DialogTitle>
           <DialogDescription>操作会被记录。两个发送渠道相互隔离，不会因本次操作共同重启。</DialogDescription>
           {operation?.action !== "RESET_CIRCUIT" ? <label className="grid gap-2 text-sm font-medium">测试消息<Input value={message} maxLength={1000} onChange={(event) => setMessage(event.target.value)} /></label> : null}
           <label className="grid gap-2 text-sm font-medium">操作原因<Input value={reason} maxLength={500} onChange={(event) => setReason(event.target.value)} /></label>
-          {mutation.isError ? <MutationError error={mutation.error} /> : null}
-          <DialogFooter><Button variant="outline" disabled={mutation.isPending} onClick={close}>取消</Button><Button disabled={!reason.trim() || mutation.isPending || (operation?.action !== "RESET_CIRCUIT" && !message.trim())} onClick={() => mutation.mutate()}>{mutation.isPending ? "正在执行" : "确认执行"}</Button></DialogFooter>
+          {actionMutation.isError ? <MutationError error={actionMutation.error} /> : null}
+          <DialogFooter><Button variant="outline" disabled={actionMutation.isPending} onClick={closeAction}>取消</Button><Button disabled={!reason.trim() || actionMutation.isPending || (operation?.action !== "RESET_CIRCUIT" && !message.trim())} onClick={() => actionMutation.mutate()}>{actionMutation.isPending ? "正在执行" : "确认执行"}</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) closeEdit() }}>
+        <DialogContent>
+          <DialogTitle>{editing ? `${channelLabels[editing.channel]} · 编辑配置` : "编辑渠道配置"}</DialogTitle>
+          <DialogDescription>修改运行参数不会展示或覆盖已经保存的密钥。保存时使用当前配置版本防止互相覆盖。</DialogDescription>
+          {editing ? (
+            <>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <input type="checkbox" checked={editing.enabled} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, enabled: event.target.checked })} />
+                启用此渠道
+              </label>
+              <label className="grid gap-2 text-sm font-medium">
+                连接超时（秒）
+                <Input type="number" min="1" max={editing.channel === "WECOM" ? "15" : "30"} value={editing.timeoutSeconds} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, timeoutSeconds: Number(event.target.value) })} />
+              </label>
+              {editing.channel === "EMAIL" ? (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <label className="grid gap-2 text-sm font-medium sm:col-span-2">
+                    SMTP 服务器
+                    <Input value={editing.smtpHost ?? ""} maxLength={253} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, smtpHost: event.target.value })} />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
+                    SMTP 端口
+                    <Input type="number" min="1" max="65535" value={editing.smtpPort ?? 465} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, smtpPort: Number(event.target.value) })} />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
+                    安全方式
+                    <select className="h-9 rounded-md border bg-background px-3 text-sm" value={editing.security ?? "SSL"} disabled={updateMutation.isPending} onChange={(event) => setEditing({ ...editing, security: event.target.value })}>
+                      <option value="SSL">SSL</option>
+                      <option value="STARTTLS">STARTTLS</option>
+                    </select>
+                  </label>
+                </div>
+              ) : null}
+              <label className="grid gap-2 text-sm font-medium">
+                修改原因
+                <Input value={reason} maxLength={500} disabled={updateMutation.isPending} onChange={(event) => setReason(event.target.value)} />
+              </label>
+            </>
+          ) : null}
+          {updateMutation.isError ? <MutationError error={updateMutation.error} /> : null}
+          <DialogFooter><Button variant="outline" disabled={updateMutation.isPending} onClick={closeEdit}>取消</Button><Button disabled={!editing || !reason.trim() || !validChannelConfiguration(editing) || updateMutation.isPending} onClick={() => updateMutation.mutate()}><Save />{updateMutation.isPending ? "正在保存" : "保存配置"}</Button></DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -558,6 +625,34 @@ function channelActionLabel(action: ChannelOperation["action"]) {
   if (action === "TEST") return "发送测试"
   if (action === "PROBE") return "连接探测"
   return "重置熔断"
+}
+
+function circuitLabel(state: NotificationChannel["circuitState"]) {
+  if (state === "CLOSED") return "正常"
+  if (state === "OPEN") return "已熔断"
+  if (state === "HALF_OPEN") return "探测中"
+  return "已停用"
+}
+
+function validChannelConfiguration(channel: NotificationChannel) {
+  const maxTimeout = channel.channel === "WECOM" ? 15 : 30
+  if (
+    !Number.isFinite(channel.timeoutSeconds)
+    || channel.timeoutSeconds < 1
+    || channel.timeoutSeconds > maxTimeout
+  ) {
+    return false
+  }
+  if (channel.channel === "WECOM") return true
+  return Boolean(
+    channel.smtpHost !== null
+      && channel.smtpHost.length <= 253
+      && channel.smtpPort !== null
+      && Number.isInteger(channel.smtpPort)
+      && channel.smtpPort >= 1
+      && channel.smtpPort <= 65_535
+      && (channel.security === "SSL" || channel.security === "STARTTLS"),
+  )
 }
 
 function useUnauthorized(error: unknown, onUnauthorized: () => void) {

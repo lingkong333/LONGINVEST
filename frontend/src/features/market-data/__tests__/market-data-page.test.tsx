@@ -18,7 +18,8 @@ function page<Item>(items: Item[]) {
 
 function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway {
   return {
-    loadSecurities: vi.fn().mockResolvedValue(page([{
+    loadSecurities: vi.fn().mockResolvedValue({
+      ...page([{
       id: "600519.SH",
       symbol: "600519.SH",
       name: "贵州茅台",
@@ -28,8 +29,12 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       isSuspended: false,
       masterVersion: 12,
       updatedAt: "2026-07-23T02:00:00Z",
-    }])),
-    loadQuoteCycles: vi.fn().mockResolvedValue(page([{
+      }]),
+      allowedActions: ["REFRESH"],
+    }),
+    refreshSecurities: vi.fn().mockResolvedValue(undefined),
+    loadQuoteCycles: vi.fn().mockResolvedValue({
+      ...page([{
       id: "cycle-1",
       status: "PARTIAL",
       expectedCount: 2,
@@ -39,7 +44,9 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       failedCount: 0,
       scheduledAt: "2026-07-23T02:00:00Z",
       finalizedAt: "2026-07-23T02:00:30Z",
-    }])),
+      }]),
+      allowedActions: ["MANUAL_COLLECT", "DIAGNOSE"],
+    }),
     loadQuoteItems: vi.fn().mockResolvedValue([{
       id: "item-1",
       symbol: "600519.SH",
@@ -50,6 +57,7 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       errorCode: null,
       eligibleForEvaluation: true,
     }]),
+    runQuoteOperation: vi.fn().mockResolvedValue(undefined),
     loadDailyBatches: vi.fn().mockResolvedValue(page([{
       id: "batch-1",
       tradingDate: "2026-07-22",
@@ -61,7 +69,9 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       failedCount: 0,
       createdAt: "2026-07-22T09:00:00Z",
       completedAt: "2026-07-22T09:20:00Z",
+      allowedActions: ["RETRY_MISSING"],
     }])),
+    retryDailyBatch: vi.fn().mockResolvedValue(undefined),
     loadQfq: vi.fn().mockResolvedValue({
       id: "qfq-1",
       symbol: "600519.SH",
@@ -75,7 +85,9 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       freshness: "FRESH",
       staleReason: null,
       activatedAt: "2026-07-23T02:00:00Z",
+      allowedActions: ["REFRESH"],
     }),
+    refreshQfq: vi.fn().mockResolvedValue(undefined),
     loadQualityIssues: vi.fn().mockResolvedValue(page([{
       id: "issue-1",
       issueType: "SOURCE_CONFLICT",
@@ -90,7 +102,8 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       allowedActions: ["SELECT_SOURCE", "INVALIDATE", "REFETCH"],
     }])),
     runQualityAction: vi.fn().mockResolvedValue(undefined),
-    loadBackfills: vi.fn().mockResolvedValue(page([{
+    loadBackfills: vi.fn().mockResolvedValue({
+      ...page([{
       id: "backfill-1",
       status: "RUNNING",
       version: 2,
@@ -100,7 +113,12 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       failed: null,
       updatedAt: "2026-07-23T02:00:00Z",
       terminalAt: null,
-    }])),
+      allowedActions: ["PAUSE", "CANCEL"],
+      }]),
+      allowedActions: ["CREATE"],
+    }),
+    createBackfill: vi.fn().mockResolvedValue(undefined),
+    runBackfillAction: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
 }
@@ -188,6 +206,86 @@ describe("行情数据中心", () => {
       action: "SELECT_SOURCE",
       reason: "人工核对来源",
       selectedSource: "akshare",
+    })
+  })
+
+  it("只显示服务端许可的行情写操作", async () => {
+    renderPage(gateway({
+      loadSecurities: vi.fn().mockResolvedValue({
+        ...page([]),
+        allowedActions: [],
+      }),
+      loadQuoteCycles: vi.fn().mockResolvedValue({
+        ...page([]),
+        allowedActions: ["DIAGNOSE"],
+      }),
+      loadDailyBatches: vi.fn().mockResolvedValue(page([])),
+      loadBackfills: vi.fn().mockResolvedValue({
+        ...page([]),
+        allowedActions: [],
+      }),
+    }))
+
+    expect(await screen.findByRole("button", { name: "行情诊断" }))
+      .toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "刷新主数据" }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "手动采集" }))
+      .not.toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "新建回填" }))
+      .not.toBeInTheDocument()
+  })
+
+  it("日线重试提交确认原因且提交期间防止重复操作", async () => {
+    let finish: (() => void) | undefined
+    const retryDailyBatch = vi.fn().mockImplementation(() => (
+      new Promise<void>((resolve) => {
+        finish = resolve
+      })
+    ))
+    renderPage(gateway({ retryDailyBatch }))
+
+    await userEvent.click(await screen.findByRole("button", {
+      name: "重试缺失",
+    }))
+    const dialog = screen.getByRole("dialog")
+    await userEvent.type(
+      within(dialog).getByRole("textbox", { name: "操作原因" }),
+      "补齐真实缺失项",
+    )
+    const confirm = within(dialog).getByRole("button", { name: "确认执行" })
+    await userEvent.click(confirm)
+
+    expect(retryDailyBatch).toHaveBeenCalledTimes(1)
+    expect(retryDailyBatch).toHaveBeenCalledWith({
+      batchId: "batch-1",
+      reason: "补齐真实缺失项",
+    })
+    expect(within(dialog).getByRole("button", { name: "正在提交" }))
+      .toBeDisabled()
+    finish?.()
+  })
+
+  it("历史回填控制携带页面读取到的任务版本", async () => {
+    const runBackfillAction = vi.fn().mockResolvedValue(undefined)
+    const marketGateway = gateway({ runBackfillAction })
+    renderPage(marketGateway)
+
+    await userEvent.click(await screen.findByRole("button", { name: "暂停" }))
+    const dialog = screen.getByRole("dialog")
+    expect(within(dialog).getByText(/版本 v2/)).toBeInTheDocument()
+    await userEvent.type(
+      within(dialog).getByRole("textbox", { name: "操作原因" }),
+      "为日线批次释放资源",
+    )
+    await userEvent.click(within(dialog).getByRole("button", {
+      name: "确认执行",
+    }))
+
+    expect(runBackfillAction).toHaveBeenCalledWith({
+      job: expect.objectContaining({ id: "backfill-1", version: 2 }),
+      action: "PAUSE",
+      reason: "为日线批次释放资源",
     })
   })
 })

@@ -21,6 +21,7 @@ from long_invest.modules.daily_data.application import (
 from long_invest.modules.qfq.contracts import (
     Page,
     QfqBarView,
+    QfqDatasetAction,
     QfqDatasetLifecycle,
     QfqDatasetView,
     QfqDataWindow,
@@ -33,7 +34,10 @@ from long_invest.modules.qfq.contracts import (
 from long_invest.modules.qfq.models import QfqRefreshRun
 from long_invest.modules.qfq.outbox import QfqEventAdapter
 from long_invest.modules.qfq.repository import QfqRepository
-from long_invest.modules.qfq.service import QfqRefreshService
+from long_invest.modules.qfq.service import (
+    QfqRefreshService,
+    qfq_dataset_allowed_actions,
+)
 from long_invest.modules.securities.application import (
     SecurityApplication,
     get_security_application,
@@ -69,6 +73,24 @@ class QfqApplication:
         self._audit_service_factory = audit_service_factory
         self._event_factory = event_factory
         self._domain_service_factory = domain_service_factory
+
+    async def allowed_actions(
+        self, symbol: str
+    ) -> tuple[QfqDatasetAction, ...]:
+        security = await self._call_public(self._security.resolve_identity(symbol))
+        try:
+            async with self._database.session() as session:
+                repository = self._repository_factory(session)
+                dataset = await repository.current_dataset(security.security_id)
+                if dataset is None:
+                    return ()
+                active = await repository.has_active_refresh(security.security_id)
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return qfq_dataset_allowed_actions(
+            dataset.lifecycle,
+            refresh_in_progress=active,
+        )
 
     async def get_data(
         self,
@@ -175,6 +197,7 @@ class QfqApplication:
         actor_user_id: str,
         session_id: str,
         trusted_ip: str,
+        expected_version: int | None = None,
     ) -> Any:
         reason = reason.strip()
         idempotency_key = idempotency_key.strip()
@@ -185,6 +208,13 @@ class QfqApplication:
             or len(idempotency_key) > 160
             or start > end
             or as_of_date != end
+            or (
+                expected_version is not None
+                and (
+                    isinstance(expected_version, bool)
+                    or expected_version < 1
+                )
+            )
         ):
             raise _window_invalid("刷新窗口、目标日或原因无效")
         security = await self._call_public(self._security.resolve_identity(symbol))
@@ -239,6 +269,7 @@ class QfqApplication:
             "daily_source": daily.source,
             "unadjusted_close": _decimal(daily.close),
             "trigger_reason": command.trigger_reason,
+            "expected_version": expected_version,
             "provider": "eastmoney",
         }
         submission = SubmitJob(
@@ -273,6 +304,21 @@ class QfqApplication:
                             details={"refresh_run_id": str(existing_run.id)},
                         )
                     return existing_job
+                await repository.lock_security(security.security_id)
+                current = await repository.current_dataset(
+                    security.security_id, for_update=True
+                )
+                current_version = current.version if current is not None else None
+                if current_version != expected_version:
+                    raise AppError(
+                        code="QFQ_DATASET_VERSION_CONFLICT",
+                        message="前复权数据版本已变化，请刷新页面后重试",
+                        status_code=409,
+                        details={
+                            "expected_version": expected_version,
+                            "current_version": current_version,
+                        },
+                    )
                 job = await jobs.submit(submission)
                 run, _created = await repository.claim_run(
                     QfqRefreshRun(
@@ -312,7 +358,10 @@ class QfqApplication:
                     ),
                     risk_level="HIGH",
                     reason=command.trigger_reason,
-                    before_summary=None,
+                    before_summary={
+                        "dataset_id": str(current.id) if current else None,
+                        "version": current_version,
+                    },
                     after_summary={
                         "job_id": str(job.id),
                         "refresh_run_id": str(run.id),
@@ -321,6 +370,7 @@ class QfqApplication:
                         "as_of_date": command.as_of_date.isoformat(),
                         "calendar_version_id": str(window.version_id),
                         "input_daily_version": command.input_daily_version,
+                        "expected_version": expected_version,
                     },
                     actor_user_id=actor_user_id,
                     session_id=session_id,

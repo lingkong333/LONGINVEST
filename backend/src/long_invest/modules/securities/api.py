@@ -1,7 +1,7 @@
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from long_invest.modules.auth.dependencies import (
     AuthenticatedRequest,
@@ -31,6 +31,7 @@ WriteIdentity = Annotated[
 
 class RefreshRequest(BaseModel):
     confirm: bool
+    reason: str = Field(min_length=1, max_length=500)
 
 
 @router.get("")
@@ -41,7 +42,14 @@ async def list_securities(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
     items, total = await application.list(page=page, page_size=page_size)
-    return _page_response(items, page=page, page_size=page_size, total=total)
+    actions = await application.allowed_actions()
+    return _page_response(
+        items,
+        page=page,
+        page_size=page_size,
+        total=total,
+        allowed_actions=[action.value for action in actions],
+    )
 
 
 @router.get("/search")
@@ -98,6 +106,7 @@ async def refresh_securities(
         idempotency_key=idempotency_key,
         request_id=get_request_id(),
         created_by_user_id=str(identity.user.id),
+        reason=body.reason,
     )
     return success_response(
         data={
@@ -110,12 +119,18 @@ async def refresh_securities(
 
 
 def _page_response(
-    items: list[Security], *, page: int, page_size: int, total: int
+    items: list[Security],
+    *,
+    page: int,
+    page_size: int,
+    total: int,
+    allowed_actions: list[str] | None = None,
 ) -> dict[str, Any]:
     return success_response(
         data={
             "items": [_security_data(item) for item in items],
             "pagination": {"page": page, "page_size": page_size, "total": total},
+            "allowed_actions": allowed_actions or [],
         }
     )
 

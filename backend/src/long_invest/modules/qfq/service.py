@@ -5,6 +5,7 @@ from typing import Protocol
 from uuid import UUID, uuid4
 
 from long_invest.modules.qfq.contracts import (
+    QfqDatasetAction,
     QfqDatasetLifecycle,
     QfqFreshness,
     QfqRefreshStatus,
@@ -16,6 +17,19 @@ from long_invest.modules.qfq.models import (
     QfqRefreshRun,
 )
 from long_invest.platform.errors import AppError
+
+
+def qfq_dataset_allowed_actions(
+    lifecycle: QfqDatasetLifecycle | str,
+    *,
+    refresh_in_progress: bool,
+) -> tuple[QfqDatasetAction, ...]:
+    if (
+        QfqDatasetLifecycle(str(lifecycle)) is QfqDatasetLifecycle.CURRENT
+        and not refresh_in_progress
+    ):
+        return (QfqDatasetAction.REFRESH,)
+    return ()
 
 
 class QfqRepositoryPort(Protocol):

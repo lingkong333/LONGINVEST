@@ -55,6 +55,7 @@ class RefreshRequest(StrictRequest):
     as_of_date: date
     confirm: StrictBool
     reason: Annotated[str, Field(min_length=1, max_length=64)]
+    expected_version: int | None = Field(ge=1)
 
 
 class QfqDatasetRecord(BaseModel):
@@ -79,6 +80,7 @@ class QfqDatasetRecord(BaseModel):
     created_at: datetime
     activated_at: datetime | None
     superseded_at: datetime | None
+    allowed_actions: list[str]
 
 
 class QfqBarRecord(BaseModel):
@@ -128,9 +130,13 @@ async def get_qfq_data(
         page=page,
         page_size=page_size,
     )
+    actions = await application.allowed_actions(symbol)
     return success_response(
         data={
-            "dataset": asdict(dataset),
+            "dataset": {
+                **asdict(dataset),
+                "allowed_actions": [action.value for action in actions],
+            },
             "items": [asdict(item) for item in result.items],
             "pagination": {
                 "page": result.page,
@@ -187,6 +193,7 @@ async def refresh_qfq_data(
         actor_user_id=str(identity.user.id),
         session_id=str(identity.session.id),
         trusted_ip=identity.audit_context.trusted_ip or "unknown",
+        expected_version=body.expected_version,
     )
     return success_response(
         data={

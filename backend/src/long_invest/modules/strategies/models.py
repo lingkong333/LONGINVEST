@@ -108,6 +108,19 @@ class StrategyDraft(Base):
         PG_UUID(as_uuid=True), ForeignKey("strategy.id"), nullable=False
     )
     source_code: Mapped[str] = mapped_column(String, nullable=False)
+    strategy_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    parameter_schema: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
     draft_version: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
@@ -129,6 +142,19 @@ class StrategyDraftRevision(Base):
     )
     revision_no: Mapped[int] = mapped_column(Integer, nullable=False)
     source_code: Mapped[str] = mapped_column(String, nullable=False)
+    strategy_metadata: Mapped[dict[str, Any]] = mapped_column(
+        "metadata",
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    parameter_schema: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
 
 
 class StrategyValidationRun(Base):

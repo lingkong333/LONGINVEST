@@ -153,12 +153,14 @@ class BackfillView(BaseModel):
     created_at: datetime
     updated_at: datetime
     terminal_at: datetime | None
+    allowed_actions: list[str]
     scope_snapshot: BackfillScopeSnapshot | None = None
 
 
 class BackfillPageData(BaseModel):
     items: list[BackfillView]
     pagination: Pagination
+    allowed_actions: list[str]
 
 
 class BackfillPageResponse(SuccessEnvelope):
@@ -196,8 +198,9 @@ async def create_backfill(
         ),
         owner_user_id=identity.user.id,
     )
+    actions = await application.allowed_actions(job.id)
     return success_response(
-        data=_job(job, detail=True),
+        data=_job(job, detail=True, allowed_actions=actions),
         code="HISTORY_BACKFILL_ACCEPTED",
         message="历史回填任务已受理",
     )
@@ -211,14 +214,21 @@ async def list_backfills(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, object]:
     result = await application.list(page=page, page_size=page_size)
+    actions_by_id = await application.allowed_actions_many(
+        tuple(item.id for item in result.items)
+    )
     return success_response(
         data={
-            "items": [_job(item) for item in result.items],
+            "items": [
+                _job(item, allowed_actions=actions_by_id[item.id])
+                for item in result.items
+            ],
             "pagination": {
                 "page": result.page,
                 "page_size": result.page_size,
                 "total": result.total,
             },
+            "allowed_actions": ["CREATE"],
         }
     )
 
@@ -229,7 +239,11 @@ async def get_backfill(
     application: Application,
     _identity: ReadIdentity,
 ) -> dict[str, object]:
-    return success_response(data=_job(await application.get(job_id), detail=True))
+    job = await application.get(job_id)
+    actions = await application.allowed_actions(job_id)
+    return success_response(
+        data=_job(job, detail=True, allowed_actions=actions)
+    )
 
 
 def _command_route(action: str):
@@ -261,8 +275,9 @@ def _command_route(action: str):
                 trusted_ip=getattr(audit, "trusted_ip", None),
             ),
         )
+        actions = await application.allowed_actions(job.id)
         return success_response(
-            data=_job(job),
+            data=_job(job, allowed_actions=actions),
             code="HISTORY_BACKFILL_CONTROL_ACCEPTED",
             message="历史回填控制请求已受理",
         )
@@ -281,7 +296,12 @@ for _action in ("pause", "resume", "cancel", "retry-failed"):
     )
 
 
-def _job(job: Any, *, detail: bool = False) -> dict[str, object]:
+def _job(
+    job: Any,
+    *,
+    detail: bool = False,
+    allowed_actions=(),
+) -> dict[str, object]:
     progress = job.progress or None
     if progress is not None and not {"completed", "total"}.issubset(progress):
         progress = None
@@ -294,6 +314,10 @@ def _job(job: Any, *, detail: bool = False) -> dict[str, object]:
         "created_at": job.created_at,
         "updated_at": job.updated_at,
         "terminal_at": job.terminal_at,
+        "allowed_actions": [
+            action.value if hasattr(action, "value") else str(action)
+            for action in allowed_actions
+        ],
     }
     if detail:
         result["scope_snapshot"] = job.config_snapshot

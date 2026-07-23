@@ -20,6 +20,7 @@ function createApi(overrides: Partial<StrategyApi> = {}): StrategyApi {
       strategyId: "strategy-1",
       name: "长期策略",
       description: "说明",
+      metadata: { description: "说明" },
       sourceCode: "pass",
       parameterSchema: "{}",
       version: 1,

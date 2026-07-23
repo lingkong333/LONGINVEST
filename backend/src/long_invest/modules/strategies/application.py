@@ -197,20 +197,18 @@ class StrategyApplication:
         if request.draft_id is None or request.draft_version is None:
             return False
         draft = await self.get_draft(request.strategy_id)
-        if (
-            draft.id != request.draft_id
-            or draft.draft_version != request.draft_version
-            or draft.source_code != request.source_code
-            or hash_source_code(draft.source_code) != request.source_code_hash
-            or request.environment_version != self._environment_version
-            or request.runner_image_digest != self._runner_image_digest
-        ):
-            return False
-        analysis = analyze_strategy_source(draft.source_code)
-        return thaw_json_value(request.metadata) == thaw_json_value(
-            analysis.metadata
-        ) and thaw_json_value(request.parameter_schema) == thaw_json_value(
-            analysis.parameter_schema
+        return all(
+            (
+                draft.id == request.draft_id,
+                draft.draft_version == request.draft_version,
+                draft.source_code == request.source_code,
+                hash_source_code(draft.source_code) == request.source_code_hash,
+                thaw_json_value(request.metadata) == draft.strategy_metadata,
+                thaw_json_value(request.parameter_schema)
+                == draft.parameter_schema,
+                request.environment_version == self._environment_version,
+                request.runner_image_digest == self._runner_image_digest,
+            )
         )
 
     async def diff(self, strategy_id: UUID, *, revision_id: UUID):
@@ -228,7 +226,7 @@ class StrategyApplication:
         stock_tests = self._required_operation_port(self._stock_tests)
         draft = await self.get_draft(request.strategy_id)
         try:
-            analysis = analyze_strategy_source(draft.source_code)
+            analyze_strategy_source(draft.source_code)
         except ValueError as exc:
             raise AppError(
                 code=str(getattr(exc, "code", "STRATEGY_INPUT_INVALID")),
@@ -246,9 +244,11 @@ class StrategyApplication:
                 strategy_id=draft.strategy_id,
                 draft_version=draft.draft_version,
                 source_code=draft.source_code,
+                metadata=draft.strategy_metadata,
+                parameter_schema=draft.parameter_schema,
             ),
-            metadata=analysis.metadata,
-            parameter_schema=analysis.parameter_schema,
+            metadata=draft.strategy_metadata,
+            parameter_schema=draft.parameter_schema,
             request=request,
             idempotency_key=idempotency_key,
             request_id=request_id,
@@ -447,12 +447,16 @@ class StrategyApplication:
         source_code: str,
         expected_version: int,
         create_revision: bool,
+        metadata: dict[str, Any] | None = None,
+        parameter_schema: dict[str, Any] | None = None,
         **context: str,
     ):
         return await self._write(
             "save_draft",
             strategy_id,
             source_code=source_code,
+            metadata=metadata,
+            parameter_schema=parameter_schema,
             expected_version=expected_version,
             create_revision=create_revision,
             context=self._context(context),
@@ -498,8 +502,6 @@ class StrategyApplication:
         strategy_id: UUID,
         *,
         backtest_task_id: UUID,
-        metadata: dict[str, Any],
-        parameter_schema: dict[str, Any],
         params: dict[str, Any],
         **context: str,
     ):
@@ -507,8 +509,6 @@ class StrategyApplication:
             "request_validation",
             strategy_id,
             backtest_task_id=backtest_task_id,
-            metadata=metadata,
-            parameter_schema=parameter_schema,
             params=params,
             environment_version=self._environment_version,
             runner_image_digest=self._runner_image_digest,

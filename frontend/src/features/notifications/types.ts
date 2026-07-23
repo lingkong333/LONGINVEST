@@ -10,6 +10,7 @@ export type NotificationAction =
 
 export type DeliveryChannel = "WECOM" | "EMAIL"
 export type PolicyScope = "global" | "signals" | "system-alerts"
+export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN" | "DISABLED"
 
 export interface PageResult<T> {
   items: T[]
@@ -72,11 +73,15 @@ export interface NotificationChannel {
   smtpHost: string | null
   smtpPort: number | null
   security: string | null
+  username: string | null
   sender: string | null
   recipients: string[]
   version: number
   secretConfigured: boolean
   secretFingerprint: string | null
+  circuitState: CircuitState
+  circuitFailures: number
+  circuitRetryAt: string | null
   allowedActions: NotificationAction[]
 }
 
@@ -118,6 +123,7 @@ export interface NotificationGateway {
   }): Promise<void>
   cancelDelivery(deliveryId: string, reason: string): Promise<void>
   loadChannels(): Promise<NotificationChannel[]>
+  updateChannel(channel: NotificationChannel, reason: string): Promise<void>
   runChannelAction(input: {
     channel: DeliveryChannel
     action: "TEST" | "PROBE" | "RESET_CIRCUIT"

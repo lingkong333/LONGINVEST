@@ -20,6 +20,7 @@ const draft: StrategyDraft = {
   strategyId: "strategy-1",
   name: "长期策略",
   description: "月度趋势策略",
+  metadata: { description: "月度趋势策略" },
   sourceCode: "def calculate_targets(history, params, context):\n    return [1, 2, 3, 4]",
   parameterSchema: '{"type":"object","properties":{}}',
   version: 4,
@@ -318,8 +319,6 @@ describe("策略工作台", () => {
       expect(api.validateDraft).toHaveBeenCalledWith("strategy-1", {
         reason: "例行检查",
         backtestTaskId: "backtest-1",
-        metadata: {},
-        parameterSchema: { type: "object", properties: {} },
         params: {},
       })
     } else if (method === "testDraft") {

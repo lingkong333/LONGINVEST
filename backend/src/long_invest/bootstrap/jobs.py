@@ -251,6 +251,7 @@ async def security_master_refresh(context: JobExecutionContext) -> JobResult:
         "idempotency_key",
         "request_id",
         "created_by_user_id",
+        "reason",
     )
     if any(not str(config.get(field, "")).strip() for field in required):
         return JobResult.failure(
@@ -296,7 +297,7 @@ async def security_master_refresh(context: JobExecutionContext) -> JobResult:
             actor_user_id=str(config["created_by_user_id"]),
             session_id="maintenance-worker",
             trusted_ip="internal-worker",
-            reason="scheduled security master refresh",
+            reason=str(config["reason"]),
         ),
     )
     return JobResult.success_result(

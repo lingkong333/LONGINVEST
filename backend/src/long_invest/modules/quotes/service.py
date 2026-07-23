@@ -13,6 +13,7 @@ from long_invest.modules.quotes.contracts import (
     QuoteCycleSummary,
     QuoteItemStatus,
     QuoteItemView,
+    QuoteOperationAction,
     QuoteSubmission,
 )
 from long_invest.modules.quotes.models import QuoteCycle, QuoteCycleItem
@@ -28,6 +29,21 @@ TERMINAL_CYCLES = frozenset(
         QuoteCycleStatus.CANCELED,
     }
 )
+
+
+def quote_operation_allowed_actions(
+    *,
+    manual_collection_in_progress: bool,
+    diagnosis_in_progress: bool,
+) -> tuple[QuoteOperationAction, ...]:
+    actions: list[QuoteOperationAction] = []
+    if not manual_collection_in_progress:
+        actions.append(QuoteOperationAction.MANUAL_COLLECT)
+    if not diagnosis_in_progress:
+        actions.append(QuoteOperationAction.DIAGNOSE)
+    return tuple(actions)
+
+
 MISSED_CLAIM_WINDOW_SECONDS = 60
 
 

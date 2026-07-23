@@ -2,6 +2,7 @@ import { z } from "zod"
 
 import type {
   NotificationAction,
+  NotificationChannel,
   NotificationGateway,
   NotificationPolicy,
   PolicyScope,
@@ -101,10 +102,18 @@ const secretSchema = z.object({
   fingerprint: z.string().nullable().optional(),
 })
 
+const circuitSchema = z.object({
+  channel: channelSchema,
+  state: z.enum(["CLOSED", "OPEN", "HALF_OPEN", "DISABLED"]),
+  consecutive_failures: z.number().int().nonnegative(),
+  cooldown_level: z.number().int().min(0).max(2),
+  retry_at: z.string().nullable(),
+})
+
 const channelsSchema = z.object({
   channels: z.array(settingSchema),
   secrets: z.array(secretSchema),
-  allowed_actions: actionsSchema,
+  circuits: z.array(circuitSchema).optional().default([]),
 })
 
 const policySchema = settingSchema
@@ -178,6 +187,25 @@ function policyValue(policy: NotificationPolicy) {
     critical: policy.critical,
     recovered: policy.recovered,
     daily_unresolved: policy.dailyUnresolved,
+  }
+}
+
+function channelValue(channel: NotificationChannel) {
+  if (channel.channel === "WECOM") {
+    return {
+      enabled: channel.enabled,
+      timeout_seconds: channel.timeoutSeconds,
+    }
+  }
+  return {
+    enabled: channel.enabled,
+    smtp_host: channel.smtpHost ?? "",
+    smtp_port: channel.smtpPort ?? 465,
+    security: channel.security ?? "SSL",
+    username: channel.username ?? "",
+    sender: channel.sender ?? "",
+    recipients: channel.recipients,
+    timeout_seconds: channel.timeoutSeconds,
   }
 }
 
@@ -319,6 +347,9 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         "INVALID_NOTIFICATION_CHANNELS",
       )
       const secretByKey = new Map(value.secrets.map((item) => [item.key, item]))
+      const circuitByChannel = new Map(
+        value.circuits.map((item) => [item.channel, item]),
+      )
       return (["WECOM", "EMAIL"] as const).map((channel) => {
         const key = channel === "WECOM"
           ? "notification.channel.wecom"
@@ -329,6 +360,7 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
         const setting = value.channels.find((item) => item.key === key)
         const config = setting?.value ?? {}
         const secret = secretByKey.get(secretKey)
+        const circuit = circuitByChannel.get(channel)
         return {
           channel,
           enabled: config.enabled === true,
@@ -338,17 +370,36 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
           smtpHost: typeof config.smtp_host === "string" ? config.smtp_host : null,
           smtpPort: typeof config.smtp_port === "number" ? config.smtp_port : null,
           security: typeof config.security === "string" ? config.security : null,
+          username: typeof config.username === "string" ? config.username : null,
           sender: typeof config.sender === "string" ? config.sender : null,
           recipients: z.array(z.string()).catch([]).parse(config.recipients),
           version: setting?.version ?? 0,
           secretConfigured: secret?.configured ?? false,
           secretFingerprint: secret?.fingerprint ?? null,
-          allowedActions: actionsOf(
-            setting?.allowed_actions ?? [],
-            value.allowed_actions,
-          ),
+          circuitState: circuit?.state ?? "CLOSED",
+          circuitFailures: circuit?.consecutive_failures ?? 0,
+          circuitRetryAt: circuit?.retry_at ?? null,
+          allowedActions: setting?.allowed_actions ?? [],
         }
       })
+    },
+
+    async updateChannel(channel, reason) {
+      await api.request(api.client.PATCH(
+        "/api/v1/notifications/channels/{channel}",
+        {
+          params: {
+            path: { channel: channel.channel },
+            header: { "Idempotency-Key": createClientRequestId() },
+          },
+          body: {
+            value: channelValue(channel),
+            expected_version: channel.version,
+            reason,
+            confirm: true,
+          },
+        },
+      ))
     },
 
     async runChannelAction(input) {

@@ -26,6 +26,14 @@ class HistoryBackfillControl(StrEnum):
     CANCEL_REQUESTED = "CANCEL_REQUESTED"
 
 
+class HistoryBackfillAction(StrEnum):
+    CREATE = "CREATE"
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+    CANCEL = "CANCEL"
+    RETRY_FAILED = "RETRY_FAILED"
+
+
 @dataclass(frozen=True, slots=True)
 class CreateHistoryBackfill:
     scope: HistoryBackfillScope

@@ -53,6 +53,8 @@ class RenameStrategyRequest(CreateStrategyRequest):
 
 class SaveDraftRequest(ConfirmedRequest):
     source_code: str
+    metadata: dict[str, Any]
+    parameter_schema: dict[str, Any]
     expected_version: int = Field(ge=1)
 
 
@@ -71,8 +73,6 @@ class PublishStrategyRequest(ConfirmedRequest):
 
 class ValidateStrategyRequest(ConfirmedRequest):
     backtest_task_id: UUID
-    metadata: dict[str, Any]
-    parameter_schema: dict[str, Any]
     params: dict[str, Any]
 
 
@@ -257,6 +257,8 @@ async def save_draft(
     row = await application.save_draft(
         strategy_id,
         source_code=body.source_code,
+        metadata=body.metadata,
+        parameter_schema=body.parameter_schema,
         expected_version=body.expected_version,
         create_revision=False,
         **_context(identity, key, body.reason),
@@ -276,6 +278,8 @@ async def create_draft_revision(
     row = await application.save_draft(
         strategy_id,
         source_code=body.source_code,
+        metadata=body.metadata,
+        parameter_schema=body.parameter_schema,
         expected_version=body.expected_version,
         create_revision=True,
         **_context(identity, key, body.reason),
@@ -376,8 +380,6 @@ async def validate_strategy(
     row = await application.request_validation(
         strategy_id,
         backtest_task_id=body.backtest_task_id,
-        metadata=body.metadata,
-        parameter_schema=body.parameter_schema,
         params=body.params,
         **_context(identity, key, body.reason),
     )
@@ -556,6 +558,8 @@ def _draft(row: Any) -> dict[str, Any]:
         "strategy_id": str(row.strategy_id),
         "draft_version": row.draft_version,
         "source_code": row.source_code,
+        "metadata": row.strategy_metadata,
+        "parameter_schema": row.parameter_schema,
     }
 
 
@@ -565,6 +569,8 @@ def _revision(row: Any) -> dict[str, Any]:
         "draft_id": str(row.draft_id),
         "revision_no": row.revision_no,
         "source_code": row.source_code,
+        "metadata": row.strategy_metadata,
+        "parameter_schema": row.parameter_schema,
     }
 
 

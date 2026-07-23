@@ -19,6 +19,10 @@ class QfqFreshness(StrEnum):
     STALE = "STALE"
 
 
+class QfqDatasetAction(StrEnum):
+    REFRESH = "REFRESH"
+
+
 class QfqRefreshStatus(StrEnum):
     PENDING = "PENDING"
     FETCHING = "FETCHING"

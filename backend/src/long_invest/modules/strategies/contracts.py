@@ -260,6 +260,17 @@ class StrategyDraftView(StrictContract):
     strategy_id: UUID
     draft_version: int = Field(ge=1)
     source_code: str
+    metadata: Mapping[str, Any]
+    parameter_schema: Mapping[str, Any]
+
+    @field_validator("metadata", "parameter_schema")
+    @classmethod
+    def freeze_draft_mapping(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return freeze_json_mapping(value)
+
+    @field_serializer("metadata", "parameter_schema")
+    def serialize_draft_mapping(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return thaw_json_value(value)
 
 
 class StrategyDraftRevisionView(StrategyDraftView):

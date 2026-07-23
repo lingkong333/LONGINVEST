@@ -14,6 +14,7 @@ from long_invest.modules.notifications.admin import (
 )
 from long_invest.modules.notifications.circuit import NotificationCircuitService
 from long_invest.modules.notifications.contracts import DeliveryChannel
+from long_invest.modules.notifications.delivery import CircuitSnapshot
 from long_invest.modules.notifications.models import NotificationDelivery
 from long_invest.modules.notifications.repository import NotificationRepository
 from long_invest.modules.notifications.runtime import NotificationDeliveryRuntime
@@ -154,6 +155,16 @@ class NotificationAdminApplication:
                 }
                 for row in rows
             )
+
+    async def channel_circuit_snapshots(
+        self,
+    ) -> dict[DeliveryChannel, CircuitSnapshot]:
+        async with self._database.session() as session:
+            service = NotificationCircuitService(NotificationRepository(session))
+            return {
+                channel: await service.snapshot(channel)
+                for channel in DeliveryChannel
+            }
 
     async def activate_template(
         self,

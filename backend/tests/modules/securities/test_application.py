@@ -18,6 +18,7 @@ from long_invest.modules.securities.contracts import (
     SecurityType,
 )
 from long_invest.platform.errors import AppError
+from long_invest.platform.jobs.contracts import JobStatus
 
 
 class FakeDatabase:
@@ -208,6 +209,7 @@ async def test_refresh_submits_public_job_in_database_transaction() -> None:
         idempotency_key="refresh-key",
         request_id="request-1",
         created_by_user_id="user-1",
+        reason="人工刷新证券主数据",
     )
 
     assert submitted is job
@@ -223,7 +225,39 @@ async def test_refresh_submits_public_job_in_database_transaction() -> None:
         "idempotency_key": "refresh-key",
         "request_id": "request-1",
         "created_by_user_id": "user-1",
+        "reason": "人工刷新证券主数据",
     }
+
+
+@pytest.mark.anyio
+async def test_allowed_actions_follow_real_refresh_job_state() -> None:
+    class Admin:
+        def __init__(self, _session, active: bool) -> None:
+            self.active = active
+
+        async def list_jobs(self, **filters):
+            total = int(
+                self.active
+                and filters["status"] is JobStatus.RUNNING
+                and filters["job_type"] == "SECURITY_MASTER_REFRESH"
+                and filters["queue"] == "maintenance"
+            )
+            return SimpleNamespace(total=total)
+
+    database = IdentityDatabase()
+    available = SecurityApplication(
+        database,
+        job_admin_factory=lambda session: Admin(session, False),
+    )
+    busy = SecurityApplication(
+        database,
+        job_admin_factory=lambda session: Admin(session, True),
+    )
+
+    assert [item.value for item in await available.allowed_actions()] == [
+        "REFRESH"
+    ]
+    assert await busy.allowed_actions() == ()
 
 
 @pytest.mark.anyio
@@ -265,11 +299,12 @@ async def test_business_idempotency_conflict_is_not_rewritten_as_503() -> None:
     )
 
     with pytest.raises(AppError) as captured:
-        await application.refresh(
-            idempotency_key="same-key",
-            request_id="request-1",
-            created_by_user_id="user-1",
-        )
+            await application.refresh(
+                idempotency_key="same-key",
+                request_id="request-1",
+                created_by_user_id="user-1",
+                reason="人工刷新证券主数据",
+            )
 
     assert captured.value.code == "IDEMPOTENCY_KEY_REUSED"
     assert captured.value.status_code == 409

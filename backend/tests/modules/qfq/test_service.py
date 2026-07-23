@@ -15,11 +15,29 @@ from long_invest.modules.qfq.contracts import (
     ValidatedQfqWindow,
 )
 from long_invest.modules.qfq.models import QfqDataset
-from long_invest.modules.qfq.service import QfqRefreshService
+from long_invest.modules.qfq.service import (
+    QfqRefreshService,
+    qfq_dataset_allowed_actions,
+)
 
 NOW = datetime(2026, 7, 16, 10, tzinfo=UTC)
 START = date(2026, 7, 15)
 END = date(2026, 7, 16)
+
+
+def test_qfq_refresh_requires_current_dataset_and_no_active_refresh() -> None:
+    assert [
+        item.value
+        for item in qfq_dataset_allowed_actions(
+            "CURRENT", refresh_in_progress=False
+        )
+    ] == ["REFRESH"]
+    assert qfq_dataset_allowed_actions(
+        "CURRENT", refresh_in_progress=True
+    ) == ()
+    assert qfq_dataset_allowed_actions(
+        "SUPERSEDED", refresh_in_progress=False
+    ) == ()
 
 
 def _window(checksum: str = "a" * 64) -> ValidatedQfqWindow:

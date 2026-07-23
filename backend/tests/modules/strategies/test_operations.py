@@ -165,7 +165,12 @@ def operation_dates():
 def test_stock_test_freezes_current_draft_and_reuses_deterministic_task_id():
     strategy_id = uuid4()
     draft = SimpleNamespace(
-        id=uuid4(), strategy_id=strategy_id, draft_version=3, source_code=SOURCE
+        id=uuid4(),
+        strategy_id=strategy_id,
+        draft_version=3,
+        source_code=SOURCE,
+        strategy_metadata={"description": "测试策略"},
+        parameter_schema={"type": "object"},
     )
     service = OperationsService(draft)
     stock_tests = StockTests()
@@ -202,7 +207,8 @@ def test_stock_test_freezes_current_draft_and_reuses_deterministic_task_id():
 
     assert first.task_id == replay.task_id
     assert stock_tests.calls[0]["draft"].draft_version == 3
-    assert stock_tests.calls[0]["metadata"]["name"] == "test"
+    assert stock_tests.calls[0]["metadata"] == {"description": "测试策略"}
+    assert stock_tests.calls[0]["parameter_schema"] == {"type": "object"}
 
 
 def test_apply_version_isolates_missing_rejected_and_temporary_failures():

@@ -9,6 +9,7 @@ from long_invest.modules.notifications.api import (
     preview_template_type,
 )
 from long_invest.modules.notifications.contracts import DeliveryChannel
+from long_invest.modules.notifications.delivery import CircuitSnapshot
 
 
 def test_notification_and_dynamic_setting_routes_are_published() -> None:
@@ -117,8 +118,18 @@ def test_spec_channel_read_returns_only_the_matching_secret_status() -> None:
         )
     )
 
+    application = SimpleNamespace(
+        channel_circuit_snapshots=AsyncMock(
+            return_value={DeliveryChannel.WECOM: CircuitSnapshot.closed()}
+        )
+    )
     result = asyncio.run(
-        get_channel(DeliveryChannel.WECOM, settings, SimpleNamespace())
+        get_channel(
+            DeliveryChannel.WECOM,
+            settings,
+            application,
+            SimpleNamespace(),
+        )
     )
 
     assert result["data"] == {
@@ -127,10 +138,18 @@ def test_spec_channel_read_returns_only_the_matching_secret_status() -> None:
             "key": "notification.channel.wecom",
             "value": {"enabled": True, "timeout_seconds": 5},
             "version": 2,
+            "allowed_actions": ["UPDATE"],
         },
         "secret": {
             "key": "notification.wecom.webhook",
             "configured": False,
+        },
+        "circuit": {
+            "channel": DeliveryChannel.WECOM,
+            "state": "CLOSED",
+            "consecutive_failures": 0,
+            "cooldown_level": 0,
+            "retry_at": None,
         },
     }
     assert settings.read.await_args_list[0].args == (

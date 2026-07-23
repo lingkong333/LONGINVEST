@@ -70,6 +70,24 @@ class HistoryBackfillApplication:
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
 
+    async def allowed_actions(self, job_id: UUID):
+        try:
+            async with self._database.session() as session:
+                return await self._service(session).allowed_actions(job_id)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
+    async def allowed_actions_many(self, job_ids: tuple[UUID, ...]):
+        try:
+            async with self._database.session() as session:
+                return await self._service(session).allowed_actions_many(job_ids)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
     async def command(
         self,
         job_id: UUID,

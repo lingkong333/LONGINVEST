@@ -18,6 +18,7 @@ from long_invest.modules.qfq.application import get_qfq_application
 from long_invest.modules.qfq.contracts import (
     Page,
     QfqBarView,
+    QfqDatasetAction,
     QfqDatasetLifecycle,
     QfqDatasetView,
     QfqFreshness,
@@ -109,6 +110,9 @@ def bar_page() -> Page[QfqBarView]:
 def test_get_requires_authentication_and_returns_concrete_page() -> None:
     application = Mock()
     application.get_data = AsyncMock(return_value=(dataset_view(), bar_page()))
+    application.allowed_actions = AsyncMock(
+        return_value=(QfqDatasetAction.REFRESH,)
+    )
     unauthenticated, _, _ = client_for(application, authenticated=False)
     rejected = unauthenticated.get("/api/v1/qfq-data/600000.SH")
     assert rejected.status_code == 401
@@ -126,6 +130,7 @@ def test_get_requires_authentication_and_returns_concrete_page() -> None:
 
     assert response.status_code == 200
     assert response.json()["data"]["dataset"]["version"] == 3
+    assert response.json()["data"]["dataset"]["allowed_actions"] == ["REFRESH"]
     assert response.json()["data"]["items"][0]["close"] == "10.25"
     assert response.json()["data"]["pagination"] == {
         "page": 2,
@@ -155,6 +160,7 @@ def test_refresh_requires_confirmation_reason_and_idempotency_key() -> None:
             "as_of_date": "2026-07-16",
             "confirm": False,
             "reason": "manual refresh",
+            "expected_version": 3,
         },
         headers={"Idempotency-Key": "qfq-1"},
     )
@@ -166,6 +172,7 @@ def test_refresh_requires_confirmation_reason_and_idempotency_key() -> None:
             "as_of_date": "2026-07-16",
             "confirm": True,
             "reason": "   ",
+            "expected_version": 3,
         },
         headers={"Idempotency-Key": "qfq-1"},
     )
@@ -177,6 +184,7 @@ def test_refresh_requires_confirmation_reason_and_idempotency_key() -> None:
             "as_of_date": "2026-07-16",
             "confirm": True,
             "reason": "manual refresh",
+            "expected_version": 3,
         },
     )
 
@@ -200,6 +208,7 @@ def test_refresh_returns_typed_accepted_job_for_verified_identity() -> None:
             "as_of_date": "2026-07-16",
             "confirm": True,
             "reason": " manual refresh ",
+            "expected_version": 3,
         },
         headers={"Idempotency-Key": "qfq-1"},
     )
@@ -216,6 +225,7 @@ def test_refresh_returns_typed_accepted_job_for_verified_identity() -> None:
     assert arguments["session_id"] == str(identity.session.id)
     assert arguments["reason"] == "manual refresh"
     assert arguments["idempotency_key"] == "qfq-1"
+    assert arguments["expected_version"] == 3
 
 
 def test_refresh_exposes_stable_conflict() -> None:
@@ -237,6 +247,7 @@ def test_refresh_exposes_stable_conflict() -> None:
             "as_of_date": "2026-07-16",
             "confirm": True,
             "reason": "manual refresh",
+            "expected_version": 3,
         },
         headers={"Idempotency-Key": "qfq-conflict"},
     )
@@ -302,6 +313,7 @@ def test_refresh_uses_origin_session_and_csrf_protection() -> None:
         "as_of_date": "2026-07-16",
         "confirm": True,
         "reason": "manual refresh",
+        "expected_version": 3,
     }
     headers = {
         "Origin": "http://127.0.0.1:15173",

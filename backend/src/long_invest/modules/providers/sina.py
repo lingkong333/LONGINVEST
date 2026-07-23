@@ -275,7 +275,7 @@ class SinaRealtimeProvider:
                         security_type="A_SHARE",
                         listed_on=None,
                         delisted_on=None,
-                        listed=True,
+                        listed=None,
                         is_st="ST" in name.upper(),
                         suspended=None,
                         source=ProviderCode.SINA,

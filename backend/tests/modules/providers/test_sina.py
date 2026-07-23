@@ -45,6 +45,7 @@ def test_sina_parses_security_master_page_for_three_markets() -> None:
     ]
     assert all(record.security_type == "A_SHARE" for record in records)
     assert all(record.source is ProviderCode.SINA for record in records)
+    assert all(record.listed is None for record in records)
 
 
 @pytest.mark.parametrize(

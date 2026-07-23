@@ -5,14 +5,27 @@ from uuid import uuid4
 import pytest
 
 from long_invest.modules.positions.contracts import (
+    PositionAction,
     PositionAuditContext,
     PositionStatus,
     SetPosition,
 )
-from long_invest.modules.positions.service import PositionService
+from long_invest.modules.positions.service import (
+    PositionService,
+    position_allowed_actions,
+)
 from long_invest.platform.errors import AppError
 
 NOW = datetime(2026, 7, 17, 9, tzinfo=UTC)
+
+
+def test_allowed_actions_follow_current_position() -> None:
+    assert position_allowed_actions(PositionStatus.HOLDING) == (
+        PositionAction.CLEAR,
+    )
+    assert position_allowed_actions(PositionStatus.NOT_HOLDING) == (
+        PositionAction.HOLD,
+    )
 
 
 class Repository:

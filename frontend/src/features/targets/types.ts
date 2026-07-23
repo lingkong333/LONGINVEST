@@ -1,9 +1,9 @@
 import type { components } from "@/shared/api/generated/schema"
 
-export type TargetSnapshot = components["schemas"]["TargetSnapshot"]
+export type TargetSnapshot = components["schemas"]["TargetRecord"]
 export type TargetRevision = components["schemas"]["TargetRevisionView"]
 export type TargetRun = components["schemas"]["TargetCalculationRunView"]
-export type TargetReview = components["schemas"]["TargetReviewView"]
+export type TargetReview = components["schemas"]["TargetReviewDetail"]
 export type TargetValues = components["schemas"]["TargetValues-Output"]
 
 export type TargetAction =
@@ -19,11 +19,9 @@ export interface TargetItem extends TargetSnapshot {
   allowedActions: TargetAction[]
 }
 
-export interface TargetReviewItem extends TargetReview {
+export type TargetReviewItem = TargetReview & {
   allowedActions: TargetAction[]
-  version: number | null
-  baseline: TargetRevision | null
-  candidate: TargetRevision | null
+  version: number
 }
 
 export interface ManualTargetInput {

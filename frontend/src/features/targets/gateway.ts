@@ -1,4 +1,4 @@
-import type { paths } from "@/shared/api/generated/schema"
+import type { components, paths } from "@/shared/api/generated/schema"
 import { createApiClient } from "@/shared/api/client"
 
 import type {
@@ -8,7 +8,6 @@ import type {
   ReviewDecisionInput,
   TargetAction,
   TargetManagementApi,
-  TargetReview,
   TargetReviewItem,
 } from "./types"
 
@@ -40,70 +39,58 @@ function allowedActions(value: unknown): TargetAction[] {
   )
 }
 
-function resourceVersion(value: unknown): number | null {
-  const version = recordOf(value).version
-  return typeof version === "number" && Number.isInteger(version) && version > 0 ? version : null
-}
-
-function targetItem<T extends object>(value: T): T & { allowedActions: TargetAction[] } {
+function targetItem<T extends components["schemas"]["TargetRecord"]>(
+  value: T,
+): T & { allowedActions: TargetAction[] } {
   return { ...value, allowedActions: allowedActions(value) }
-}
-
-async function targetHistories(api: ApiClient, subscriptionIds: string[]) {
-  const pages = await Promise.all(subscriptionIds.map(async (subscriptionId) => {
-    const data = await api.request(api.client.GET("/api/v1/targets/{subscription_id}/history", {
-      params: { path: { subscription_id: subscriptionId }, query: { page: 1, page_size: 200 } },
-    }))
-    return data.items
-  }))
-  return new Map(pages.flat().map((revision) => [revision.id, revision]))
 }
 
 export function createTargetManagementApi(api = createApiClient<paths>()): TargetManagementApi {
   return {
     async listTargets() {
-      const data = await api.request(api.client.GET("/api/v1/targets", {
+      const data = await api.request<components["schemas"]["TargetPageData"]>(
+        api.client.GET("/api/v1/targets", {
         params: { query: { page: 1, page_size: 200 } },
-      }))
+        }),
+      )
       return data.items.map(targetItem)
     },
     async getTarget(subscriptionId) {
-      const data = await api.request(api.client.GET("/api/v1/targets/{subscription_id}", {
-        params: { path: { subscription_id: subscriptionId } },
-      }))
+      const data = await api.request<components["schemas"]["TargetRecord"]>(
+        api.client.GET("/api/v1/targets/{subscription_id}", {
+          params: { path: { subscription_id: subscriptionId } },
+        }),
+      )
       return targetItem(data)
     },
     async listHistory(subscriptionId) {
-      const data = await api.request(api.client.GET("/api/v1/targets/{subscription_id}/history", {
-        params: { path: { subscription_id: subscriptionId }, query: { page: 1, page_size: 200 } },
-      }))
+      const data = await api.request<components["schemas"]["TargetHistoryData"]>(
+        api.client.GET("/api/v1/targets/{subscription_id}/history", {
+          params: { path: { subscription_id: subscriptionId }, query: { page: 1, page_size: 200 } },
+        }),
+      )
       return data.items
     },
     async listRuns() {
-      const data = await api.request(api.client.GET("/api/v1/target-calculation-runs", {
-        params: { query: { page: 1, page_size: 200 } },
-      }))
+      const data = await api.request<components["schemas"]["CalculationRunPageData"]>(
+        api.client.GET("/api/v1/target-calculation-runs", {
+          params: { query: { page: 1, page_size: 200 } },
+        }),
+      )
       return data.items
     },
     async listReviews() {
-      const [reviewData, targetData] = await Promise.all([
-        api.request(api.client.GET("/api/v1/target-reviews", {
+      const data = await api.request<components["schemas"]["ReviewPageData"]>(
+        api.client.GET("/api/v1/target-reviews", {
           params: { query: { page: 1, page_size: 200 } },
-        })),
-        api.request(api.client.GET("/api/v1/targets", {
-          params: { query: { page: 1, page_size: 200 } },
-        })),
-      ])
-      const revisions = await targetHistories(
-        api,
-        [...new Set(targetData.items.map((target) => target.subscription_id))],
+        }),
       )
-      return reviewData.items.map((review: TargetReview): TargetReviewItem => ({
+      return data.items.map((review): TargetReviewItem => ({
         ...review,
         allowedActions: allowedActions(review),
-        version: resourceVersion(review),
-        baseline: revisions.get(review.baseline_revision_id) ?? null,
-        candidate: revisions.get(review.candidate_revision_id) ?? null,
+        version: review.binding_version,
+        baseline: review.baseline,
+        candidate: review.candidate,
       }))
     },
     async setManual(subscriptionId, input: ManualTargetInput) {
@@ -206,4 +193,4 @@ async function decideReview(
   await api.request(api.client.POST("/api/v1/target-reviews/{review_id}/reject", request))
 }
 
-export const targetGatewayInternals = { allowedActions, resourceVersion }
+export const targetGatewayInternals = { allowedActions }

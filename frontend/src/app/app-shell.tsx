@@ -1,6 +1,7 @@
 import {
   Activity,
   BellRing,
+  BriefcaseBusiness,
   CalendarDays,
   CandlestickChart,
   ChartNoAxesCombined,
@@ -8,8 +9,10 @@ import {
   FlaskConical,
   LogOut,
   Radar,
+  RadioTower,
   Settings2,
   ShieldAlert,
+  Target,
 } from "lucide-react"
 import { NavLink, Outlet } from "react-router-dom"
 
@@ -42,6 +45,15 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/monitoring" aria-label="监控列表" title="监控列表">
             <Radar aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/positions" aria-label="持仓管理" title="持仓管理">
+            <BriefcaseBusiness aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/targets" aria-label="目标价管理" title="目标价管理">
+            <Target aria-hidden="true" />
+          </NavLink>
+          <NavLink to="/signals" aria-label="信号中心" title="信号中心">
+            <RadioTower aria-hidden="true" />
           </NavLink>
           {futureNavigation.map(({ label, icon: Icon }) => (
             <span

@@ -25,6 +25,7 @@ import {
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
 
+import { createTargetManagementApi } from "./gateway"
 import type {
   CalculateTargetInput,
   ManualTargetInput,
@@ -40,6 +41,7 @@ type View = "overview" | "detail" | "history" | "runs" | "reviews"
 type Operation =
   | { kind: "manual"; target: TargetItem }
   | { kind: "calculate"; target: TargetItem }
+  | { kind: "retry"; target: TargetItem }
   | { kind: "restore"; target: TargetItem; revision: TargetRevision }
   | { kind: "review"; decision: "approve" | "reject" | "recalculate"; review: TargetReviewItem }
 
@@ -160,7 +162,11 @@ function ErrorState({ error, retry }: { error: unknown; retry: () => void }) {
   )
 }
 
-export function TargetManagementPage({ api }: { api: TargetManagementApi }) {
+export function TargetManagementPage({
+  api = createTargetManagementApi(),
+}: {
+  api?: TargetManagementApi
+}) {
   const queryClient = useQueryClient()
   const [view, setView] = useState<View>("overview")
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -198,8 +204,8 @@ export function TargetManagementPage({ api }: { api: TargetManagementApi }) {
     <main className="mx-auto w-full max-w-[92rem] px-4 py-6 sm:px-6 lg:px-8">
       <header className="flex flex-col gap-4 border-b pb-5 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <p className="text-xs font-semibold tracking-[0.18em] text-primary">价格决策台</p>
-          <h1 className="mt-2 text-2xl font-semibold tracking-tight">目标管理</h1>
+          <p className="text-xs font-semibold text-primary">价格决策台</p>
+          <h1 className="mt-2 text-2xl font-semibold">目标管理</h1>
           <p className="mt-1 text-sm text-muted-foreground">查看四档目标、计算记录与待复核变化。</p>
         </div>
         <Button variant="outline" onClick={() => void refresh()}><RefreshCw />刷新</Button>
@@ -272,7 +278,7 @@ function TargetDetail({ item, onOperation }: { item: TargetItem; onOperation: (o
   const hasCapabilities = item.allowedActions.length > 0
   return (
     <section className="mt-5 space-y-5" aria-label="股票目标详情">
-      <div className="rounded-xl border bg-card p-5">
+      <div className="rounded-lg border bg-card p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="font-mono text-sm text-muted-foreground">订阅 {item.subscription_id}</p>
@@ -298,6 +304,7 @@ function TargetDetail({ item, onOperation }: { item: TargetItem; onOperation: (o
       <div className="flex flex-wrap gap-2">
         <Button disabled={!hasAction(item.allowedActions, "MANUAL_EDIT")} onClick={() => onOperation({ kind: "manual", target: item })}><PencilLine />手工编辑</Button>
         <Button variant="secondary" disabled={!hasAction(item.allowedActions, "CALCULATE")} onClick={() => onOperation({ kind: "calculate", target: item })}><Calculator />运行计算</Button>
+        <Button variant="outline" disabled={!hasAction(item.allowedActions, "RETRY")} onClick={() => onOperation({ kind: "retry", target: item })}><RefreshCw />重试计算</Button>
       </div>
     </section>
   )
@@ -387,7 +394,7 @@ function ReviewsView({ query, onReview }: {
       {pending.map((review) => {
         const canDecide = review.version !== null && review.baseline !== null && review.candidate !== null
         return (
-          <article key={review.id} className="rounded-xl border bg-card p-5">
+          <article key={review.id} className="rounded-lg border bg-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <h2 className="font-semibold">候选目标复核</h2>
@@ -483,6 +490,14 @@ function OperationDialog({ operation, api, onClose, onDone }: {
         }
         await api.calculate(operation.target.subscription_id, input)
         return "目标计算任务已提交"
+      }
+      if (operation.kind === "retry") {
+        await api.retry(
+          operation.target.subscription_id,
+          reason.trim(),
+          operation.target.binding_version,
+        )
+        return "目标重试任务已提交"
       }
       if (operation.kind === "restore") {
         await api.restore(operation.target.subscription_id, {
@@ -586,6 +601,7 @@ function operationTitle(operation: Operation | null) {
   if (!operation) return ""
   if (operation.kind === "manual") return "编辑手工目标"
   if (operation.kind === "calculate") return "运行策略计算"
+  if (operation.kind === "retry") return "重试目标计算"
   if (operation.kind === "restore") return `恢复第 ${operation.revision.revision_no} 版目标`
   if (operation.decision === "approve") return "批准候选目标"
   if (operation.decision === "reject") return "驳回候选目标"
@@ -596,6 +612,7 @@ function operationDescription(operation: Operation | null) {
   if (!operation) return ""
   if (operation.kind === "manual") return "新目标会直接激活。请对照旧值核对每一档变化。"
   if (operation.kind === "calculate") return "计算将冻结策略、参数和数据快照，并以当前绑定版本提交。"
+  if (operation.kind === "retry") return "系统会按当前订阅版本重新提交最近一次失败的目标计算。"
   if (operation.kind === "restore") return "系统会复制历史价格生成新版本，不会修改原历史记录。"
   if (operation.decision === "approve") return "批准前请逐项核对新旧目标；数据变化时后端会拒绝旧版本提交。"
   if (operation.decision === "reject") return "驳回后旧目标继续服务，并保持过期状态等待后续处理。"

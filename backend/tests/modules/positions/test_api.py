@@ -8,8 +8,10 @@ from long_invest.modules.auth.dependencies import (
 from long_invest.modules.positions.api import (
     BatchPositionRequest,
     PositionChangeRequest,
+    _position_data,
     router,
 )
+from long_invest.modules.positions.contracts import PositionStatus, PositionView
 
 
 def test_position_router_exposes_v31_routes_with_correct_auth() -> None:
@@ -57,3 +59,33 @@ def test_position_note_is_trimmed_before_500_character_limit() -> None:
     )
 
     assert request.note == "x" * 500
+
+
+def test_position_response_exposes_backend_allowed_actions() -> None:
+    holding = PositionView(
+        security_id="00000000-0000-0000-0000-000000000001",
+        symbol="600000.SH",
+        status=PositionStatus.HOLDING,
+        version=2,
+    )
+    not_holding = holding.model_copy(
+        update={"status": PositionStatus.NOT_HOLDING}
+    )
+
+    assert _position_data(holding)["allowed_actions"] == ["CLEAR"]
+    assert _position_data(not_holding)["allowed_actions"] == ["HOLD"]
+
+
+def test_position_lists_publish_server_pagination_parameters() -> None:
+    parameters = {
+        parameter.name
+        for route in router.routes
+        if route.path in {
+            "/api/v1/positions",
+            "/api/v1/position-history",
+            "/api/v1/positions/{symbol}/history",
+        }
+        for parameter in route.dependant.query_params
+    }
+
+    assert parameters == {"page", "page_size"}

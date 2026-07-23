@@ -66,6 +66,17 @@ class PositionApplication:
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
 
+    async def list_page(self, *, page: int, page_size: int):
+        try:
+            async with self._database.session() as session:
+                return await self._service_factory(
+                    self._repository_factory(session)
+                ).list_page(page=page, page_size=page_size)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
     async def history(self, symbol: str | None = None):
         identity = await self._resolve_identity(symbol) if symbol else None
         try:
@@ -73,6 +84,28 @@ class PositionApplication:
                 return await self._service_factory(
                     self._repository_factory(session)
                 ).history(identity.security_id if identity else None)
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
+    async def history_page(
+        self,
+        symbol: str | None = None,
+        *,
+        page: int,
+        page_size: int,
+    ):
+        identity = await self._resolve_identity(symbol) if symbol else None
+        try:
+            async with self._database.session() as session:
+                return await self._service_factory(
+                    self._repository_factory(session)
+                ).history_page(
+                    identity.security_id if identity else None,
+                    page=page,
+                    page_size=page_size,
+                )
         except AppError:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:

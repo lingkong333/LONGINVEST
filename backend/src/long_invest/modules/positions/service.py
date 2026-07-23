@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 from long_invest.modules.positions.contracts import (
+    PositionAction,
     PositionEvent,
     PositionEventSink,
     PositionResult,
@@ -46,6 +47,26 @@ class PositionService:
 
     async def history(self, security_id=None):
         return await self._repository.list_history(security_id)
+
+    async def list_page(self, *, page: int, page_size: int):
+        rows, total = await self._repository.list_current_page(
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
+        return tuple(_position_view(item) for item in rows), total
+
+    async def history_page(
+        self,
+        security_id=None,
+        *,
+        page: int,
+        page_size: int,
+    ):
+        return await self._repository.list_history_page(
+            security_id,
+            offset=(page - 1) * page_size,
+            limit=page_size,
+        )
 
     async def set(self, command: SetPosition) -> PositionResult:
         self._require_ports(command)
@@ -217,6 +238,14 @@ class PositionService:
                 trusted_ip=context.trusted_ip,
             )
         )
+
+
+def position_allowed_actions(
+    status: PositionStatus | str,
+) -> tuple[PositionAction, ...]:
+    if PositionStatus(str(status)) is PositionStatus.HOLDING:
+        return (PositionAction.CLEAR,)
+    return (PositionAction.HOLD,)
 
 
 def _position_view(position, *, security_id=None, symbol=None) -> PositionView:

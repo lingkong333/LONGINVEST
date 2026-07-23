@@ -26,7 +26,7 @@ from long_invest.modules.targets.contracts import (
     RestoreTargetCommand,
     TargetCalculationRunView,
     TargetMutationResult,
-    TargetReviewView,
+    TargetReviewDetail,
     TargetRevisionView,
     TargetSnapshot,
     TargetValues,
@@ -149,8 +149,12 @@ class ReviewTargetRequest(CapabilityWriteRequest):
         return value.strip() if isinstance(value, str) else value
 
 
+class TargetRecord(TargetSnapshot):
+    allowed_actions: tuple[str, ...]
+
+
 class TargetPageData(BaseModel):
-    items: list[TargetSnapshot]
+    items: list[TargetRecord]
     pagination: Pagination
 
 
@@ -164,7 +168,7 @@ class TargetPageResponse(SuccessEnvelope):
 
 
 class TargetResponse(SuccessEnvelope):
-    data: TargetSnapshot
+    data: TargetRecord
 
 
 class TargetHistoryResponse(SuccessEnvelope):
@@ -200,7 +204,7 @@ class CalculationRunPageResponse(SuccessEnvelope):
 
 
 class ReviewPageData(BaseModel):
-    items: list[TargetReviewView]
+    items: list[TargetReviewDetail]
     pagination: Pagination
 
 
@@ -253,7 +257,7 @@ async def list_targets(
     items, total = await application.list(page=page, page_size=page_size)
     return success_response(
         data={
-            "items": [item.model_dump(mode="json") for item in items],
+            "items": [_target_record(item) for item in items],
             "pagination": {"page": page, "page_size": page_size, "total": total},
         }
     )
@@ -275,7 +279,7 @@ async def get_target(
             message="订阅尚无当前目标",
             status_code=404,
         )
-    return success_response(data=target.model_dump(mode="json"))
+    return success_response(data=_target_record(target))
 
 
 @router.get(
@@ -639,6 +643,22 @@ def _validated_idempotency_key(value: str) -> str:
 def _batch_item_key(batch_key: str, subscription_id: UUID) -> str:
     digest = hashlib.sha256(f"{batch_key}:{subscription_id}".encode()).hexdigest()
     return f"batch:{digest}"
+
+
+def _target_record(target: TargetSnapshot) -> dict[str, Any]:
+    actions = ["MANUAL_EDIT", "RESTORE"]
+    if target.status not in {
+        "CALCULATING",
+        "REVIEW_REQUIRED",
+        "ACTIVATING",
+    }:
+        actions.append("CALCULATE")
+    if target.status in {"FAILED", "STALE"}:
+        actions.append("RETRY")
+    return {
+        **target.model_dump(mode="json"),
+        "allowed_actions": actions,
+    }
 
 
 def _identity(identity: AuthenticatedRequest) -> dict[str, str]:

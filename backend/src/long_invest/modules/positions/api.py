@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from long_invest.modules.auth.dependencies import (
@@ -15,13 +15,15 @@ from long_invest.modules.positions.application import (
     get_position_application,
 )
 from long_invest.modules.positions.contracts import (
+    PositionAction,
     PositionBatchResult,
     PositionResult,
     PositionStatus,
     PositionView,
 )
+from long_invest.modules.positions.service import position_allowed_actions
 from long_invest.platform.http.responses import success_response
-from long_invest.platform.http.schemas import SuccessEnvelope
+from long_invest.platform.http.schemas import Pagination, SuccessEnvelope
 
 router = APIRouter(tags=["positions"])
 
@@ -65,8 +67,19 @@ class BatchPositionRequest(StrictRequest):
         return _strip_text(value)
 
 
+class PositionRecord(BaseModel):
+    security_id: UUID
+    symbol: str
+    status: PositionStatus
+    version: int
+    source: str | None
+    updated_at: datetime | None
+    allowed_actions: list[PositionAction]
+
+
 class PositionItems(BaseModel):
-    items: list[PositionView]
+    items: list[PositionRecord]
+    pagination: Pagination
 
 
 class PositionHistoryRecord(BaseModel):
@@ -84,10 +97,24 @@ class PositionHistoryRecord(BaseModel):
 
 class PositionHistoryItems(BaseModel):
     items: list[PositionHistoryRecord]
+    pagination: Pagination
+
+
+class PositionResultRecord(BaseModel):
+    code: str
+    position: PositionRecord
+    replayed: bool
+
+
+class PositionBatchItemRecord(BaseModel):
+    symbol: str
+    status: str
+    code: str
+    position: PositionRecord | None
 
 
 class PositionBatchItems(BaseModel):
-    items: list[PositionBatchResult]
+    items: list[PositionBatchItemRecord]
 
 
 class PositionListResponse(SuccessEnvelope):
@@ -95,7 +122,7 @@ class PositionListResponse(SuccessEnvelope):
 
 
 class PositionResponse(SuccessEnvelope):
-    data: PositionView
+    data: PositionRecord
 
 
 class PositionHistoryResponse(SuccessEnvelope):
@@ -103,7 +130,7 @@ class PositionHistoryResponse(SuccessEnvelope):
 
 
 class PositionChangeResponse(SuccessEnvelope):
-    data: PositionResult
+    data: PositionResultRecord
 
 
 class PositionBatchResponse(SuccessEnvelope):
@@ -120,20 +147,36 @@ IdempotencyKey = Annotated[
 
 @router.get("/api/v1/positions", response_model=PositionListResponse)
 async def list_positions(
-    application: Application, _authenticated: ReadAuth
+    application: Application,
+    _authenticated: ReadAuth,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    items = await application.list()
+    items, total = await application.list_page(page=page, page_size=page_size)
     return success_response(
-        data={"items": [item.model_dump(mode="json") for item in items]}
+        data={
+            "items": [_position_data(item) for item in items],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
     )
 
 
 @router.get("/api/v1/position-history", response_model=PositionHistoryResponse)
 async def all_position_history(
-    application: Application, _authenticated: ReadAuth
+    application: Application,
+    _authenticated: ReadAuth,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    items = await application.history()
-    return success_response(data={"items": [_history_data(item) for item in items]})
+    items, total = await application.history_page(
+        page=page, page_size=page_size
+    )
+    return success_response(
+        data={
+            "items": [_history_data(item) for item in items],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
+    )
 
 
 @router.post("/api/v1/positions/batch", response_model=PositionBatchResponse)
@@ -154,7 +197,7 @@ async def batch_positions(
         **_identity(authenticated),
     )
     return success_response(
-        data={"items": [item.model_dump(mode="json") for item in results]}
+        data={"items": [_batch_result_data(item) for item in results]}
     )
 
 
@@ -163,7 +206,7 @@ async def get_position(
     symbol: str, application: Application, _authenticated: ReadAuth
 ) -> dict[str, Any]:
     return success_response(
-        data=(await application.get(symbol)).model_dump(mode="json")
+        data=_position_data(await application.get(symbol))
     )
 
 
@@ -172,10 +215,21 @@ async def get_position(
     response_model=PositionHistoryResponse,
 )
 async def position_history(
-    symbol: str, application: Application, _authenticated: ReadAuth
+    symbol: str,
+    application: Application,
+    _authenticated: ReadAuth,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, Any]:
-    items = await application.history(symbol)
-    return success_response(data={"items": [_history_data(item) for item in items]})
+    items, total = await application.history_page(
+        symbol, page=page, page_size=page_size
+    )
+    return success_response(
+        data={
+            "items": [_history_data(item) for item in items],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
+        }
+    )
 
 
 @router.post(
@@ -199,7 +253,7 @@ async def hold_position(
         idempotency_key=idempotency_key,
         **_identity(authenticated),
     )
-    return success_response(data=result.model_dump(mode="json"))
+    return success_response(data=_result_data(result))
 
 
 @router.post(
@@ -223,7 +277,33 @@ async def clear_position(
         idempotency_key=idempotency_key,
         **_identity(authenticated),
     )
-    return success_response(data=result.model_dump(mode="json"))
+    return success_response(data=_result_data(result))
+
+
+def _position_data(item: PositionView) -> dict[str, Any]:
+    return {
+        **item.model_dump(mode="json"),
+        "allowed_actions": list(position_allowed_actions(item.status)),
+    }
+
+
+def _result_data(result: PositionResult) -> dict[str, Any]:
+    return {
+        "code": result.code,
+        "position": _position_data(result.position),
+        "replayed": result.replayed,
+    }
+
+
+def _batch_result_data(result: PositionBatchResult) -> dict[str, Any]:
+    return {
+        "symbol": result.symbol,
+        "status": result.status,
+        "code": result.code,
+        "position": (
+            _position_data(result.position) if result.position is not None else None
+        ),
+    }
 
 
 def _identity(authenticated: AuthenticatedRequest) -> dict:

@@ -32,6 +32,8 @@ from long_invest.modules.targets.application import (
 from long_invest.modules.targets.contracts import (
     TargetBindingView,
     TargetMutationResult,
+    TargetReviewDetail,
+    TargetReviewStatus,
     TargetRevisionView,
     TargetSnapshot,
     TargetSource,
@@ -49,6 +51,7 @@ from long_invest.platform.http.middleware import RequestContextMiddleware
 NOW = datetime(2026, 7, 17, 9, tzinfo=UTC)
 SUBSCRIPTION_ID = uuid4()
 REVISION_ID = uuid4()
+REVIEW_ID = uuid4()
 
 
 def _identity():
@@ -107,6 +110,27 @@ def _mutation():
     )
 
 
+def _review_detail():
+    revision = _revision()
+    return TargetReviewDetail(
+        id=REVIEW_ID,
+        candidate_revision_id=revision.id,
+        baseline_revision_id=revision.id,
+        status=TargetReviewStatus.PENDING,
+        reason="large change",
+        low_strong_change="0.1",
+        low_watch_change="0.1",
+        high_watch_change="0.1",
+        high_strong_change="0.1",
+        created_at=NOW,
+        subscription_id=SUBSCRIPTION_ID,
+        binding_version=2,
+        candidate=revision,
+        baseline=revision,
+        allowed_actions=("APPROVE", "REJECT", "RECALCULATE"),
+    )
+
+
 def _application():
     application = SimpleNamespace(
         list=AsyncMock(return_value=((_snapshot(),), 1)),
@@ -131,7 +155,7 @@ def _application():
             )
         ),
         list_calculation_runs=AsyncMock(return_value=((), 0)),
-        list_reviews=AsyncMock(return_value=((), 0)),
+        list_reviews=AsyncMock(return_value=((_review_detail(),), 1)),
         decide_review=AsyncMock(),
     )
     return application
@@ -273,6 +297,16 @@ def test_authenticated_reads_paginate_and_missing_current_is_404() -> None:
     )
 
     assert listed.status_code == current.status_code == history.status_code == 200
+    assert listed.json()["data"]["items"][0]["allowed_actions"] == [
+        "MANUAL_EDIT",
+        "RESTORE",
+        "CALCULATE",
+    ]
+    assert current.json()["data"]["allowed_actions"] == [
+        "MANUAL_EDIT",
+        "RESTORE",
+        "CALCULATE",
+    ]
     assert listed.json()["data"]["pagination"] == {
         "page": 2,
         "page_size": 20,
@@ -289,6 +323,18 @@ def test_authenticated_reads_paginate_and_missing_current_is_404() -> None:
     missing = client.get(f"/api/v1/targets/{uuid4()}")
     assert missing.status_code == 404
     assert missing.json()["code"] == "TARGET_REVISION_NOT_FOUND"
+
+
+def test_review_list_includes_server_actions_and_decision_version() -> None:
+    response = TestClient(_app()).get("/api/v1/target-reviews")
+
+    assert response.status_code == 200
+    review = response.json()["data"]["items"][0]
+    assert review["subscription_id"] == str(SUBSCRIPTION_ID)
+    assert review["binding_version"] == 2
+    assert review["allowed_actions"] == ["APPROVE", "REJECT", "RECALCULATE"]
+    assert review["candidate"]["id"] == str(REVISION_ID)
+    assert review["baseline"]["id"] == str(REVISION_ID)
 
 
 def test_manual_and_restore_map_verified_identity_and_confirmation_fields() -> None:

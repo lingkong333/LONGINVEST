@@ -262,6 +262,14 @@ class TargetReviewView(StrictContract):
         return self
 
 
+class TargetReviewDetail(TargetReviewView):
+    subscription_id: UUID
+    binding_version: int = Field(ge=1)
+    candidate: TargetRevisionView
+    baseline: TargetRevisionView
+    allowed_actions: tuple[str, ...] = ()
+
+
 class TargetSnapshot(FrozenParametersContract):
     subscription_id: UUID
     revision_id: UUID

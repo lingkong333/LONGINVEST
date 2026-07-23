@@ -2,6 +2,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from long_invest.modules.targets.models import (
     SubscriptionTargetBinding,
@@ -227,10 +228,28 @@ class TargetRepository:
 
     async def list_reviews(
         self, *, page: int = 1, page_size: int = 50
-    ) -> tuple[TargetReview, ...]:
+    ) -> tuple[
+        tuple[
+            TargetReview,
+            TargetRevision,
+            TargetRevision,
+            SubscriptionTargetBinding,
+        ],
+        ...,
+    ]:
         _validate_page(page, page_size)
-        rows = await self._session.scalars(
+        candidate = aliased(TargetRevision)
+        baseline = aliased(TargetRevision)
+        rows = await self._session.execute(
             select(TargetReview)
+            .add_columns(candidate, baseline, SubscriptionTargetBinding)
+            .join(candidate, candidate.id == TargetReview.candidate_revision_id)
+            .join(baseline, baseline.id == TargetReview.baseline_revision_id)
+            .join(
+                SubscriptionTargetBinding,
+                SubscriptionTargetBinding.subscription_id
+                == candidate.subscription_id,
+            )
             .order_by(TargetReview.created_at.desc(), TargetReview.id.desc())
             .limit(page_size)
             .offset((page - 1) * page_size)

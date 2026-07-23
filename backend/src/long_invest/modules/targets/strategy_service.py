@@ -13,8 +13,10 @@ from long_invest.modules.targets.contracts import (
     TargetCalculationErrorCode,
     TargetCalculationRunView,
     TargetCalculationStatus,
+    TargetReviewDetail,
     TargetReviewStatus,
     TargetReviewView,
+    TargetRevisionView,
     TargetSource,
     TargetStatus,
     TargetValues,
@@ -335,7 +337,10 @@ class StrategyTargetService:
     async def list_reviews(self, *, page: int = 1, page_size: int = 50):
         rows = await self._repository.list_reviews(page=page, page_size=page_size)
         return (
-            tuple(_review_view(row) for row in rows),
+            tuple(
+                _review_detail(review, candidate, baseline, binding)
+                for review, candidate, baseline, binding in rows
+            ),
             await self._repository.count_reviews(),
         )
 
@@ -922,5 +927,40 @@ def _review_view(row):
         reviewer_user_id=row.reviewer_user_id,
         review_comment=row.review_comment,
         reviewed_at=row.reviewed_at,
+        created_at=row.created_at,
+    )
+
+
+def _review_detail(row, candidate, baseline, binding):
+    review = _review_view(row)
+    return TargetReviewDetail(
+        **review.model_dump(),
+        subscription_id=candidate.subscription_id,
+        binding_version=binding.version,
+        candidate=_target_revision_view(candidate),
+        baseline=_target_revision_view(baseline),
+        allowed_actions=(
+            ("APPROVE", "REJECT", "RECALCULATE")
+            if review.status is TargetReviewStatus.PENDING
+            else ()
+        ),
+    )
+
+
+def _target_revision_view(row):
+    return TargetRevisionView(
+        id=row.id,
+        subscription_id=row.subscription_id,
+        revision_no=row.revision_no,
+        values=_values(row),
+        source=TargetSource(row.source),
+        source_revision_id=row.source_revision_id,
+        target_date=row.target_date,
+        strategy_version_id=row.strategy_version_id,
+        parameter_snapshot=row.parameter_snapshot,
+        data_version=row.data_version,
+        source_code_hash=row.source_code_hash,
+        content_hash=row.content_hash,
+        reason=row.reason,
         created_at=row.created_at,
     )

@@ -5612,10 +5612,25 @@ export interface components {
             /** Total */
             total: number;
         };
+        /**
+         * PositionAction
+         * @enum {string}
+         */
+        PositionAction: "HOLD" | "CLEAR";
+        /** PositionBatchItemRecord */
+        PositionBatchItemRecord: {
+            /** Symbol */
+            symbol: string;
+            /** Status */
+            status: string;
+            /** Code */
+            code: string;
+            position: components["schemas"]["PositionRecord"] | null;
+        };
         /** PositionBatchItems */
         PositionBatchItems: {
             /** Items */
-            items: components["schemas"]["PositionBatchResult"][];
+            items: components["schemas"]["PositionBatchItemRecord"][];
         };
         /** PositionBatchResponse */
         PositionBatchResponse: {
@@ -5636,16 +5651,6 @@ export interface components {
              */
             server_time: string;
             data: components["schemas"]["PositionBatchItems"];
-        };
-        /** PositionBatchResult */
-        PositionBatchResult: {
-            /** Symbol */
-            symbol: string;
-            /** Status */
-            status: string;
-            /** Code */
-            code: string;
-            position?: components["schemas"]["PositionView"] | null;
         };
         /** PositionChangeRequest */
         PositionChangeRequest: {
@@ -5679,7 +5684,7 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionResult"];
+            data: components["schemas"]["PositionResultRecord"];
         };
         /** PositionData */
         PositionData: {
@@ -5692,6 +5697,7 @@ export interface components {
         PositionHistoryItems: {
             /** Items */
             items: components["schemas"]["PositionHistoryRecord"][];
+            pagination: components["schemas"]["Pagination"];
         };
         /** PositionHistoryRecord */
         PositionHistoryRecord: {
@@ -5746,7 +5752,8 @@ export interface components {
         /** PositionItems */
         PositionItems: {
             /** Items */
-            items: components["schemas"]["PositionView"][];
+            items: components["schemas"]["PositionRecord"][];
+            pagination: components["schemas"]["Pagination"];
         };
         /** PositionListResponse */
         PositionListResponse: {
@@ -5768,6 +5775,25 @@ export interface components {
             server_time: string;
             data: components["schemas"]["PositionItems"];
         };
+        /** PositionRecord */
+        PositionRecord: {
+            /**
+             * Security Id
+             * Format: uuid
+             */
+            security_id: string;
+            /** Symbol */
+            symbol: string;
+            status: components["schemas"]["PositionStatus"];
+            /** Version */
+            version: number;
+            /** Source */
+            source: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Allowed Actions */
+            allowed_actions: components["schemas"]["PositionAction"][];
+        };
         /** PositionResponse */
         PositionResponse: {
             /**
@@ -5786,17 +5812,14 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionView"];
+            data: components["schemas"]["PositionRecord"];
         };
-        /** PositionResult */
-        PositionResult: {
+        /** PositionResultRecord */
+        PositionResultRecord: {
             /** Code */
             code: string;
-            position: components["schemas"]["PositionView"];
-            /**
-             * Replayed
-             * @default false
-             */
+            position: components["schemas"]["PositionRecord"];
+            /** Replayed */
             replayed: boolean;
         };
         /**
@@ -5804,23 +5827,6 @@ export interface components {
          * @enum {string}
          */
         PositionStatus: "HOLDING" | "NOT_HOLDING";
-        /** PositionView */
-        PositionView: {
-            /**
-             * Security Id
-             * Format: uuid
-             */
-            security_id: string;
-            /** Symbol */
-            symbol: string;
-            status: components["schemas"]["PositionStatus"];
-            /** Version */
-            version: number;
-            /** Source */
-            source?: string | null;
-            /** Updated At */
-            updated_at?: string | null;
-        };
         /**
          * ProviderCode
          * @enum {string}
@@ -6487,7 +6493,7 @@ export interface components {
         /** ReviewPageData */
         ReviewPageData: {
             /** Items */
-            items: components["schemas"]["TargetReviewView"][];
+            items: components["schemas"]["TargetReviewDetail"][];
             pagination: components["schemas"]["Pagination"];
         };
         /** ReviewPageResponse */
@@ -7706,7 +7712,7 @@ export interface components {
         /** TargetPageData */
         TargetPageData: {
             /** Items */
-            items: components["schemas"]["TargetSnapshot"][];
+            items: components["schemas"]["TargetRecord"][];
             pagination: components["schemas"]["Pagination"];
         };
         /** TargetPageResponse */
@@ -7729,6 +7735,50 @@ export interface components {
             server_time: string;
             data: components["schemas"]["TargetPageData"];
         };
+        /** TargetRecord */
+        TargetRecord: {
+            /** Parameter Snapshot */
+            parameter_snapshot: {
+                [key: string]: unknown;
+            };
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /**
+             * Revision Id
+             * Format: uuid
+             */
+            revision_id: string;
+            /** Revision No */
+            revision_no: number;
+            /** Binding Version */
+            binding_version: number;
+            values: components["schemas"]["TargetValues-Output"];
+            source: components["schemas"]["TargetSource"];
+            status: components["schemas"]["TargetStatus"];
+            /**
+             * Target Date
+             * Format: date
+             */
+            target_date: string;
+            /** Strategy Version Id */
+            strategy_version_id?: string | null;
+            /** Data Version */
+            data_version?: number | null;
+            /** Source Code Hash */
+            source_code_hash?: string | null;
+            /** Content Hash */
+            content_hash: string;
+            /**
+             * Activated At
+             * Format: date-time
+             */
+            activated_at: string;
+            /** Allowed Actions */
+            allowed_actions: string[];
+        };
         /** TargetResponse */
         TargetResponse: {
             /**
@@ -7747,15 +7797,10 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TargetSnapshot"];
+            data: components["schemas"]["TargetRecord"];
         };
-        /**
-         * TargetReviewStatus
-         * @enum {string}
-         */
-        TargetReviewStatus: "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED";
-        /** TargetReviewView */
-        TargetReviewView: {
+        /** TargetReviewDetail */
+        TargetReviewDetail: {
             /**
              * Id
              * Format: uuid
@@ -7793,7 +7838,26 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+            /**
+             * Subscription Id
+             * Format: uuid
+             */
+            subscription_id: string;
+            /** Binding Version */
+            binding_version: number;
+            candidate: components["schemas"]["TargetRevisionView"];
+            baseline: components["schemas"]["TargetRevisionView"];
+            /**
+             * Allowed Actions
+             * @default []
+             */
+            allowed_actions: string[];
         };
+        /**
+         * TargetReviewStatus
+         * @enum {string}
+         */
+        TargetReviewStatus: "PENDING" | "APPROVED" | "REJECTED" | "SUPERSEDED";
         /** TargetRevisionView */
         TargetRevisionView: {
             /** Parameter Snapshot */
@@ -7836,48 +7900,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-        };
-        /** TargetSnapshot */
-        TargetSnapshot: {
-            /** Parameter Snapshot */
-            parameter_snapshot: {
-                [key: string]: unknown;
-            };
-            /**
-             * Subscription Id
-             * Format: uuid
-             */
-            subscription_id: string;
-            /**
-             * Revision Id
-             * Format: uuid
-             */
-            revision_id: string;
-            /** Revision No */
-            revision_no: number;
-            /** Binding Version */
-            binding_version: number;
-            values: components["schemas"]["TargetValues-Output"];
-            source: components["schemas"]["TargetSource"];
-            status: components["schemas"]["TargetStatus"];
-            /**
-             * Target Date
-             * Format: date
-             */
-            target_date: string;
-            /** Strategy Version Id */
-            strategy_version_id?: string | null;
-            /** Data Version */
-            data_version?: number | null;
-            /** Source Code Hash */
-            source_code_hash?: string | null;
-            /** Content Hash */
-            content_hash: string;
-            /**
-             * Activated At
-             * Format: date-time
-             */
-            activated_at: string;
         };
         /**
          * TargetSource
@@ -10683,7 +10705,10 @@ export interface operations {
     };
     list_positions_api_v1_positions_get: {
         parameters: {
-            query?: never;
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10699,11 +10724,23 @@ export interface operations {
                     "application/json": components["schemas"]["PositionListResponse"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     all_position_history_api_v1_position_history_get: {
         parameters: {
-            query?: never;
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -10717,6 +10754,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PositionHistoryResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -10789,7 +10835,10 @@ export interface operations {
     };
     position_history_api_v1_positions__symbol__history_get: {
         parameters: {
-            query?: never;
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
             header?: never;
             path: {
                 symbol: string;

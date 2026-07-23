@@ -17,6 +17,11 @@ class PositionStatus(StrEnum):
     NOT_HOLDING = "NOT_HOLDING"
 
 
+class PositionAction(StrEnum):
+    HOLD = "HOLD"
+    CLEAR = "CLEAR"
+
+
 class SetPosition(StrictContract):
     security_id: UUID
     symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")

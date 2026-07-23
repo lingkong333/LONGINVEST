@@ -3611,6 +3611,31 @@
         ],
         "summary": "List Positions",
         "operationId": "list_positions_api_v1_positions_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3618,6 +3643,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PositionListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -3632,6 +3667,31 @@
         ],
         "summary": "All Position History",
         "operationId": "all_position_history_api_v1_position_history_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -3639,6 +3699,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PositionHistoryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -3757,6 +3827,29 @@
             "schema": {
               "type": "string",
               "title": "Symbol"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
             }
           }
         ],
@@ -18024,11 +18117,53 @@
         ],
         "title": "Pagination"
       },
+      "PositionAction": {
+        "type": "string",
+        "enum": [
+          "HOLD",
+          "CLEAR"
+        ],
+        "title": "PositionAction"
+      },
+      "PositionBatchItemRecord": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PositionRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "status",
+          "code",
+          "position"
+        ],
+        "title": "PositionBatchItemRecord"
+      },
       "PositionBatchItems": {
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/PositionBatchResult"
+              "$ref": "#/components/schemas/PositionBatchItemRecord"
             },
             "type": "array",
             "title": "Items"
@@ -18078,40 +18213,6 @@
           "data"
         ],
         "title": "PositionBatchResponse"
-      },
-      "PositionBatchResult": {
-        "properties": {
-          "symbol": {
-            "type": "string",
-            "title": "Symbol"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
-          },
-          "code": {
-            "type": "string",
-            "title": "Code"
-          },
-          "position": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PositionView"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "symbol",
-          "status",
-          "code"
-        ],
-        "title": "PositionBatchResult"
       },
       "PositionChangeRequest": {
         "properties": {
@@ -18185,7 +18286,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/PositionResult"
+            "$ref": "#/components/schemas/PositionResultRecord"
           }
         },
         "type": "object",
@@ -18236,11 +18337,15 @@
             },
             "type": "array",
             "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "pagination"
         ],
         "title": "PositionHistoryItems"
       },
@@ -18360,15 +18465,19 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/PositionView"
+              "$ref": "#/components/schemas/PositionRecord"
             },
             "type": "array",
             "title": "Items"
+          },
+          "pagination": {
+            "$ref": "#/components/schemas/Pagination"
           }
         },
         "type": "object",
         "required": [
-          "items"
+          "items",
+          "pagination"
         ],
         "title": "PositionItems"
       },
@@ -18411,6 +18520,67 @@
         ],
         "title": "PositionListResponse"
       },
+      "PositionRecord": {
+        "properties": {
+          "security_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Security Id"
+          },
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PositionStatus"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "allowed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/PositionAction"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "security_id",
+          "symbol",
+          "status",
+          "version",
+          "source",
+          "updated_at",
+          "allowed_actions"
+        ],
+        "title": "PositionRecord"
+      },
       "PositionResponse": {
         "properties": {
           "success": {
@@ -18436,7 +18606,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/PositionView"
+            "$ref": "#/components/schemas/PositionRecord"
           }
         },
         "type": "object",
@@ -18450,28 +18620,27 @@
         ],
         "title": "PositionResponse"
       },
-      "PositionResult": {
+      "PositionResultRecord": {
         "properties": {
           "code": {
             "type": "string",
             "title": "Code"
           },
           "position": {
-            "$ref": "#/components/schemas/PositionView"
+            "$ref": "#/components/schemas/PositionRecord"
           },
           "replayed": {
             "type": "boolean",
-            "title": "Replayed",
-            "default": false
+            "title": "Replayed"
           }
         },
-        "additionalProperties": false,
         "type": "object",
         "required": [
           "code",
-          "position"
+          "position",
+          "replayed"
         ],
-        "title": "PositionResult"
+        "title": "PositionResultRecord"
       },
       "PositionStatus": {
         "type": "string",
@@ -18480,59 +18649,6 @@
           "NOT_HOLDING"
         ],
         "title": "PositionStatus"
-      },
-      "PositionView": {
-        "properties": {
-          "security_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Security Id"
-          },
-          "symbol": {
-            "type": "string",
-            "title": "Symbol"
-          },
-          "status": {
-            "$ref": "#/components/schemas/PositionStatus"
-          },
-          "version": {
-            "type": "integer",
-            "minimum": 0.0,
-            "title": "Version"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
-          },
-          "updated_at": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Updated At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "security_id",
-          "symbol",
-          "status",
-          "version"
-        ],
-        "title": "PositionView"
       },
       "ProviderCode": {
         "type": "string",
@@ -20299,7 +20415,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/TargetReviewView"
+              "$ref": "#/components/schemas/TargetReviewDetail"
             },
             "type": "array",
             "title": "Items"
@@ -23441,7 +23557,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/TargetSnapshot"
+              "$ref": "#/components/schemas/TargetRecord"
             },
             "type": "array",
             "title": "Items"
@@ -23496,6 +23612,119 @@
         ],
         "title": "TargetPageResponse"
       },
+      "TargetRecord": {
+        "properties": {
+          "parameter_snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameter Snapshot"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "revision_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Revision Id"
+          },
+          "revision_no": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Revision No"
+          },
+          "binding_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Binding Version"
+          },
+          "values": {
+            "$ref": "#/components/schemas/TargetValues-Output"
+          },
+          "source": {
+            "$ref": "#/components/schemas/TargetSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TargetStatus"
+          },
+          "target_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Target Date"
+          },
+          "strategy_version_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Strategy Version Id"
+          },
+          "data_version": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Version"
+          },
+          "source_code_hash": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Code Hash"
+          },
+          "content_hash": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Content Hash"
+          },
+          "activated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Activated At"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "parameter_snapshot",
+          "subscription_id",
+          "revision_id",
+          "revision_no",
+          "binding_version",
+          "values",
+          "source",
+          "status",
+          "target_date",
+          "content_hash",
+          "activated_at",
+          "allowed_actions"
+        ],
+        "title": "TargetRecord"
+      },
       "TargetResponse": {
         "properties": {
           "success": {
@@ -23521,7 +23750,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/TargetSnapshot"
+            "$ref": "#/components/schemas/TargetRecord"
           }
         },
         "type": "object",
@@ -23535,17 +23764,7 @@
         ],
         "title": "TargetResponse"
       },
-      "TargetReviewStatus": {
-        "type": "string",
-        "enum": [
-          "PENDING",
-          "APPROVED",
-          "REJECTED",
-          "SUPERSEDED"
-        ],
-        "title": "TargetReviewStatus"
-      },
-      "TargetReviewView": {
+      "TargetReviewDetail": {
         "properties": {
           "id": {
             "type": "string",
@@ -23629,6 +23848,30 @@
             "type": "string",
             "format": "date-time",
             "title": "Created At"
+          },
+          "subscription_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Subscription Id"
+          },
+          "binding_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Binding Version"
+          },
+          "candidate": {
+            "$ref": "#/components/schemas/TargetRevisionView"
+          },
+          "baseline": {
+            "$ref": "#/components/schemas/TargetRevisionView"
+          },
+          "allowed_actions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Allowed Actions",
+            "default": []
           }
         },
         "additionalProperties": false,
@@ -23643,9 +23886,23 @@
           "low_watch_change",
           "high_watch_change",
           "high_strong_change",
-          "created_at"
+          "created_at",
+          "subscription_id",
+          "binding_version",
+          "candidate",
+          "baseline"
         ],
-        "title": "TargetReviewView"
+        "title": "TargetReviewDetail"
+      },
+      "TargetReviewStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "APPROVED",
+          "REJECTED",
+          "SUPERSEDED"
+        ],
+        "title": "TargetReviewStatus"
       },
       "TargetRevisionView": {
         "properties": {
@@ -23758,111 +24015,6 @@
           "created_at"
         ],
         "title": "TargetRevisionView"
-      },
-      "TargetSnapshot": {
-        "properties": {
-          "parameter_snapshot": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parameter Snapshot"
-          },
-          "subscription_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Subscription Id"
-          },
-          "revision_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Revision Id"
-          },
-          "revision_no": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Revision No"
-          },
-          "binding_version": {
-            "type": "integer",
-            "minimum": 1.0,
-            "title": "Binding Version"
-          },
-          "values": {
-            "$ref": "#/components/schemas/TargetValues-Output"
-          },
-          "source": {
-            "$ref": "#/components/schemas/TargetSource"
-          },
-          "status": {
-            "$ref": "#/components/schemas/TargetStatus"
-          },
-          "target_date": {
-            "type": "string",
-            "format": "date",
-            "title": "Target Date"
-          },
-          "strategy_version_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strategy Version Id"
-          },
-          "data_version": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Data Version"
-          },
-          "source_code_hash": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[0-9a-f]{64}$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Code Hash"
-          },
-          "content_hash": {
-            "type": "string",
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Content Hash"
-          },
-          "activated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Activated At"
-          }
-        },
-        "additionalProperties": false,
-        "type": "object",
-        "required": [
-          "parameter_snapshot",
-          "subscription_id",
-          "revision_id",
-          "revision_no",
-          "binding_version",
-          "values",
-          "source",
-          "status",
-          "target_date",
-          "content_hash",
-          "activated_at"
-        ],
-        "title": "TargetSnapshot"
       },
       "TargetSource": {
         "type": "string",

@@ -5,6 +5,9 @@ import { RouteErrorPage } from "@/app/route-error-page"
 import { LoginPage, ProtectedRoute } from "@/features/auth"
 import { DashboardPage } from "@/features/dashboard"
 import { MonitoringPage } from "@/features/monitoring"
+import { PositionsPage } from "@/features/positions"
+import { SignalsPage } from "@/features/signals"
+import { TargetManagementPage } from "@/features/targets"
 
 export const appRouter = createBrowserRouter([
   {
@@ -26,6 +29,18 @@ export const appRouter = createBrowserRouter([
           {
             path: "/monitoring",
             element: <MonitoringPage />,
+          },
+          {
+            path: "/positions",
+            element: <PositionsPage />,
+          },
+          {
+            path: "/targets",
+            element: <TargetManagementPage />,
+          },
+          {
+            path: "/signals",
+            element: <SignalsPage />,
           },
         ],
       },

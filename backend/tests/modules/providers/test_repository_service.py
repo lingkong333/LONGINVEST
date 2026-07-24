@@ -543,6 +543,7 @@ class ServiceRepository:
         self.persisted_probe = None
         self.circuit_id = uuid4()
         self.replay = None
+        self.capability = "REALTIME_QUOTE_BATCH"
 
     async def replay_mutation(self, idempotency_key, digest):
         del idempotency_key, digest
@@ -555,7 +556,7 @@ class ServiceRepository:
         assert circuit_id == self.circuit_id
         return {
             "provider_code": "EASTMONEY",
-            "capability": "REALTIME_QUOTE_BATCH",
+            "capability": self.capability,
         }
 
     async def persist_probe(self, circuit_id, result, **kwargs):
@@ -732,6 +733,29 @@ async def test_normal_probe_does_not_force_half_open() -> None:
         audit_context=audit_context(),
     )
     assert router.calls[0][2] is False
+
+
+@async_test
+async def test_historical_daily_probe_allows_complete_history_timeout() -> None:
+    repository = ServiceRepository()
+    repository.capability = "HISTORICAL_DAILY_UNADJUSTED"
+    router = ProbeRouter()
+    service = ProviderService(
+        router,
+        {ProviderCode.EASTMONEY: DiagnosticProvider(ProviderCode.EASTMONEY, "10")},
+        repository,
+        ProbeRuntime(),
+    )
+
+    await service.reset_circuit(
+        repository.circuit_id,
+        reason="operator reset",
+        audit_context=audit_context(),
+    )
+
+    setting, deadline, _force_half_open = router.calls[0]
+    assert setting.timeout_seconds == 30
+    assert deadline >= datetime.now(UTC) + timedelta(seconds=25)
 
 
 @async_test

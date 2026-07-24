@@ -224,19 +224,25 @@ class ProviderService:
         if replay is not None:
             return replay
         circuit = await self._repository.circuit(circuit_id)
+        capability = ProviderCapability(circuit["capability"])
+        probe_timeout_seconds = (
+            30
+            if capability is ProviderCapability.HISTORICAL_DAILY_UNADJUSTED
+            else 10
+        )
         setting = ProviderRouteSetting(
             provider=ProviderCode(circuit["provider_code"]),
-            capability=ProviderCapability(circuit["capability"]),
+            capability=capability,
             enabled=True,
             priority=1,
             concurrency=1,
             rate_per_second=1,
-            timeout_seconds=10,
+            timeout_seconds=probe_timeout_seconds,
             auto_switch=False,
         )
         result = await self._router.probe(
             setting,
-            datetime.now(UTC) + timedelta(seconds=10),
+            datetime.now(UTC) + timedelta(seconds=probe_timeout_seconds),
             force_half_open=action_code == "provider.circuit_reset_probed",
         )
         snapshot = await self._runtime.circuit_snapshot(setting)

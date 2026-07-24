@@ -56,7 +56,14 @@ async def run_with_retry[T](
         try:
             return await operation()
         except Exception as error:
-            if attempt == attempts or not _retryable(error):
+            retryable = _retryable(error)
+            if attempt == attempts:
+                if retryable and not isinstance(error, ProviderHttpError):
+                    raise ProviderHttpError(
+                        "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
+                    ) from error
+                raise
+            if not retryable:
                 raise
             remaining = (deadline - datetime.now(UTC)).total_seconds()
             delay = min(0.1 * 2 ** (attempt - 1), max(0.0, remaining))

@@ -49,6 +49,26 @@ async def test_retryable_failures_make_at_most_three_attempts(
 
 
 @async_test
+async def test_exhausted_transport_failure_is_normalized() -> None:
+    attempts = 0
+
+    async def operation() -> None:
+        nonlocal attempts
+        attempts += 1
+        raise httpx.RemoteProtocolError("peer closed response")
+
+    with pytest.raises(ProviderHttpError) as captured:
+        await run_with_retry(
+            operation,
+            deadline=datetime.now(UTC) + timedelta(seconds=2),
+            sleep=lambda _: _done(),
+        )
+    assert captured.value.code == "PROVIDER_UPSTREAM_TEMPORARY"
+    assert captured.value.retryable is True
+    assert attempts == 3
+
+
+@async_test
 @pytest.mark.parametrize(
     "failure",
     [

@@ -33,6 +33,7 @@ from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderCapability,
 )
+from long_invest.modules.providers.retry import ProviderHttpError
 from long_invest.modules.watchlists.outbox import WatchlistEventAdapter
 from long_invest.modules.watchlists.repository import WatchlistRepository
 from long_invest.modules.watchlists.service import WatchlistService
@@ -71,16 +72,21 @@ class DatabaseHistoryBarsProvider:
         end_date: date,
         deadline: datetime,
     ) -> tuple[HistoryBarInput, ...]:
-        async with self._database.session() as session:
-            result = await build_provider_service(session).daily_bars(
-                DailyBarRequest(
-                    symbol=item.symbol,
-                    start=start_date,
-                    end=end_date,
-                    capability=ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
-                ),
-                deadline,
-            )
+        try:
+            async with self._database.session() as session:
+                result = await build_provider_service(session).daily_bars(
+                    DailyBarRequest(
+                        symbol=item.symbol,
+                        start=start_date,
+                        end=end_date,
+                        capability=ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+                    ),
+                    deadline,
+                )
+        except ProviderHttpError as error:
+            raise HistoryBackfillItemError(
+                error.code, retryable=error.retryable
+            ) from error
         if result.batch_error_code:
             raise HistoryBackfillItemError(result.batch_error_code, retryable=True)
         if result.failures:

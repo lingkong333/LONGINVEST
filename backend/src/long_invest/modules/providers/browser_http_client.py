@@ -154,13 +154,12 @@ def create_browser_json_client(
     sessions = tuple(
         Session(
             impersonate="chrome",
-            default_headers=False,
             curl_options={CurlOpt.RESOLVE: [f"{host}:443:{address}"]},
         )
         for address in addresses
     )
     if not sessions:
-        sessions = (Session(impersonate="chrome", default_headers=False),)
+        sessions = (Session(impersonate="chrome"),)
     return BrowserProviderHttpClient(
         sessions,
         allowed_hosts=frozenset({host}),

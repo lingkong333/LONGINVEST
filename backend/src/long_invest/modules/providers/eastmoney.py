@@ -834,6 +834,12 @@ class EastmoneyProvider:
         if client is None:
             raise RuntimeError("provider client is not configured")
         request_headers = {**self.REQUEST_HEADERS, **(headers or {})}
+        if url == self.HISTORY_URL and self._history_client is not self._client:
+            request_headers = {
+                key: value
+                for key, value in request_headers.items()
+                if key != "User-Agent" and not key.startswith("Sec-CH-UA")
+            }
         return await client.request_json(
             ProviderHttpRequest(url, params, request_headers), deadline=deadline
         )

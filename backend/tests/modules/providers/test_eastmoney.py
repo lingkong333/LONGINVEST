@@ -378,6 +378,9 @@ def test_daily_bars_use_dedicated_history_transport() -> None:
     assert len(result.items) == 1
     assert not normal.requests
     assert history.requests[0].url == EastmoneyProvider.HISTORY_URL
+    assert "User-Agent" not in history.requests[0].headers
+    assert "Sec-CH-UA" not in history.requests[0].headers
+    assert history.requests[0].headers["Referer"].endswith("sh600519.html")
 
 
 def test_daily_bars_accept_real_response_with_additional_fields() -> None:

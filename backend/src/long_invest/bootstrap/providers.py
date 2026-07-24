@@ -167,7 +167,11 @@ def get_provider_resources() -> ProviderResources:
             runtime=RedisProviderRuntimeState(redis),
             providers={
                 ProviderCode.EASTMONEY: EastmoneyProvider(
-                    provider_http, history_client=history_http
+                    provider_http,
+                    history_client=history_http,
+                    request_complete_history=(
+                        settings.eastmoney_history_transport == "playwright"
+                    ),
                 ),
                 ProviderCode.SINA: SinaRealtimeProvider(provider_http),
             },

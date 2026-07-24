@@ -95,9 +95,11 @@ class EastmoneyProvider:
         client: ProviderJsonClient | None,
         *,
         history_client: ProviderJsonClient | None = None,
+        request_complete_history: bool = False,
     ) -> None:
         self._client = client
         self._history_client = history_client or client
+        self._request_complete_history = request_complete_history
 
     async def security_master(
         self, deadline: datetime
@@ -151,19 +153,28 @@ class EastmoneyProvider:
             if request.capability is ProviderCapability.HISTORICAL_DAILY_QFQ
             else "0"
         )
+        params = {
+            "secid": secid,
+            "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+            "klt": "101",
+            "fqt": fqt,
+            "beg": request.start.strftime("%Y%m%d"),
+            "end": request.end.strftime("%Y%m%d"),
+            "lmt": "1000000",
+            "fields1": "f1,f2,f3,f4,f5,f6",
+            "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        }
+        if self._request_complete_history:
+            params = {
+                **params,
+                "beg": "0",
+                "end": "20500101",
+                "fields2": "f51,f52,f53,f54,f55,f56,f57",
+            }
+            params.pop("ut")
         payload = await self._json(
             self.HISTORY_URL,
-            {
-                "secid": secid,
-                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
-                "klt": "101",
-                "fqt": fqt,
-                "beg": request.start.strftime("%Y%m%d"),
-                "end": request.end.strftime("%Y%m%d"),
-                "lmt": "1000000",
-                "fields1": "f1,f2,f3,f4,f5,f6",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
-            },
+            params,
             deadline,
             headers={
                 "Referer": (
@@ -921,14 +932,16 @@ class EastmoneyProvider:
                     raise ValueError
                 trading_date = date.fromisoformat(fields[0])
                 if (
-                    trading_date < request.start
-                    or trading_date > request.end
-                    or trading_date in seen_dates
+                    trading_date in seen_dates
                     or (previous_date is not None and trading_date <= previous_date)
                 ):
                     raise ValueError
                 seen_dates.add(trading_date)
                 previous_date = trading_date
+                if trading_date < request.start or trading_date > request.end:
+                    if self._request_complete_history:
+                        continue
+                    raise ValueError
                 items.append(
                     DailyBar(
                         request.symbol,

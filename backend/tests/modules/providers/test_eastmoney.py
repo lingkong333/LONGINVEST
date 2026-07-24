@@ -383,6 +383,43 @@ def test_daily_bars_use_dedicated_history_transport() -> None:
     assert history.requests[0].headers["Referer"].endswith("sh600519.html")
 
 
+def test_server_browser_requests_complete_history_then_filters_range() -> None:
+    history = RecordingJsonClient(
+        {
+            "rc": 0,
+            "data": {
+                "code": "600519",
+                "klines": [
+                    "2024-12-31,1400,1410,1420,1390,100,141000",
+                    "2025-01-02,1500,1510,1520,1490,100,151000",
+                    "2026-01-02,1600,1610,1620,1590,100,161000",
+                ],
+            },
+        }
+    )
+    request = DailyBarRequest(
+        "600519.SH",
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+
+    result = asyncio.run(
+        EastmoneyProvider(
+            None,
+            history_client=history,
+            request_complete_history=True,
+        ).daily_bars(request, datetime.now(UTC) + timedelta(seconds=5))
+    )
+
+    assert [item.trading_date for item in result.items] == [date(2025, 1, 2)]
+    sent = history.requests[0]
+    assert sent.params["beg"] == "0"
+    assert sent.params["end"] == "20500101"
+    assert sent.params["fields2"] == "f51,f52,f53,f54,f55,f56,f57"
+    assert "ut" not in sent.params
+
+
 def test_daily_bars_accept_real_response_with_additional_fields() -> None:
     request = DailyBarRequest(
         "000001.SZ",

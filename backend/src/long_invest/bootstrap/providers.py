@@ -7,6 +7,10 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
+from long_invest.modules.providers.browser_http_client import (
+    BrowserProviderHttpClient,
+    create_browser_json_client,
+)
 from long_invest.modules.providers.contracts import ProviderCode
 from long_invest.modules.providers.eastmoney import EastmoneyProvider
 from long_invest.modules.providers.http_client import (
@@ -92,12 +96,14 @@ class ProviderEventAdapter:
 @dataclass(slots=True)
 class ProviderResources:
     http_client: httpx.AsyncClient
+    history_http_client: BrowserProviderHttpClient
     redis: Redis
     runtime: RedisProviderRuntimeState
     providers: dict[ProviderCode, object]
 
     async def close(self) -> None:
         await self.http_client.aclose()
+        await self.history_http_client.close()
         await self.redis.aclose()
 
 
@@ -122,13 +128,25 @@ def get_provider_resources() -> ProviderResources:
                 }
             ),
         )
-        redis = Redis.from_url(get_settings().redis_url)
+        settings = get_settings()
+        history_http = create_browser_json_client(
+            host="push2his.eastmoney.com",
+            resolve_addresses=(
+                value.strip()
+                for value in settings.eastmoney_history_resolve_ips.split(",")
+                if value.strip()
+            ),
+        )
+        redis = Redis.from_url(settings.redis_url)
         _resources = ProviderResources(
             http_client=client,
+            history_http_client=history_http,
             redis=redis,
             runtime=RedisProviderRuntimeState(redis),
             providers={
-                ProviderCode.EASTMONEY: EastmoneyProvider(provider_http),
+                ProviderCode.EASTMONEY: EastmoneyProvider(
+                    provider_http, history_client=history_http
+                ),
                 ProviderCode.SINA: SinaRealtimeProvider(provider_http),
             },
         )

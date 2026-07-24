@@ -4,7 +4,7 @@ import asyncio
 import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 import httpx
@@ -20,6 +20,12 @@ class ProviderHttpRequest:
     url: str
     params: dict[str, str] = field(default_factory=dict)
     headers: dict[str, str] = field(default_factory=dict)
+
+
+class ProviderJsonClient(Protocol):
+    async def request_json(
+        self, request: ProviderHttpRequest, *, deadline: datetime
+    ) -> dict[str, Any]: ...
 
 
 def create_async_client(

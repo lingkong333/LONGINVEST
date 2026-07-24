@@ -24,8 +24,8 @@ from long_invest.modules.providers.contracts import (
     SecurityMasterRecord,
 )
 from long_invest.modules.providers.http_client import (
-    ProviderHttpClient,
     ProviderHttpRequest,
+    ProviderJsonClient,
 )
 from long_invest.modules.providers.retry import ProviderHttpError
 
@@ -90,8 +90,14 @@ class EastmoneyProvider:
     }
     _CHINA = ZoneInfo("Asia/Shanghai")
 
-    def __init__(self, client: ProviderHttpClient | None) -> None:
+    def __init__(
+        self,
+        client: ProviderJsonClient | None,
+        *,
+        history_client: ProviderJsonClient | None = None,
+    ) -> None:
         self._client = client
+        self._history_client = history_client or client
 
     async def security_master(
         self, deadline: datetime
@@ -824,10 +830,11 @@ class EastmoneyProvider:
         *,
         headers: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        if self._client is None:
+        client = self._history_client if url == self.HISTORY_URL else self._client
+        if client is None:
             raise RuntimeError("provider client is not configured")
         request_headers = {**self.REQUEST_HEADERS, **(headers or {})}
-        return await self._client.request_json(
+        return await client.request_json(
             ProviderHttpRequest(url, params, request_headers), deadline=deadline
         )
 

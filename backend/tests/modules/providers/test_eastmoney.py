@@ -351,6 +351,35 @@ def test_daily_bars_use_current_complete_daily_query() -> None:
     )
 
 
+def test_daily_bars_use_dedicated_history_transport() -> None:
+    normal = RecordingJsonClient({"rc": 0, "data": {"diff": []}})
+    history = RecordingJsonClient(
+        {
+            "rc": 0,
+            "data": {
+                "code": "600519",
+                "klines": ["2025-01-02,1500,1510,1520,1490,100,151000"],
+            },
+        }
+    )
+    request = DailyBarRequest(
+        "600519.SH",
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+
+    result = asyncio.run(
+        EastmoneyProvider(normal, history_client=history).daily_bars(
+            request, datetime.now(UTC) + timedelta(seconds=5)
+        )
+    )
+
+    assert len(result.items) == 1
+    assert not normal.requests
+    assert history.requests[0].url == EastmoneyProvider.HISTORY_URL
+
+
 def test_eastmoney_isolates_identifiable_bad_quote_row() -> None:
     payload = load("multi_market.json")
     payload["data"]["diff"][1]["f2"] = "-"

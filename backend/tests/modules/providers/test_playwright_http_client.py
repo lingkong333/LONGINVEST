@@ -60,7 +60,7 @@ def test_playwright_client_builds_query_and_returns_json() -> None:
 
     assert result == {"ok": True}
     assert "secid=0.000002" in fetcher.calls[0][0]
-    assert "fields2=f51%2Cf52" in fetcher.calls[0][0]
+    assert "fields2=f51,f52" in fetcher.calls[0][0]
     assert fetcher.calls[0][1]["Referer"].startswith("https://quote")
     asyncio.run(client.close())
     assert fetcher.closed is True

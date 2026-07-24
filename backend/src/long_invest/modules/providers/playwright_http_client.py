@@ -196,7 +196,7 @@ class PlaywrightProviderHttpClient:
     @staticmethod
     def _build_url(request: ProviderHttpRequest) -> str:
         parsed = urlsplit(request.url)
-        query = urlencode(request.params)
+        query = urlencode(request.params, safe=",")
         if parsed.query and query:
             query = f"{parsed.query}&{query}"
         elif parsed.query:

@@ -350,6 +350,7 @@ class SecurityMasterService:
             )
             for security in securities
         ]
+        frozen.items = items
         await self._repository.save_universe_snapshot(frozen, items)
         return frozen
 

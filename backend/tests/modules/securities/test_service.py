@@ -442,6 +442,7 @@ async def test_freeze_universe_copies_current_state_and_filter_version() -> None
     assert frozen.item_count == 1
     assert frozen.master_version == 1
     assert frozen.filters["include_st"] is False
+    assert [item.symbol for item in frozen.items] == ["600000.SH"]
     frozen_item = repository.saved_universes[0][1][0]
     assert frozen_item.symbol == "600000.SH"
     assert frozen_item.master_version == 1

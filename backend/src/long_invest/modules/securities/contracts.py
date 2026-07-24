@@ -32,6 +32,13 @@ class ListingStatus(StrEnum):
     DATA_MISSING = "DATA_MISSING"
 
 
+MARKET_DATA_LISTING_STATUSES = (
+    ListingStatus.LISTED,
+    ListingStatus.SUSPENDED,
+    ListingStatus.DATA_MISSING,
+)
+
+
 class SecurityMasterAction(StrEnum):
     REFRESH = "REFRESH"
 
@@ -94,6 +101,7 @@ class UniverseQuery:
 @dataclass(frozen=True, slots=True)
 class SymbolUniverseQuery:
     symbols: tuple[str, ...] = ()
+    include_data_missing: bool = False
 
     def __post_init__(self) -> None:
         normalized = tuple(sorted(set(self.symbols)))

@@ -12,6 +12,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillScope,
 )
 from long_invest.modules.securities.contracts import (
+    MARKET_DATA_LISTING_STATUSES,
     SymbolUniverseQuery,
     UniverseQuery,
 )
@@ -50,7 +51,9 @@ class SecurityHistoryScopeSnapshotAdapter:
     ) -> FrozenHistoryScope:
         service = self._master_service_factory(session)
         if command.scope is HistoryBackfillScope.ALL:
-            snapshot = await service.freeze_universe(UniverseQuery())
+            snapshot = await service.freeze_universe(
+                UniverseQuery(listing_statuses=MARKET_DATA_LISTING_STATUSES)
+            )
         else:
             symbols = command.symbols
             if command.scope is HistoryBackfillScope.WATCHLIST:
@@ -65,7 +68,13 @@ class SecurityHistoryScopeSnapshotAdapter:
                     command.watchlist_id,
                     owner_user_id=owner_user_id,
                 )
-            snapshot = await service.freeze_symbols(SymbolUniverseQuery(symbols))
+            snapshot = await service.freeze_symbols(
+                SymbolUniverseQuery(
+                    symbols,
+                    include_data_missing=command.scope
+                    in {HistoryBackfillScope.SINGLE, HistoryBackfillScope.SELECTED},
+                )
+            )
         return FrozenHistoryScope(
             snapshot_id=snapshot.id,
             master_version=snapshot.master_version,

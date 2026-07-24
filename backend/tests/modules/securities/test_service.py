@@ -500,6 +500,30 @@ async def test_freeze_symbols_rejects_all_invalid_items_atomically() -> None:
 
 
 @pytest.mark.anyio
+async def test_freeze_symbols_allows_incomplete_market_data_explicitly() -> None:
+    repository = FakeRepository()
+    subject, _session = service(repository)
+    await subject.apply_snapshot(
+        snapshot(item("000003.SZ", status=ListingStatus.DATA_MISSING))
+    )
+
+    frozen = await subject.freeze_symbols(
+        SymbolUniverseQuery(
+            symbols=("000003.SZ",),
+            include_data_missing=True,
+        )
+    )
+
+    assert frozen.item_count == 1
+    assert frozen.filters == {
+        "mode": "symbols",
+        "symbols": ["000003.SZ"],
+        "include_data_missing": True,
+    }
+    assert repository.saved_universes[-1][1][0].listing_status == "DATA_MISSING"
+
+
+@pytest.mark.anyio
 async def test_freeze_symbols_copies_normalized_current_state_immutably() -> None:
     repository = FakeRepository()
     subject, _session = service(repository)

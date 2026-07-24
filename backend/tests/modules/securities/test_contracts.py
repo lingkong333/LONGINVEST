@@ -90,10 +90,12 @@ def test_noncanonical_symbols_are_rejected(symbol: str) -> None:
 
 def test_symbol_universe_query_normalizes_duplicates_and_order() -> None:
     query = SymbolUniverseQuery(
-        symbols=("600000.SH", "000001.SZ", "600000.SH")
+        symbols=("600000.SH", "000001.SZ", "600000.SH"),
+        include_data_missing=True,
     )
 
     assert query.symbols == ("000001.SZ", "600000.SH")
+    assert query.include_data_missing is True
 
 
 def test_symbol_universe_query_rejects_an_invalid_symbol() -> None:

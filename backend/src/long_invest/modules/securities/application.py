@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.securities.contracts import (
+    MARKET_DATA_LISTING_STATUSES,
     FrozenSecurity,
     FrozenUniverse,
     ListingStatus,
@@ -228,10 +229,20 @@ class SecurityApplication:
         return _frozen_universe(stored)
 
     async def freeze_universe_in_transaction(self, session):
+        return await self._freeze_universe_in_transaction(session, UniverseQuery())
+
+    async def freeze_daily_universe_in_transaction(self, session):
+        return await self._freeze_universe_in_transaction(
+            session,
+            UniverseQuery(listing_statuses=MARKET_DATA_LISTING_STATUSES),
+        )
+
+    @staticmethod
+    async def _freeze_universe_in_transaction(session, query: UniverseQuery):
         repository = SecurityRepository(session)
         snapshot = await SecurityMasterService(
             session, repository=repository
-        ).freeze_universe(UniverseQuery())
+        ).freeze_universe(query)
         stored = await repository.get_universe_snapshot(snapshot.id)
         if stored is None:
             raise RuntimeError("saved universe snapshot cannot be reloaded")

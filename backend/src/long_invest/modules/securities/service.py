@@ -293,7 +293,11 @@ class SecurityMasterService:
                 errors.append({"symbol": symbol, "code": "SECURITY_NOT_FOUND"})
                 continue
             eligibility = assess_monitoring_eligibility(_security_item(security))
-            if not eligibility.eligible:
+            allow_incomplete_market_data = (
+                query.include_data_missing
+                and eligibility.code == "SECURITY_DATA_MISSING"
+            )
+            if not eligibility.eligible and not allow_incomplete_market_data:
                 errors.append({"symbol": symbol, "code": eligibility.code})
                 continue
             securities.append(security)
@@ -305,10 +309,16 @@ class SecurityMasterService:
                 details={"errors": errors},
             )
         master_version = await self._repository.current_master_version()
+        filters: dict[str, Any] = {
+            "mode": "symbols",
+            "symbols": list(query.symbols),
+        }
+        if query.include_data_missing:
+            filters["include_data_missing"] = True
         return await self._save_universe_snapshot(
             securities=securities,
             master_version=master_version,
-            filters={"mode": "symbols", "symbols": list(query.symbols)},
+            filters=filters,
         )
 
     async def _save_universe_snapshot(

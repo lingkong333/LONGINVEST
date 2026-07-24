@@ -13,6 +13,8 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
         "LONGINVEST_DATABASE_APP_ROLE",
         "LONGINVEST_DATABASE_APP_PASSWORD",
         "LONGINVEST_REDIS_URL",
+        "LONGINVEST_EASTMONEY_HISTORY_TRANSPORT",
+        "LONGINVEST_EASTMONEY_HISTORY_MIN_INTERVAL_SECONDS",
         "LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST",
     ):
         monkeypatch.delenv(name, raising=False)
@@ -27,6 +29,8 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
     assert settings.database_owner_url.startswith("postgresql+")
     assert settings.database_app_role == "longinvest_app"
     assert settings.redis_url.startswith("redis://")
+    assert settings.eastmoney_history_transport == "curl"
+    assert settings.eastmoney_history_min_interval_seconds == 3
     assert settings.dispatcher_scan_interval_seconds == 1.0
     assert settings.dispatcher_batch_size == 50
     assert settings.watchdog_scan_interval_seconds == 10.0
@@ -41,9 +45,13 @@ def test_settings_accept_longinvest_environment_prefix(monkeypatch) -> None:
     monkeypatch.setenv("LONGINVEST_ENVIRONMENT", "test")
     monkeypatch.setenv("LONGINVEST_API_PORT", "9000")
     monkeypatch.setenv("LONGINVEST_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("LONGINVEST_EASTMONEY_HISTORY_TRANSPORT", "playwright")
+    monkeypatch.setenv("LONGINVEST_EASTMONEY_HISTORY_MIN_INTERVAL_SECONDS", "5")
 
     settings = AppSettings(_env_file=None)
 
     assert settings.environment == "test"
     assert settings.api_port == 9000
     assert settings.log_level == "DEBUG"
+    assert settings.eastmoney_history_transport == "playwright"
+    assert settings.eastmoney_history_min_interval_seconds == 5

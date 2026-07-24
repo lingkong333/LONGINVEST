@@ -17,6 +17,10 @@ from long_invest.modules.providers.http_client import (
     ProviderHttpClient,
     create_async_client,
 )
+from long_invest.modules.providers.playwright_http_client import (
+    PlaywrightProviderHttpClient,
+    create_playwright_json_client,
+)
 from long_invest.modules.providers.repository import ProviderRepository
 from long_invest.modules.providers.resilience import RedisProviderRuntimeState
 from long_invest.modules.providers.router import ProviderRouter
@@ -24,7 +28,7 @@ from long_invest.modules.providers.service import ProviderService
 from long_invest.modules.providers.sina import SinaRealtimeProvider
 from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.audit.service import AuditService
-from long_invest.platform.config.settings import get_settings
+from long_invest.platform.config.settings import AppSettings, get_settings
 from long_invest.platform.database.engine import get_database
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
@@ -96,7 +100,7 @@ class ProviderEventAdapter:
 @dataclass(slots=True)
 class ProviderResources:
     http_client: httpx.AsyncClient
-    history_http_client: BrowserProviderHttpClient
+    history_http_client: BrowserProviderHttpClient | PlaywrightProviderHttpClient
     redis: Redis
     runtime: RedisProviderRuntimeState
     providers: dict[ProviderCode, object]
@@ -108,6 +112,26 @@ class ProviderResources:
 
 
 _resources: ProviderResources | None = None
+
+
+def build_history_http_client(
+    settings: AppSettings,
+) -> BrowserProviderHttpClient | PlaywrightProviderHttpClient:
+    if settings.eastmoney_history_transport == "playwright":
+        return create_playwright_json_client(
+            host="push2his.eastmoney.com",
+            minimum_interval_seconds=(
+                settings.eastmoney_history_min_interval_seconds
+            ),
+        )
+    return create_browser_json_client(
+        host="push2his.eastmoney.com",
+        resolve_addresses=(
+            value.strip()
+            for value in settings.eastmoney_history_resolve_ips.split(",")
+            if value.strip()
+        ),
+    )
 
 
 def get_provider_resources() -> ProviderResources:
@@ -129,14 +153,7 @@ def get_provider_resources() -> ProviderResources:
             ),
         )
         settings = get_settings()
-        history_http = create_browser_json_client(
-            host="push2his.eastmoney.com",
-            resolve_addresses=(
-                value.strip()
-                for value in settings.eastmoney_history_resolve_ips.split(",")
-                if value.strip()
-            ),
-        )
+        history_http = build_history_http_client(settings)
         redis = Redis.from_url(settings.redis_url)
         _resources = ProviderResources(
             http_client=client,

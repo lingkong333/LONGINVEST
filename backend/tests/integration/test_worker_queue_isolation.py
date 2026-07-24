@@ -14,7 +14,7 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
         and service["build"].get("target") == "runtime"
     }
 
-    assert len(backend_services) == 18
+    assert len(backend_services) == 17
     assert {service["image"] for service in backend_services.values()} == {
         "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
     }
@@ -40,6 +40,27 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
             "-m",
             "long_invest.entrypoints.worker",
         ]
+
+
+def test_bulk_history_worker_uses_isolated_browser_image() -> None:
+    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
+        "worker-bulk-history"
+    ]
+
+    assert service["build"]["dockerfile"] == (
+        "deploy/docker/history-worker.Dockerfile"
+    )
+    assert service["environment"]["LONGINVEST_WORKER_QUEUES"] == "bulk-history"
+    assert (
+        service["environment"]["LONGINVEST_EASTMONEY_HISTORY_TRANSPORT"]
+        == "playwright"
+    )
+    assert service["read_only"] is True
+    assert service["shm_size"] == "512m"
+    assert service["mem_limit"] == "1g"
+    assert "ALL" in service["cap_drop"]
+    assert "ports" not in service
 
 
 def test_compose_publishes_only_the_frontend_on_public_port() -> None:

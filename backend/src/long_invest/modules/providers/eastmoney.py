@@ -76,9 +76,16 @@ class EastmoneyProvider:
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9",
         "Referer": "https://quote.eastmoney.com/",
+        "Sec-CH-UA": (
+            '"Not;A=Brand";v="8", "Chromium";v="150", '
+            '"Google Chrome";v="150"'
+        ),
+        "Sec-CH-UA-Mobile": "?0",
+        "Sec-CH-UA-Platform": '"Windows"',
         "User-Agent": (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/138.0.0.0 Safari/537.36"
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/150.0.0.0 Safari/537.36"
         ),
     }
     _CHINA = ZoneInfo("Asia/Shanghai")
@@ -142,15 +149,23 @@ class EastmoneyProvider:
             self.HISTORY_URL,
             {
                 "secid": secid,
-                "ut": "7eea3edcaed734bea9cbfc24409ed989",
+                "ut": "fa5fd1943c7b386f172d6893dbfba10b",
                 "klt": "101",
                 "fqt": fqt,
                 "beg": request.start.strftime("%Y%m%d"),
                 "end": request.end.strftime("%Y%m%d"),
+                "smplmt": "460",
+                "lmt": "1000000",
                 "fields1": "f1,f2,f3,f4,f5,f6",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57",
+                "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
             },
             deadline,
+            headers={
+                "Referer": (
+                    "https://quote.eastmoney.com/"
+                    f"{request.symbol[-2:].lower()}{request.symbol[:6]}.html"
+                )
+            },
         )
         try:
             return self.parse_bars(payload, request=request)

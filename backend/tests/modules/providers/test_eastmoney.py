@@ -310,6 +310,48 @@ def test_eastmoney_normalizes_unadjusted_and_qfq_bars() -> None:
         assert result.items[0].capability is capability
 
 
+def test_daily_bars_use_current_complete_daily_query() -> None:
+    client = RecordingJsonClient(
+        {
+            "rc": 0,
+            "data": {
+                "code": "600519",
+                "klines": ["2025-01-02,1500,1510,1520,1490,100,151000"],
+            },
+        }
+    )
+    request = DailyBarRequest(
+        "600519.SH",
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+
+    result = asyncio.run(
+        EastmoneyProvider(client).daily_bars(
+            request, datetime.now(UTC) + timedelta(seconds=5)
+        )
+    )
+
+    assert len(result.items) == 1
+    sent = client.requests[0]
+    assert sent.params == {
+        "secid": "1.600519",
+        "ut": "fa5fd1943c7b386f172d6893dbfba10b",
+        "klt": "101",
+        "fqt": "0",
+        "beg": "20250101",
+        "end": "20251231",
+        "smplmt": "460",
+        "lmt": "1000000",
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+    }
+    assert sent.headers["Referer"] == (
+        "https://quote.eastmoney.com/sh600519.html"
+    )
+
+
 def test_eastmoney_isolates_identifiable_bad_quote_row() -> None:
     payload = load("multi_market.json")
     payload["data"]["diff"][1]["f2"] = "-"

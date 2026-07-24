@@ -33,6 +33,7 @@ from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderCapability,
 )
+from long_invest.modules.providers.resilience import ProviderCallError
 from long_invest.modules.providers.retry import ProviderHttpError
 from long_invest.modules.watchlists.outbox import WatchlistEventAdapter
 from long_invest.modules.watchlists.repository import WatchlistRepository
@@ -87,6 +88,8 @@ class DatabaseHistoryBarsProvider:
             raise HistoryBackfillItemError(
                 error.code, retryable=error.retryable
             ) from error
+        except ProviderCallError as error:
+            raise HistoryBackfillItemError(error.code, retryable=True) from error
         if result.batch_error_code:
             raise HistoryBackfillItemError(result.batch_error_code, retryable=True)
         if result.failures:

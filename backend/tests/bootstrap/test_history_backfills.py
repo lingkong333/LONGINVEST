@@ -11,6 +11,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillItemError,
     HistoryBackfillWorkItem,
 )
+from long_invest.modules.providers.resilience import ProviderCallError
 from long_invest.modules.providers.retry import ProviderHttpError
 
 
@@ -47,6 +48,33 @@ def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None
                 deadline=datetime.now(UTC) + timedelta(seconds=2),
             )
         assert captured.value.code == "PROVIDER_UPSTREAM_TEMPORARY"
+        assert captured.value.retryable is True
+
+    asyncio.run(run())
+
+
+def test_provider_circuit_failure_keeps_stable_error_code(monkeypatch) -> None:
+    class OpenCircuitProviderService:
+        async def daily_bars(self, request, deadline):
+            del request, deadline
+            raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
+
+    monkeypatch.setattr(
+        history_backfills,
+        "build_provider_service",
+        lambda session: OpenCircuitProviderService(),
+    )
+
+    async def run() -> None:
+        provider = DatabaseHistoryBarsProvider(FakeDatabase())
+        with pytest.raises(HistoryBackfillItemError) as captured:
+            await provider.fetch(
+                HistoryBackfillWorkItem(uuid4(), "600519.SH"),
+                start_date=date(2025, 1, 1),
+                end_date=date(2025, 12, 31),
+                deadline=datetime.now(UTC) + timedelta(seconds=2),
+            )
+        assert captured.value.code == "PROVIDER_CIRCUIT_OPEN"
         assert captured.value.retryable is True
 
     asyncio.run(run())

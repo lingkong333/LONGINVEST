@@ -24,7 +24,7 @@ from long_invest.modules.providers.models import (
     ProviderHealthState,
     ProviderMutationRequest,
 )
-from long_invest.modules.providers.repository import ProviderRepository
+from long_invest.modules.providers.repository import ProviderRepository, _json_safe
 from long_invest.modules.providers.resilience import (
     ProviderInvocationPipeline,
     ProviderRouteSetting,
@@ -40,6 +40,15 @@ def async_test(function):
         return asyncio.run(function(*args, **kwargs))
 
     return run
+
+
+def test_provider_json_summary_serializes_datetimes() -> None:
+    occurred_at = datetime(2026, 7, 24, 6, 55, tzinfo=UTC)
+
+    assert _json_safe({"state": "OPEN", "opened_at": occurred_at}) == {
+        "state": "OPEN",
+        "opened_at": "2026-07-24T06:55:00+00:00",
+    }
 
 
 def audit_context(key: str = "idem-1") -> AuditContext:

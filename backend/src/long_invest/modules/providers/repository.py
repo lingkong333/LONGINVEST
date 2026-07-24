@@ -439,13 +439,15 @@ class ProviderRepository:
                 )
             )
             after = self._circuit_dict(circuit)
+            safe_before = _json_safe(before)
+            safe_after = _json_safe(after)
             self._session.add(
                 self._mutation(
                     context,
                     digest=digest,
                     operation=action_code,
                     object_id=str(circuit_id),
-                    response=after,
+                    response=safe_after,
                 )
             )
             await self._audit.record(
@@ -454,8 +456,8 @@ class ProviderRepository:
                 object_type="provider_circuit",
                 object_id=str(circuit_id),
                 reason=reason,
-                before_summary=before,
-                after_summary=after,
+                before_summary=safe_before,
+                after_summary=safe_after,
             )
             await self._events.append(
                 action_code,
@@ -956,3 +958,10 @@ class ProviderRepository:
             session_id=str(context.session_id),
             trusted_ip=str(context.trusted_ip),
         )
+
+
+def _json_safe(value: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: item.isoformat() if isinstance(item, datetime) else item
+        for key, item in value.items()
+    }

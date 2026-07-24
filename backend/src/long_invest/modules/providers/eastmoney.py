@@ -911,7 +911,7 @@ class EastmoneyProvider:
         try:
             for row in rows:
                 fields = row.split(",")
-                if len(fields) != 7:
+                if len(fields) < 7:
                     raise ValueError
                 trading_date = date.fromisoformat(fields[0])
                 if (

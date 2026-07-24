@@ -380,6 +380,31 @@ def test_daily_bars_use_dedicated_history_transport() -> None:
     assert history.requests[0].url == EastmoneyProvider.HISTORY_URL
 
 
+def test_daily_bars_accept_real_response_with_additional_fields() -> None:
+    request = DailyBarRequest(
+        "000001.SZ",
+        date(2025, 1, 1),
+        date(2025, 12, 31),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+    payload = {
+        "rc": 0,
+        "data": {
+            "code": "000001",
+            "klines": [
+                "2025-01-02,11.20,11.35,11.40,11.10,1000,11250000,"
+                "1.79,0.20,1.35,0.68"
+            ],
+        },
+    }
+
+    result = EastmoneyProvider(None).parse_bars(payload, request=request)
+
+    assert len(result.items) == 1
+    assert result.items[0].open == Decimal("11.20")
+    assert result.items[0].close == Decimal("11.35")
+
+
 def test_eastmoney_isolates_identifiable_bad_quote_row() -> None:
     payload = load("multi_market.json")
     payload["data"]["diff"][1]["f2"] = "-"

@@ -342,7 +342,6 @@ def test_daily_bars_use_current_complete_daily_query() -> None:
         "fqt": "0",
         "beg": "20250101",
         "end": "20251231",
-        "smplmt": "460",
         "lmt": "1000000",
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",

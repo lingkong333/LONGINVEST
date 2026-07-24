@@ -213,6 +213,7 @@ async def test_runtime_outcome_persists_health_circuit_history_and_events() -> N
         ProviderCode.EASTMONEY,
         ProviderCapability.REALTIME_QUOTE_BATCH,
     )
+    occurred_at = datetime.now(UTC)
     await repository.record_outcome(
         setting,
         success=False,
@@ -220,9 +221,9 @@ async def test_runtime_outcome_persists_health_circuit_history_and_events() -> N
             "state": "OPEN",
             "consecutive_failures": 3,
             "cooldown_index": 0,
-            "opened_at": datetime.now(UTC),
+            "opened_at": occurred_at.timestamp(),
         },
-        occurred_at=datetime.now(UTC),
+        occurred_at=occurred_at,
         error_code="PROVIDER_FAILED",
     )
     assert {item.__tablename__ for item in session.added} == {
@@ -230,6 +231,10 @@ async def test_runtime_outcome_persists_health_circuit_history_and_events() -> N
         "provider_circuit_state",
         "provider_circuit_history",
     }
+    circuit = next(
+        item for item in session.added if item.__tablename__ == "provider_circuit_state"
+    )
+    assert circuit.opened_at == occurred_at
     assert [call[0][0] for call in events.calls] == [
         "provider.circuit_state_changed",
         "provider.circuit_opened",

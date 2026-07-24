@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -404,7 +404,7 @@ class ProviderRepository:
             circuit.state = result["state"]
             circuit.consecutive_failures = result["consecutive_failures"]
             circuit.cooldown_index = result["cooldown_index"]
-            circuit.opened_at = result.get("opened_at")
+            circuit.opened_at = self._opened_at_datetime(result.get("opened_at"))
             health = await self._session.scalar(
                 select(ProviderHealthState)
                 .where(
@@ -562,6 +562,7 @@ class ProviderRepository:
             ordered_samples = sorted(int(item) for item in samples)
             p95_index = max(0, (len(ordered_samples) * 95 + 99) // 100 - 1)
             opened_at = snapshot.get("opened_at")
+            persisted_opened_at = self._opened_at_datetime(opened_at)
             cooldown_index = int(
                 snapshot.get("cooldown_index", snapshot.get("level", 0))
             )
@@ -645,7 +646,7 @@ class ProviderRepository:
                     cooldown_index=int(
                         snapshot.get("cooldown_index", snapshot.get("level", 0))
                     ),
-                    opened_at=snapshot.get("opened_at"),
+                    opened_at=persisted_opened_at,
                 )
                 self._session.add(circuit)
             else:
@@ -655,7 +656,7 @@ class ProviderRepository:
                 circuit.cooldown_index = int(
                     snapshot.get("cooldown_index", snapshot.get("level", 0))
                 )
-                circuit.opened_at = snapshot.get("opened_at")
+                circuit.opened_at = persisted_opened_at
             if previous_state != state:
                 self._session.add(
                     ProviderCircuitHistory(
@@ -767,7 +768,7 @@ class ProviderRepository:
                     state="HALF_OPEN",
                     consecutive_failures=int(snapshot.get("failures", 0)),
                     cooldown_index=int(snapshot.get("level", 0)),
-                    opened_at=snapshot.get("opened_at"),
+                    opened_at=self._opened_at_datetime(snapshot.get("opened_at")),
                 )
                 self._session.add(circuit)
             else:
@@ -838,6 +839,17 @@ class ProviderRepository:
         cooldowns = (60, 180, 300)
         cooldown = cooldowns[min(max(cooldown_index, 0), len(cooldowns) - 1)]
         return max(0, int(opened_timestamp + cooldown - occurred_at.timestamp()))
+
+    @staticmethod
+    def _opened_at_datetime(opened_at: Any) -> datetime | None:
+        if opened_at is None:
+            return None
+        if isinstance(opened_at, datetime):
+            return opened_at
+        try:
+            return datetime.fromtimestamp(float(opened_at), tz=UTC)
+        except (OSError, OverflowError, TypeError, ValueError):
+            return None
 
     async def add_failure_sample(self, sample: ProviderFailureSample) -> None:
         self._session.add(sample)

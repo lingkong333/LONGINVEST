@@ -120,6 +120,11 @@ def build_history_http_client(
     if settings.eastmoney_history_transport == "playwright":
         return create_playwright_json_client(
             host="push2his.eastmoney.com",
+            resolve_addresses=tuple(
+                value.strip()
+                for value in settings.eastmoney_history_resolve_ips.split(",")
+                if value.strip()
+            ),
             minimum_interval_seconds=(
                 settings.eastmoney_history_min_interval_seconds
             ),

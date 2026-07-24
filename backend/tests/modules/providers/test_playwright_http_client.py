@@ -7,6 +7,7 @@ from long_invest.modules.providers.http_client import ProviderHttpRequest
 from long_invest.modules.providers.playwright_http_client import (
     BrowserResponse,
     PlaywrightProviderHttpClient,
+    create_playwright_json_client,
 )
 from long_invest.modules.providers.retry import ProviderHttpError
 
@@ -141,4 +142,12 @@ def test_playwright_client_keeps_response_guards(
                 ProviderHttpRequest(url),
                 deadline=datetime.now(UTC) + timedelta(seconds=1),
             )
+        )
+
+
+def test_playwright_client_rejects_invalid_configured_address() -> None:
+    with pytest.raises(ValueError):
+        create_playwright_json_client(
+            host="push2his.eastmoney.com",
+            resolve_addresses=("not-an-ip",),
         )

@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Mapping
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from ipaddress import ip_address
 from time import monotonic
 from typing import Any, Protocol
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -38,8 +40,15 @@ class BrowserFetcher(Protocol):
 
 
 class PlaywrightPageFetcher:
-    def __init__(self, *, allowed_hosts: frozenset[str]) -> None:
+    def __init__(
+        self,
+        *,
+        allowed_hosts: frozenset[str],
+        resolve_addresses: tuple[str, ...] = (),
+    ) -> None:
         self._allowed_hosts = allowed_hosts
+        self._resolve_addresses = resolve_addresses
+        self._address_index = 0
         self._runtime: Any | None = None
         self._browser: Any | None = None
         self._start_lock = asyncio.Lock()
@@ -52,16 +61,11 @@ class PlaywrightPageFetcher:
         timeout_ms: float,
     ) -> BrowserResponse:
         browser = await self._get_browser()
-        page = await browser.new_page(extra_http_headers=dict(headers))
-
-        async def guard_request(route: Any) -> None:
-            request = route.request
-            if request.redirected_from is not None or not self._is_allowed(request.url):
-                await route.abort("blockedbyclient")
-                return
-            await route.continue_()
-
-        await page.route("**/*", guard_request)
+        browser_headers = {
+            key: value for key, value in headers.items() if key.lower() == "referer"
+        }
+        page = await browser.new_page(extra_http_headers=browser_headers)
+        should_rotate = False
         try:
             from playwright.async_api import Error as PlaywrightError
             from playwright.async_api import TimeoutError as PlaywrightTimeoutError
@@ -76,6 +80,8 @@ class PlaywrightPageFetcher:
                     raise ProviderHttpError(
                         "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
                     )
+                if response.request.redirected_from is not None:
+                    raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
                 return BrowserResponse(
                     status_code=response.status,
                     headers=response.headers,
@@ -83,15 +89,20 @@ class PlaywrightPageFetcher:
                     url=response.url,
                 )
             except PlaywrightTimeoutError as error:
+                should_rotate = True
                 raise ProviderHttpError(
                     "PROVIDER_TIMEOUT", retryable=True
                 ) from error
             except PlaywrightError as error:
+                should_rotate = True
                 raise ProviderHttpError(
                     "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
                 ) from error
         finally:
-            await page.close()
+            with suppress(Exception):
+                await page.close()
+            if should_rotate:
+                await self._rotate_browser()
 
     async def close(self) -> None:
         if self._browser is not None:
@@ -113,18 +124,26 @@ class PlaywrightPageFetcher:
                         "Playwright history transport is not installed"
                     ) from error
                 self._runtime = await async_playwright().start()
-                self._browser = await self._runtime.chromium.launch(headless=True)
+                launch_args = []
+                if self._resolve_addresses:
+                    address = self._resolve_addresses[self._address_index]
+                    host = next(iter(self._allowed_hosts))
+                    launch_args.append(f"--host-resolver-rules=MAP {host} {address}")
+                self._browser = await self._runtime.chromium.launch(
+                    headless=True,
+                    args=launch_args,
+                )
         return self._browser
 
-    def _is_allowed(self, url: str) -> bool:
-        parsed = urlsplit(url)
-        return (
-            parsed.scheme == "https"
-            and parsed.hostname in self._allowed_hosts
-            and parsed.username is None
-            and parsed.password is None
-            and parsed.port in (None, 443)
-        )
+    async def _rotate_browser(self) -> None:
+        if self._browser is not None:
+            with suppress(Exception):
+                await self._browser.close()
+            self._browser = None
+        if self._resolve_addresses:
+            self._address_index = (self._address_index + 1) % len(
+                self._resolve_addresses
+            )
 
 
 class PlaywrightProviderHttpClient:
@@ -251,12 +270,19 @@ class PlaywrightProviderHttpClient:
 def create_playwright_json_client(
     *,
     host: str,
+    resolve_addresses: tuple[str, ...] = (),
     minimum_interval_seconds: float = 3,
     max_response_bytes: int = 2_000_000,
 ) -> PlaywrightProviderHttpClient:
     allowed_hosts = frozenset({host})
+    addresses = tuple(dict.fromkeys(resolve_addresses))
+    for address in addresses:
+        ip_address(address)
     return PlaywrightProviderHttpClient(
-        PlaywrightPageFetcher(allowed_hosts=allowed_hosts),
+        PlaywrightPageFetcher(
+            allowed_hosts=allowed_hosts,
+            resolve_addresses=addresses,
+        ),
         allowed_hosts=allowed_hosts,
         minimum_interval_seconds=minimum_interval_seconds,
         max_response_bytes=max_response_bytes,

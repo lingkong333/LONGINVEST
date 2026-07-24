@@ -10,8 +10,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes git \
     && rm -rf /var/lib/apt/lists/* \
+    && useradd --uid 999 --gid pwuser --home-dir /app --no-create-home longinvest \
     && mkdir -p /app /var/log/longinvest \
-    && chown -R pwuser:pwuser /app /var/log/longinvest
+    && chown -R longinvest:pwuser /app /var/log/longinvest
 
 WORKDIR /app
 
@@ -23,10 +24,10 @@ RUN uv sync --frozen --no-dev --extra collector --no-install-project
 COPY backend/src ./src
 
 RUN uv sync --frozen --no-dev --extra collector \
-    && chown -R pwuser:pwuser /app
+    && chown -R longinvest:pwuser /app
 
 ENV PATH="/app/.venv/bin:$PATH"
 
-USER pwuser
+USER longinvest
 
 CMD ["python", "-m", "long_invest.entrypoints.worker"]

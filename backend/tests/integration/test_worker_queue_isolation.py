@@ -44,9 +44,13 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
 
 def test_bulk_history_worker_uses_isolated_browser_image() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    dockerfile_path = (
+        Path(__file__).parents[3] / "deploy" / "docker" / "history-worker.Dockerfile"
+    )
     service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
         "worker-bulk-history"
     ]
+    dockerfile = dockerfile_path.read_text(encoding="utf-8")
 
     assert service["build"]["dockerfile"] == (
         "deploy/docker/history-worker.Dockerfile"
@@ -61,6 +65,8 @@ def test_bulk_history_worker_uses_isolated_browser_image() -> None:
     assert service["mem_limit"] == "1g"
     assert "ALL" in service["cap_drop"]
     assert "ports" not in service
+    assert "useradd --uid 999" in dockerfile
+    assert "USER longinvest" in dockerfile
 
 
 def test_compose_publishes_only_the_frontend_on_public_port() -> None:

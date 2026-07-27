@@ -167,6 +167,8 @@ describe("行情数据中心", () => {
     expect(screen.getByText("前复权数据")).toBeInTheDocument()
     expect(screen.getByText(/来源冲突/)).toBeInTheDocument()
     expect(screen.getByText("历史回填")).toBeInTheDocument()
+    expect(screen.getByText(/0\/100 · 成功 0 · 失败 0/)).toBeInTheDocument()
+    expect(screen.getByRole("progressbar", { name: "完成 0%" })).toBeInTheDocument()
     expect(screen.getByText("价格仅由数据源采集，不支持人工录入")).toBeInTheDocument()
     expect(screen.queryByRole("textbox", { name: "价格" })).not.toBeInTheDocument()
   })

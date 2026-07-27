@@ -6,6 +6,8 @@ from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from uuid import UUID
 
+import structlog
+
 from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillControl,
     HistoryBackfillExecutionResult,
@@ -24,6 +26,8 @@ from long_invest.platform.jobs.contracts import (
     JobItemStatus,
     JobResult,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 class HistoryBackfillExecutor:
@@ -172,7 +176,13 @@ class HistoryBackfillExecutor:
             await self._fail(fence, item, exc.code)
         except ValueError:
             await self._fail(fence, item, "HISTORY_BARS_INVALID")
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "history_backfill_item_failed",
+                job_id=str(context.job_id),
+                symbol=item.symbol,
+                error_type=type(exc).__name__,
+            )
             await self._fail(fence, item, "HISTORY_ITEM_FAILED")
 
     async def _stop_at_safe_point(

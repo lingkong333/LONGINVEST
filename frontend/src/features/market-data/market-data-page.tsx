@@ -766,8 +766,14 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : (
             <div className="flex flex-col gap-2">
               {backfills.data.items.slice(0, 8).map((job) => {
+                const completed = Math.min(
+                  job.total,
+                  job.itemCounts.succeeded
+                    + job.itemCounts.failed
+                    + job.itemCounts.canceled,
+                )
                 const percentage = job.total > 0
-                  ? Math.min(100, Math.round((job.completed / job.total) * 100))
+                  ? Math.min(100, Math.round((completed / job.total) * 100))
                   : 0
                 return (
                   <div key={job.id} className="border px-3 py-2.5">
@@ -781,7 +787,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                       aria-label={`完成 ${percentage}%`}
                     />
                     <p className="mt-1.5 text-xs text-muted-foreground">
-                      {job.completed}/{job.total} · 成功 {job.itemCounts.succeeded} · 失败 {job.itemCounts.failed} · 更新于 {dateTime(job.updatedAt)}
+                      {completed}/{job.total} · 成功 {job.itemCounts.succeeded} · 失败 {job.itemCounts.failed} · 更新于 {dateTime(job.updatedAt)}
                     </p>
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {job.itemCounts.fetching > 0 ? (

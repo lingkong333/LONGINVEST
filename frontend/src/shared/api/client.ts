@@ -49,6 +49,19 @@ interface ApiClientOptions {
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"])
 let fallbackRequestSequence = 0
+let sharedCsrfToken: string | undefined
+
+export function setSharedCsrfToken(token: string | undefined) {
+  sharedCsrfToken = token
+}
+
+export function clearSharedCsrfToken() {
+  sharedCsrfToken = undefined
+}
+
+export function getSharedCsrfToken() {
+  return sharedCsrfToken
+}
 
 interface ApiOperationResult {
   data?: unknown
@@ -125,6 +138,7 @@ export function createApiClient<Paths extends object>({
   onUnauthorized,
   fetch: fetchImplementation = globalThis.fetch,
 }: ApiClientOptions = {}) {
+  const resolveCsrfToken = getCsrfToken ?? getSharedCsrfToken
   let authGeneration = 0
   let handledUnauthorizedGeneration: number | undefined
   let unauthorizedWave: {
@@ -174,7 +188,7 @@ export function createApiClient<Paths extends object>({
     if (isWrite && !headers.has("Idempotency-Key")) {
       headers.set("Idempotency-Key", createClientIdempotencyKey())
     }
-    const csrfToken = isWrite ? getCsrfToken?.() : undefined
+    const csrfToken = isWrite ? resolveCsrfToken() : undefined
     if (csrfToken && !headers.has("X-CSRF-Token")) {
       headers.set("X-CSRF-Token", csrfToken)
     }

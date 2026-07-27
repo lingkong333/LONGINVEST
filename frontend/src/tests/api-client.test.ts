@@ -4,8 +4,10 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest
 
 import {
   ApiError,
+  clearSharedCsrfToken,
   createApiClient,
   createClientRequestId,
+  setSharedCsrfToken,
   unwrapEnvelope,
   type ApiEnvelope,
 } from "@/shared/api/client"
@@ -36,6 +38,7 @@ const server = setupServer()
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
 afterEach(() => {
+  clearSharedCsrfToken()
   server.resetHandlers()
   vi.unstubAllGlobals()
 })
@@ -99,6 +102,28 @@ describe("统一 API 客户端", () => {
     const data = await api.request(api.client.POST("/settings", { body: { enabled: true } }))
 
     expect(data).toEqual({ enabled: true })
+  })
+
+  it("业务请求默认共享登录流程取得的内存 CSRF", async () => {
+    setSharedCsrfToken("shared-session-csrf")
+    server.use(
+      http.post("http://localhost/api/v1/settings", ({ request }) => {
+        expect(request.headers.get("X-CSRF-Token")).toBe("shared-session-csrf")
+        return HttpResponse.json({
+          success: true,
+          code: "OK",
+          message: "操作成功",
+          data: { enabled: true },
+          request_id: "req_shared_write",
+          server_time: "2026-07-27T00:00:00Z",
+        } satisfies ApiEnvelope<{ enabled: boolean }>)
+      }),
+    )
+    const api = createApiClient<TestPaths>({ baseUrl: "http://localhost/api/v1" })
+
+    await expect(
+      api.request(api.client.POST("/settings", { body: { enabled: true } })),
+    ).resolves.toEqual({ enabled: true })
   })
 
   it("请求超过截止时间后返回稳定超时错误", async () => {

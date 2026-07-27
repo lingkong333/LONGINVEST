@@ -3,12 +3,19 @@ import { setupServer } from "msw/node"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 
 import { createAuthGateway } from "@/features/auth"
-import type { ApiEnvelope } from "@/shared/api/client"
+import {
+  clearSharedCsrfToken,
+  createApiClient,
+  type ApiEnvelope,
+} from "@/shared/api/client"
 
 const server = setupServer()
 
 beforeAll(() => server.listen({ onUnhandledRequest: "error" }))
-afterEach(() => server.resetHandlers())
+afterEach(() => {
+  clearSharedCsrfToken()
+  server.resetHandlers()
+})
 afterAll(() => server.close())
 
 function envelope<T>(data: T): ApiEnvelope<T> {
@@ -64,6 +71,36 @@ describe("认证请求边界", () => {
     await gateway.logout()
 
     expect(logoutCsrf).toBe("memory-csrf")
+  })
+
+  it("登录取得的 CSRF 可供其他业务请求使用", async () => {
+    let settingsCsrf: string | null = null
+    server.use(
+      http.get("http://localhost/api/v1/auth/me", () => (
+        HttpResponse.json(envelope(me))
+      )),
+      http.get("http://localhost/api/v1/auth/csrf", () => (
+        HttpResponse.json(envelope({ csrf_token: "shared-auth-csrf" }))
+      )),
+      http.post("http://localhost/api/v1/settings", ({ request }) => {
+        settingsCsrf = request.headers.get("X-CSRF-Token")
+        return HttpResponse.json(envelope({ saved: true }))
+      }),
+    )
+    const gateway = createAuthGateway({ baseUrl: "http://localhost" })
+    const businessApi = createApiClient<{ "/api/v1/settings": {
+      post: {
+        requestBody: { content: { "application/json": Record<string, never> } }
+        responses: { 200: { content: { "application/json": ApiEnvelope<{ saved: boolean }> } } }
+      }
+    } }>({ baseUrl: "http://localhost" })
+
+    await gateway.loadSession()
+    await businessApi.request(
+      businessApi.client.POST("/api/v1/settings", { body: {} }),
+    )
+
+    expect(settingsCsrf).toBe("shared-auth-csrf")
   })
 
   it("同一批并发 401 只触发一次统一失效处理", async () => {

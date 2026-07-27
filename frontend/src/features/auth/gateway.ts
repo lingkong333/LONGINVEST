@@ -1,7 +1,12 @@
 import { z } from "zod"
 
 import type { paths } from "@/shared/api/generated/schema"
-import { ApiError, createApiClient } from "@/shared/api/client"
+import {
+  ApiError,
+  clearSharedCsrfToken,
+  createApiClient,
+  setSharedCsrfToken,
+} from "@/shared/api/client"
 import type { AuthGateway, AuthState, LoginInput } from "@/features/auth/types"
 
 const authStateSchema = z.object({
@@ -47,15 +52,13 @@ export function createAuthGateway({
   baseUrl = "",
   fetch,
 }: AuthGatewayOptions = {}): AuthGateway {
-  let csrfToken: string | undefined
   let unauthorizedHandler: (() => void) | undefined
 
   const api = createApiClient<paths>({
     baseUrl,
     fetch,
-    getCsrfToken: () => csrfToken,
     onUnauthorized: () => {
-      csrfToken = undefined
+      clearSharedCsrfToken()
       unauthorizedHandler?.()
     },
   })
@@ -66,7 +69,7 @@ export function createAuthGateway({
       api.request<unknown>(api.client.GET("/api/v1/auth/csrf")),
     ])
     const authState = parseResponse(authStateSchema, authData)
-    csrfToken = parseResponse(csrfSchema, csrfData).csrf_token
+    setSharedCsrfToken(parseResponse(csrfSchema, csrfData).csrf_token)
     return authState
   }
 
@@ -81,7 +84,7 @@ export function createAuthGateway({
       try {
         await api.request(api.client.POST("/api/v1/auth/logout"))
       } finally {
-        csrfToken = undefined
+        clearSharedCsrfToken()
       }
     },
     setUnauthorizedHandler(handler) {

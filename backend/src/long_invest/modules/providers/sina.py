@@ -305,10 +305,11 @@ class SinaRealtimeProvider:
         raw_rows: list[tuple[date, dict[str, Any]]] = []
         try:
             for index, row in frame.iterrows():
+                raw_date = row["date"] if "date" in frame.columns else index
                 trading_date = (
-                    index.date()
-                    if hasattr(index, "date")
-                    else date.fromisoformat(str(index)[:10])
+                    raw_date.date()
+                    if hasattr(raw_date, "date")
+                    else date.fromisoformat(str(raw_date)[:10])
                 )
                 if request.start <= trading_date <= request.end:
                     raw_rows.append((trading_date, row))

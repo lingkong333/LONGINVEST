@@ -211,6 +211,45 @@ def test_sina_loads_and_normalizes_historical_daily(capability, adjust) -> None:
     assert all(item.capability is capability for item in result.items)
 
 
+def test_sina_accepts_akshare_date_column_shape() -> None:
+    request = DailyBarRequest(
+        "000001.SZ",
+        date(2026, 7, 24),
+        date(2026, 7, 27),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+    frame = pd.DataFrame(
+        [
+            {
+                "date": date(2026, 7, 24),
+                "open": 11.09,
+                "high": 11.18,
+                "low": 11.09,
+                "close": 11.10,
+                "volume": 114093292.0,
+                "amount": 1269361000.0,
+            },
+            {
+                "date": date(2026, 7, 27),
+                "open": 11.11,
+                "high": 11.16,
+                "low": 11.04,
+                "close": 11.11,
+                "volume": 95715556.0,
+                "amount": 1062796000.0,
+            },
+        ]
+    )
+
+    result = SinaRealtimeProvider.parse_daily_bars(frame, request=request)
+
+    assert [item.trading_date for item in result.items] == [
+        date(2026, 7, 24),
+        date(2026, 7, 27),
+    ]
+    assert result.items[-1].volume == 95715556
+
+
 def test_sina_qfq_discards_only_the_nonpositive_prefix() -> None:
     request = DailyBarRequest(
         "000001.SZ",

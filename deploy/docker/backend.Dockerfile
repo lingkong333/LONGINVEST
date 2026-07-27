@@ -47,6 +47,7 @@ COPY backend/tests ./tests
 COPY backend/openapi.json ./openapi.json
 COPY deploy/compose.yaml /deploy/compose.yaml
 COPY deploy/data/trading-calendar /deploy/data/trading-calendar
+COPY deploy/docker/history-worker.Dockerfile /deploy/docker/history-worker.Dockerfile
 COPY deploy/docker/strategy-runner.Dockerfile /deploy/docker/strategy-runner.Dockerfile
 COPY deploy/security/strategy-runner-seccomp.json /deploy/security/strategy-runner-seccomp.json
 

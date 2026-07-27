@@ -67,6 +67,7 @@ def test_bulk_history_worker_uses_isolated_browser_image() -> None:
     assert "ports" not in service
     assert "useradd --uid 999" in dockerfile
     assert "playwright install chrome" in dockerfile
+    assert 'ENV HOME="/tmp"' in dockerfile
     assert "USER longinvest" in dockerfile
 
 

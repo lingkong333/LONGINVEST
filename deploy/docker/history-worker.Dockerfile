@@ -30,6 +30,7 @@ RUN uv sync --frozen --no-dev --extra collector \
     && chown -R longinvest:pwuser /app
 
 ENV PATH="/app/.venv/bin:$PATH"
+ENV HOME="/tmp"
 
 USER longinvest
 

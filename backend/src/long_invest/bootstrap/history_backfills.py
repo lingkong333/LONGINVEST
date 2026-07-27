@@ -130,7 +130,10 @@ async def _wait_for_history_capacity(provider, request, *, deadline: datetime):
         try:
             return await provider.daily_bars(request, deadline)
         except ProviderCallError as error:
-            if error.code != "PROVIDER_RATE_LIMITED":
+            if error.code not in {
+                "PROVIDER_RATE_LIMITED",
+                "PROVIDER_CIRCUIT_OPEN",
+            }:
                 raise
             remaining = (deadline - datetime.now(UTC)).total_seconds()
             if remaining <= 0:
@@ -190,10 +193,6 @@ class DatabaseHistoryBarStore:
                 events=DailyDataEventWriter(session),
                 quality_issues=QualityIssueService(QualityIssueRepository(session)),
             ).store_historical_bars(inputs, reason=reason)
-        if stored.review_required:
-            raise HistoryBackfillItemError(
-                "HISTORY_UNADJUSTED_REVIEW_REQUIRED", retryable=False
-            )
         qfq_dates = tuple(bar.trade_date for bar in bars.qfq)
         raw_by_date = {bar.trade_date: bar for bar in bars.unadjusted}
         anchor = raw_by_date[bars.qfq[-1].trade_date]

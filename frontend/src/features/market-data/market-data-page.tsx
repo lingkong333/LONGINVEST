@@ -94,9 +94,11 @@ function dateTime(value: string | null) {
 }
 
 const activeBackfillStatuses = new Set([
+  "PENDING_DISPATCH",
   "PENDING",
   "QUEUED",
   "RUNNING",
+  "WAITING_RETRY",
   "PAUSING",
   "CANCEL_REQUESTED",
 ])
@@ -140,9 +142,11 @@ const statusLabels: Record<string, string> = {
   PARTIAL: "部分完成",
   PAUSED: "已暂停",
   PENDING: "等待中",
+  PENDING_DISPATCH: "等待分发",
   READY: "可用",
   RESOLVED: "已解决",
   RUNNING: "运行中",
+  WAITING_RETRY: "等待重试",
   STALE: "已过期",
   SUCCEEDED: "成功",
   WARNING: "警告",

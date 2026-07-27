@@ -21,6 +21,9 @@ COPY backend/uv.lock ./uv.lock
 
 RUN uv sync --frozen --no-dev --extra collector --no-install-project
 
+RUN /app/.venv/bin/playwright install chrome \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY backend/src ./src
 
 RUN uv sync --frozen --no-dev --extra collector \

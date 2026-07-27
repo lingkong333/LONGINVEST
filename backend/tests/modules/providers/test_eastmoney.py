@@ -77,14 +77,11 @@ class CorporateActionClient:
                     "list": [
                         {
                             "art_code": "AN1",
-                            "columns": [
-                                {"column_code": "001002002001005"}
-                            ],
+                            "columns": [{"column_code": "001002002001005"}],
                             "display_time": "2025-04-02 18:19:23:211",
                             "eiTime": "2025-04-02 18:20:42:000",
                             "title": (
-                                "示例:2024年度利润分配及资本公积金"
-                                "转增股本实施公告"
+                                "示例:2024年度利润分配及资本公积金转增股本实施公告"
                             ),
                         }
                     ],
@@ -102,8 +99,7 @@ class CorporateActionClient:
                 "data": {
                     "art_code": "AN1",
                     "notice_content": (
-                        f"{terms}股权登记日为2025年4月9日；"
-                        "除权除息日为2025年4月10日。"
+                        f"{terms}股权登记日为2025年4月9日；除权除息日为2025年4月10日。"
                     ),
                 },
                 "success": 1,
@@ -121,9 +117,7 @@ class CorporateActionClient:
 
 def test_corporate_actions_builds_verified_dividend_factor() -> None:
     client = CorporateActionClient()
-    request = CorporateActionRequest(
-        "300033.SZ", date(2025, 4, 10), date(2025, 4, 10)
-    )
+    request = CorporateActionRequest("300033.SZ", date(2025, 4, 10), date(2025, 4, 10))
     result = asyncio.run(
         EastmoneyProvider(client).corporate_actions(
             request, datetime.now(UTC) + timedelta(seconds=5)
@@ -133,17 +127,13 @@ def test_corporate_actions_builds_verified_dividend_factor() -> None:
     item = result.items[0]
     assert item.event_type is CorporateActionType.COMPOSITE
     assert item.source_event_id == "AN1"
-    assert item.adjustment_factor == (
-        Decimal("100") - Decimal("5.1")
-    ) / Decimal("140")
+    assert item.adjustment_factor == (Decimal("100") - Decimal("5.1")) / Decimal("140")
     assert item.published_at == datetime(2025, 4, 2, 10, 20, 42, tzinfo=UTC)
     assert len(item.raw_payload_hash) == 64
 
 
 def test_corporate_actions_rejects_announcement_terms_that_do_not_match() -> None:
-    request = CorporateActionRequest(
-        "300033.SZ", date(2025, 4, 10), date(2025, 4, 10)
-    )
+    request = CorporateActionRequest("300033.SZ", date(2025, 4, 10), date(2025, 4, 10))
     with pytest.raises(ProviderHttpError, match="ADJUSTMENT_DATA_UNAVAILABLE"):
         asyncio.run(
             EastmoneyProvider(
@@ -181,10 +171,7 @@ def test_corporate_action_report_rejects_missing_page_rows() -> None:
 
 def test_rights_evidence_requires_issue_terms_and_actual_result_quantity() -> None:
     EastmoneyProvider._validate_rights_content(
-        (
-            "股权登记日2022年1月18日，按每10股配售1.5股，"
-            "配股价格为14.43元/股。"
-        ),
+        ("股权登记日2022年1月18日，按每10股配售1.5股，配股价格为14.43元/股。"),
         "实际发行1,552,021,645股。",
         event_date=date(2022, 1, 18),
         ratio_per_ten=Decimal("1.5"),
@@ -215,8 +202,7 @@ def test_rights_action_uses_issue_and_result_evidence_for_factor() -> None:
             del deadline
             if announcement["art_code"] == "ISSUE":
                 return (
-                    "股权登记日2022年1月18日，按每10股配售1.5股，"
-                    "配股价格为14.43元/股。"
+                    "股权登记日2022年1月18日，按每10股配售1.5股，配股价格为14.43元/股。"
                 )
             return "实际发行1,552,021,645股。"
 
@@ -237,9 +223,7 @@ def test_rights_action_uses_issue_and_result_evidence_for_factor() -> None:
     item = asyncio.run(
         RightsProvider(None)._rights_action(
             row,
-            CorporateActionRequest(
-                "600030.SH", date(2022, 1, 27), date(2022, 1, 27)
-            ),
+            CorporateActionRequest("600030.SH", date(2022, 1, 27), date(2022, 1, 27)),
             datetime(2025, 1, 1, tzinfo=UTC),
             datetime.now(UTC) + timedelta(seconds=5),
         )
@@ -346,9 +330,7 @@ def test_daily_bars_use_current_complete_daily_query() -> None:
         "fields1": "f1,f2,f3,f4,f5,f6",
         "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
     }
-    assert sent.headers["Referer"] == (
-        "https://quote.eastmoney.com/sh600519.html"
-    )
+    assert sent.headers["Referer"] == ("https://quote.eastmoney.com/sh600519.html")
 
 
 def test_daily_bars_use_dedicated_history_transport() -> None:
@@ -383,24 +365,40 @@ def test_daily_bars_use_dedicated_history_transport() -> None:
     assert history.requests[0].headers["Referer"].endswith("sh600519.html")
 
 
-def test_server_browser_requests_complete_history_then_filters_range() -> None:
-    history = RecordingJsonClient(
-        {
-            "rc": 0,
-            "data": {
-                "code": "600519",
-                "klines": [
-                    "2024-12-31,1400,1410,1420,1390,100,141000",
-                    "2025-01-02,1500,1510,1520,1490,100,151000",
-                    "2026-01-02,1600,1610,1620,1590,100,161000",
-                ],
-            },
-        }
-    )
+def test_server_browser_requests_and_merges_each_history_year() -> None:
+    class AnnualHistoryClient:
+        def __init__(self) -> None:
+            self.requests = []
+            self.responses = iter(
+                (
+                    {"rc": 0, "data": None},
+                    {
+                        "rc": 0,
+                        "data": {
+                            "code": "600519",
+                            "klines": ["2025-01-02,1500,1510,1520,1490,100,151000"],
+                        },
+                    },
+                    {
+                        "rc": 0,
+                        "data": {
+                            "code": "600519",
+                            "klines": ["2026-01-02,1600,1610,1620,1590,100,161000"],
+                        },
+                    },
+                )
+            )
+
+        async def request_json(self, request, *, deadline):
+            del deadline
+            self.requests.append(request)
+            return next(self.responses)
+
+    history = AnnualHistoryClient()
     request = DailyBarRequest(
         "600519.SH",
-        date(2025, 1, 1),
-        date(2025, 12, 31),
+        date(2024, 7, 1),
+        date(2026, 6, 30),
         ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
     )
 
@@ -412,12 +410,54 @@ def test_server_browser_requests_complete_history_then_filters_range() -> None:
         ).daily_bars(request, datetime.now(UTC) + timedelta(seconds=5))
     )
 
-    assert [item.trading_date for item in result.items] == [date(2025, 1, 2)]
-    sent = history.requests[0]
-    assert sent.params["beg"] == "0"
-    assert sent.params["end"] == "20500101"
-    assert sent.params["fields2"] == "f51,f52,f53,f54,f55,f56,f57"
-    assert "ut" not in sent.params
+    assert [item.trading_date for item in result.items] == [
+        date(2025, 1, 2),
+        date(2026, 1, 2),
+    ]
+    assert [sent.params["beg"] for sent in history.requests] == [
+        "20240701",
+        "20250101",
+        "20260101",
+    ]
+    assert [sent.params["end"] for sent in history.requests] == [
+        "20241231",
+        "20251231",
+        "20260630",
+    ]
+    for sent in history.requests:
+        assert sent.params["smplmt"] == "460"
+        assert sent.params["ut"] == "fa5fd1943c7b386f172d6893dbfba10b"
+        assert sent.params["fields2"] == "f51,f52,f53,f54,f55,f56,f57"
+
+
+def test_server_browser_stops_after_invalid_history_segment() -> None:
+    class InvalidHistoryClient:
+        def __init__(self) -> None:
+            self.requests = []
+
+        async def request_json(self, request, *, deadline):
+            del deadline
+            self.requests.append(request)
+            return {"rc": 0, "data": {"code": "WRONG", "klines": []}}
+
+    history = InvalidHistoryClient()
+    request = DailyBarRequest(
+        "600519.SH",
+        date(2024, 1, 1),
+        date(2026, 12, 31),
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
+
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        asyncio.run(
+            EastmoneyProvider(
+                None,
+                history_client=history,
+                request_complete_history=True,
+            ).daily_bars(request, datetime.now(UTC) + timedelta(seconds=5))
+        )
+
+    assert len(history.requests) == 1
 
 
 def test_daily_bars_accept_real_response_with_additional_fields() -> None:
@@ -432,8 +472,7 @@ def test_daily_bars_accept_real_response_with_additional_fields() -> None:
         "data": {
             "code": "000001",
             "klines": [
-                "2025-01-02,11.20,11.35,11.40,11.10,1000,11250000,"
-                "1.79,0.20,1.35,0.68"
+                "2025-01-02,11.20,11.35,11.40,11.10,1000,11250000,1.79,0.20,1.35,0.68"
             ],
         },
     }
@@ -585,7 +624,7 @@ def test_security_master_preserves_unknown_status_instead_of_fabricating_normal(
             "diff": [
                 {"f12": "600000", "f14": "浦发银行", "f26": "19991110", "f2": "-"},
                 {"f12": "000001", "f14": "平安银行", "f26": "-", "f2": "-"},
-            ]
+            ],
         },
     }
     records = EastmoneyProvider(None).parse_security_master(
@@ -611,7 +650,7 @@ def test_security_master_recognizes_star_st_and_explicit_delisting_date() -> Non
                     "f80": "20250714",
                     "f2": "-",
                 }
-            ]
+            ],
         },
     }
     record = EastmoneyProvider(None).parse_security_master(

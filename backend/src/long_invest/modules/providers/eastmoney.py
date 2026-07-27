@@ -69,16 +69,13 @@ class EastmoneyProvider:
     HISTORY_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
     CORPORATE_ACTION_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
     ANNOUNCEMENT_URL = "https://np-anotice-stock.eastmoney.com/api/security/ann"
-    ANNOUNCEMENT_CONTENT_URL = (
-        "https://np-cnotice-stock.eastmoney.com/api/content/ann"
-    )
+    ANNOUNCEMENT_CONTENT_URL = "https://np-cnotice-stock.eastmoney.com/api/content/ann"
     REQUEST_HEADERS = {
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "zh-CN,zh;q=0.9",
         "Referer": "https://quote.eastmoney.com/",
         "Sec-CH-UA": (
-            '"Not;A=Brand";v="8", "Chromium";v="150", '
-            '"Google Chrome";v="150"'
+            '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
         ),
         "Sec-CH-UA-Mobile": "?0",
         "Sec-CH-UA-Platform": '"Windows"',
@@ -164,30 +161,73 @@ class EastmoneyProvider:
             "fields1": "f1,f2,f3,f4,f5,f6",
             "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
         }
+        headers = {
+            "Referer": (
+                "https://quote.eastmoney.com/"
+                f"{request.symbol[-2:].lower()}{request.symbol[:6]}.html"
+            )
+        }
         if self._request_complete_history:
-            params = {
-                **params,
-                "beg": "0",
-                "end": "20500101",
-                "fields2": "f51,f52,f53,f54,f55,f56,f57",
-            }
-            params.pop("ut")
-        payload = await self._json(
-            self.HISTORY_URL,
-            params,
-            deadline,
-            headers={
-                "Referer": (
-                    "https://quote.eastmoney.com/"
-                    f"{request.symbol[-2:].lower()}{request.symbol[:6]}.html"
+            rows: list[str] = []
+            for year in range(request.start.year, request.end.year + 1):
+                segment_start = max(request.start, date(year, 1, 1))
+                segment_end = min(request.end, date(year, 12, 31))
+                segment_payload = await self._json(
+                    self.HISTORY_URL,
+                    {
+                        **params,
+                        "beg": segment_start.strftime("%Y%m%d"),
+                        "end": segment_end.strftime("%Y%m%d"),
+                        "smplmt": "460",
+                        "fields2": "f51,f52,f53,f54,f55,f56,f57",
+                    },
+                    deadline,
+                    headers=headers,
                 )
-            },
-        )
+                try:
+                    rows.extend(
+                        self._history_segment_rows(
+                            segment_payload,
+                            expected_code=request.symbol[:6],
+                        )
+                    )
+                except ProviderHttpError as error:
+                    self._attach_schema_sample(error, segment_payload)
+                    raise
+            payload = {
+                "rc": 0,
+                "data": {"code": request.symbol[:6], "klines": rows},
+            }
+        else:
+            payload = await self._json(
+                self.HISTORY_URL,
+                params,
+                deadline,
+                headers=headers,
+            )
         try:
             return self.parse_bars(payload, request=request)
         except ProviderHttpError as error:
             self._attach_schema_sample(error, payload)
             raise
+
+    @staticmethod
+    def _history_segment_rows(
+        payload: dict[str, Any], *, expected_code: str
+    ) -> list[str]:
+        if payload.get("rc") != 0:
+            raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR", retryable=True)
+        data = payload.get("data")
+        if data is None:
+            return []
+        if not isinstance(data, dict) or data.get("code") != expected_code:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        rows = data.get("klines")
+        if rows is None:
+            return []
+        if not isinstance(rows, list) or not all(isinstance(row, str) for row in rows):
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        return rows
 
     async def corporate_actions(
         self, request: CorporateActionRequest, deadline: datetime
@@ -354,9 +394,7 @@ class EastmoneyProvider:
         previous_close = await self._previous_close(
             request.symbol, effective_date, deadline
         )
-        factor = (
-            previous_close - cash_per_ten / Decimal(10)
-        ) / (
+        factor = (previous_close - cash_per_ten / Decimal(10)) / (
             previous_close
             * (
                 Decimal(1)
@@ -430,9 +468,9 @@ class EastmoneyProvider:
             request.symbol, effective_date, deadline
         )
         ratio_per_share = ratio_per_ten / Decimal(10)
-        factor = (
-            previous_close + ratio_per_share * issue_price
-        ) / (previous_close * (Decimal(1) + ratio_per_share))
+        factor = (previous_close + ratio_per_share * issue_price) / (
+            previous_close * (Decimal(1) + ratio_per_share)
+        )
         combined_announcement = {
             "art_code": "+".join(str(item["art_code"]) for item in evidence),
             "evidence": evidence,
@@ -555,9 +593,7 @@ class EastmoneyProvider:
             ),
             deadline,
         )
-        eligible = [
-            item for item in result.items if item.trading_date < effective_date
-        ]
+        eligible = [item for item in result.items if item.trading_date < effective_date]
         if not eligible:
             raise ProviderHttpError("ADJUSTMENT_DATA_UNAVAILABLE")
         return eligible[-1].close
@@ -598,9 +634,7 @@ class EastmoneyProvider:
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
 
     @staticmethod
-    def _announcement_has_column(
-        announcement: dict[str, Any], expected: str
-    ) -> bool:
+    def _announcement_has_column(announcement: dict[str, Any], expected: str) -> bool:
         columns = announcement.get("columns")
         return isinstance(columns, list) and any(
             isinstance(item, dict) and item.get("column_code") == expected
@@ -707,9 +741,7 @@ class EastmoneyProvider:
 
     @staticmethod
     def _require_chinese_date(content: str, expected: date) -> None:
-        pattern = (
-            rf"{expected.year}年0?{expected.month}月0?{expected.day}日"
-        )
+        pattern = rf"{expected.year}年0?{expected.month}月0?{expected.day}日"
         if re.search(pattern, content) is None:
             raise ProviderHttpError("ADJUSTMENT_DATA_UNAVAILABLE")
 
@@ -931,9 +963,8 @@ class EastmoneyProvider:
                 if len(fields) < 7:
                     raise ValueError
                 trading_date = date.fromisoformat(fields[0])
-                if (
-                    trading_date in seen_dates
-                    or (previous_date is not None and trading_date <= previous_date)
+                if trading_date in seen_dates or (
+                    previous_date is not None and trading_date <= previous_date
                 ):
                     raise ValueError
                 seen_dates.add(trading_date)

@@ -30,10 +30,8 @@ class AppSettings(BaseSettings):
     database_app_password: str = "longinvest-app-local-only"
     redis_url: str = "redis://redis:6379/0"
     eastmoney_history_transport: Literal["curl", "playwright"] = "curl"
-    eastmoney_history_resolve_ips: str = "120.79.123.125,120.79.243.12"
-    eastmoney_history_min_interval_seconds: float = Field(
-        default=3, ge=1, le=30
-    )
+    eastmoney_history_resolve_ips: str = ""
+    eastmoney_history_min_interval_seconds: float = Field(default=3, ge=1, le=30)
     auth_allowed_origins: str = "http://127.0.0.1:15173,http://localhost:15173"
     auth_trusted_proxy_networks: str = "172.16.0.0/12,127.0.0.0/8,::1/128"
     dispatcher_scan_interval_seconds: float = Field(default=1.0, ge=0.1, le=60)

@@ -14,6 +14,7 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
         "LONGINVEST_DATABASE_APP_PASSWORD",
         "LONGINVEST_REDIS_URL",
         "LONGINVEST_EASTMONEY_HISTORY_TRANSPORT",
+        "LONGINVEST_EASTMONEY_HISTORY_RESOLVE_IPS",
         "LONGINVEST_EASTMONEY_HISTORY_MIN_INTERVAL_SECONDS",
         "LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST",
     ):
@@ -30,6 +31,7 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
     assert settings.database_app_role == "longinvest_app"
     assert settings.redis_url.startswith("redis://")
     assert settings.eastmoney_history_transport == "curl"
+    assert settings.eastmoney_history_resolve_ips == ""
     assert settings.eastmoney_history_min_interval_seconds == 3
     assert settings.dispatcher_scan_interval_seconds == 1.0
     assert settings.dispatcher_batch_size == 50

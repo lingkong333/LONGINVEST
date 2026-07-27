@@ -7,6 +7,9 @@ from long_invest.modules.providers.http_client import ProviderHttpRequest
 from long_invest.modules.providers.playwright_http_client import (
     BrowserResponse,
     PlaywrightProviderHttpClient,
+    _rewrite_page_history_url,
+    _unwrap_jsonp,
+    _validated_quote_url,
     create_playwright_json_client,
 )
 from long_invest.modules.providers.retry import ProviderHttpError
@@ -151,3 +154,38 @@ def test_playwright_client_rejects_invalid_configured_address() -> None:
             host="push2his.eastmoney.com",
             resolve_addresses=("not-an-ip",),
         )
+
+
+def test_quote_page_rewrite_keeps_page_callback_and_target_year() -> None:
+    rewritten = _rewrite_page_history_url(
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get?"
+        "cb=pageCallback&secid=0.000001&fqt=1&beg=0&end=20500101&_=123",
+        "https://push2his.eastmoney.com/api/qt/stock/kline/get?"
+        "secid=0.000001&fqt=0&beg=20250101&end=20251231&smplmt=999",
+    )
+
+    assert "cb=pageCallback" in rewritten
+    assert "fqt=0" in rewritten
+    assert "beg=20250101" in rewritten
+    assert "end=20251231" in rewritten
+    assert "smplmt=460" in rewritten
+    assert "_=123" in rewritten
+
+
+def test_quote_page_requires_exact_official_symbol_url() -> None:
+    assert (
+        _validated_quote_url({"Referer": "https://quote.eastmoney.com/sh600519.html"})
+        == "https://quote.eastmoney.com/sh600519.html"
+    )
+
+    with pytest.raises(ProviderHttpError, match="PROVIDER_TARGET_NOT_ALLOWED"):
+        _validated_quote_url(
+            {"Referer": "https://quote.eastmoney.com/redirect?symbol=600519"}
+        )
+
+
+def test_quote_page_jsonp_is_normalized_to_json() -> None:
+    assert _unwrap_jsonp(b'callback123({"rc":0});\n') == b'{"rc":0}'
+
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        _unwrap_jsonp(b'callback-name({"rc":0})')

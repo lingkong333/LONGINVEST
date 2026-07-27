@@ -36,6 +36,7 @@ dev = [
 ]
 collector = [
     "playwright==1.61.0",
+    "playwright-stealth==2.0.3",
 ]
 
 [tool.setuptools.packages.find]

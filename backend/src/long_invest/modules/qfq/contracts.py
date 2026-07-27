@@ -267,6 +267,16 @@ class QfqDataWindow:
 
 
 @dataclass(frozen=True, slots=True)
+class QfqHistoryStoreResult:
+    dataset_id: UUID
+    version: int
+    row_count: int
+    actual_start: date
+    actual_end: date
+    unchanged: bool
+
+
+@dataclass(frozen=True, slots=True)
 class QfqRefreshView:
     id: UUID
     job_id: UUID

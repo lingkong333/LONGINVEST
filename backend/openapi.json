@@ -12648,6 +12648,56 @@
         ],
         "title": "BackfillControlBody"
       },
+      "BackfillItemCounts": {
+        "properties": {
+          "pending": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Pending"
+          },
+          "fetching": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fetching"
+          },
+          "validating": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Validating"
+          },
+          "saving": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Saving"
+          },
+          "succeeded": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Succeeded"
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed"
+          },
+          "canceled": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Canceled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "pending",
+          "fetching",
+          "validating",
+          "saving",
+          "succeeded",
+          "failed",
+          "canceled"
+        ],
+        "title": "BackfillItemCounts"
+      },
       "BackfillPageData": {
         "properties": {
           "items": {
@@ -13029,6 +13079,9 @@
             "type": "array",
             "title": "Allowed Actions"
           },
+          "item_counts": {
+            "$ref": "#/components/schemas/BackfillItemCounts"
+          },
           "scope_snapshot": {
             "anyOf": [
               {
@@ -13050,7 +13103,8 @@
           "created_at",
           "updated_at",
           "terminal_at",
-          "allowed_actions"
+          "allowed_actions",
+          "item_counts"
         ],
         "title": "BackfillView"
       },

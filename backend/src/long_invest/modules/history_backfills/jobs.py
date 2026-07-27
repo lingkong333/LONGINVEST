@@ -11,6 +11,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillExecutionResult,
     HistoryBackfillItemError,
     HistoryBackfillWorkItem,
+    HistoryBarsBundle,
     HistoryBarsProviderPort,
     HistoryBarStorePort,
     HistoryDiskGuardPort,
@@ -112,15 +113,15 @@ class HistoryBackfillExecutor:
                 return
             deadline = datetime.now(UTC) + timedelta(seconds=self._item_timeout_seconds)
             async with asyncio.timeout(self._item_timeout_seconds):
-                bars = await self._provider.fetch(
+                bundle = await self._provider.fetch(
                     item,
                     start_date=start_date,
                     end_date=end_date,
                     deadline=deadline,
                 )
             await self._items.mark_stage(fence, item.symbol, JobItemStatus.VALIDATING)
-            bars = _validate_bars(
-                bars,
+            bundle = _validate_bundle(
+                bundle,
                 symbol=item.symbol,
                 start_date=start_date,
                 end_date=end_date,
@@ -134,7 +135,7 @@ class HistoryBackfillExecutor:
             await self._items.mark_stage(fence, item.symbol, JobItemStatus.SAVING)
             stored = await self._store.store(
                 item,
-                bars,
+                bundle,
                 idempotency_key=_store_key(
                     context.job_id, item.symbol, start_date, end_date
                 ),
@@ -149,6 +150,13 @@ class HistoryBackfillExecutor:
                     "unchanged": stored.unchanged,
                     "revised": stored.revised,
                     "review_required": stored.review_required,
+                    "qfq_dataset_id": str(stored.qfq_dataset_id),
+                    "qfq_version": stored.qfq_version,
+                    "qfq_rows": stored.qfq_rows,
+                    "qfq_unchanged": stored.qfq_unchanged,
+                    "qfq_actual_start": stored.qfq_actual_start.isoformat(),
+                    "qfq_actual_end": stored.qfq_actual_end.isoformat(),
+                    "qfq_truncated_rows": stored.qfq_truncated_rows,
                     "start_date": start_date.isoformat(),
                     "end_date": end_date.isoformat(),
                 },
@@ -270,6 +278,42 @@ def _validate_bars(
             raise ValueError("invalid historical daily bar")
         seen.add(bar.trade_date)
     return tuple(sorted(rows, key=lambda item: item.trade_date))
+
+
+def _validate_bundle(
+    bundle: HistoryBarsBundle,
+    *,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> HistoryBarsBundle:
+    unadjusted = _validate_bars(
+        bundle.unadjusted,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    qfq = _validate_bars(
+        bundle.qfq,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    raw_by_date = {item.trade_date: item for item in unadjusted}
+    qfq_dates = tuple(item.trade_date for item in qfq)
+    raw_suffix = tuple(
+        item.trade_date for item in unadjusted if item.trade_date >= qfq[0].trade_date
+    )
+    if qfq_dates != raw_suffix:
+        raise HistoryBackfillItemError("HISTORY_QFQ_WINDOW_MISMATCH", retryable=False)
+    anchor = raw_by_date[qfq[-1].trade_date]
+    if qfq[-1].close != anchor.close:
+        raise HistoryBackfillItemError("HISTORY_QFQ_ANCHOR_MISMATCH", retryable=False)
+    return HistoryBarsBundle(
+        unadjusted=unadjusted,
+        qfq=qfq,
+        provider_contract_version=bundle.provider_contract_version,
+    )
 
 
 def _positive_finite(value: Decimal) -> bool:

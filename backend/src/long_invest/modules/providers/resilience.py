@@ -210,14 +210,34 @@ class StaticProviderConfiguration:
             ),
             ProviderCapability.HISTORICAL_DAILY_UNADJUSTED: (
                 ProviderRouteSetting(
+                    ProviderCode.SINA,
+                    ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+                    concurrency=1,
+                    rate_per_second=1 / 3,
+                    timeout_seconds=300,
+                    auto_switch=False,
+                ),
+                ProviderRouteSetting(
                     ProviderCode.EASTMONEY,
                     ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+                    priority=1,
+                    auto_switch=False,
                 ),
             ),
             ProviderCapability.HISTORICAL_DAILY_QFQ: (
                 ProviderRouteSetting(
+                    ProviderCode.SINA,
+                    ProviderCapability.HISTORICAL_DAILY_QFQ,
+                    concurrency=1,
+                    rate_per_second=1 / 3,
+                    timeout_seconds=300,
+                    auto_switch=False,
+                ),
+                ProviderRouteSetting(
                     ProviderCode.EASTMONEY,
                     ProviderCapability.HISTORICAL_DAILY_QFQ,
+                    priority=1,
+                    auto_switch=False,
                 ),
             ),
             ProviderCapability.CORPORATE_ACTIONS: (
@@ -296,6 +316,21 @@ class ProviderLease:
     token: str
 
 
+def _capacity_name(setting: ProviderRouteSetting) -> str:
+    if setting.capability in {
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+    }:
+        return "HISTORICAL_DAILY"
+    return setting.capability.value
+
+
+def _runtime_capacity_key(
+    setting: ProviderRouteSetting,
+) -> tuple[ProviderCode, str]:
+    return setting.provider, _capacity_name(setting)
+
+
 class InMemoryProviderRuntimeState:
     """Conservative fallback and deterministic test implementation."""
 
@@ -309,10 +344,8 @@ class InMemoryProviderRuntimeState:
         self._breaker = CircuitBreaker()
         self._global_limit = global_limit
         self._reserved = realtime_reserved
-        self._active: dict[tuple[ProviderCode, ProviderCapability], int] = {}
-        self._tokens: dict[
-            tuple[ProviderCode, ProviderCapability], tuple[float, float]
-        ] = {}
+        self._active: dict[tuple[ProviderCode, str], int] = {}
+        self._tokens: dict[tuple[ProviderCode, str], tuple[float, float]] = {}
         self._clock = clock
         self._lock = asyncio.Lock()
 
@@ -326,7 +359,7 @@ class InMemoryProviderRuntimeState:
 
     async def acquire(self, setting: ProviderRouteSetting) -> ProviderLease | None:
         async with self._lock:
-            key = (setting.provider, setting.capability)
+            key = _runtime_capacity_key(setting)
             total = sum(self._active.values())
             usable = self._global_limit
             if setting.capability is not ProviderCapability.REALTIME_QUOTE_BATCH:
@@ -353,7 +386,7 @@ class InMemoryProviderRuntimeState:
         if lease.backend != "local":
             return
         async with self._lock:
-            key = (setting.provider, setting.capability)
+            key = _runtime_capacity_key(setting)
             self._active[key] = max(0, self._active.get(key, 0) - 1)
 
     async def record_success(self, setting: ProviderRouteSetting) -> None:
@@ -476,8 +509,8 @@ class RedisProviderRuntimeState:
             limit = max(1, limit - self._reserved)
         keys = [
             f"{self._namespace}:active:global",
-            f"{self._namespace}:active:{setting.provider}:{setting.capability}",
-            f"{self._namespace}:rate:{setting.provider}:{setting.capability}",
+            f"{self._namespace}:active:{setting.provider}:{_capacity_name(setting)}",
+            f"{self._namespace}:rate:{setting.provider}:{_capacity_name(setting)}",
         ]
         try:
             acquired = bool(
@@ -502,7 +535,7 @@ class RedisProviderRuntimeState:
             return
         keys = [
             f"{self._namespace}:active:global",
-            f"{self._namespace}:active:{setting.provider}:{setting.capability}",
+            f"{self._namespace}:active:{setting.provider}:{_capacity_name(setting)}",
         ]
         script = """
         for i=1,#KEYS do

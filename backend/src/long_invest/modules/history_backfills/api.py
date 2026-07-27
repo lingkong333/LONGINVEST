@@ -126,6 +126,16 @@ class BackfillResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class BackfillItemCounts(BaseModel):
+    pending: int = Field(ge=0)
+    fetching: int = Field(ge=0)
+    validating: int = Field(ge=0)
+    saving: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    canceled: int = Field(ge=0)
+
+
 class BackfillScopeItem(BaseModel):
     security_id: UUID
     symbol: str
@@ -154,6 +164,7 @@ class BackfillView(BaseModel):
     updated_at: datetime
     terminal_at: datetime | None
     allowed_actions: list[str]
+    item_counts: BackfillItemCounts
     scope_snapshot: BackfillScopeSnapshot | None = None
 
 
@@ -199,8 +210,14 @@ async def create_backfill(
         owner_user_id=identity.user.id,
     )
     actions = await application.allowed_actions(job.id)
+    counts = await application.item_status_counts_many((job.id,))
     return success_response(
-        data=_job(job, detail=True, allowed_actions=actions),
+        data=_job(
+            job,
+            detail=True,
+            allowed_actions=actions,
+            item_counts=counts[job.id],
+        ),
         code="HISTORY_BACKFILL_ACCEPTED",
         message="历史回填任务已受理",
     )
@@ -214,13 +231,19 @@ async def list_backfills(
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
 ) -> dict[str, object]:
     result = await application.list(page=page, page_size=page_size)
+    job_ids = tuple(item.id for item in result.items)
     actions_by_id = await application.allowed_actions_many(
-        tuple(item.id for item in result.items)
+        job_ids
     )
+    counts_by_id = await application.item_status_counts_many(job_ids)
     return success_response(
         data={
             "items": [
-                _job(item, allowed_actions=actions_by_id[item.id])
+                _job(
+                    item,
+                    allowed_actions=actions_by_id[item.id],
+                    item_counts=counts_by_id[item.id],
+                )
                 for item in result.items
             ],
             "pagination": {
@@ -241,8 +264,14 @@ async def get_backfill(
 ) -> dict[str, object]:
     job = await application.get(job_id)
     actions = await application.allowed_actions(job_id)
+    counts = await application.item_status_counts_many((job_id,))
     return success_response(
-        data=_job(job, detail=True, allowed_actions=actions)
+        data=_job(
+            job,
+            detail=True,
+            allowed_actions=actions,
+            item_counts=counts[job_id],
+        )
     )
 
 
@@ -276,8 +305,13 @@ def _command_route(action: str):
             ),
         )
         actions = await application.allowed_actions(job.id)
+        counts = await application.item_status_counts_many((job.id,))
         return success_response(
-            data=_job(job, allowed_actions=actions),
+            data=_job(
+                job,
+                allowed_actions=actions,
+                item_counts=counts[job.id],
+            ),
             code="HISTORY_BACKFILL_CONTROL_ACCEPTED",
             message="历史回填控制请求已受理",
         )
@@ -301,6 +335,7 @@ def _job(
     *,
     detail: bool = False,
     allowed_actions=(),
+    item_counts=None,
 ) -> dict[str, object]:
     progress = job.progress or None
     if progress is not None and not {"completed", "total"}.issubset(progress):
@@ -318,7 +353,22 @@ def _job(
             action.value if hasattr(action, "value") else str(action)
             for action in allowed_actions
         ],
+        "item_counts": _item_counts(item_counts or {}),
     }
     if detail:
         result["scope_snapshot"] = job.config_snapshot
     return result
+
+
+def _item_counts(values: dict[str, int]) -> dict[str, int]:
+    return {
+        "pending": values.get("PENDING", 0),
+        "fetching": values.get("FETCHING", 0),
+        "validating": values.get("VALIDATING", 0)
+        + values.get("RUNNING", 0),
+        "saving": values.get("SAVING", 0),
+        "succeeded": values.get("SUCCEEDED", 0)
+        + values.get("SKIPPED", 0),
+        "failed": values.get("FAILED", 0),
+        "canceled": values.get("CANCELED", 0),
+    }

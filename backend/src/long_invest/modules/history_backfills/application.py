@@ -88,6 +88,15 @@ class HistoryBackfillApplication:
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
 
+    async def item_status_counts_many(self, job_ids: tuple[UUID, ...]):
+        try:
+            async with self._database.session() as session:
+                return await self._job_service_factory(
+                    session
+                ).item_status_counts_many(job_ids)
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+
     async def command(
         self,
         job_id: UUID,

@@ -149,6 +149,15 @@ export interface BackfillSummary {
   total: number
   succeeded: number | null
   failed: number | null
+  itemCounts: {
+    pending: number
+    fetching: number
+    validating: number
+    saving: number
+    succeeded: number
+    failed: number
+    canceled: number
+  }
   updatedAt: string
   terminalAt: string | null
   allowedActions: Exclude<BackfillAction, "CREATE">[]

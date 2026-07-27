@@ -247,6 +247,11 @@ class JobService:
             return None
         return await self._jobs.item_status_counts(job_id)
 
+    async def item_status_counts_many(
+        self, job_ids: tuple[UUID, ...]
+    ) -> dict[UUID, dict[str, int]]:
+        return await self._jobs.item_status_counts_many(job_ids)
+
     async def cancel_pending_items(self, job_id: UUID, fence_token: UUID) -> bool:
         if await self._active_run(job_id, fence_token) is None:
             return False

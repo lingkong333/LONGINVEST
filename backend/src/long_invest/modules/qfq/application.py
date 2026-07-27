@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -26,6 +26,7 @@ from long_invest.modules.qfq.contracts import (
     QfqDatasetView,
     QfqDataWindow,
     QfqFreshness,
+    QfqHistoryStoreResult,
     QfqRefreshStatus,
     QfqRefreshView,
     RefreshQfq,
@@ -182,6 +183,44 @@ class QfqApplication:
         return QfqDataWindow(
             dataset=_dataset_view(dataset),
             bars=tuple(_bar_view(item) for item in bars),
+        )
+
+    async def store_history(
+        self,
+        *,
+        security_id: UUID,
+        symbol: str,
+        requested_start: date,
+        validated_window: ValidatedQfqWindow,
+        provider: str,
+        provider_contract_version: str,
+        reason: str,
+    ) -> QfqHistoryStoreResult:
+        try:
+            async with self._database.transaction() as session:
+                dataset, unchanged = await self._transaction_service(
+                    session
+                ).import_history(
+                    security_id=security_id,
+                    symbol=symbol,
+                    requested_start=requested_start,
+                    window=validated_window,
+                    provider=provider,
+                    provider_contract_version=provider_contract_version,
+                    reason=reason,
+                    now=datetime.now(UTC),
+                )
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return QfqHistoryStoreResult(
+            dataset_id=dataset.id,
+            version=dataset.version,
+            row_count=dataset.row_count,
+            actual_start=dataset.actual_start,
+            actual_end=dataset.actual_end,
+            unchanged=unchanged,
         )
 
     async def submit_refresh(

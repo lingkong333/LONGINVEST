@@ -185,6 +185,11 @@ class RecordingEvents:
             raise RuntimeError("outbox failed")
         self.records.append(("qfq_refresh.failed", run, current))
 
+    async def history_imported(self, dataset, *, reason):
+        if self.fail_write:
+            raise RuntimeError("outbox failed")
+        self.records.append(("qfq_history.imported", dataset, reason))
+
 
 def _service(repo: FakeRepository):
     events = RecordingEvents(repo.session)
@@ -215,6 +220,52 @@ def _current(repo: FakeRepository, *, version: int = 1, checksum: str = "c" * 64
     )
     repo.datasets.append(dataset)
     return dataset
+
+
+@pytest.mark.anyio
+async def test_history_import_atomically_activates_a_dataset() -> None:
+    repo = FakeRepository()
+    service, events = _service(repo)
+
+    dataset, unchanged = await service.import_history(
+        security_id=repo.run.security_id,
+        symbol=repo.run.symbol,
+        requested_start=START,
+        window=_window(),
+        provider="SINA",
+        provider_contract_version="SINA:config-v2",
+        reason="initial history",
+        now=NOW,
+    )
+
+    assert unchanged is False
+    assert dataset.lifecycle == QfqDatasetLifecycle.CURRENT
+    assert dataset.version == 1
+    assert len(repo.bars[dataset.id]) == 2
+    assert events.records[-1][0] == "qfq_history.imported"
+
+
+@pytest.mark.anyio
+async def test_history_import_reuses_identical_current_dataset() -> None:
+    repo = FakeRepository()
+    current = _current(repo, checksum="a" * 64)
+    service, events = _service(repo)
+
+    dataset, unchanged = await service.import_history(
+        security_id=repo.run.security_id,
+        symbol=repo.run.symbol,
+        requested_start=START,
+        window=_window(),
+        provider="SINA",
+        provider_contract_version="SINA:config-v2",
+        reason="retry history",
+        now=NOW,
+    )
+
+    assert unchanged is True
+    assert dataset is current
+    assert len(repo.datasets) == 1
+    assert events.records == []
 
 
 @pytest.mark.anyio

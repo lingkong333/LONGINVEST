@@ -125,6 +125,34 @@ def test_fractional_rate_allows_one_request_every_five_seconds() -> None:
     asyncio.run(scenario())
 
 
+def test_sina_history_capabilities_share_one_rate_bucket() -> None:
+    now = [100.0]
+    runtime = InMemoryProviderRuntimeState(clock=lambda: now[0])
+    raw = ProviderRouteSetting(
+        ProviderCode.SINA,
+        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+        concurrency=1,
+        rate_per_second=1 / 3,
+    )
+    qfq = ProviderRouteSetting(
+        ProviderCode.SINA,
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+        concurrency=1,
+        rate_per_second=1 / 3,
+    )
+
+    async def scenario() -> None:
+        lease = await runtime.acquire(raw)
+        assert lease is not None
+        assert await runtime.acquire(qfq) is None
+        await runtime.release(raw, lease)
+        assert await runtime.acquire(qfq) is None
+        now[0] += 3
+        assert await runtime.acquire(qfq) is not None
+
+    asyncio.run(scenario())
+
+
 def test_redis_lease_is_released_by_the_backend_that_acquired_it() -> None:
     class Redis:
         def __init__(self) -> None:

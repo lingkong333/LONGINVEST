@@ -115,6 +115,23 @@ class JobRepository:
         ).all()
         return {str(status): int(count) for status, count in rows}
 
+    async def item_status_counts_many(
+        self, job_ids: tuple[UUID, ...]
+    ) -> dict[UUID, dict[str, int]]:
+        if not job_ids:
+            return {}
+        rows = (
+            await self._session.execute(
+                select(JobItem.job_id, JobItem.status, func.count())
+                .where(JobItem.job_id.in_(job_ids))
+                .group_by(JobItem.job_id, JobItem.status)
+            )
+        ).all()
+        result = {job_id: {} for job_id in job_ids}
+        for job_id, status, count in rows:
+            result[job_id][str(status)] = int(count)
+        return result
+
     async def cancel_pending_items(self, job_id: UUID, now: datetime) -> None:
         await self._session.execute(
             update(JobItem)

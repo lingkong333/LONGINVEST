@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Protocol
 from uuid import UUID, uuid4
 
@@ -74,6 +74,9 @@ class QfqEventPort(Protocol):
 
     async def completed(self, run: QfqRefreshRun, dataset: QfqDataset) -> None: ...
     async def failed(self, run: QfqRefreshRun, current: QfqDataset | None) -> None: ...
+    async def history_imported(
+        self, dataset: QfqDataset, *, reason: str
+    ) -> None: ...
 
 
 class QfqRefreshService:
@@ -86,6 +89,98 @@ class QfqRefreshService:
             )
         self._repository = repository
         self._events = events
+
+    async def import_history(
+        self,
+        *,
+        security_id: UUID,
+        symbol: str,
+        requested_start: date,
+        window: ValidatedQfqWindow,
+        provider: str,
+        provider_contract_version: str,
+        reason: str,
+        now: datetime,
+    ) -> tuple[QfqDataset, bool]:
+        if (
+            not window.bars
+            or window.anchor_date != window.bars[-1].trade_date
+            or requested_start > window.bars[0].trade_date
+            or not provider.strip()
+            or not provider_contract_version.strip()
+            or not reason.strip()
+        ):
+            raise ValueError("invalid QFQ history import")
+        await self._repository.lock_security(security_id)
+        current = await self._repository.current_dataset(
+            security_id, for_update=True
+        )
+        if current is not None and current.checksum == window.checksum:
+            await self._repository.transition_dataset(
+                current.id,
+                expected_lifecycle=QfqDatasetLifecycle.CURRENT,
+                lifecycle=QfqDatasetLifecycle.CURRENT,
+                freshness=QfqFreshness.FRESH,
+                stale_reason=None,
+            )
+            current.freshness = QfqFreshness.FRESH
+            current.stale_reason = None
+            return current, True
+
+        actual_start = window.bars[0].trade_date
+        actual_end = window.bars[-1].trade_date
+        dataset = QfqDataset(
+            id=uuid4(),
+            security_id=security_id,
+            symbol=symbol,
+            version=await self._repository.next_version(security_id),
+            requested_start=requested_start,
+            requested_end=actual_end,
+            actual_start=actual_start,
+            actual_end=actual_end,
+            as_of_date=actual_end,
+            provider=provider,
+            provider_contract_version=provider_contract_version,
+            anchor_date=window.anchor_date,
+            anchor_close=window.anchor_close,
+            row_count=window.row_count,
+            checksum=window.checksum,
+            lifecycle=QfqDatasetLifecycle.STAGING,
+            freshness=QfqFreshness.FRESH,
+            stale_reason=None,
+            created_at=now,
+        )
+        bars = [
+            QfqDatasetBar(
+                dataset_id=dataset.id,
+                trade_date=item.trade_date,
+                open=item.open,
+                high=item.high,
+                low=item.low,
+                close=item.close,
+                volume=item.volume,
+                amount=item.amount,
+            )
+            for item in window.bars
+        ]
+        await self._repository.add_dataset(dataset, bars)
+        if current is not None:
+            await self._repository.transition_dataset(
+                current.id,
+                expected_lifecycle=QfqDatasetLifecycle.CURRENT,
+                lifecycle=QfqDatasetLifecycle.SUPERSEDED,
+                superseded_at=now,
+            )
+        await self._repository.transition_dataset(
+            dataset.id,
+            expected_lifecycle=QfqDatasetLifecycle.STAGING,
+            lifecycle=QfqDatasetLifecycle.CURRENT,
+            activated_at=now,
+        )
+        dataset.lifecycle = QfqDatasetLifecycle.CURRENT
+        dataset.activated_at = now
+        await self._events.history_imported(dataset, reason=reason)
+        return dataset, False
 
     async def activate(
         self,

@@ -11,6 +11,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillItemError,
     HistoryBackfillWorkItem,
     HistoryBarInput,
+    HistoryBarsBundle,
     HistoryBarStoreResult,
     HistoryJobItemSummary,
 )
@@ -143,7 +144,7 @@ class Provider:
                 raise failure
             if self.after_fetch:
                 self.after_fetch(item.symbol)
-            return (bar(item.symbol),)
+            return bundle(item.symbol)
         finally:
             self.active -= 1
 
@@ -154,7 +155,18 @@ class Store:
 
     async def store(self, item, bars, **values):
         self.calls.append((item.symbol, bars, values))
-        return HistoryBarStoreResult(inserted=1, unchanged=0, revised=0)
+        return HistoryBarStoreResult(
+            inserted=1,
+            unchanged=0,
+            revised=0,
+            qfq_dataset_id=uuid4(),
+            qfq_version=1,
+            qfq_rows=1,
+            qfq_actual_start=date(2020, 1, 2),
+            qfq_actual_end=date(2020, 1, 2),
+            qfq_unchanged=False,
+            qfq_truncated_rows=0,
+        )
 
 
 class Disk:
@@ -175,7 +187,15 @@ def bar(symbol, *, high="11", low="9") -> HistoryBarInput:
         close=Decimal("10.5"),
         volume=100,
         amount=Decimal("1000"),
-        source="EASTMONEY",
+        source="SINA",
+    )
+
+
+def bundle(symbol: str) -> HistoryBarsBundle:
+    return HistoryBarsBundle(
+        unadjusted=(bar(symbol),),
+        qfq=(bar(symbol),),
+        provider_contract_version="SINA:config-v2",
     )
 
 
@@ -359,7 +379,11 @@ async def test_invalid_bar_fails_before_store() -> None:
     provider = Provider()
 
     async def invalid_fetch(_item, **_values):
-        return (bar("600000.SH", high="8"),)
+        return HistoryBarsBundle(
+            unadjusted=(bar("600000.SH", high="8"),),
+            qfq=(bar("600000.SH"),),
+            provider_contract_version="SINA:config-v2",
+        )
 
     provider.fetch = invalid_fetch
     store = Store()
@@ -371,6 +395,44 @@ async def test_invalid_bar_fails_before_store() -> None:
         reason="补齐历史",
     )
     assert items.errors["600000.SH"] == "HISTORY_BARS_INVALID"
+    assert store.calls == []
+
+
+@pytest.mark.anyio
+async def test_qfq_date_gap_fails_before_store() -> None:
+    items = Items(("600000.SH",))
+    provider = Provider()
+
+    async def invalid_fetch(_item, **_values):
+        first = bar("600000.SH")
+        second = HistoryBarInput(
+            symbol="600000.SH",
+            trade_date=date(2020, 1, 3),
+            open=Decimal("10"),
+            high=Decimal("11"),
+            low=Decimal("9"),
+            close=Decimal("10.5"),
+            volume=100,
+            amount=Decimal("1000"),
+            source="SINA",
+        )
+        return HistoryBarsBundle(
+            unadjusted=(first, second),
+            qfq=(first,),
+            provider_contract_version="SINA:config-v2",
+        )
+
+    provider.fetch = invalid_fetch
+    store = Store()
+    await executor(provider, items, store=store).execute(
+        context(),
+        start_date=date(2010, 1, 1),
+        end_date=date(2020, 12, 31),
+        concurrency=1,
+        reason="补齐历史",
+    )
+
+    assert items.errors["600000.SH"] == "HISTORY_QFQ_WINDOW_MISMATCH"
     assert store.calls == []
 
 

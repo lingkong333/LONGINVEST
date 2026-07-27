@@ -171,10 +171,30 @@ class HistoryBarInput:
 
 
 @dataclass(frozen=True, slots=True)
+class HistoryBarsBundle:
+    unadjusted: tuple[HistoryBarInput, ...]
+    qfq: tuple[HistoryBarInput, ...]
+    provider_contract_version: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "unadjusted", tuple(self.unadjusted))
+        object.__setattr__(self, "qfq", tuple(self.qfq))
+        if not self.provider_contract_version.strip():
+            raise ValueError("history provider contract version is required")
+
+
+@dataclass(frozen=True, slots=True)
 class HistoryBarStoreResult:
     inserted: int
     unchanged: int
     revised: int
+    qfq_dataset_id: UUID
+    qfq_version: int
+    qfq_rows: int
+    qfq_unchanged: bool
+    qfq_actual_start: date
+    qfq_actual_end: date
+    qfq_truncated_rows: int
     review_required: int = 0
 
     def __post_init__(self) -> None:
@@ -185,6 +205,9 @@ class HistoryBarStoreResult:
                 self.unchanged,
                 self.revised,
                 self.review_required,
+                self.qfq_version,
+                self.qfq_rows,
+                self.qfq_truncated_rows,
             )
         ):
             raise ValueError("历史日线写入数量不能为负数")
@@ -229,14 +252,14 @@ class HistoryBarsProviderPort(Protocol):
         start_date: date,
         end_date: date,
         deadline: datetime,
-    ) -> tuple[HistoryBarInput, ...]: ...
+    ) -> HistoryBarsBundle: ...
 
 
 class HistoryBarStorePort(Protocol):
     async def store(
         self,
         item: HistoryBackfillWorkItem,
-        bars: tuple[HistoryBarInput, ...],
+        bars: HistoryBarsBundle,
         *,
         idempotency_key: str,
         reason: str,

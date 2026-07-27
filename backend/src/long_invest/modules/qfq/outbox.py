@@ -75,6 +75,30 @@ class QfqEventAdapter:
             dedupe_key=f"qfq:{run.id}:failed",
         )
 
+    async def history_imported(
+        self, dataset: QfqDataset, *, reason: str
+    ) -> None:
+        await self._writer.append(
+            session=self.session,
+            topic="qfq_history.imported",
+            aggregate_type="qfq_dataset",
+            aggregate_id=str(dataset.id),
+            queue="domain-events",
+            payload={
+                "event_type": "qfq_history.imported",
+                "security_id": str(dataset.security_id),
+                "symbol": dataset.symbol,
+                "dataset_id": str(dataset.id),
+                "version": dataset.version,
+                "actual_start": dataset.actual_start.isoformat(),
+                "actual_end": dataset.actual_end.isoformat(),
+                "row_count": dataset.row_count,
+                "checksum": dataset.checksum,
+                "reason": reason,
+            },
+            dedupe_key=f"qfq-history:{dataset.security_id}:{dataset.checksum}",
+        )
+
     async def _append(
         self,
         run: QfqRefreshRun,

@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import UTC, datetime, timedelta, timezone
+from collections.abc import Callable
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from time import monotonic
+from typing import Any
 
 from long_invest.modules.providers.contracts import (
     DailyBar,
@@ -34,6 +36,8 @@ class SinaRealtimeProvider:
         {
             ProviderCapability.SECURITY_MASTER,
             ProviderCapability.REALTIME_QUOTE_BATCH,
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+            ProviderCapability.HISTORICAL_DAILY_QFQ,
         }
     )
     REALTIME_URL = "https://hq.sinajs.cn/list="
@@ -49,8 +53,14 @@ class SinaRealtimeProvider:
     MASTER_PAGE_SIZE = 100
     MASTER_MAX_PAGES = 100
 
-    def __init__(self, client: ProviderHttpClient | None) -> None:
+    def __init__(
+        self,
+        client: ProviderHttpClient | None,
+        *,
+        history_loader: Callable[..., Any] | None = None,
+    ) -> None:
         self._client = client
+        self._history_loader = history_loader
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime
@@ -146,8 +156,40 @@ class SinaRealtimeProvider:
     async def daily_bars(
         self, request: DailyBarRequest, deadline: datetime
     ) -> ProviderBatchResult[DailyBar]:
-        del request, deadline
-        raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
+        if request.capability not in {
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+            ProviderCapability.HISTORICAL_DAILY_QFQ,
+        }:
+            raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
+        remaining = (deadline - datetime.now(UTC)).total_seconds()
+        if remaining <= 0:
+            raise TimeoutError
+        loader = self._history_loader or _load_sina_history
+        adjust = (
+            "qfq"
+            if request.capability is ProviderCapability.HISTORICAL_DAILY_QFQ
+            else ""
+        )
+        try:
+            async with asyncio.timeout(remaining):
+                frame = await asyncio.to_thread(
+                    loader,
+                    symbol=_sina_symbol(request.symbol),
+                    start_date=request.start.strftime("%Y%m%d"),
+                    end_date=request.end.strftime("%Y%m%d"),
+                    adjust=adjust,
+                )
+            return self.parse_daily_bars(frame, request=request)
+        except TimeoutError:
+            raise
+        except ProviderHttpError:
+            raise
+        except (ImportError, ModuleNotFoundError) as error:
+            raise ProviderHttpError("PROVIDER_DEPENDENCY_UNAVAILABLE") from error
+        except Exception as error:
+            raise ProviderHttpError(
+                "PROVIDER_UPSTREAM_FAILED", retryable=True
+            ) from error
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime
@@ -165,6 +207,17 @@ class SinaRealtimeProvider:
         try:
             if capability is ProviderCapability.SECURITY_MASTER:
                 await self._security_master_count(deadline)
+            elif capability in {
+                ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+                ProviderCapability.HISTORICAL_DAILY_QFQ,
+            }:
+                today = datetime.now(CHINA_TIMEZONE).date()
+                await self.daily_bars(
+                    DailyBarRequest(
+                        "600000.SH", today - timedelta(days=10), today, capability
+                    ),
+                    deadline,
+                )
             else:
                 await self.realtime_quotes(("600000.SH",), deadline)
             healthy, error_code = True, None
@@ -237,6 +290,84 @@ class SinaRealtimeProvider:
         return ProviderBatchResult(items, failures)
 
     @staticmethod
+    def parse_daily_bars(
+        frame: Any, *, request: DailyBarRequest
+    ) -> ProviderBatchResult[DailyBar]:
+        required = {"open", "high", "low", "close", "volume", "amount"}
+        if (
+            frame is None
+            or not hasattr(frame, "columns")
+            or not hasattr(frame, "iterrows")
+        ):
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        if not required.issubset({str(value) for value in frame.columns}):
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        raw_rows: list[tuple[date, dict[str, Any]]] = []
+        try:
+            for index, row in frame.iterrows():
+                trading_date = (
+                    index.date()
+                    if hasattr(index, "date")
+                    else date.fromisoformat(str(index)[:10])
+                )
+                if request.start <= trading_date <= request.end:
+                    raw_rows.append((trading_date, row))
+        except (TypeError, ValueError) as error:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+        if not raw_rows:
+            return ProviderBatchResult(
+                failures=(
+                    ProviderItemFailure(
+                        request.symbol,
+                        "PROVIDER_ITEM_MISSING",
+                        "新浪未返回请求窗口内的历史日线",
+                        ProviderCode.SINA,
+                    ),
+                )
+            )
+        raw_rows.sort(key=lambda item: item[0])
+        if request.capability is ProviderCapability.HISTORICAL_DAILY_QFQ:
+            first_positive = next(
+                (
+                    index
+                    for index, (_, row) in enumerate(raw_rows)
+                    if all(
+                        Decimal(str(row[field])).is_finite()
+                        and Decimal(str(row[field])) > 0
+                        for field in ("open", "high", "low", "close")
+                    )
+                ),
+                None,
+            )
+            if first_positive is None:
+                raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+            raw_rows = raw_rows[first_positive:]
+        bars: list[DailyBar] = []
+        seen: set[date] = set()
+        try:
+            for trading_date, row in raw_rows:
+                if trading_date in seen:
+                    raise ValueError("duplicate date")
+                seen.add(trading_date)
+                bars.append(
+                    DailyBar(
+                        symbol=request.symbol,
+                        trading_date=trading_date,
+                        open=Decimal(str(row["open"])),
+                        high=Decimal(str(row["high"])),
+                        low=Decimal(str(row["low"])),
+                        close=Decimal(str(row["close"])),
+                        volume=int(row["volume"]),
+                        amount=Decimal(str(row["amount"])),
+                        source=ProviderCode.SINA,
+                        capability=request.capability,
+                    )
+                )
+        except (InvalidOperation, KeyError, TypeError, ValueError) as error:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+        return ProviderBatchResult(tuple(bars))
+
+    @staticmethod
     def parse_security_master_page(
         text: str, *, observed_at: datetime
     ) -> tuple[SecurityMasterRecord, ...]:
@@ -285,3 +416,13 @@ class SinaRealtimeProvider:
         except (KeyError, TypeError, ValueError) as error:
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
         return tuple(records)
+
+
+def _sina_symbol(symbol: str) -> str:
+    return f"{symbol[-2:].lower()}{symbol[:6]}"
+
+
+def _load_sina_history(**kwargs: str) -> Any:
+    import akshare as ak
+
+    return ak.stock_zh_a_daily(**kwargs)

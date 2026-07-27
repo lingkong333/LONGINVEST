@@ -3493,6 +3493,23 @@ export interface components {
             /** Expected Version */
             expected_version: number;
         };
+        /** BackfillItemCounts */
+        BackfillItemCounts: {
+            /** Pending */
+            pending: number;
+            /** Fetching */
+            fetching: number;
+            /** Validating */
+            validating: number;
+            /** Saving */
+            saving: number;
+            /** Succeeded */
+            succeeded: number;
+            /** Failed */
+            failed: number;
+            /** Canceled */
+            canceled: number;
+        };
         /** BackfillPageData */
         BackfillPageData: {
             /** Items */
@@ -3645,6 +3662,7 @@ export interface components {
             terminal_at: string | null;
             /** Allowed Actions */
             allowed_actions: string[];
+            item_counts: components["schemas"]["BackfillItemCounts"];
             scope_snapshot?: components["schemas"]["BackfillScopeSnapshot"] | null;
         };
         /**

@@ -149,11 +149,14 @@ async def test_primary_exception_switches_whole_batch_to_sina() -> None:
 
 
 @async_test
-async def test_history_uses_eastmoney_only_without_day_level_stitching() -> None:
+async def test_history_uses_sina_only_without_day_level_stitching() -> None:
     east = FakeProvider(
         ProviderCode.EASTMONEY, ProviderBatchResult(batch_error_code="PROVIDER_FAILED")
     )
-    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    sina = FakeProvider(
+        ProviderCode.SINA,
+        ProviderBatchResult(batch_error_code="PROVIDER_FAILED"),
+    )
     request = DailyBarRequest(
         "600000.SH",
         date(2025, 1, 1),
@@ -162,8 +165,8 @@ async def test_history_uses_eastmoney_only_without_day_level_stitching() -> None
     )
     result = await ProviderRouter(east, sina).daily_bars(request, deadline())
     assert result.batch_error_code == "PROVIDER_FAILED"
-    assert len(east.bar_requests) == 1
-    assert sina.bar_requests == []
+    assert east.bar_requests == []
+    assert len(sina.bar_requests) == 1
 
 
 @async_test

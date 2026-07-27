@@ -1,9 +1,16 @@
-from datetime import UTC, datetime
+import asyncio
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
-from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
+from long_invest.modules.providers.contracts import (
+    DailyBarRequest,
+    ProviderCapability,
+    ProviderCode,
+)
 from long_invest.modules.providers.retry import ProviderHttpError
 from long_invest.modules.providers.sina import SinaRealtimeProvider
 
@@ -14,12 +21,14 @@ def load(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
 
-def test_sina_declares_realtime_and_security_master_endpoints() -> None:
+def test_sina_declares_realtime_master_and_history_capabilities() -> None:
     assert SinaRealtimeProvider.code is ProviderCode.SINA
     assert SinaRealtimeProvider.capabilities == frozenset(
         {
             ProviderCapability.SECURITY_MASTER,
             ProviderCapability.REALTIME_QUOTE_BATCH,
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+            ProviderCapability.HISTORICAL_DAILY_QFQ,
         }
     )
     assert SinaRealtimeProvider.REALTIME_URL.startswith("https://hq.sinajs.cn/")
@@ -133,3 +142,151 @@ def test_sina_identifiable_anomaly_is_an_item_failure(fixture: str) -> None:
     )
     assert result.items == ()
     assert result.failures[0].code == "PROVIDER_ITEM_INVALID"
+
+
+def _history_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(rows)
+    frame.index = pd.to_datetime(frame.pop("date"))
+    return frame
+
+
+@pytest.mark.parametrize(
+    ("capability", "adjust"),
+    [
+        (ProviderCapability.HISTORICAL_DAILY_UNADJUSTED, ""),
+        (ProviderCapability.HISTORICAL_DAILY_QFQ, "qfq"),
+    ],
+)
+def test_sina_loads_and_normalizes_historical_daily(capability, adjust) -> None:
+    calls = []
+
+    def loader(**kwargs):
+        calls.append(kwargs)
+        return _history_frame(
+            [
+                {
+                    "date": "2026-07-24",
+                    "open": 10,
+                    "high": 11,
+                    "low": 9,
+                    "close": 10.5,
+                    "volume": 100,
+                    "amount": 1000,
+                },
+                {
+                    "date": "2026-07-27",
+                    "open": 10.5,
+                    "high": 12,
+                    "low": 10,
+                    "close": 11,
+                    "volume": 200,
+                    "amount": 2200,
+                },
+            ]
+        )
+
+    request = DailyBarRequest(
+        "600000.SH", date(2026, 7, 1), date(2026, 7, 27), capability
+    )
+    result = asyncio.run(
+        SinaRealtimeProvider(None, history_loader=loader).daily_bars(
+            request, datetime.now(UTC) + timedelta(seconds=5)
+        )
+    )
+
+    assert calls == [
+        {
+            "symbol": "sh600000",
+            "start_date": "20260701",
+            "end_date": "20260727",
+            "adjust": adjust,
+        }
+    ]
+    assert [item.trading_date for item in result.items] == [
+        date(2026, 7, 24),
+        date(2026, 7, 27),
+    ]
+    assert result.items[-1].close == Decimal("11")
+    assert all(item.source is ProviderCode.SINA for item in result.items)
+    assert all(item.capability is capability for item in result.items)
+
+
+def test_sina_qfq_discards_only_the_nonpositive_prefix() -> None:
+    request = DailyBarRequest(
+        "000001.SZ",
+        date(1991, 1, 1),
+        date(1991, 1, 4),
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+    )
+    frame = _history_frame(
+        [
+            {
+                "date": "1991-01-01",
+                "open": -1,
+                "high": 0,
+                "low": -2,
+                "close": -1,
+                "volume": 1,
+                "amount": 1,
+            },
+            {
+                "date": "1991-01-02",
+                "open": 1,
+                "high": 2,
+                "low": 1,
+                "close": 2,
+                "volume": 1,
+                "amount": 1,
+            },
+            {
+                "date": "1991-01-03",
+                "open": 2,
+                "high": 3,
+                "low": 2,
+                "close": 3,
+                "volume": 1,
+                "amount": 1,
+            },
+        ]
+    )
+
+    result = SinaRealtimeProvider.parse_daily_bars(frame, request=request)
+
+    assert [item.trading_date for item in result.items] == [
+        date(1991, 1, 2),
+        date(1991, 1, 3),
+    ]
+
+
+def test_sina_rejects_nonpositive_qfq_inside_the_valid_suffix() -> None:
+    request = DailyBarRequest(
+        "000001.SZ",
+        date(1991, 1, 1),
+        date(1991, 1, 4),
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+    )
+    frame = _history_frame(
+        [
+            {
+                "date": "1991-01-01",
+                "open": 1,
+                "high": 2,
+                "low": 1,
+                "close": 2,
+                "volume": 1,
+                "amount": 1,
+            },
+            {
+                "date": "1991-01-02",
+                "open": -1,
+                "high": 0,
+                "low": -2,
+                "close": -1,
+                "volume": 1,
+                "amount": 1,
+            },
+        ]
+    )
+
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        SinaRealtimeProvider.parse_daily_bars(frame, request=request)

@@ -48,6 +48,7 @@ import {
 } from "@/shared/ui/dialog"
 import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
+import { Progress } from "@/shared/ui/progress"
 import {
   Select,
   SelectContent,
@@ -91,6 +92,14 @@ function dateTime(value: string | null) {
     hour12: false,
   }).format(new Date(value))
 }
+
+const activeBackfillStatuses = new Set([
+  "PENDING",
+  "QUEUED",
+  "RUNNING",
+  "PAUSING",
+  "CANCEL_REQUESTED",
+])
 
 function normalizedSymbols(value: string) {
   return [...new Set(
@@ -258,6 +267,9 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
   const backfills = useQuery({
     queryKey: ["market-data", "backfills"],
     queryFn: () => gateway.loadBackfills(),
+    refetchInterval: (query) => query.state.data?.items.some(
+      (item) => activeBackfillStatuses.has(item.status),
+    ) ? 3_000 : false,
   })
   const qualityMutation = useMutation({
     mutationFn: () => {
@@ -727,7 +739,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
 
         <Panel
           title="历史回填"
-          description="全市场或指定范围的历史日线补齐进度"
+          description="全市场或指定范围的未复权与前复权历史补齐进度"
           icon={HistoryIcon}
         >
           {backfills.data?.allowedActions.includes("CREATE") ? (
@@ -748,7 +760,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           ) : backfills.data.items.length === 0 ? (
             <PageState state="empty" title="还没有历史回填任务" description="当前没有可展示的回填记录。" />
           ) : (
-            <div className="space-y-2">
+            <div className="flex flex-col gap-2">
               {backfills.data.items.slice(0, 8).map((job) => {
                 const percentage = job.total > 0
                   ? Math.min(100, Math.round((job.completed / job.total) * 100))
@@ -759,12 +771,31 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                       <span className="truncate text-sm font-medium">{job.id}</span>
                       <Status value={job.status} />
                     </div>
-                    <div className="mt-2 h-1.5 overflow-hidden bg-muted" aria-label={`完成 ${percentage}%`}>
-                      <div className="h-full bg-foreground" style={{ width: `${percentage}%` }} />
-                    </div>
+                    <Progress
+                      className="mt-2"
+                      value={percentage}
+                      aria-label={`完成 ${percentage}%`}
+                    />
                     <p className="mt-1.5 text-xs text-muted-foreground">
-                      {job.completed}/{job.total} · 成功 {job.succeeded ?? "—"} · 失败 {job.failed ?? "—"} · 更新于 {dateTime(job.updatedAt)}
+                      {job.completed}/{job.total} · 成功 {job.itemCounts.succeeded} · 失败 {job.itemCounts.failed} · 更新于 {dateTime(job.updatedAt)}
                     </p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {job.itemCounts.fetching > 0 ? (
+                        <Badge variant="secondary">抓取 {job.itemCounts.fetching}</Badge>
+                      ) : null}
+                      {job.itemCounts.validating > 0 ? (
+                        <Badge variant="secondary">校验 {job.itemCounts.validating}</Badge>
+                      ) : null}
+                      {job.itemCounts.saving > 0 ? (
+                        <Badge variant="secondary">双口径入库 {job.itemCounts.saving}</Badge>
+                      ) : null}
+                      {job.itemCounts.pending > 0 ? (
+                        <Badge variant="outline">等待 {job.itemCounts.pending}</Badge>
+                      ) : null}
+                      {job.itemCounts.canceled > 0 ? (
+                        <Badge variant="outline">已取消 {job.itemCounts.canceled}</Badge>
+                      ) : null}
+                    </div>
                     {job.allowedActions.length > 0 ? (
                       <div className="mt-2 flex flex-wrap justify-end gap-2 border-t pt-2">
                         {job.allowedActions.map((action) => (

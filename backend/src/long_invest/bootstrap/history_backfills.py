@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import shutil
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,6 +20,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillItemError,
     HistoryBackfillWorkItem,
     HistoryBarInput,
+    HistoryBarsBundle,
     HistoryBarStoreResult,
     HistoryJobFence,
     HistoryJobItemSummary,
@@ -32,9 +34,13 @@ from long_invest.modules.market_data.service import QualityIssueService
 from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderCapability,
+    ProviderCode,
 )
 from long_invest.modules.providers.resilience import ProviderCallError
 from long_invest.modules.providers.retry import ProviderHttpError
+from long_invest.modules.qfq.application import get_qfq_application
+from long_invest.modules.qfq.contracts import QfqBarInput, RefreshQfq
+from long_invest.modules.qfq.validation import validate_qfq_window
 from long_invest.modules.watchlists.outbox import WatchlistEventAdapter
 from long_invest.modules.watchlists.repository import WatchlistRepository
 from long_invest.modules.watchlists.service import WatchlistService
@@ -72,43 +78,81 @@ class DatabaseHistoryBarsProvider:
         start_date: date,
         end_date: date,
         deadline: datetime,
-    ) -> tuple[HistoryBarInput, ...]:
+    ) -> HistoryBarsBundle:
         try:
             async with self._database.session() as session:
-                result = await build_provider_service(session).daily_bars(
+                provider = build_provider_service(session)
+                unadjusted = await _wait_for_history_capacity(
+                    provider,
                     DailyBarRequest(
                         symbol=item.symbol,
                         start=start_date,
                         end=end_date,
                         capability=ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
                     ),
-                    deadline,
+                    deadline=deadline,
                 )
+                qfq = await _wait_for_history_capacity(
+                    provider,
+                    DailyBarRequest(
+                        symbol=item.symbol,
+                        start=start_date,
+                        end=end_date,
+                        capability=ProviderCapability.HISTORICAL_DAILY_QFQ,
+                    ),
+                    deadline=deadline,
+                )
+                summary = await provider.get_provider(ProviderCode.SINA)
         except ProviderHttpError as error:
             raise HistoryBackfillItemError(
                 error.code, retryable=error.retryable
             ) from error
         except ProviderCallError as error:
             raise HistoryBackfillItemError(error.code, retryable=True) from error
-        if result.batch_error_code:
-            raise HistoryBackfillItemError(result.batch_error_code, retryable=True)
-        if result.failures:
-            failure = result.failures[0]
-            raise HistoryBackfillItemError(failure.code, retryable=True)
-        return tuple(
-            HistoryBarInput(
-                symbol=bar.symbol,
-                trade_date=bar.trading_date,
-                open=bar.open,
-                high=bar.high,
-                low=bar.low,
-                close=bar.close,
-                volume=bar.volume,
-                amount=bar.amount,
-                source=bar.source.value,
-            )
-            for bar in result.items
+        _require_provider_result(unadjusted)
+        _require_provider_result(qfq)
+        return HistoryBarsBundle(
+            unadjusted=_history_inputs(unadjusted.items),
+            qfq=_history_inputs(qfq.items),
+            provider_contract_version=f"SINA:config-v{int(summary['version'])}",
         )
+
+
+def _require_provider_result(result) -> None:
+    if result.batch_error_code:
+        raise HistoryBackfillItemError(result.batch_error_code, retryable=True)
+    if result.failures:
+        raise HistoryBackfillItemError(result.failures[0].code, retryable=True)
+
+
+async def _wait_for_history_capacity(provider, request, *, deadline: datetime):
+    while True:
+        try:
+            return await provider.daily_bars(request, deadline)
+        except ProviderCallError as error:
+            if error.code != "PROVIDER_RATE_LIMITED":
+                raise
+            remaining = (deadline - datetime.now(UTC)).total_seconds()
+            if remaining <= 0:
+                raise TimeoutError from error
+            await asyncio.sleep(min(0.25, remaining))
+
+
+def _history_inputs(bars) -> tuple[HistoryBarInput, ...]:
+    return tuple(
+        HistoryBarInput(
+            symbol=bar.symbol,
+            trade_date=bar.trading_date,
+            open=bar.open,
+            high=bar.high,
+            low=bar.low,
+            close=bar.close,
+            volume=bar.volume,
+            amount=bar.amount,
+            source=bar.source.value,
+        )
+        for bar in bars
+    )
 
 
 class DatabaseHistoryBarStore:
@@ -118,7 +162,7 @@ class DatabaseHistoryBarStore:
     async def store(
         self,
         item: HistoryBackfillWorkItem,
-        bars: tuple[HistoryBarInput, ...],
+        bars: HistoryBarsBundle,
         *,
         idempotency_key: str,
         reason: str,
@@ -138,7 +182,7 @@ class DatabaseHistoryBarStore:
                 amount=bar.amount,
                 source=bar.source,
             )
-            for bar in bars
+            for bar in bars.unadjusted
         )
         async with self._database.transaction() as session:
             stored = await DailyDataService(
@@ -146,11 +190,63 @@ class DatabaseHistoryBarStore:
                 events=DailyDataEventWriter(session),
                 quality_issues=QualityIssueService(QualityIssueRepository(session)),
             ).store_historical_bars(inputs, reason=reason)
+        if stored.review_required:
+            raise HistoryBackfillItemError(
+                "HISTORY_UNADJUSTED_REVIEW_REQUIRED", retryable=False
+            )
+        qfq_dates = tuple(bar.trade_date for bar in bars.qfq)
+        raw_by_date = {bar.trade_date: bar for bar in bars.unadjusted}
+        anchor = raw_by_date[bars.qfq[-1].trade_date]
+        command = RefreshQfq(
+            security_id=item.security_id,
+            symbol=item.symbol,
+            start=bars.qfq[0].trade_date,
+            end=bars.qfq[-1].trade_date,
+            as_of_date=bars.qfq[-1].trade_date,
+            expected_trade_dates=qfq_dates,
+            input_daily_version=1,
+            trigger_reason=reason,
+            request_id=idempotency_key,
+            idempotency_key=idempotency_key,
+            actor_user_id="history-backfill-worker",
+        )
+        validated = validate_qfq_window(
+            command,
+            (
+                QfqBarInput(
+                    trade_date=bar.trade_date,
+                    open=bar.open,
+                    high=bar.high,
+                    low=bar.low,
+                    close=bar.close,
+                    volume=bar.volume,
+                    amount=bar.amount,
+                )
+                for bar in bars.qfq
+            ),
+            anchor.close,
+        )
+        qfq = await get_qfq_application().store_history(
+            security_id=item.security_id,
+            symbol=item.symbol,
+            requested_start=bars.unadjusted[0].trade_date,
+            validated_window=validated,
+            provider=bars.qfq[0].source,
+            provider_contract_version=bars.provider_contract_version,
+            reason=reason,
+        )
         return HistoryBarStoreResult(
             inserted=stored.inserted,
             unchanged=stored.unchanged,
             revised=stored.revised,
             review_required=stored.review_required,
+            qfq_dataset_id=qfq.dataset_id,
+            qfq_version=qfq.version,
+            qfq_rows=qfq.row_count,
+            qfq_unchanged=qfq.unchanged,
+            qfq_actual_start=qfq.actual_start,
+            qfq_actual_end=qfq.actual_end,
+            qfq_truncated_rows=len(bars.unadjusted) - len(bars.qfq),
         )
 
 

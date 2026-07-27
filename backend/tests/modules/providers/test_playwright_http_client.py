@@ -7,6 +7,7 @@ from long_invest.modules.providers.http_client import ProviderHttpRequest
 from long_invest.modules.providers.playwright_http_client import (
     BrowserResponse,
     PlaywrightProviderHttpClient,
+    _activate_history_request,
     _rewrite_page_history_url,
     _unwrap_jsonp,
     _validated_quote_url,
@@ -189,3 +190,49 @@ def test_quote_page_jsonp_is_normalized_to_json() -> None:
 
     with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
         _unwrap_jsonp(b'callback-name({"rc":0})')
+
+
+@pytest.mark.anyio
+async def test_activate_history_request_switches_weekly_then_daily() -> None:
+    class Tabs:
+        def __init__(self) -> None:
+            self.clicked: list[tuple[int, bool, float]] = []
+            self.index = 0
+
+        async def all_inner_texts(self) -> list[str]:
+            return ["日K", "周K", "月K", "5分钟"]
+
+        def nth(self, index: int) -> "Tabs":
+            self.index = index
+            return self
+
+        async def click(self, *, force: bool, timeout: float) -> None:
+            self.clicked.append((self.index, force, timeout))
+
+    class Page:
+        def __init__(self, tabs: Tabs) -> None:
+            self.tabs = tabs
+
+        def locator(self, selector: str) -> Tabs:
+            assert selector == "ul.k_tab a"
+            return self.tabs
+
+    tabs = Tabs()
+    await _activate_history_request(Page(tabs), timeout_ms=60_000)
+
+    assert tabs.clicked == [(1, True, 15_000), (0, True, 15_000)]
+
+
+@pytest.mark.anyio
+async def test_activate_history_request_rejects_changed_page_schema() -> None:
+    class Tabs:
+        async def all_inner_texts(self) -> list[str]:
+            return ["分时", "五日"]
+
+    class Page:
+        def locator(self, selector: str) -> Tabs:
+            assert selector == "ul.k_tab a"
+            return Tabs()
+
+    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
+        await _activate_history_request(Page(), timeout_ms=60_000)

@@ -232,8 +232,9 @@ class PlaywrightPageFetcher:
                     wait_until="domcontentloaded",
                     timeout=timeout_ms,
                 )
-            if quote_response is None or quote_response.request.redirected_from:
-                raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
+                if quote_response is None or quote_response.request.redirected_from:
+                    raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
+                await _activate_history_request(page, timeout_ms=timeout_ms)
             response = await response_info.value
             body = _unwrap_jsonp(await response.body())
             response_headers = dict(response.headers)
@@ -399,6 +400,16 @@ def _unwrap_jsonp(body: bytes) -> bytes:
     ):
         raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
     return stripped[opening + 1 : closing]
+
+
+async def _activate_history_request(page: Any, *, timeout_ms: float) -> None:
+    tabs = page.locator("ul.k_tab a")
+    labels = tuple(label.strip() for label in await tabs.all_inner_texts())
+    if labels[:3] != ("日K", "周K", "月K"):
+        raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+    click_timeout = min(timeout_ms, 15_000)
+    await tabs.nth(1).click(force=True, timeout=click_timeout)
+    await tabs.nth(0).click(force=True, timeout=click_timeout)
 
 
 class PlaywrightProviderHttpClient:

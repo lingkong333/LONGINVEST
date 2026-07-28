@@ -96,11 +96,28 @@ class DailyDataService:
         ):
             raise ValueError("historical daily bars contain duplicate dates")
 
-        inserted = unchanged = revised = review_required = 0
-        for item in ordered:
-            previous_close = await self._repository.get_previous_close(
-                item.security_id, item.trade_date
+        security_ids = {item.security_id for item in ordered}
+        symbols = {item.symbol for item in ordered}
+        if len(security_ids) != 1 or len(symbols) != 1:
+            raise ValueError("historical daily bars must belong to one security")
+
+        security_id = ordered[0].security_id
+        await self._repository.lock_security_bars(security_id)
+        existing_by_date = {
+            item.trade_date: item
+            for item in await self._repository.list_bars_in_window(
+                security_id,
+                start=ordered[0].trade_date,
+                end=ordered[-1].trade_date,
             )
+        }
+        previous_close = await self._repository.get_previous_close(
+            security_id, ordered[0].trade_date
+        )
+        now = self._now()
+        desired_by_date: dict[date, dict[str, Any]] = {}
+        review_items: list[tuple[HistoricalDailyBarInput, str]] = []
+        for item in ordered:
             payload = {
                 "symbol": item.symbol,
                 "trading_date": item.trade_date,
@@ -131,58 +148,109 @@ class DailyDataService:
                     message="历史日线数据未通过正式数据校验",
                     status_code=422,
                 )
-            existing = await self._repository.get_bar(item.security_id, item.trade_date)
-            stage = DailyBarStage(
-                id=uuid4(),
-                batch_id=uuid4(),
-                security_id=item.security_id,
-                symbol=item.symbol,
-                trading_date=item.trade_date,
-                status=(
-                    DailyStageStatus.REVIEW_REQUIRED
-                    if quality.review_required
-                    else DailyStageStatus.VALID
-                ),
-                provider_payload=payload,
-                received_at=self._now(),
-                validated_at=self._now(),
-                expires_at=self._now() + timedelta(days=7),
-            )
-            revision_no = await self._commit_stage(stage, revision_reason=reason)
-            if existing is None:
-                inserted += 1
-            elif revision_no:
-                revised += 1
-            else:
-                unchanged += 1
+            desired_by_date[item.trade_date] = {
+                "security_id": item.security_id,
+                "trade_date": item.trade_date,
+                "symbol": item.symbol,
+                "open": item.open,
+                "high": item.high,
+                "low": item.low,
+                "close": item.close,
+                "previous_close": previous_close,
+                "volume": item.volume,
+                "amount": item.amount,
+                "source": item.source,
+            }
             if quality.review_required:
-                review_required += 1
-                await self._quality_service().open(
-                    OpenQualityIssue(
-                        issue_type=quality.code,
-                        subject_type="daily_bar_unadjusted",
-                        subject_id=f"{item.security_id}:{item.trade_date}",
-                        symbol=item.symbol,
-                        severity=QualitySeverity.WARNING,
-                        evidence={
-                            "security_id": str(item.security_id),
-                            "symbol": item.symbol,
-                            "trade_date": item.trade_date.isoformat(),
-                            "quality_code": quality.code,
-                            "source": item.source,
-                        },
-                        dedupe_key=(
-                            f"history-daily-review:{item.security_id}:"
-                            f"{item.trade_date}:{quality.code}"
-                        ),
-                        requires_review=True,
-                    )
+                review_items.append((item, quality.code))
+            previous_close = item.close
+
+        inserted_dates: list[date] = []
+        changed_dates: list[date] = []
+        for trade_date, values in desired_by_date.items():
+            existing = existing_by_date.get(trade_date)
+            if existing is None:
+                inserted_dates.append(trade_date)
+            elif any(
+                _stored_values(existing)[key] != value
+                for key, value in values.items()
+                if key not in {"security_id", "trade_date", "symbol"}
+            ) or existing.symbol != values["symbol"]:
+                changed_dates.append(trade_date)
+
+        revision_numbers = await self._repository.latest_revision_numbers(
+            security_id, changed_dates
+        )
+        write_rows: list[dict[str, Any]] = []
+        revisions: list[dict[str, Any]] = []
+        for trade_date in (*inserted_dates, *changed_dates):
+            values = desired_by_date[trade_date]
+            existing = existing_by_date.get(trade_date)
+            data_version = 1 if existing is None else existing.data_version + 1
+            write_rows.append(
+                {
+                    **values,
+                    "data_version": data_version,
+                    "created_at": existing.created_at if existing is not None else now,
+                    "updated_at": now,
+                }
+            )
+            if existing is None:
+                continue
+            old_values = _stored_values(existing)
+            new_values = {
+                key: value
+                for key, value in values.items()
+                if key not in {"security_id", "trade_date", "symbol"}
+            }
+            changed_fields = tuple(
+                key for key, value in new_values.items() if old_values[key] != value
+            )
+            revisions.append(
+                {
+                    "id": uuid4(),
+                    "daily_bar_security_id": security_id,
+                    "daily_bar_trade_date": trade_date,
+                    "symbol": values["symbol"],
+                    "revision_no": revision_numbers.get(trade_date, 0) + 1,
+                    "old_values": _json_values(old_values),
+                    "new_values": _json_values(new_values),
+                    "changed_fields": list(changed_fields),
+                    "source": values["source"],
+                    "reason": reason,
+                    "created_at": now,
+                }
+            )
+        await self._repository.upsert_historical_bars(write_rows)
+        await self._repository.add_historical_revisions(revisions)
+
+        for item, quality_code in review_items:
+            await self._quality_service().open(
+                OpenQualityIssue(
+                    issue_type=quality_code,
+                    subject_type="daily_bar_unadjusted",
+                    subject_id=f"{item.security_id}:{item.trade_date}",
+                    symbol=item.symbol,
+                    severity=QualitySeverity.WARNING,
+                    evidence={
+                        "security_id": str(item.security_id),
+                        "symbol": item.symbol,
+                        "trade_date": item.trade_date.isoformat(),
+                        "quality_code": quality_code,
+                        "source": item.source,
+                    },
+                    dedupe_key=(
+                        f"history-daily-review:{item.security_id}:"
+                        f"{item.trade_date}:{quality_code}"
+                    ),
+                    requires_review=True,
                 )
+            )
         return HistoricalDailyStoreResult(
-            inserted=inserted,
-            unchanged=unchanged,
-            revised=revised,
-            review_required=review_required,
+            inserted=len(inserted_dates),
+            unchanged=len(ordered) - len(inserted_dates) - len(changed_dates),
+            revised=len(changed_dates),
+            review_required=len(review_items),
         )
 
     async def stage(self, batch_id: UUID, item: StageDailyBar) -> None:
@@ -550,7 +618,7 @@ class DailyDataService:
         self, stage: DailyBarStage, *, revision_reason: str = "provider_replay_changed"
     ) -> int:
         values = _bar_values(stage)
-        await self._repository.lock_bar_key(stage.security_id, stage.trading_date)
+        await self._repository.lock_security_bars(stage.security_id)
         existing = await self._repository.get_bar(stage.security_id, stage.trading_date)
         if existing is None:
             await self._repository.add_bar(

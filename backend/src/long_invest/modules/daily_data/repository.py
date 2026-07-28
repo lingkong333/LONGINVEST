@@ -26,6 +26,8 @@ from long_invest.platform.errors import AppError
 
 
 class DailyDataRepository:
+    _HISTORY_CHUNK_SIZE = 500
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
@@ -180,6 +182,75 @@ class DailyDataRepository:
             .execution_options(populate_existing=True)
         )
 
+    async def lock_security_bars(self, security_id: UUID) -> None:
+        raw_key = f"daily-bars:{security_id}".encode("ascii")
+        lock_key = int.from_bytes(
+            blake2b(raw_key, digest_size=8).digest(), "big", signed=True
+        )
+        await self.session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
+
+    async def list_bars_in_window(
+        self, security_id: UUID, *, start: date, end: date
+    ) -> list[DailyBarUnadjusted]:
+        rows = await self.session.scalars(
+            select(DailyBarUnadjusted)
+            .where(
+                DailyBarUnadjusted.security_id == security_id,
+                DailyBarUnadjusted.trade_date.between(start, end),
+            )
+            .order_by(DailyBarUnadjusted.trade_date)
+        )
+        return list(rows)
+
+    async def latest_revision_numbers(
+        self, security_id: UUID, trade_dates: Sequence[date]
+    ) -> dict[date, int]:
+        if not trade_dates:
+            return {}
+        rows = await self.session.execute(
+            select(
+                DailyBarRevision.daily_bar_trade_date,
+                func.max(DailyBarRevision.revision_no),
+            )
+            .where(
+                DailyBarRevision.daily_bar_security_id == security_id,
+                DailyBarRevision.daily_bar_trade_date.in_(trade_dates),
+            )
+            .group_by(DailyBarRevision.daily_bar_trade_date)
+        )
+        return {trade_date: int(revision_no) for trade_date, revision_no in rows}
+
+    async def upsert_historical_bars(
+        self, values: Sequence[dict[str, Any]]
+    ) -> None:
+        for chunk in _chunks(values, self._HISTORY_CHUNK_SIZE):
+            statement = insert(DailyBarUnadjusted).values(chunk)
+            excluded = statement.excluded
+            await self.session.execute(
+                statement.on_conflict_do_update(
+                    constraint="pk_daily_bar_unadjusted",
+                    set_={
+                        "symbol": excluded.symbol,
+                        "open": excluded.open,
+                        "high": excluded.high,
+                        "low": excluded.low,
+                        "close": excluded.close,
+                        "previous_close": excluded.previous_close,
+                        "volume": excluded.volume,
+                        "amount": excluded.amount,
+                        "source": excluded.source,
+                        "data_version": excluded.data_version,
+                        "updated_at": excluded.updated_at,
+                    },
+                )
+            )
+
+    async def add_historical_revisions(
+        self, values: Sequence[dict[str, Any]]
+    ) -> None:
+        for chunk in _chunks(values, self._HISTORY_CHUNK_SIZE):
+            await self.session.execute(insert(DailyBarRevision).values(chunk))
+
     async def get_bar_by_symbol_date(
         self, symbol: str, trade_date: date
     ) -> DailyBarUnadjusted | None:
@@ -189,13 +260,6 @@ class DailyDataRepository:
                 DailyBarUnadjusted.trade_date == trade_date,
             )
         )
-
-    async def lock_bar_key(self, security_id: UUID, trade_date: date) -> None:
-        raw_key = f"{security_id}:{trade_date.isoformat()}".encode("ascii")
-        lock_key = int.from_bytes(
-            blake2b(raw_key, digest_size=8).digest(), "big", signed=True
-        )
-        await self.session.scalar(select(func.pg_advisory_xact_lock(lock_key)))
 
     async def get_previous_close(
         self, security_id: UUID, trading_date: date
@@ -417,3 +481,7 @@ def _json_value(value: Any) -> Any:
     if isinstance(value, Enum):
         return value.value
     return value
+
+
+def _chunks[T](values: Sequence[T], size: int) -> tuple[Sequence[T], ...]:
+    return tuple(values[index : index + size] for index in range(0, len(values), size))

@@ -126,6 +126,7 @@ def _require_provider_result(result) -> None:
 
 
 async def _wait_for_history_capacity(provider, request, *, deadline: datetime):
+    failed_attempts = 0
     while True:
         try:
             return await provider.daily_bars(request, deadline)
@@ -139,6 +140,14 @@ async def _wait_for_history_capacity(provider, request, *, deadline: datetime):
             if remaining <= 0:
                 raise TimeoutError from error
             await asyncio.sleep(min(0.25, remaining))
+        except ProviderHttpError as error:
+            failed_attempts += 1
+            if not error.retryable or failed_attempts >= 3:
+                raise
+            remaining = (deadline - datetime.now(UTC)).total_seconds()
+            if remaining <= 0:
+                raise TimeoutError from error
+            await asyncio.sleep(min(0.25 * 2 ** (failed_attempts - 1), remaining))
 
 
 def _history_inputs(bars) -> tuple[HistoryBarInput, ...]:

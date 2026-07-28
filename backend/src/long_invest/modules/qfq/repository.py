@@ -6,6 +6,7 @@ from hashlib import blake2b
 from uuid import UUID
 
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +20,8 @@ from long_invest.platform.errors import AppError
 
 
 class QfqRepository:
+    _BAR_CHUNK_SIZE = 500
+
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
@@ -151,8 +154,26 @@ class QfqRepository:
         self, dataset: QfqDataset, bars: Sequence[QfqDatasetBar]
     ) -> None:
         self.session.add(dataset)
-        self.session.add_all(bars)
         await self.session.flush()
+        values = [
+            {
+                "dataset_id": bar.dataset_id,
+                "trade_date": bar.trade_date,
+                "open": bar.open,
+                "high": bar.high,
+                "low": bar.low,
+                "close": bar.close,
+                "volume": bar.volume,
+                "amount": bar.amount,
+            }
+            for bar in bars
+        ]
+        for index in range(0, len(values), self._BAR_CHUNK_SIZE):
+            await self.session.execute(
+                insert(QfqDatasetBar).values(
+                    values[index : index + self._BAR_CHUNK_SIZE]
+                )
+            )
 
     async def transition_dataset(
         self,

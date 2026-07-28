@@ -35,16 +35,20 @@ class FakeDatabase:
 
 def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None:
     class FailingProviderService:
+        calls = 0
+
         async def daily_bars(self, request, deadline):
             del request, deadline
+            self.calls += 1
             raise ProviderHttpError(
                 "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
             )
 
+    service = FailingProviderService()
     monkeypatch.setattr(
         history_backfills,
         "build_provider_service",
-        lambda session: FailingProviderService(),
+        lambda session: service,
     )
 
     async def run() -> None:
@@ -61,6 +65,7 @@ def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None
             )
         assert captured.value.code == "PROVIDER_UPSTREAM_TEMPORARY"
         assert captured.value.retryable is True
+        assert service.calls == 3
 
     asyncio.run(run())
 

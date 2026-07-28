@@ -415,13 +415,13 @@ async def test_current_bar_and_latest_revision_reads_request_row_locks() -> None
 
 
 @async_test
-async def test_bar_key_advisory_lock_is_stable_and_transaction_scoped() -> None:
+async def test_security_bar_advisory_lock_is_stable_and_transaction_scoped() -> None:
     session = FakeSession([None, None])
     repository = DailyDataRepository(session)
     security_id = uuid4()
 
-    await repository.lock_bar_key(security_id, DAY)
-    await repository.lock_bar_key(security_id, DAY)
+    await repository.lock_security_bars(security_id)
+    await repository.lock_security_bars(security_id)
 
     first, second = session.scalar_statements
     first_sql = str(first.compile(compile_kwargs={"literal_binds": True}))

@@ -13,6 +13,7 @@ from long_invest.modules.daily_data.contracts import (
     DailyBatchStatus,
     DailyMissingReason,
     DailyStageStatus,
+    HistoricalDailyBarInput,
     StageDailyBar,
 )
 from long_invest.modules.daily_data.service import (
@@ -132,8 +133,47 @@ class FakeRepository:
         self.bar_write_order.append(("get", security_id, trade_date))
         return self.bars.get((security_id, trade_date))
 
-    async def lock_bar_key(self, security_id, trade_date):
-        self.bar_write_order.append(("lock", security_id, trade_date))
+    async def lock_security_bars(self, security_id):
+        self.bar_write_order.append(("lock-security", security_id))
+
+    async def list_bars_in_window(self, security_id, *, start, end):
+        return [
+            bar
+            for (stored_security_id, trade_date), bar in self.bars.items()
+            if stored_security_id == security_id and start <= trade_date <= end
+        ]
+
+    async def latest_revision_numbers(self, security_id, trade_dates):
+        return {
+            trade_date: max(
+                (
+                    revision.revision_no
+                    for revision in self.revisions
+                    if revision.daily_bar_security_id == security_id
+                    and revision.daily_bar_trade_date == trade_date
+                ),
+                default=0,
+            )
+            for trade_date in trade_dates
+        }
+
+    async def upsert_historical_bars(self, values):
+        from long_invest.modules.daily_data.models import DailyBarUnadjusted
+
+        for row in values:
+            key = (row["security_id"], row["trade_date"])
+            existing = self.bars.get(key)
+            if existing is None:
+                self.bars[key] = DailyBarUnadjusted(**row)
+                continue
+            for field, value in row.items():
+                if field not in {"security_id", "trade_date", "created_at"}:
+                    setattr(existing, field, value)
+
+    async def add_historical_revisions(self, values):
+        from long_invest.modules.daily_data.models import DailyBarRevision
+
+        self.revisions.extend(DailyBarRevision(**row) for row in values)
 
     async def get_previous_close(self, security_id, trading_date):
         return self.previous_closes.get((security_id, trading_date))
@@ -337,7 +377,7 @@ async def test_same_value_replay_has_no_revision_and_changed_value_revises() -> 
 
 
 @async_test
-async def test_commit_locks_bar_key_before_reading_current_fact() -> None:
+async def test_commit_locks_security_before_reading_current_fact() -> None:
     repo = FakeRepository()
     service = _service(repo)
     batch = await service.create(_command())
@@ -347,7 +387,7 @@ async def test_commit_locks_bar_key_before_reading_current_fact() -> None:
     await _validate_and_commit(service, batch.id)
 
     assert repo.bar_write_order[:2] == [
-        ("lock", staged.security_id, DAY),
+        ("lock-security", staged.security_id),
         ("get", staged.security_id, DAY),
     ]
 
@@ -935,3 +975,55 @@ async def test_stage_locks_batch_and_cannot_reopen_late_states(status) -> None:
     assert captured.value.code == "DAILY_BATCH_STATE_CONFLICT"
     assert repo.batch_lock_requests[-1] == (batch.id, True)
     assert repo.batches[batch.id].status is status
+
+
+def _historical_bar(
+    security_id,
+    trade_date,
+    *,
+    close="10.50",
+):
+    return HistoricalDailyBarInput(
+        security_id=security_id,
+        symbol="600000.SH",
+        trade_date=trade_date,
+        open=Decimal("10.00"),
+        high=Decimal("11.00"),
+        low=Decimal("9.00"),
+        close=Decimal(close),
+        volume=100,
+        amount=Decimal("1000"),
+        source="SINA",
+    )
+
+
+@async_test
+async def test_historical_store_is_bulk_idempotent_and_preserves_revisions() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    security_id = uuid4()
+    first = _historical_bar(security_id, date(2026, 7, 14), close="10.20")
+    second = _historical_bar(security_id, date(2026, 7, 15), close="10.50")
+
+    inserted = await service.store_historical_bars(
+        (second, first), reason="history import"
+    )
+    replayed = await service.store_historical_bars(
+        (first, second), reason="history replay"
+    )
+    revised = await service.store_historical_bars(
+        (first, _historical_bar(security_id, second.trade_date, close="10.60")),
+        reason="history correction",
+    )
+
+    assert (inserted.inserted, inserted.unchanged, inserted.revised) == (2, 0, 0)
+    assert (replayed.inserted, replayed.unchanged, replayed.revised) == (0, 2, 0)
+    assert (revised.inserted, revised.unchanged, revised.revised) == (0, 1, 1)
+    assert len(repo.revisions) == 1
+    assert repo.revisions[0].old_values["close"] == "10.50"
+    assert repo.revisions[0].new_values["close"] == "10.60"
+    assert [entry[0] for entry in repo.bar_write_order] == [
+        "lock-security",
+        "lock-security",
+        "lock-security",
+    ]

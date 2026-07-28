@@ -83,7 +83,7 @@ def test_rate_limiter_reserves_realtime_capacity_and_degrades_conservatively() -
     assert not limiter.acquire(historical)
 
 
-def test_sina_history_defaults_to_500ms_serial_requests() -> None:
+def test_sina_history_defaults_to_500ms_four_concurrent_requests() -> None:
     async def scenario() -> None:
         configuration = StaticProviderConfiguration()
         for capability in (
@@ -95,7 +95,7 @@ def test_sina_history_defaults_to_500ms_serial_requests() -> None:
                 for route in await configuration.routes(capability)
                 if route.provider is ProviderCode.SINA
             )
-            assert sina.concurrency == 1
+            assert sina.concurrency == 4
             assert sina.rate_per_second == 2.0
 
     asyncio.run(scenario())

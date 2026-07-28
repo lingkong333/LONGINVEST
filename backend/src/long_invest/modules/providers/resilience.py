@@ -212,7 +212,7 @@ class StaticProviderConfiguration:
                 ProviderRouteSetting(
                     ProviderCode.SINA,
                     ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
-                    concurrency=1,
+                    concurrency=4,
                     rate_per_second=2.0,
                     timeout_seconds=300,
                     auto_switch=False,
@@ -228,7 +228,7 @@ class StaticProviderConfiguration:
                 ProviderRouteSetting(
                     ProviderCode.SINA,
                     ProviderCapability.HISTORICAL_DAILY_QFQ,
-                    concurrency=1,
+                    concurrency=4,
                     rate_per_second=2.0,
                     timeout_seconds=300,
                     auto_switch=False,

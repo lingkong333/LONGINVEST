@@ -73,10 +73,10 @@ def test_consolidated_background_containers_keep_permission_boundary() -> None:
     assert strategy["healthcheck"]["test"][-1] == "strategy"
 
 
-def test_bulk_history_worker_uses_isolated_browser_image() -> None:
+def test_bulk_history_worker_uses_lightweight_sdk_image() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     dockerfile_path = (
-        Path(__file__).parents[3] / "deploy" / "docker" / "history-worker.Dockerfile"
+        Path(__file__).parents[3] / "deploy" / "docker" / "backend.Dockerfile"
     )
     service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
         "worker-bulk-history"
@@ -84,20 +84,19 @@ def test_bulk_history_worker_uses_isolated_browser_image() -> None:
     dockerfile = dockerfile_path.read_text(encoding="utf-8")
 
     assert service["build"]["dockerfile"] == (
-        "deploy/docker/history-worker.Dockerfile"
+        "deploy/docker/backend.Dockerfile"
     )
+    assert service["build"]["target"] == "collector-runtime"
     assert service["environment"]["LONGINVEST_WORKER_QUEUES"] == "bulk-history"
-    assert (
-        service["environment"]["LONGINVEST_EASTMONEY_HISTORY_TRANSPORT"]
-        == "playwright"
-    )
+    assert "LONGINVEST_EASTMONEY_HISTORY_TRANSPORT" not in service["environment"]
     assert service["read_only"] is True
-    assert service["shm_size"] == "512m"
+    assert "shm_size" not in service
     assert service["mem_limit"] == "1g"
     assert "ALL" in service["cap_drop"]
     assert "ports" not in service
-    assert "useradd --uid 999" in dockerfile
-    assert "playwright install chrome" in dockerfile
+    assert "FROM base AS collector-runtime" in dockerfile
+    assert "uv sync --frozen --no-dev --extra collector" in dockerfile
+    assert "playwright install" not in dockerfile
     assert 'ENV HOME="/tmp"' in dockerfile
     assert "USER longinvest" in dockerfile
 

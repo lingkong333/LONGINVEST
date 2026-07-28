@@ -767,10 +767,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-collector = [
-    { name = "akshare" },
+browser-collector = [
     { name = "playwright" },
     { name = "playwright-stealth" },
+]
+collector = [
+    { name = "akshare" },
 ]
 dev = [
     { name = "pytest" },
@@ -793,8 +795,8 @@ requires-dist = [
     { name = "jsonschema", specifier = ">=4.26.0,<5" },
     { name = "numpy", specifier = ">=2.5.1,<3" },
     { name = "pandas", specifier = ">=3.0.3,<4" },
-    { name = "playwright", marker = "extra == 'collector'", specifier = "==1.61.0" },
-    { name = "playwright-stealth", marker = "extra == 'collector'", specifier = "==2.0.3" },
+    { name = "playwright", marker = "extra == 'browser-collector'", specifier = "==1.61.0" },
+    { name = "playwright-stealth", marker = "extra == 'browser-collector'", specifier = "==2.0.3" },
     { name = "pydantic-settings", specifier = ">=2.10,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=9,<10" },
     { name = "redis", specifier = ">=6,<8" },
@@ -804,7 +806,7 @@ requires-dist = [
     { name = "structlog", specifier = ">=25,<26" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
 ]
-provides-extras = ["dev", "collector"]
+provides-extras = ["dev", "collector", "browser-collector"]
 
 [[package]]
 name = "lxml"

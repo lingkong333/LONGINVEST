@@ -761,13 +761,13 @@ services:
     image: ${LONGINVEST_HISTORY_WORKER_IMAGE:-longinvest-history-worker:local}
     build:
       context: ..
-      dockerfile: deploy/docker/history-worker.Dockerfile
+      dockerfile: deploy/docker/backend.Dockerfile
+      target: collector-runtime
     command: ["python", "-m", "long_invest.entrypoints.worker"]
     environment:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_REDIS_URL: redis://redis:6379/0
-      LONGINVEST_EASTMONEY_HISTORY_TRANSPORT: playwright
       LONGINVEST_EASTMONEY_HISTORY_MIN_INTERVAL_SECONDS: ${LONGINVEST_EASTMONEY_HISTORY_MIN_INTERVAL_SECONDS:-3}
       LONGINVEST_LOG_FILE: /var/log/longinvest/worker-bulk-history.jsonl
       LONGINVEST_WORKER_QUEUES: bulk-history
@@ -784,9 +784,8 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=256m,mode=1777,nosuid,nodev
-    shm_size: 512m
     mem_limit: 1g
-    pids_limit: 256
+    pids_limit: 128
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true

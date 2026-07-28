@@ -45,7 +45,7 @@ async def require_authenticated_request(
     return AuthenticatedRequest(
         user=authenticated.user,
         session=authenticated.session,
-        audit_context=audit_context,
+        audit_context=build_audit_context(request),
     )
 
 
@@ -65,7 +65,7 @@ async def require_verified_write_request(
     return AuthenticatedRequest(
         user=authenticated.user,
         session=authenticated.session,
-        audit_context=audit_context,
+        audit_context=build_audit_context(request),
     )
 
 

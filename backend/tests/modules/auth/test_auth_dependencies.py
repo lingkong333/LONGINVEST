@@ -83,6 +83,8 @@ async def test_authenticated_dependency_uses_cookie_and_records_identity() -> No
     assert authenticated.user.id == "user-1"
     assert authenticated.session.id == "session-1"
     assert authenticated.audit_context.idempotency_key == "idem-test"
+    assert authenticated.audit_context.actor_user_id == "user-1"
+    assert authenticated.audit_context.session_id == "session-1"
     assert application.authenticate_arguments is not None
     assert application.authenticate_arguments["session_token"] == "session-token"
 
@@ -109,6 +111,8 @@ async def test_write_dependency_requires_origin_cookie_and_csrf(monkeypatch) -> 
         get_settings.cache_clear()
 
     assert authenticated.session.id == "session-1"
+    assert authenticated.audit_context.actor_user_id == "user-1"
+    assert authenticated.audit_context.session_id == "session-1"
     assert application.write_arguments is not None
     assert application.write_arguments["session_token"] == "session-token"
     assert application.write_arguments["csrf_token"] == "csrf-token"

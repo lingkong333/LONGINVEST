@@ -15,6 +15,7 @@ from long_invest.modules.providers.resilience import (
     ProviderRateLimiter,
     ProviderRouteSetting,
     RedisProviderRuntimeState,
+    StaticProviderConfiguration,
 )
 
 
@@ -80,6 +81,24 @@ def test_rate_limiter_reserves_realtime_capacity_and_degrades_conservatively() -
     limiter.release(realtime)
     assert limiter.acquire(historical)
     assert not limiter.acquire(historical)
+
+
+def test_sina_history_defaults_to_500ms_serial_requests() -> None:
+    async def scenario() -> None:
+        configuration = StaticProviderConfiguration()
+        for capability in (
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+            ProviderCapability.HISTORICAL_DAILY_QFQ,
+        ):
+            sina = next(
+                route
+                for route in await configuration.routes(capability)
+                if route.provider is ProviderCode.SINA
+            )
+            assert sina.concurrency == 1
+            assert sina.rate_per_second == 2.0
+
+    asyncio.run(scenario())
 
 
 def test_async_runtime_enforces_token_rate_after_concurrency_release() -> None:

@@ -67,7 +67,7 @@ def test_consolidated_background_containers_keep_permission_boundary() -> None:
 
     assert not any("docker.sock" in volume for volume in core["volumes"])
     assert any("docker.sock" in volume for volume in strategy["volumes"])
-    assert core["mem_limit"] == "768m"
+    assert core["mem_limit"] == "1536m"
     assert strategy["mem_limit"] == "1536m"
     assert core["healthcheck"]["test"][-1] == "core"
     assert strategy["healthcheck"]["test"][-1] == "strategy"

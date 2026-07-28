@@ -2,6 +2,8 @@ from pathlib import Path
 
 import yaml
 
+from long_invest.entrypoints.process_supervisor import process_specs
+
 
 def test_compose_backend_runtime_services_share_one_image() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
@@ -14,17 +16,13 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
         and service["build"].get("target") == "runtime"
     }
 
-    assert len(backend_services) == 17
+    assert len(backend_services) == 19
     assert {service["image"] for service in backend_services.values()} == {
         "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
     }
 
 
 def test_compose_workers_listen_only_to_their_role_queue() -> None:
-    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
-    compose = yaml.safe_load(compose_path.read_text(encoding="utf-8"))
-    services = compose["services"]
-
     expected = {
         "worker-maintenance": "maintenance",
         "worker-realtime-quotes": "realtime-quotes",
@@ -32,14 +30,47 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
         "worker-qfq-refresh": "qfq-refresh",
         "worker-signals": "signals",
     }
-    for service_name, queue_name in expected.items():
-        service = services[service_name]
-        assert service["environment"]["LONGINVEST_WORKER_QUEUES"] == queue_name
-        assert service["command"] == [
-            "python",
-            "-m",
-            "long_invest.entrypoints.worker",
-        ]
+    actual = {
+        spec.name: dict(spec.environment).get("LONGINVEST_WORKER_QUEUES")
+        for spec in process_specs("core")
+        if spec.name in expected
+    }
+
+    assert actual == expected
+
+
+def test_default_compose_has_seven_persistent_containers() -> None:
+    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
+    default_persistent = {
+        name
+        for name, service in services.items()
+        if "profiles" not in service and name not in {"migrate"}
+    }
+
+    assert default_persistent == {
+        "postgres",
+        "redis",
+        "api",
+        "frontend",
+        "background-core",
+        "background-strategy",
+        "worker-bulk-history",
+    }
+
+
+def test_consolidated_background_containers_keep_permission_boundary() -> None:
+    compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
+    services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
+    core = services["background-core"]
+    strategy = services["background-strategy"]
+
+    assert not any("docker.sock" in volume for volume in core["volumes"])
+    assert any("docker.sock" in volume for volume in strategy["volumes"])
+    assert core["mem_limit"] == "768m"
+    assert strategy["mem_limit"] == "1536m"
+    assert core["healthcheck"]["test"][-1] == "core"
+    assert strategy["healthcheck"]["test"][-1] == "strategy"
 
 
 def test_bulk_history_worker_uses_isolated_browser_image() -> None:
@@ -85,33 +116,27 @@ def test_compose_publishes_only_the_frontend_on_public_port() -> None:
 
 def test_monitor_scheduler_is_an_isolated_private_service() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
-    service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
-        "monitor-scheduler"
-    ]
+    services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
+    service = services["background-core"]
+    scheduler = next(
+        spec for spec in process_specs("core") if spec.name == "monitor-scheduler"
+    )
 
-    assert service["command"] == [
-        "python",
-        "-m",
-        "long_invest.entrypoints.monitor_scheduler",
-    ]
+    assert scheduler.module == "long_invest.entrypoints.monitor_scheduler"
     assert "ports" not in service
     assert service["read_only"] is True
-    assert service["mem_limit"] == "128m"
     assert "no-new-privileges:true" in service["security_opt"]
 
 
 def test_signal_projector_is_an_isolated_private_service() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
-    service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
-        "signal-projector"
-    ]
+    services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
+    service = services["background-core"]
+    projector = next(
+        spec for spec in process_specs("core") if spec.name == "signal-projector"
+    )
 
-    assert service["command"] == [
-        "python",
-        "-m",
-        "long_invest.entrypoints.signal_projector",
-    ]
+    assert projector.module == "long_invest.entrypoints.signal_projector"
     assert "ports" not in service
     assert service["read_only"] is True
-    assert service["mem_limit"] == "128m"
     assert "no-new-privileges:true" in service["security_opt"]

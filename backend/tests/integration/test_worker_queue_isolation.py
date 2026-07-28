@@ -113,6 +113,16 @@ def test_compose_publishes_only_the_frontend_on_public_port() -> None:
     assert "ports" not in services["redis"]
 
 
+def test_frontend_proxy_refreshes_api_container_address() -> None:
+    nginx_path = Path(__file__).parents[3] / "deploy" / "docker" / "nginx.conf"
+    nginx_config = nginx_path.read_text(encoding="utf-8")
+
+    assert "resolver 127.0.0.11 valid=10s ipv6=off;" in nginx_config
+    assert "set $api_upstream api:8000;" in nginx_config
+    assert "proxy_pass http://$api_upstream;" in nginx_config
+    assert "proxy_pass http://api:8000;" not in nginx_config
+
+
 def test_monitor_scheduler_is_an_isolated_private_service() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]

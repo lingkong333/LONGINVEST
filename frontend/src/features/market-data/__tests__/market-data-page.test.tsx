@@ -259,6 +259,38 @@ describe("行情数据中心", () => {
       .not.toBeInTheDocument()
   })
 
+  it("历史回填默认并发为四且不设置固定上限", async () => {
+    const createBackfill = vi.fn().mockResolvedValue(undefined)
+    renderPage(gateway({ createBackfill }))
+
+    await userEvent.click(await screen.findByRole("button", {
+      name: "新建回填",
+    }))
+    const concurrency = within(screen.getByRole("dialog")).getByRole(
+      "spinbutton",
+      { name: "并发数" },
+    )
+
+    expect(concurrency).toHaveValue(4)
+    expect(concurrency).toHaveAttribute("min", "1")
+    expect(concurrency).not.toHaveAttribute("max")
+
+    await userEvent.clear(concurrency)
+    await userEvent.type(concurrency, "12")
+    await userEvent.type(screen.getByRole("textbox", { name: "股票代码" }), "600519.SH")
+    await userEvent.type(screen.getByLabelText("开始日期"), "2020-01-01")
+    await userEvent.type(screen.getByLabelText("结束日期"), "2025-12-31")
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "操作原因" }),
+      "验证自定义并发",
+    )
+    await userEvent.click(screen.getByRole("button", { name: "确认执行" }))
+
+    expect(createBackfill).toHaveBeenCalledWith(expect.objectContaining({
+      concurrency: 12,
+    }))
+  })
+
   it("日线重试提交确认原因且提交期间防止重复操作", async () => {
     let finish: (() => void) | undefined
     const retryDailyBatch = vi.fn().mockImplementation(() => (

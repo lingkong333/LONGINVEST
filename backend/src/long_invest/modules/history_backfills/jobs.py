@@ -57,7 +57,7 @@ class HistoryBackfillExecutor:
         concurrency: int,
         reason: str,
     ) -> HistoryBackfillExecutionResult:
-        if start_date > end_date or not 1 <= concurrency <= 8 or not reason.strip():
+        if start_date > end_date or concurrency < 1 or not reason.strip():
             raise ValueError("invalid history execution configuration")
         fence = HistoryJobFence(context.job_id, context.fence_token)
         await self._items.recover_incomplete(fence)
@@ -85,6 +85,7 @@ class HistoryBackfillExecutor:
                         start_date=start_date,
                         end_date=end_date,
                         reason=reason,
+                        concurrency=concurrency,
                     )
                     for item in claimed
                 )
@@ -111,6 +112,7 @@ class HistoryBackfillExecutor:
         start_date: date,
         end_date: date,
         reason: str,
+        concurrency: int,
     ) -> None:
         try:
             if await self._stop_at_safe_point(fence, item):
@@ -122,6 +124,7 @@ class HistoryBackfillExecutor:
                     start_date=start_date,
                     end_date=end_date,
                     deadline=deadline,
+                    concurrency=concurrency,
                 )
             await self._items.mark_stage(fence, item.symbol, JobItemStatus.VALIDATING)
             bundle = _validate_bundle(
@@ -227,7 +230,7 @@ def build_history_backfill_handler(
             end_date = date.fromisoformat(str(context.config["end_date"]))
             concurrency = int(context.config["concurrency"])
             reason = str(context.config["reason"]).strip()
-            if start_date > end_date or not 1 <= concurrency <= 8 or not reason:
+            if start_date > end_date or concurrency < 1 or not reason:
                 raise ValueError
         except (KeyError, TypeError, ValueError):
             return JobResult.failure(

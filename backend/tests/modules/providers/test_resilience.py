@@ -83,7 +83,7 @@ def test_rate_limiter_reserves_realtime_capacity_and_degrades_conservatively() -
     assert not limiter.acquire(historical)
 
 
-def test_sina_history_defaults_to_500ms_four_concurrent_requests() -> None:
+def test_sina_history_default_route_remains_four_concurrent_requests() -> None:
     async def scenario() -> None:
         configuration = StaticProviderConfiguration()
         for capability in (

@@ -239,7 +239,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
   >("SINGLE")
   const [backfillStart, setBackfillStart] = useState("")
   const [backfillEnd, setBackfillEnd] = useState("")
-  const [backfillConcurrency, setBackfillConcurrency] = useState(4)
+  const [backfillConcurrency, setBackfillConcurrency] = useState("4")
 
   const securities = useQuery({
     queryKey: ["market-data", "securities"],
@@ -330,7 +330,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
             : normalizedSymbols(commandSymbols),
           startDate: backfillStart,
           endDate: backfillEnd,
-          concurrency: backfillConcurrency,
+          concurrency: Number(backfillConcurrency),
           reason: commandReason.trim(),
         })
       }
@@ -392,6 +392,13 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
     || (
       marketCommand?.kind === "BACKFILL_CREATE"
       && (!backfillStart || !backfillEnd || backfillStart > backfillEnd)
+    )
+    || (
+      marketCommand?.kind === "BACKFILL_CREATE"
+      && (
+        !Number.isSafeInteger(Number(backfillConcurrency))
+        || Number(backfillConcurrency) < 1
+      )
     )
 
   return (
@@ -971,11 +978,9 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                 <Input
                   type="number"
                   min={1}
-                  max={8}
+                  step={1}
                   value={backfillConcurrency}
-                  onChange={(event) => setBackfillConcurrency(
-                    Math.min(8, Math.max(1, Number(event.target.value))),
-                  )}
+                  onChange={(event) => setBackfillConcurrency(event.target.value)}
                 />
               </label>
             </>

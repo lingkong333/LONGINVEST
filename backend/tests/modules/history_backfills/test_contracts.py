@@ -31,7 +31,7 @@ def test_watchlist_scope_requires_watchlist_id() -> None:
         )
 
 
-def test_date_and_concurrency_are_bounded() -> None:
+def test_date_and_concurrency_require_valid_order_and_positive_value() -> None:
     with pytest.raises(ValueError, match="开始日期"):
         CreateHistoryBackfill(
             scope=HistoryBackfillScope.ALL,
@@ -44,8 +44,19 @@ def test_date_and_concurrency_are_bounded() -> None:
             scope=HistoryBackfillScope.ALL,
             start_date=date(2010, 1, 1),
             end_date=date(2020, 12, 31),
-            concurrency=9,
+            concurrency=0,
         )
+
+
+def test_concurrency_has_no_fixed_upper_limit() -> None:
+    command = CreateHistoryBackfill(
+        scope=HistoryBackfillScope.ALL,
+        start_date=date(2010, 1, 1),
+        end_date=date(2020, 12, 31),
+        concurrency=64,
+    )
+
+    assert command.concurrency == 64
 
 
 def test_frozen_scope_rejects_empty_and_duplicate_items() -> None:

@@ -37,8 +37,9 @@ def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None
     class FailingProviderService:
         calls = 0
 
-        async def daily_bars(self, request, deadline):
+        async def daily_bars(self, request, deadline, *, concurrency):
             del request, deadline
+            assert concurrency == 64
             self.calls += 1
             raise ProviderHttpError(
                 "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
@@ -62,6 +63,7 @@ def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None
                 start_date=date(2025, 1, 1),
                 end_date=date(2025, 12, 31),
                 deadline=datetime.now(UTC) + timedelta(seconds=2),
+                concurrency=64,
             )
         assert captured.value.code == "PROVIDER_UPSTREAM_TEMPORARY"
         assert captured.value.retryable is True
@@ -74,8 +76,9 @@ def test_provider_waits_for_circuit_recovery(monkeypatch) -> None:
     class OpenCircuitProviderService:
         calls = 0
 
-        async def daily_bars(self, request, deadline):
+        async def daily_bars(self, request, deadline, *, concurrency):
             del request, deadline
+            assert concurrency == 64
             self.calls += 1
             if self.calls == 1:
                 raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
@@ -93,6 +96,7 @@ def test_provider_waits_for_circuit_recovery(monkeypatch) -> None:
             service,
             object(),
             deadline=datetime.now(UTC) + timedelta(seconds=2),
+            concurrency=64,
         )
 
         assert result is not None

@@ -66,7 +66,7 @@ class CreateBackfillBody(BaseModel):
     scope: HistoryBackfillScope
     start_date: date
     end_date: date
-    concurrency: int = Field(default=4, ge=1, le=8)
+    concurrency: int = Field(default=4, ge=1)
     symbols: list[str] = Field(default_factory=list)
     watchlist_id: UUID | None = None
     confirm: StrictBool
@@ -149,7 +149,7 @@ class BackfillScopeSnapshot(BaseModel):
     universe_master_version: int = Field(ge=1)
     start_date: date
     end_date: date
-    concurrency: int = Field(ge=1, le=8)
+    concurrency: int = Field(ge=1)
     reason: str
     items: list[BackfillScopeItem]
 

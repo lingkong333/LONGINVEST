@@ -170,6 +170,55 @@ async def test_history_uses_sina_only_without_day_level_stitching() -> None:
 
 
 @async_test
+async def test_history_uses_task_selected_concurrency_without_fixed_cap() -> None:
+    class CapturingRuntime(InMemoryProviderRuntimeState):
+        def __init__(self) -> None:
+            super().__init__()
+            self.acquired: list[ProviderRouteSetting] = []
+
+        async def acquire(self, setting):
+            self.acquired.append(setting)
+            return await super().acquire(setting)
+
+    east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    runtime = CapturingRuntime()
+    request = DailyBarRequest(
+        "600000.SH",
+        date(2025, 1, 1),
+        date(2025, 1, 2),
+        ProviderCapability.HISTORICAL_DAILY_QFQ,
+    )
+
+    await ProviderRouter(east, sina, runtime=runtime).daily_bars(
+        request,
+        deadline(),
+        concurrency=64,
+    )
+
+    assert runtime.acquired[0].concurrency == 64
+
+
+@async_test
+async def test_concurrency_override_is_restricted_to_history() -> None:
+    east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    request = DailyBarRequest(
+        "600000.SH",
+        date(2025, 1, 1),
+        date(2025, 1, 2),
+        ProviderCapability.DAILY_BAR_UNADJUSTED,
+    )
+
+    with pytest.raises(ValueError, match="historical provider concurrency"):
+        await ProviderRouter(east, sina).daily_bars(
+            request,
+            deadline(),
+            concurrency=64,
+        )
+
+
+@async_test
 async def test_corporate_actions_use_dedicated_eastmoney_route() -> None:
     east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
     sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())

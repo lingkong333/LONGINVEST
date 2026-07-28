@@ -67,9 +67,19 @@ class ProviderService:
         )
 
     async def daily_bars(
-        self, request: DailyBarRequest, deadline: datetime
+        self,
+        request: DailyBarRequest,
+        deadline: datetime,
+        *,
+        concurrency: int | None = None,
     ) -> ProviderBatchResult[DailyBar]:
-        return await self._router.daily_bars(request, deadline)
+        if concurrency is None:
+            return await self._router.daily_bars(request, deadline)
+        return await self._router.daily_bars(
+            request,
+            deadline,
+            concurrency=concurrency,
+        )
 
     async def corporate_actions(
         self, request: CorporateActionRequest, deadline: datetime

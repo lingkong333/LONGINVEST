@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from typing import Any
 
@@ -109,12 +110,26 @@ class ProviderRouter:
         return ProviderBatchResult(items, final_failures, batch_error)
 
     async def daily_bars(
-        self, request: DailyBarRequest, deadline: datetime
+        self,
+        request: DailyBarRequest,
+        deadline: datetime,
+        *,
+        concurrency: int | None = None,
     ) -> ProviderBatchResult[DailyBar]:
+        if concurrency is not None and (
+            concurrency < 1
+            or request.capability
+            not in {
+                ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+                ProviderCapability.HISTORICAL_DAILY_QFQ,
+            }
+        ):
+            raise ValueError("invalid historical provider concurrency")
         return await self._single(
             request.capability,
             deadline,
             lambda provider: provider.daily_bars(request, deadline),
+            concurrency_override=concurrency,
         )
 
     async def corporate_actions(
@@ -184,12 +199,16 @@ class ProviderRouter:
         capability: ProviderCapability,
         deadline: datetime,
         operation: Any,
+        *,
+        concurrency_override: int | None = None,
     ):
         routes = await self._config.routes(capability)
         last_error: Exception | None = None
         for setting in routes:
             if not setting.enabled:
                 continue
+            if concurrency_override is not None:
+                setting = replace(setting, concurrency=concurrency_override)
             provider = self._providers.get(setting.provider)
             if provider is None:
                 continue

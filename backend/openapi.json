@@ -12983,7 +12983,6 @@
           },
           "concurrency": {
             "type": "integer",
-            "maximum": 8.0,
             "minimum": 1.0,
             "title": "Concurrency"
           },
@@ -15337,7 +15336,6 @@
           },
           "concurrency": {
             "type": "integer",
-            "maximum": 8.0,
             "minimum": 1.0,
             "title": "Concurrency",
             "default": 4

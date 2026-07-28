@@ -51,8 +51,8 @@ class CreateHistoryBackfill:
         object.__setattr__(self, "symbols", normalized)
         if self.start_date > self.end_date:
             raise ValueError("开始日期不能晚于结束日期")
-        if not 1 <= self.concurrency <= 8:
-            raise ValueError("并发数必须在 1 到 8 之间")
+        if self.concurrency < 1:
+            raise ValueError("并发数必须是正整数")
         if self.scope is HistoryBackfillScope.SINGLE and len(normalized) != 1:
             raise ValueError("单股回填必须且只能选择一只股票")
         if self.scope is HistoryBackfillScope.SELECTED and not normalized:
@@ -252,6 +252,7 @@ class HistoryBarsProviderPort(Protocol):
         start_date: date,
         end_date: date,
         deadline: datetime,
+        concurrency: int,
     ) -> HistoryBarsBundle: ...
 
 

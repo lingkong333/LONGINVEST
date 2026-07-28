@@ -129,11 +129,13 @@ class Provider:
         self.after_fetch = after_fetch
         self.delay = delay
         self.calls = []
+        self.concurrencies = []
         self.active = 0
         self.max_active = 0
 
     async def fetch(self, item, **_values):
         self.calls.append(item.symbol)
+        self.concurrencies.append(_values["concurrency"])
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -233,6 +235,7 @@ async def test_executor_limits_concurrency_and_completes_each_item() -> None:
     assert result.succeeded == 3
     assert result.failed == 0
     assert provider.max_active == 2
+    assert provider.concurrencies == [2, 2, 2]
     assert items.claim_limits == [2, 2, 2]
     assert items.recovered == 1
     assert items.progress_reports[-1].succeeded == 3

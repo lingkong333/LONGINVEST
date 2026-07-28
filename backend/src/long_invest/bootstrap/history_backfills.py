@@ -78,6 +78,7 @@ class DatabaseHistoryBarsProvider:
         start_date: date,
         end_date: date,
         deadline: datetime,
+        concurrency: int,
     ) -> HistoryBarsBundle:
         try:
             async with self._database.session() as session:
@@ -91,6 +92,7 @@ class DatabaseHistoryBarsProvider:
                         capability=ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
                     ),
                     deadline=deadline,
+                    concurrency=concurrency,
                 )
                 qfq = await _wait_for_history_capacity(
                     provider,
@@ -101,6 +103,7 @@ class DatabaseHistoryBarsProvider:
                         capability=ProviderCapability.HISTORICAL_DAILY_QFQ,
                     ),
                     deadline=deadline,
+                    concurrency=concurrency,
                 )
                 summary = await provider.get_provider(ProviderCode.SINA)
         except ProviderHttpError as error:
@@ -125,11 +128,21 @@ def _require_provider_result(result) -> None:
         raise HistoryBackfillItemError(result.failures[0].code, retryable=True)
 
 
-async def _wait_for_history_capacity(provider, request, *, deadline: datetime):
+async def _wait_for_history_capacity(
+    provider,
+    request,
+    *,
+    deadline: datetime,
+    concurrency: int,
+):
     failed_attempts = 0
     while True:
         try:
-            return await provider.daily_bars(request, deadline)
+            return await provider.daily_bars(
+                request,
+                deadline,
+                concurrency=concurrency,
+            )
         except ProviderCallError as error:
             if error.code not in {
                 "PROVIDER_RATE_LIMITED",

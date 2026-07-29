@@ -19,12 +19,14 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.drop_constraint(
-        "ck_provider_capability_setting_concurrency_range",
+        op.f("ck_provider_capability_setting_concurrency_range"),
         "provider_capability_setting",
         type_="check",
     )
     op.create_check_constraint(
-        "concurrency_positive", "provider_capability_setting", "concurrency >= 1"
+        op.f("ck_provider_capability_setting_concurrency_positive"),
+        "provider_capability_setting",
+        "concurrency >= 1",
     )
     op.add_column(
         "provider_capability_setting",
@@ -37,10 +39,12 @@ def upgrade() -> None:
         ),
     )
     op.create_check_constraint(
-        "daily_limit_positive", "provider_capability_setting", "daily_limit >= 1"
+        op.f("ck_provider_capability_setting_daily_limit_positive"),
+        "provider_capability_setting",
+        "daily_limit >= 1",
     )
     op.create_check_constraint(
-        "min_interval_nonnegative",
+        op.f("ck_provider_capability_setting_min_interval_nonnegative"),
         "provider_capability_setting",
         "min_interval_seconds >= 0",
     )
@@ -119,7 +123,7 @@ def upgrade() -> None:
         ),
     )
     op.create_index(
-        "ix_provider_budget_usage_provider_date",
+        op.f("ix_provider_budget_usage_provider_date"),
         "provider_budget_usage",
         ["provider_code", "budget_date"],
     )
@@ -136,7 +140,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("token", name=op.f("uq_provider_request_lease_token")),
     )
     op.create_index(
-        "ix_provider_request_lease_active",
+        op.f("ix_provider_request_lease_active"),
         "provider_request_lease",
         ["provider_code", "capability", "expires_at"],
         postgresql_where=sa.text("released_at IS NULL"),
@@ -145,33 +149,35 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index(
-        "ix_provider_request_lease_active", table_name="provider_request_lease"
+        op.f("ix_provider_request_lease_active"),
+        table_name="provider_request_lease",
     )
     op.drop_table("provider_request_lease")
     op.drop_index(
-        "ix_provider_budget_usage_provider_date", table_name="provider_budget_usage"
+        op.f("ix_provider_budget_usage_provider_date"),
+        table_name="provider_budget_usage",
     )
     op.drop_table("provider_budget_usage")
     op.drop_table("provider_budget_policy")
     op.drop_constraint(
-        "ck_provider_capability_setting_min_interval_nonnegative",
+        op.f("ck_provider_capability_setting_min_interval_nonnegative"),
         "provider_capability_setting",
         type_="check",
     )
     op.drop_constraint(
-        "ck_provider_capability_setting_daily_limit_positive",
+        op.f("ck_provider_capability_setting_daily_limit_positive"),
         "provider_capability_setting",
         type_="check",
     )
     op.drop_column("provider_capability_setting", "min_interval_seconds")
     op.drop_column("provider_capability_setting", "daily_limit")
     op.drop_constraint(
-        "ck_provider_capability_setting_concurrency_positive",
+        op.f("ck_provider_capability_setting_concurrency_positive"),
         "provider_capability_setting",
         type_="check",
     )
     op.create_check_constraint(
-        "concurrency_range",
+        op.f("ck_provider_capability_setting_concurrency_range"),
         "provider_capability_setting",
         "concurrency BETWEEN 1 AND 32",
     )

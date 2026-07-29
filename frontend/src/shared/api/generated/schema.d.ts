@@ -652,6 +652,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/providers/{provider_code}/budget": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Budget */
+        get: operations["budget_api_v1_providers__provider_code__budget_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/providers/{provider_code}/settings": {
         parameters: {
             query?: never;
@@ -5868,6 +5885,11 @@ export interface components {
          */
         PositionStatus: "HOLDING" | "NOT_HOLDING";
         /**
+         * ProviderCapability
+         * @enum {string}
+         */
+        ProviderCapability: "SECURITY_MASTER" | "REALTIME_QUOTE_BATCH" | "DAILY_BAR_UNADJUSTED" | "HISTORICAL_DAILY_UNADJUSTED" | "HISTORICAL_DAILY_QFQ" | "CORPORATE_ACTIONS";
+        /**
          * ProviderCode
          * @enum {string}
          */
@@ -7225,6 +7247,7 @@ export interface components {
             reason: string;
             /** Expected Version */
             expected_version: number;
+            capability?: components["schemas"]["ProviderCapability"] | null;
             /** Enabled */
             enabled?: boolean | null;
             /** Priority */
@@ -7237,6 +7260,20 @@ export interface components {
             timeout_seconds?: number | null;
             /** Auto Switch */
             auto_switch?: boolean | null;
+            /** Daily Limit */
+            daily_limit?: number | null;
+            /** Min Interval Seconds */
+            min_interval_seconds?: number | null;
+            /** Total Daily Limit */
+            total_daily_limit?: number | null;
+            /** Reset Timezone */
+            reset_timezone?: string | null;
+            /** Total Concurrency */
+            total_concurrency?: number | null;
+            /** Realtime Reserved */
+            realtime_reserved?: number | null;
+            /** Daily Reserved */
+            daily_reserved?: number | null;
         };
         /** SignalActionRequest */
         SignalActionRequest: {
@@ -10080,6 +10117,39 @@ export interface operations {
         };
     };
     health_api_v1_providers__provider_code__health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                provider_code: components["schemas"]["ProviderCode"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    budget_api_v1_providers__provider_code__budget_get: {
         parameters: {
             query?: never;
             header?: never;

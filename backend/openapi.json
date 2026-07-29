@@ -1955,6 +1955,49 @@
         }
       }
     },
+    "/api/v1/providers/{provider_code}/budget": {
+      "get": {
+        "tags": [
+          "providers"
+        ],
+        "summary": "Budget",
+        "operationId": "budget_api_v1_providers__provider_code__budget_get",
+        "parameters": [
+          {
+            "name": "provider_code",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ProviderCode"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Budget Api V1 Providers  Provider Code  Budget Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/providers/{provider_code}/settings": {
       "patch": {
         "tags": [
@@ -18819,6 +18862,18 @@
         ],
         "title": "PositionStatus"
       },
+      "ProviderCapability": {
+        "type": "string",
+        "enum": [
+          "SECURITY_MASTER",
+          "REALTIME_QUOTE_BATCH",
+          "DAILY_BAR_UNADJUSTED",
+          "HISTORICAL_DAILY_UNADJUSTED",
+          "HISTORICAL_DAILY_QFQ",
+          "CORPORATE_ACTIONS"
+        ],
+        "title": "ProviderCapability"
+      },
       "ProviderCode": {
         "type": "string",
         "enum": [
@@ -22313,6 +22368,16 @@
             "minimum": 0.0,
             "title": "Expected Version"
           },
+          "capability": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderCapability"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "enabled": {
             "anyOf": [
               {
@@ -22341,7 +22406,6 @@
             "anyOf": [
               {
                 "type": "integer",
-                "maximum": 32.0,
                 "minimum": 1.0
               },
               {
@@ -22386,6 +22450,92 @@
               }
             ],
             "title": "Auto Switch"
+          },
+          "daily_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Limit"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 3600.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "total_daily_limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Daily Limit"
+          },
+          "reset_timezone": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Timezone"
+          },
+          "total_concurrency": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Concurrency"
+          },
+          "realtime_reserved": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Realtime Reserved"
+          },
+          "daily_reserved": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Reserved"
           }
         },
         "additionalProperties": false,

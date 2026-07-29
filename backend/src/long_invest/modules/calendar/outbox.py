@@ -5,6 +5,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.calendar.contracts import CalendarEvent
+from long_invest.platform.database.notifications import notify_scheduler_refresh
 from long_invest.platform.errors import AppError
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
@@ -37,6 +38,10 @@ class CalendarOutboxAdapter:
             .returning(EventOutbox)
         )
         if stored is not None:
+            await notify_scheduler_refresh(
+                self._session,
+                reason=f"trading_calendar:{event.aggregate_id}",
+            )
             return stored
         existing = await self._session.scalar(
             select(EventOutbox).where(EventOutbox.dedupe_key == dedupe_key)

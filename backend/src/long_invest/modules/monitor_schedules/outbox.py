@@ -4,6 +4,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from long_invest.platform.database.notifications import notify_scheduler_refresh
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 
@@ -45,4 +46,8 @@ class MonitorScheduleOutboxAdapter:
                 "action": event.action,
             },
             dedupe_key=f"monitor-schedule:{event.schedule_id}:{event.version}:{event.action}",
+        )
+        await notify_scheduler_refresh(
+            self.session,
+            reason=f"monitor_schedule:{event.schedule_id}:{event.version}",
         )

@@ -26,6 +26,8 @@ class SchedulerRuntimeSnapshot:
     clock_skew_seconds: float
     automatic_scheduling_paused: bool
     pause_reason: str | None
+    intraday_plan: tuple[dict[str, str], ...]
+    persistent_plan: tuple[dict[str, str], ...]
 
 
 class SchedulerRuntimeRepository:
@@ -86,6 +88,8 @@ class SchedulerRuntimeRepository:
         database_time: datetime,
         success: bool,
         error_code: str | None,
+        intraday_plan: list[dict[str, str]] | None = None,
+        persistent_plan: list[dict[str, str]] | None = None,
     ) -> None:
         values = {
             "heartbeat_at": database_time,
@@ -100,6 +104,10 @@ class SchedulerRuntimeRepository:
         }
         if success:
             values["last_success_at"] = database_time
+        if intraday_plan is not None:
+            values["intraday_plan"] = intraday_plan
+        if persistent_plan is not None:
+            values["persistent_plan"] = persistent_plan
         await self._session.execute(
             update(SchedulerRuntimeState)
             .where(
@@ -122,6 +130,8 @@ class SchedulerRuntimeRepository:
             clock_skew_seconds=row.clock_skew_seconds,
             automatic_scheduling_paused=row.automatic_scheduling_paused,
             pause_reason=row.pause_reason,
+            intraday_plan=tuple(row.intraday_plan or ()),
+            persistent_plan=tuple(row.persistent_plan or ()),
         )
 
 
@@ -170,6 +180,8 @@ class SchedulerRuntimeApplication:
         instance_id: str,
         success: bool,
         error_code: str | None = None,
+        intraday_plan: list[dict[str, str]] | None = None,
+        persistent_plan: list[dict[str, str]] | None = None,
     ) -> None:
         async with self._database.transaction() as session:
             repository = self._repository_factory(session)
@@ -180,6 +192,8 @@ class SchedulerRuntimeApplication:
                 database_time=database_time,
                 success=success,
                 error_code=error_code,
+                intraday_plan=intraday_plan,
+                persistent_plan=persistent_plan,
             )
 
     async def get(self) -> SchedulerRuntimeSnapshot | None:

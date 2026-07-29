@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from long_invest.platform.database.base import Base
@@ -33,6 +34,12 @@ class SchedulerRuntimeState(Base):
         Boolean, nullable=False, default=False
     )
     pause_reason: Mapped[str | None] = mapped_column(String(300))
+    intraday_plan: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
+    persistent_plan: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, nullable=False, default=list
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

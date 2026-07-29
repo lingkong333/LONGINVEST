@@ -37,6 +37,20 @@ async def test_scheduler_reports_fresh_heartbeat_as_healthy() -> None:
                 consecutive_failures=0,
                 automatic_scheduling_paused=False,
                 pause_reason=None,
+                intraday_plan=(
+                    {
+                        "key": "2026-07-22T14:30",
+                        "next_run_at": "2026-07-22T06:30:00+00:00",
+                        "timezone": "Asia/Shanghai",
+                    },
+                ),
+                persistent_plan=(
+                    {
+                        "key": "daily-market-data",
+                        "next_run_at": "2026-07-22T09:00:00+00:00",
+                        "timezone": "Asia/Shanghai",
+                    },
+                ),
             )
         )
     )
@@ -48,6 +62,8 @@ async def test_scheduler_reports_fresh_heartbeat_as_healthy() -> None:
     assert result.status is HealthStatus.HEALTHY
     assert result.last_scan_at == now
     assert result.automatic_scheduling_paused is False
+    assert [plan.kind for plan in result.plans] == ["INTRADAY", "PERSISTENT"]
+    assert result.next_run_at == datetime(2026, 7, 22, 6, 30, tzinfo=UTC)
 
 
 @pytest.mark.anyio

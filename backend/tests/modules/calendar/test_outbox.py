@@ -19,6 +19,7 @@ async def test_calendar_outbox_adapter_writes_reliable_event_on_session() -> Non
     expected = MagicMock(spec=EventOutbox)
     session = MagicMock()
     session.scalar = AsyncMock(return_value=expected)
+    session.execute = AsyncMock()
     adapter = CalendarOutboxAdapter(session)
     event = CalendarEvent(
         event_type="trading_calendar.updated",
@@ -30,6 +31,7 @@ async def test_calendar_outbox_adapter_writes_reliable_event_on_session() -> Non
     stored = await adapter.append(event)
 
     assert stored is expected
+    session.execute.assert_awaited_once()
     statement = session.scalar.await_args.args[0]
     compiled = statement.compile(dialect=postgresql.dialect())
     sql = str(compiled)

@@ -6821,6 +6821,23 @@ export interface components {
              */
             created_at: string;
         };
+        /** SchedulerPlan */
+        SchedulerPlan: {
+            /** Key */
+            key: string;
+            /** Kind */
+            kind: string;
+            /**
+             * Next Run At
+             * Format: date-time
+             */
+            next_run_at: string;
+            /**
+             * Timezone
+             * @default Asia/Shanghai
+             */
+            timezone: string;
+        };
         /** SchedulerStatusData */
         SchedulerStatusData: {
             status: components["schemas"]["HealthStatus"];
@@ -6834,6 +6851,13 @@ export interface components {
             automatic_scheduling_paused: boolean;
             /** Pause Reason */
             pause_reason?: string | null;
+            /**
+             * Plans
+             * @default []
+             */
+            plans: components["schemas"]["SchedulerPlan"][];
+            /** Next Run At */
+            next_run_at?: string | null;
             /**
              * Updated At
              * Format: date-time

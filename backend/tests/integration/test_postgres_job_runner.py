@@ -1,10 +1,14 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import delete, func, select
 
+from long_invest.modules.scheduling.runtime import (
+    PersistentSchedule,
+    PostgresPersistentJobSubmitter,
+)
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
@@ -304,4 +308,47 @@ async def test_runner_executes_handler_and_commits_result() -> None:
             assert stored.result_summary["data"] == {"done": True}
     finally:
         await remove_job(database, job.id)
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_persistent_schedule_is_unique_across_restart_recovery() -> None:
+    database = Database(AppSettings(_env_file=None).database_owner_url)
+    unique = uuid4().hex
+    plan = PersistentSchedule(
+        key=f"restart-{unique}",
+        job_type="SCHEDULER_RESTART_TEST",
+        module_owner="tests",
+        at=time(17),
+        priority=1,
+    )
+    submitter = PostgresPersistentJobSubmitter(database)
+    values = {
+        "trade_date": date(2026, 7, 17),
+        "calendar_version_id": uuid4(),
+        "scheduled_at": datetime(2026, 7, 17, 9, tzinfo=UTC),
+    }
+    try:
+        await submitter.submit(plan, **values)
+        await submitter.submit(plan, **values)
+        async with database.session() as session:
+            jobs = tuple(
+                (
+                    await session.scalars(
+                        select(Job).where(
+                            Job.idempotency_scope == f"scheduler:{plan.key}"
+                        )
+                    )
+                ).all()
+            )
+        assert len(jobs) == 1
+        assert jobs[0].status == JobStatus.PENDING
+        assert jobs[0].config_snapshot["trade_date"] == "2026-07-17"
+    finally:
+        async with database.transaction() as session:
+            await session.execute(
+                delete(Job).where(
+                    Job.idempotency_scope == f"scheduler:{plan.key}"
+                )
+            )
         await database.dispose()

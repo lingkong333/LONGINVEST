@@ -17,6 +17,7 @@ from long_invest.modules.system_status.contracts import (
     OccurrencePage,
     QueueStatus,
     ScheduleOccurrence,
+    SchedulerPlan,
     SchedulerStatus,
     StatusDetail,
     SystemClockStatus,
@@ -179,6 +180,8 @@ class SchedulerStatusAdapter:
                 database_time=now,
                 automatic_scheduling_paused=True,
                 pause_reason="scheduler heartbeat is not available",
+                plans=(),
+                next_run_at=None,
                 updated_at=now,
             )
         stale = now - runtime.heartbeat_at > timedelta(
@@ -196,6 +199,7 @@ class SchedulerStatusAdapter:
             status = HealthStatus.HEALTHY
             paused = False
             reason = None
+        plans = _scheduler_plans(runtime)
         return SchedulerStatus(
             status=status,
             scan_interval_seconds=self._scan_interval_seconds,
@@ -203,6 +207,10 @@ class SchedulerStatusAdapter:
             database_time=now,
             automatic_scheduling_paused=paused,
             pause_reason=reason,
+            plans=plans,
+            next_run_at=min(
+                (plan.next_run_at for plan in plans), default=None
+            ),
             updated_at=now,
         )
 
@@ -297,3 +305,24 @@ def _uuid_or_none(value) -> UUID | None:
         return UUID(str(value)) if value else None
     except ValueError:
         return None
+
+
+def _scheduler_plans(runtime) -> tuple[SchedulerPlan, ...]:
+    values = []
+    for kind, entries in (
+        ("INTRADAY", getattr(runtime, "intraday_plan", ())),
+        ("PERSISTENT", getattr(runtime, "persistent_plan", ())),
+    ):
+        for entry in entries:
+            try:
+                values.append(
+                    SchedulerPlan(
+                        key=entry["key"],
+                        kind=kind,
+                        next_run_at=datetime.fromisoformat(entry["next_run_at"]),
+                        timezone=entry.get("timezone", "Asia/Shanghai"),
+                    )
+                )
+            except (KeyError, TypeError, ValueError):
+                continue
+    return tuple(sorted(values, key=lambda item: item.next_run_at))

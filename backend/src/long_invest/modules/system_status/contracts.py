@@ -62,6 +62,13 @@ class QueueStatus(StrictContract):
     updated_at: datetime
 
 
+class SchedulerPlan(StrictContract):
+    key: str = Field(min_length=1, max_length=128)
+    kind: str = Field(pattern="^(INTRADAY|PERSISTENT)$")
+    next_run_at: datetime
+    timezone: str = "Asia/Shanghai"
+
+
 class SchedulerStatus(StrictContract):
     status: HealthStatus
     scan_interval_seconds: int = Field(ge=1)
@@ -69,6 +76,8 @@ class SchedulerStatus(StrictContract):
     database_time: datetime | None = None
     automatic_scheduling_paused: bool
     pause_reason: str | None = Field(default=None, max_length=300)
+    plans: tuple[SchedulerPlan, ...] = ()
+    next_run_at: datetime | None = None
     updated_at: datetime
 
 

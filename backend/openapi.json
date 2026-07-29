@@ -21296,6 +21296,39 @@
         ],
         "title": "ScheduleRevisionRecord"
       },
+      "SchedulerPlan": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Key"
+          },
+          "kind": {
+            "type": "string",
+            "pattern": "^(INTRADAY|PERSISTENT)$",
+            "title": "Kind"
+          },
+          "next_run_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Next Run At"
+          },
+          "timezone": {
+            "type": "string",
+            "title": "Timezone",
+            "default": "Asia/Shanghai"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "key",
+          "kind",
+          "next_run_at"
+        ],
+        "title": "SchedulerPlan"
+      },
       "SchedulerStatusData": {
         "properties": {
           "status": {
@@ -21345,6 +21378,26 @@
               }
             ],
             "title": "Pause Reason"
+          },
+          "plans": {
+            "items": {
+              "$ref": "#/components/schemas/SchedulerPlan"
+            },
+            "type": "array",
+            "title": "Plans",
+            "default": []
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
           },
           "updated_at": {
             "type": "string",

@@ -70,8 +70,12 @@ async def test_finish_scan_is_fenced_by_instance_and_records_failure() -> None:
         instance_id="scheduler-2",
         success=False,
         error_code="SCHEDULER_SCAN_FAILED",
+        intraday_plan=[{"key": "10:00"}],
+        persistent_plan=[{"key": "daily"}],
     )
 
     assert Repository.finished["instance_id"] == "scheduler-2"
     assert Repository.finished["success"] is False
     assert Repository.finished["error_code"] == "SCHEDULER_SCAN_FAILED"
+    assert Repository.finished["intraday_plan"] == [{"key": "10:00"}]
+    assert Repository.finished["persistent_plan"] == [{"key": "daily"}]

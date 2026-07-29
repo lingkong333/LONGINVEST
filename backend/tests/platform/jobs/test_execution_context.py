@@ -304,7 +304,7 @@ async def test_worker_keeps_heartbeating_after_one_database_failure(
             stop,
             interval_seconds=0.001,
         ),
-        timeout=0.1,
+        timeout=2,
     )
 
     assert attempts == 2

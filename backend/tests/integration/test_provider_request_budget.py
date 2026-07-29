@@ -44,7 +44,9 @@ async def test_budget_survives_concurrency_restart_exhaustion_and_reset() -> Non
     settings = AppSettings(_env_file=None)
     database_name = f"longinvest_budget_{uuid4().hex}"
     owner_base = make_url(settings.database_owner_url)
+    app_base = make_url(settings.database_url)
     owner_url = owner_base.set(database=database_name)
+    app_url = app_base.set(database=database_name)
     maintenance = create_async_engine(
         owner_base.set(database="postgres"),
         isolation_level="AUTOCOMMIT",
@@ -52,8 +54,9 @@ async def test_budget_survives_concurrency_restart_exhaustion_and_reset() -> Non
     )
     environment = os.environ.copy()
     rendered_url = owner_url.render_as_string(hide_password=False)
+    rendered_app_url = app_url.render_as_string(hide_password=False)
     environment["LONGINVEST_DATABASE_OWNER_URL"] = rendered_url
-    environment["LONGINVEST_DATABASE_URL"] = rendered_url
+    environment["LONGINVEST_DATABASE_URL"] = rendered_app_url
 
     async with temporary_database(maintenance, database_name):
         subprocess.run(
@@ -64,7 +67,23 @@ async def test_budget_survives_concurrency_restart_exhaustion_and_reset() -> Non
             text=True,
             timeout=180,
         )
-        database = Database(rendered_url)
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "downgrade", "20260729_0030"],
+            cwd=BACKEND,
+            env=environment,
+            check=True,
+            text=True,
+            timeout=180,
+        )
+        subprocess.run(
+            [sys.executable, "-m", "alembic", "upgrade", "head"],
+            cwd=BACKEND,
+            env=environment,
+            check=True,
+            text=True,
+            timeout=180,
+        )
+        database = Database(rendered_app_url)
         await seed_policy(database)
         setting = ProviderRouteSetting(
             ProviderCode.EASTMONEY,

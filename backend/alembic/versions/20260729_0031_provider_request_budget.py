@@ -100,6 +100,11 @@ def upgrade() -> None:
         FROM provider_config_version
         """
     )
+    op.execute(
+        "CREATE TRIGGER provider_budget_policy_append_only "
+        "BEFORE UPDATE OR DELETE ON provider_budget_policy "
+        "FOR EACH ROW EXECUTE FUNCTION reject_stage2_fact_mutation()"
+    )
     op.create_table(
         "provider_budget_usage",
         sa.Column("id", postgresql.UUID(as_uuid=True), nullable=False),
@@ -148,6 +153,10 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    op.execute(
+        "DROP TRIGGER IF EXISTS provider_budget_policy_append_only "
+        "ON provider_budget_policy"
+    )
     op.drop_index(
         op.f("ix_provider_request_lease_active"),
         table_name="provider_request_lease",

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from sqlalchemy import func, select, text, update
+from sqlalchemy import delete, func, or_, select, text, update
 
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.models import (
@@ -80,6 +80,15 @@ class ProviderRequestBudget:
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
                 {"key": f"provider-budget:{setting.provider.value}:{budget_date}"},
+            )
+            await session.execute(
+                delete(ProviderRequestLease).where(
+                    ProviderRequestLease.provider_code == setting.provider.value,
+                    or_(
+                        ProviderRequestLease.released_at.is_not(None),
+                        ProviderRequestLease.expires_at <= now,
+                    ),
+                )
             )
             usage = await session.scalar(
                 select(ProviderBudgetUsage)

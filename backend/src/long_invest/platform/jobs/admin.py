@@ -18,6 +18,7 @@ from long_invest.platform.jobs.contracts import (
     JobStatus,
 )
 from long_invest.platform.jobs.models import Job, JobItem, JobRun
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 from long_invest.platform.jobs.service import JobService
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
@@ -67,6 +68,7 @@ class JobAdminService:
         status: JobStatus | None = None,
         job_type: str | None = None,
         queue: str | None = None,
+        module_owner: str | None = None,
         created_from: datetime | None = None,
         created_to: datetime | None = None,
     ) -> JobPage:
@@ -77,6 +79,8 @@ class JobAdminService:
             filters.append(Job.job_type == job_type)
         if queue is not None:
             filters.append(Job.queue == queue)
+        if module_owner is not None:
+            filters.append(Job.module_owner == module_owner)
         if created_from is not None:
             filters.append(Job.created_at >= created_from)
         if created_to is not None:
@@ -134,6 +138,8 @@ class JobAdminService:
 
     async def allowed_actions(self, job_id: UUID) -> tuple[str, ...]:
         job = await self.get_job(job_id)
+        if _is_postgres_job(job):
+            return _postgres_allowed_actions(job)
         failed_items = await self._failed_item_count(job_id)
         return _allowed_actions(job, failed_items > 0)
 
@@ -169,6 +175,9 @@ class JobAdminService:
                 status_code=409,
                 details={"current_version": job.version},
             )
+
+        if _is_postgres_job(job):
+            return await self._postgres_command(job, action, context, audit_key)
 
         before = _state_summary(job)
         now = datetime.now(UTC)
@@ -206,6 +215,37 @@ class JobAdminService:
         )
         await self._session.flush()
         return job
+
+    async def _postgres_command(
+        self,
+        job: Job,
+        action: JobAction,
+        context: JobCommandContext,
+        audit_key: str,
+    ) -> Job:
+        if action == "retry-failed-items":
+            raise _action_not_allowed(action, JobStatus(job.status))
+        before = _state_summary(job)
+        changed = await PostgresJobService(self._session).command(job.id, action)
+        await self._audit.append(
+            AuditWrite(
+                action_code=f"JOB_{action.upper().replace('-', '_')}",
+                object_type="job",
+                object_id=str(job.id),
+                result="SUCCESS",
+                request_id=context.request_id,
+                idempotency_key=audit_key,
+                risk_level="HIGH",
+                reason=context.reason,
+                before_summary=before,
+                after_summary=_state_summary(changed),
+                actor_user_id=context.actor_user_id,
+                session_id=context.session_id,
+                trusted_ip=context.trusted_ip,
+            )
+        )
+        await self._session.flush()
+        return changed
 
     async def _cancel(self, job: Job, now: datetime) -> None:
         status = JobStatus(job.status)
@@ -383,6 +423,23 @@ def _allowed_actions(job: Job, has_failed_items: bool) -> tuple[str, ...]:
     }:
         actions.append("retry-failed-items")
     return tuple(actions)
+
+
+def _is_postgres_job(job: Job) -> bool:
+    return job.queue == "postgres" and job.module_owner != "legacy"
+
+
+def _postgres_allowed_actions(job: Job) -> tuple[str, ...]:
+    status = JobStatus(job.status)
+    if status is JobStatus.PENDING:
+        return ("cancel", "pause")
+    if status is JobStatus.RUNNING:
+        return ("cancel", "pause")
+    if status is JobStatus.PAUSED:
+        return ("cancel", "resume")
+    if status is JobStatus.FAILED:
+        return ("retry",)
+    return ()
 
 
 def _state_summary(job: Job) -> dict[str, Any]:

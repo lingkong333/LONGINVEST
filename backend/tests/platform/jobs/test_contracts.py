@@ -31,8 +31,9 @@ def test_terminal_job_statuses_have_one_shared_contract() -> None:
     )
 
 
-def test_job_statuses_match_v31_contract() -> None:
+def test_job_statuses_include_v4_pending_and_legacy_read_states() -> None:
     assert {status.value for status in JobStatus} == {
+        "PENDING",
         "PENDING_DISPATCH",
         "QUEUED",
         "RUNNING",

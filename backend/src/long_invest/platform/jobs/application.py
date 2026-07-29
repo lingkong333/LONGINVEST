@@ -24,6 +24,7 @@ class JobAdminApplication:
         status: JobStatus | None = None,
         job_type: str | None = None,
         queue: str | None = None,
+        module_owner: str | None = None,
         created_from: datetime | None = None,
         created_to: datetime | None = None,
     ):
@@ -34,6 +35,7 @@ class JobAdminApplication:
                 status=status,
                 job_type=job_type,
                 queue=queue,
+                module_owner=module_owner,
                 created_from=created_from,
                 created_to=created_to,
             )

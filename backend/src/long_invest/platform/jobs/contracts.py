@@ -8,6 +8,7 @@ from uuid import UUID
 
 
 class JobStatus(StrEnum):
+    PENDING = "PENDING"
     PENDING_DISPATCH = "PENDING_DISPATCH"
     QUEUED = "QUEUED"
     RUNNING = "RUNNING"
@@ -192,9 +193,11 @@ class JobExecutionContext:
     job_id: UUID
     fence_token: UUID
     config: Mapping[str, Any]
+    checkpoint: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "config", _freeze_mapping(self.config))
+        object.__setattr__(self, "checkpoint", _freeze_mapping(self.checkpoint))
 
 
 def _freeze_mapping(value: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -218,3 +221,60 @@ class JobProgress:
     def __post_init__(self) -> None:
         if self.completed < 0 or self.total < 0 or self.completed > self.total:
             raise ValueError("job progress is outside the valid range")
+
+
+@dataclass(frozen=True, slots=True)
+class SubmitPostgresJob:
+    job_type: str
+    module_owner: str
+    idempotency_scope: str
+    idempotency_key: str
+    request_id: str
+    config_snapshot: dict[str, Any]
+    priority: int = 2
+    business_object_type: str | None = None
+    business_object_id: str | None = None
+    created_by_user_id: str | None = None
+    soft_timeout_seconds: int = 300
+    hard_timeout_seconds: int = 360
+    max_attempts: int = 1
+    recoverable: bool = False
+    max_recoveries: int = 1
+
+    def __post_init__(self) -> None:
+        if not self.job_type.strip() or not self.module_owner.strip():
+            raise ValueError("job type and module owner are required")
+        if not 0 <= self.priority <= 3:
+            raise ValueError("job priority must be between 0 and 3")
+        if not 0 < self.soft_timeout_seconds <= self.hard_timeout_seconds <= 86400:
+            raise ValueError("job timeout must satisfy 0 < soft <= hard <= 86400")
+        if self.max_attempts <= 0 or self.max_recoveries < 0:
+            raise ValueError("job attempt and recovery limits are invalid")
+        try:
+            snapshot = json.loads(
+                json.dumps(self.config_snapshot, ensure_ascii=False, allow_nan=False)
+            )
+        except (TypeError, ValueError) as exc:
+            raise ValueError("job config snapshot must be JSON-compatible") from exc
+        if not isinstance(snapshot, dict):
+            raise ValueError("job config snapshot must be an object")
+        object.__setattr__(self, "job_type", self.job_type.strip())
+        object.__setattr__(self, "module_owner", self.module_owner.strip())
+        object.__setattr__(self, "config_snapshot", snapshot)
+
+
+@dataclass(frozen=True, slots=True)
+class ClaimedPostgresJob:
+    job_id: UUID
+    job_type: str
+    lease_token: UUID
+    config_snapshot: Mapping[str, Any]
+    checkpoint: Mapping[str, Any]
+    soft_timeout_seconds: int
+    hard_timeout_seconds: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "config_snapshot", _freeze_mapping(self.config_snapshot)
+        )
+        object.__setattr__(self, "checkpoint", _freeze_mapping(self.checkpoint))

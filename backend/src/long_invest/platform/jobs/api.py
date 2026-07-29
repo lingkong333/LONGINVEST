@@ -109,6 +109,7 @@ async def list_jobs(
     status: JobStatus | None = None,
     job_type: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
     queue: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
+    module_owner: Annotated[str | None, Query(min_length=1, max_length=64)] = None,
     created_from: datetime | None = None,
     created_to: datetime | None = None,
 ) -> dict[str, Any]:
@@ -128,6 +129,7 @@ async def list_jobs(
         status=status,
         job_type=job_type,
         queue=queue,
+        module_owner=module_owner,
         created_from=created_from,
         created_to=created_to,
     )
@@ -259,10 +261,19 @@ def _job(job: Any, *, detail: bool = False) -> dict[str, Any]:
         "business_object_type": job.business_object_type,
         "business_object_id": job.business_object_id,
         "queue": job.queue,
+        "module_owner": job.module_owner,
         "priority": job.priority,
         "status": str(job.status),
         "progress": job.progress,
         "result_summary": job.result_summary,
+        "attempt_count": job.attempt_count,
+        "max_attempts": job.max_attempts,
+        "next_run_at": job.next_run_at,
+        "lease_owner": job.lease_owner,
+        "lease_expires_at": job.lease_expires_at,
+        "heartbeat_at": job.heartbeat_at,
+        "last_error_code": job.last_error_code,
+        "last_error_summary": job.last_error_summary,
         "current_run_id": str(job.current_run_id) if job.current_run_id else None,
         "version": job.version,
         "created_at": job.created_at,
@@ -275,6 +286,10 @@ def _job(job: Any, *, detail: bool = False) -> dict[str, Any]:
         value["created_by_user_id"] = job.created_by_user_id
         value["soft_timeout_seconds"] = job.soft_timeout_seconds
         value["hard_timeout_seconds"] = job.hard_timeout_seconds
+        value["checkpoint"] = job.checkpoint
+        value["recoverable"] = job.recoverable
+        value["recovery_count"] = job.recovery_count
+        value["max_recoveries"] = job.max_recoveries
     return value
 
 

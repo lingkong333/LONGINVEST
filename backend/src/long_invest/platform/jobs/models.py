@@ -3,6 +3,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     DateTime,
     ForeignKey,
@@ -42,13 +43,35 @@ class Job(Base):
             name="hard_timeout_not_less_than_soft",
         ),
         CheckConstraint(
-            "status IN ('PENDING_DISPATCH','QUEUED','RUNNING','WAITING_RETRY',"
-            "'PAUSING','PAUSED','CANCEL_REQUESTED','SUCCEEDED','PARTIAL','FAILED',"
+            "status IN ('PENDING','PENDING_DISPATCH','QUEUED','RUNNING',"
+            "'WAITING_RETRY','PAUSING','PAUSED','CANCEL_REQUESTED','SUCCEEDED',"
+            "'PARTIAL','FAILED',"
             "'TIMED_OUT','LOST','CANCELED','BLOCKED','REJECTED')",
             name="status_valid",
         ),
         Index("ix_job_status_created", "status", "created_at"),
         Index("ix_job_type_created", "job_type", "created_at"),
+        Index(
+            "ix_job_v4_due",
+            "priority",
+            "next_run_at",
+            "created_at",
+            postgresql_where=text("status = 'PENDING'"),
+        ),
+        Index(
+            "ix_job_v4_expired_lease",
+            "lease_expires_at",
+            postgresql_where=text("status = 'RUNNING'"),
+        ),
+        CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
+        CheckConstraint(
+            "max_attempts > 0 AND max_attempts >= attempt_count",
+            name="attempt_limit_valid",
+        ),
+        CheckConstraint(
+            "recovery_count >= 0 AND max_recoveries >= recovery_count",
+            name="recovery_limit_valid",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -60,6 +83,9 @@ class Job(Base):
     business_object_type: Mapped[str | None] = mapped_column(String(64))
     business_object_id: Mapped[str | None] = mapped_column(String(128))
     queue: Mapped[str] = mapped_column(String(64), nullable=False)
+    module_owner: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="legacy", server_default="legacy"
+    )
     priority: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
     status: Mapped[str] = mapped_column(
         String(32),
@@ -96,6 +122,42 @@ class Job(Base):
         server_default=text("'{}'::jsonb"),
     )
     result_summary: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    attempt_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    next_run_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    lease_owner: Mapped[str | None] = mapped_column(String(128))
+    lease_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    checkpoint: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=dict,
+        server_default=text("'{}'::jsonb"),
+    )
+    last_error_code: Mapped[str | None] = mapped_column(String(100))
+    last_error_summary: Mapped[str | None] = mapped_column(String(500))
+    pause_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    cancel_requested: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    recoverable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
+    recovery_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    max_recoveries: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
     current_run_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey(

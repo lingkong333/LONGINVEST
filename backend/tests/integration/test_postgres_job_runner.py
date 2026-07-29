@@ -163,8 +163,24 @@ async def test_pause_resume_and_running_cancel_stop_at_safe_point() -> None:
         job = await PostgresJobService(session).submit(command(unique))
     try:
         async with database.transaction() as session:
-            paused = await PostgresJobService(session).command(job.id, "pause")
-            assert paused.status == JobStatus.PAUSED
+            claim = await PostgresJobService(session).claim_next(
+                worker_id="worker-control",
+                lease_duration=timedelta(minutes=1),
+            )
+        assert claim is not None
+        async with database.transaction() as session:
+            running = await PostgresJobService(session).command(job.id, "pause")
+            assert running.status == JobStatus.RUNNING
+            assert running.pause_requested is True
+        async with database.transaction() as session:
+            status = await PostgresJobService(session).report_progress(
+                job.id,
+                claim.lease_token,
+                progress=JobProgress(completed=1, total=2),
+                checkpoint={"offset": 1},
+                lease_duration=timedelta(minutes=1),
+            )
+        assert status == JobStatus.PAUSED
         async with database.transaction() as session:
             resumed = await PostgresJobService(session).command(job.id, "resume")
             assert resumed.status == JobStatus.PENDING
@@ -187,6 +203,39 @@ async def test_pause_resume_and_running_cancel_stop_at_safe_point() -> None:
                 lease_duration=timedelta(minutes=1),
             )
         assert status == JobStatus.CANCELED
+    finally:
+        await remove_job(database, job.id)
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_partial_result_is_preserved_as_terminal_status() -> None:
+    database = Database(AppSettings(_env_file=None).database_owner_url)
+    unique = uuid4().hex
+    async with database.transaction() as session:
+        job = await PostgresJobService(session).submit(command(unique))
+    try:
+        async with database.transaction() as session:
+            claim = await PostgresJobService(session).claim_next(
+                worker_id="worker-partial",
+                lease_duration=timedelta(minutes=1),
+            )
+        assert claim is not None
+        async with database.transaction() as session:
+            accepted = await PostgresJobService(session).complete(
+                job.id,
+                claim.lease_token,
+                JobResult(
+                    success=True,
+                    code="PARTIAL",
+                    message="部分项目失败",
+                    retryable=False,
+                ),
+            )
+        assert accepted is True
+        async with database.session() as session:
+            stored = await session.get(Job, job.id)
+            assert stored is not None and stored.status == JobStatus.PARTIAL
     finally:
         await remove_job(database, job.id)
         await database.dispose()

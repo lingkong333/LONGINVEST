@@ -9750,6 +9750,24 @@
             }
           },
           {
+            "name": "module_owner",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 64
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Module Owner"
+            }
+          },
+          {
             "name": "created_from",
             "in": "query",
             "required": false,
@@ -17618,6 +17636,7 @@
       "JobStatus": {
         "type": "string",
         "enum": [
+          "PENDING",
           "PENDING_DISPATCH",
           "QUEUED",
           "RUNNING",

@@ -5402,7 +5402,7 @@ export interface components {
          * JobStatus
          * @enum {string}
          */
-        JobStatus: "PENDING_DISPATCH" | "QUEUED" | "RUNNING" | "WAITING_RETRY" | "PAUSING" | "PAUSED" | "CANCEL_REQUESTED" | "SUCCEEDED" | "PARTIAL" | "FAILED" | "TIMED_OUT" | "LOST" | "CANCELED" | "BLOCKED" | "REJECTED";
+        JobStatus: "PENDING" | "PENDING_DISPATCH" | "QUEUED" | "RUNNING" | "WAITING_RETRY" | "PAUSING" | "PAUSED" | "CANCEL_REQUESTED" | "SUCCEEDED" | "PARTIAL" | "FAILED" | "TIMED_OUT" | "LOST" | "CANCELED" | "BLOCKED" | "REJECTED";
         /** ListData */
         ListData: {
             /** Items */
@@ -14666,6 +14666,7 @@ export interface operations {
                 status?: components["schemas"]["JobStatus"] | null;
                 job_type?: string | null;
                 queue?: string | null;
+                module_owner?: string | null;
                 created_from?: string | null;
                 created_to?: string | null;
             };

@@ -61,7 +61,6 @@ async def test_budget_survives_concurrency_restart_exhaustion_and_reset() -> Non
             cwd=BACKEND,
             env=environment,
             check=True,
-            capture_output=True,
             text=True,
             timeout=180,
         )

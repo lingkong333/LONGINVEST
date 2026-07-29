@@ -249,6 +249,8 @@ async def test_history_import_atomically_activates_a_dataset() -> None:
 async def test_history_import_reuses_identical_current_dataset() -> None:
     repo = FakeRepository()
     current = _current(repo, checksum="a" * 64)
+    current.provider = "SINA"
+    current.provider_contract_version = "SINA:config-v2"
     service, events = _service(repo)
 
     dataset, unchanged = await service.import_history(
@@ -266,6 +268,34 @@ async def test_history_import_reuses_identical_current_dataset() -> None:
     assert dataset is current
     assert len(repo.datasets) == 1
     assert events.records == []
+
+
+@pytest.mark.anyio
+async def test_history_source_change_rebuilds_full_dataset_even_when_values_match() -> (
+    None
+):
+    repo = FakeRepository()
+    current = _current(repo, checksum="a" * 64)
+    service, events = _service(repo)
+
+    dataset, unchanged = await service.import_history(
+        security_id=repo.run.security_id,
+        symbol=repo.run.symbol,
+        requested_start=START,
+        window=_window(),
+        provider="SINA",
+        provider_contract_version="AKSHARE:SINA:qfq:v2",
+        reason="source changed",
+        now=NOW,
+    )
+
+    assert unchanged is False
+    assert dataset is not current
+    assert dataset.actual_start == START
+    assert dataset.actual_end == END
+    assert current.lifecycle is QfqDatasetLifecycle.SUPERSEDED
+    assert len(repo.datasets) == 2
+    assert events.records[-1][0] == "qfq_history.imported"
 
 
 @pytest.mark.anyio
@@ -316,6 +346,7 @@ async def test_duplicate_content_reuses_current_dataset_without_new_version() ->
     current = _current(repo, checksum="a" * 64)
     current.freshness = QfqFreshness.STALE
     current.stale_reason = "QFQ_PROVIDER_FAILED"
+    current.provider_contract_version = "eastmoney-v1"
     service, _events = _service(repo)
 
     activated = await service.activate(

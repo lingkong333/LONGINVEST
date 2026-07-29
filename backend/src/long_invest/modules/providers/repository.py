@@ -13,6 +13,7 @@ from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.models import (
     ProviderBudgetPolicy,
+    ProviderCapabilityRegistration,
     ProviderCapabilitySetting,
     ProviderCircuitHistory,
     ProviderCircuitState,
@@ -20,8 +21,12 @@ from long_invest.modules.providers.models import (
     ProviderFailureSample,
     ProviderHealthState,
     ProviderMutationRequest,
+    ProviderRoutePolicyVersion,
 )
-from long_invest.modules.providers.resilience import ProviderRouteSetting
+from long_invest.modules.providers.resilience import (
+    ProviderRoutePlan,
+    ProviderRouteSetting,
+)
 from long_invest.platform.errors import AppError
 
 SENSITIVE_KEYS = frozenset(
@@ -95,6 +100,7 @@ class ProviderRepositoryPort(Protocol):
     async def routes(
         self, capability: ProviderCapability
     ) -> tuple[ProviderRouteSetting, ...]: ...
+    async def route_plan(self, capability: ProviderCapability) -> ProviderRoutePlan: ...
     async def list_provider_codes(self) -> tuple[ProviderCode, ...]: ...
     async def provider_summary(self, provider: ProviderCode) -> dict[str, Any]: ...
     async def health(self, provider: ProviderCode) -> list[dict[str, Any]]: ...
@@ -193,6 +199,57 @@ class ProviderRepository:
             )
             return tuple(self._route(row) for row in rows)
 
+    async def route_plan(self, capability: ProviderCapability) -> ProviderRoutePlan:
+        latest = (
+            select(
+                ProviderCapabilitySetting.provider_code.label("provider_code"),
+                func.max(ProviderCapabilitySetting.config_version).label("version"),
+            )
+            .where(ProviderCapabilitySetting.capability == capability.value)
+            .group_by(ProviderCapabilitySetting.provider_code)
+            .subquery()
+        )
+        async with self._session.begin():
+            rows = await self._session.scalars(
+                select(ProviderCapabilitySetting)
+                .join(
+                    latest,
+                    (ProviderCapabilitySetting.provider_code == latest.c.provider_code)
+                    & (ProviderCapabilitySetting.config_version == latest.c.version),
+                )
+                .join(
+                    ProviderCapabilityRegistration,
+                    (
+                        ProviderCapabilityRegistration.provider_code
+                        == ProviderCapabilitySetting.provider_code
+                    )
+                    & (
+                        ProviderCapabilityRegistration.capability
+                        == ProviderCapabilitySetting.capability
+                    ),
+                )
+                .where(
+                    ProviderCapabilitySetting.capability == capability.value,
+                    ProviderCapabilityRegistration.probe_status == "PASSED",
+                )
+                .order_by(ProviderCapabilitySetting.priority)
+            )
+            policy = await self._session.scalar(
+                select(ProviderRoutePolicyVersion)
+                .where(ProviderRoutePolicyVersion.capability == capability.value)
+                .order_by(ProviderRoutePolicyVersion.version.desc())
+                .limit(1)
+            )
+            fixed = (
+                ProviderCode(policy.fixed_provider_code)
+                if policy is not None and policy.fixed_provider_code is not None
+                else None
+            )
+            routes = tuple(self._route(row) for row in rows)
+            if fixed is not None:
+                routes = tuple(route for route in routes if route.provider is fixed)
+            return ProviderRoutePlan(capability, routes, fixed)
+
     async def list_provider_codes(self) -> tuple[ProviderCode, ...]:
         async with self._session.begin():
             rows = await self._session.scalars(
@@ -285,6 +342,7 @@ class ProviderRepository:
         digest = request_digest(payload)
         changes = dict(changes)
         target_capability = changes.pop("capability", None)
+        manual_fixed = changes.pop("manual_fixed", None)
         async with self._session.begin():
             await self._session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:provider_key))"),
@@ -349,6 +407,26 @@ class ProviderRepository:
                 key: value for key, value in changes.items() if key in policy_keys
             }
             next_version = current_version + 1
+            if manual_fixed is not None:
+                if target_capability is None:
+                    raise AppError(
+                        code="PROVIDER_CAPABILITY_REQUIRED",
+                        message="固定数据源时必须指定能力",
+                        status_code=422,
+                    )
+                latest_route_version = await self._session.scalar(
+                    select(func.max(ProviderRoutePolicyVersion.version)).where(
+                        ProviderRoutePolicyVersion.capability == target_capability
+                    )
+                )
+                self._session.add(
+                    ProviderRoutePolicyVersion(
+                        capability=target_capability,
+                        version=int(latest_route_version or 0) + 1,
+                        fixed_provider_code=provider.value if manual_fixed else None,
+                        reason=reason,
+                    )
+                )
             next_config = ProviderConfigVersion(
                 provider_code=provider.value,
                 version=next_version,
@@ -415,6 +493,12 @@ class ProviderRepository:
                 "version": next_version,
                 "capabilities": after_capabilities,
                 "budget_policy": after_policy,
+                "route_policy": {
+                    "capability": target_capability,
+                    "fixed_provider_code": provider.value if manual_fixed else None,
+                }
+                if manual_fixed is not None
+                else None,
             }
             self._session.add(
                 self._mutation(
@@ -500,6 +584,18 @@ class ProviderRepository:
                 health.last_success_at = result["checked_at"]
             else:
                 health.last_failure_at = result["checked_at"]
+            registration = await self._session.scalar(
+                select(ProviderCapabilityRegistration)
+                .where(
+                    ProviderCapabilityRegistration.provider_code
+                    == circuit.provider_code,
+                    ProviderCapabilityRegistration.capability == circuit.capability,
+                )
+                .with_for_update()
+            )
+            if registration is not None:
+                registration.probe_status = "PASSED" if result["healthy"] else "FAILED"
+                registration.last_probe_at = result["checked_at"]
             self._session.add(
                 ProviderCircuitHistory(
                     provider_code=circuit.provider_code,

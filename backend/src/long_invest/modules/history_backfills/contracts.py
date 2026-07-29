@@ -168,6 +168,8 @@ class HistoryBarInput:
     volume: int
     amount: Decimal
     source: str
+    source_identity: dict[str, str] | None = None
+    collected_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)

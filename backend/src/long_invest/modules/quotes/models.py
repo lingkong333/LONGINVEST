@@ -133,6 +133,7 @@ class QuoteCycleItem(Base):
     quote_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     provider: Mapped[str | None] = mapped_column(String(32))
+    source_identity: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     error_code: Mapped[str | None] = mapped_column(String(80))
     conflict_evidence: Mapped[dict[str, object] | None] = mapped_column(JSONB)
     eligible_for_evaluation: Mapped[bool] = mapped_column(

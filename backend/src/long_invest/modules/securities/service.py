@@ -77,9 +77,7 @@ class SecurityMasterService:
         self._audit = audit
         self._events = events
 
-    async def apply_snapshot(
-        self, snapshot: SecurityMasterSnapshot
-    ) -> SnapshotResult:
+    async def apply_snapshot(self, snapshot: SecurityMasterSnapshot) -> SnapshotResult:
         audit_context, audit, events = self._require_integrations()
         _validate_snapshot(snapshot)
         content_hash = _snapshot_hash(snapshot)
@@ -130,11 +128,10 @@ class SecurityMasterService:
 
         incoming_symbols = {incoming.symbol for incoming in snapshot.items}
         for missing in existing.values():
-            if (
-                missing.symbol in incoming_symbols
-                or missing.listing_status
-                in {ListingStatus.DELISTED, ListingStatus.DATA_MISSING}
-            ):
+            if missing.symbol in incoming_symbols or missing.listing_status in {
+                ListingStatus.DELISTED,
+                ListingStatus.DATA_MISSING,
+            }:
                 continue
             before = _security_data(missing)
             after = dict(before)
@@ -166,6 +163,11 @@ class SecurityMasterService:
         version_record = SecurityMasterVersion(
             source=snapshot.source,
             source_version=snapshot.source_version,
+            source_identity=(
+                dict(snapshot.source_identity)
+                if snapshot.source_identity is not None
+                else None
+            ),
             idempotency_key=snapshot.idempotency_key,
             content_hash=content_hash,
             master_version=master_version,
@@ -226,9 +228,7 @@ class SecurityMasterService:
             )
         return context, audit, events
 
-    async def validate_monitoring_eligibility(
-        self, symbol: str
-    ) -> SecurityEligibility:
+    async def validate_monitoring_eligibility(self, symbol: str) -> SecurityEligibility:
         try:
             validate_symbol(symbol)
         except ValueError as exc:
@@ -246,9 +246,7 @@ class SecurityMasterService:
             )
         return assess_monitoring_eligibility(_security_item(security))
 
-    async def freeze_universe(
-        self, query: UniverseQuery
-    ) -> SecurityUniverseSnapshot:
+    async def freeze_universe(self, query: UniverseQuery) -> SecurityUniverseSnapshot:
         await self._repository.lock_master_updates()
         securities = await self._repository.list_for_universe(query)
         master_version = await self._repository.current_master_version()
@@ -510,6 +508,11 @@ def _new_security(
         **_item_data(item),
         source=snapshot.source,
         source_version=snapshot.source_version,
+        source_identity=(
+            dict(snapshot.source_identity)
+            if snapshot.source_identity is not None
+            else None
+        ),
         master_version=master_version,
     )
 
@@ -524,6 +527,9 @@ def _apply_item(
         setattr(security, field, value)
     security.source = snapshot.source
     security.source_version = snapshot.source_version
+    security.source_identity = (
+        dict(snapshot.source_identity) if snapshot.source_identity is not None else None
+    )
     security.master_version = master_version
 
 

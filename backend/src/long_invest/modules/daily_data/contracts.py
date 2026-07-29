@@ -121,6 +121,8 @@ class HistoricalDailyBarInput:
     volume: int
     amount: Decimal
     source: str
+    source_identity: Mapping[str, Any] | None = None
+    collected_at: datetime | None = None
 
     def __post_init__(self) -> None:
         _require_uuid(self.security_id, "股票编号")
@@ -135,6 +137,12 @@ class HistoricalDailyBarInput:
             raise ValueError("历史日线成交量和成交额不能为负数")
         if not self.source.strip():
             raise ValueError("历史日线数据来源不能为空")
+        if self.collected_at is not None:
+            _require_aware(self.collected_at, "采集时间")
+        if self.source_identity is not None:
+            object.__setattr__(
+                self, "source_identity", MappingProxyType(dict(self.source_identity))
+            )
 
 
 @dataclass(frozen=True, slots=True)

@@ -7,17 +7,22 @@ import pytest
 
 from long_invest.modules.providers.contracts import (
     CorporateActionRequest,
+    DailyBar,
     DailyBarRequest,
+    ProviderAdapterCode,
     ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
     ProviderItemFailure,
+    ProviderMissingRange,
+    ProviderSourceIdentity,
     RealtimeQuote,
     SecurityMasterRecord,
 )
 from long_invest.modules.providers.resilience import (
     InMemoryProviderRuntimeState,
     ProviderCallError,
+    ProviderRoutePlan,
     ProviderRouteSetting,
     StaticProviderConfiguration,
 )
@@ -51,6 +56,21 @@ def quote(symbol: str, source: ProviderCode) -> RealtimeQuote:
 
 def deadline() -> datetime:
     return datetime.now(UTC) + timedelta(seconds=5)
+
+
+def bar(close: str, source: ProviderCode) -> DailyBar:
+    return DailyBar(
+        symbol="600000.SH",
+        trading_date=date(2025, 1, 2),
+        open=Decimal("10"),
+        high=Decimal("11"),
+        low=Decimal("9"),
+        close=Decimal(close),
+        volume=100,
+        amount=Decimal("1000"),
+        source=source,
+        capability=ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+    )
 
 
 class FakeProvider:
@@ -87,6 +107,26 @@ class FakeProvider:
         if self.error:
             raise self.error
         return self.master_result
+
+
+class FixedPlanConfiguration:
+    def __init__(self, plan: ProviderRoutePlan) -> None:
+        self.plan = plan
+
+    async def route_plan(self, capability):
+        assert capability is self.plan.capability
+        return self.plan
+
+    async def routes(self, capability):
+        return (await self.route_plan(capability)).routes
+
+
+class RecordingConflicts:
+    def __init__(self) -> None:
+        self.items = []
+
+    async def record_daily_conflict(self, primary, candidate) -> None:
+        self.items.append((primary, candidate))
 
 
 @async_test
@@ -222,9 +262,7 @@ async def test_concurrency_override_is_restricted_to_history() -> None:
 async def test_corporate_actions_use_dedicated_eastmoney_route() -> None:
     east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
     sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
-    request = CorporateActionRequest(
-        "600000.SH", date(2025, 1, 1), date(2025, 12, 31)
-    )
+    request = CorporateActionRequest("600000.SH", date(2025, 1, 1), date(2025, 12, 31))
     config = StaticProviderConfiguration(
         {
             ProviderCapability.CORPORATE_ACTIONS: (
@@ -357,6 +395,152 @@ async def test_realtime_quotes_from_uses_protected_invocation_pipeline() -> None
 
     assert caught.value.code == "PROVIDER_DISABLED"
     assert east.quote_requests == []
+
+
+@async_test
+async def test_fixed_unavailable_provider_fails_without_silent_switch() -> None:
+    east = FakeProvider(ProviderCode.EASTMONEY, ProviderBatchResult())
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    capability = ProviderCapability.REALTIME_QUOTE_BATCH
+    config = FixedPlanConfiguration(
+        ProviderRoutePlan(capability, (), fixed_provider=ProviderCode.TUSHARE)
+    )
+
+    result = await ProviderRouter(east, sina, config=config).realtime_quotes(
+        ("600000.SH",), deadline()
+    )
+
+    assert result.batch_error_code == "PROVIDER_FIXED_SOURCE_UNAVAILABLE"
+    assert east.quote_requests == []
+    assert sina.quote_requests == []
+
+
+@async_test
+async def test_unadjusted_history_switches_after_whole_source_failure() -> None:
+    east = FakeProvider(
+        ProviderCode.EASTMONEY,
+        ProviderBatchResult(batch_error_code="PROVIDER_CONNECTION_FAILED"),
+    )
+    sina = FakeProvider(
+        ProviderCode.SINA,
+        ProviderBatchResult((bar("10.5", ProviderCode.SINA),)),
+    )
+    capability = ProviderCapability.HISTORICAL_DAILY_UNADJUSTED
+    config = FixedPlanConfiguration(
+        ProviderRoutePlan(
+            capability,
+            (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY, capability, priority=1, auto_switch=True
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA, capability, priority=2, auto_switch=False
+                ),
+            ),
+        )
+    )
+    request = DailyBarRequest(
+        "600000.SH", date(2025, 1, 1), date(2025, 1, 2), capability
+    )
+
+    result = await ProviderRouter(east, sina, config=config).daily_bars(
+        request, deadline()
+    )
+
+    assert result.items == (bar("10.5", ProviderCode.SINA),)
+    assert east.bar_requests == [request]
+    assert sina.bar_requests == [request]
+
+
+@async_test
+async def test_unadjusted_history_requests_only_reported_missing_range() -> None:
+    capability = ProviderCapability.HISTORICAL_DAILY_UNADJUSTED
+    missing = ProviderMissingRange("600000.SH", date(2025, 1, 6), date(2025, 1, 8))
+    east = FakeProvider(
+        ProviderCode.EASTMONEY,
+        ProviderBatchResult(
+            (bar("10.5", ProviderCode.EASTMONEY),),
+            missing_ranges=(missing,),
+        ),
+    )
+    sina = FakeProvider(ProviderCode.SINA, ProviderBatchResult())
+    config = FixedPlanConfiguration(
+        ProviderRoutePlan(
+            capability,
+            (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY, capability, priority=1, auto_switch=True
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA, capability, priority=2, auto_switch=False
+                ),
+            ),
+        )
+    )
+    request = DailyBarRequest(
+        "600000.SH", date(2025, 1, 1), date(2025, 1, 10), capability
+    )
+
+    await ProviderRouter(east, sina, config=config).daily_bars(request, deadline())
+
+    assert sina.bar_requests == [
+        DailyBarRequest("600000.SH", missing.start, missing.end, capability)
+    ]
+
+
+@async_test
+async def test_conflicting_history_rows_are_isolated_for_review() -> None:
+    capability = ProviderCapability.HISTORICAL_DAILY_UNADJUSTED
+    failure = ProviderItemFailure(
+        "600000.SH", "PROVIDER_PARTIAL", "partial", ProviderCode.EASTMONEY
+    )
+    east = FakeProvider(
+        ProviderCode.EASTMONEY,
+        ProviderBatchResult((bar("10.5", ProviderCode.EASTMONEY),), (failure,)),
+    )
+    sina = FakeProvider(
+        ProviderCode.SINA,
+        ProviderBatchResult((bar("10.8", ProviderCode.SINA),)),
+    )
+    config = FixedPlanConfiguration(
+        ProviderRoutePlan(
+            capability,
+            (
+                ProviderRouteSetting(
+                    ProviderCode.EASTMONEY, capability, priority=1, auto_switch=True
+                ),
+                ProviderRouteSetting(
+                    ProviderCode.SINA, capability, priority=2, auto_switch=False
+                ),
+            ),
+        )
+    )
+    request = DailyBarRequest(
+        "600000.SH", date(2025, 1, 1), date(2025, 1, 2), capability
+    )
+    conflicts = RecordingConflicts()
+
+    result = await ProviderRouter(
+        east, sina, config=config, conflict_observer=conflicts
+    ).daily_bars(request, deadline())
+
+    assert result.items == ()
+    assert result.failures[0].code == "PROVIDER_DATA_CONFLICT"
+    assert len(conflicts.items) == 1
+
+
+def test_source_identity_contains_adapter_upstream_interface_and_algorithm() -> None:
+    identity = ProviderSourceIdentity(
+        adapter=ProviderAdapterCode.AKSHARE,
+        upstream=ProviderCode.SINA,
+        interface="akshare.stock_zh_a_hist",
+        capability=ProviderCapability.HISTORICAL_DAILY_QFQ,
+        algorithm_version="akshare-qfq-v1",
+    )
+
+    assert identity.contract_version == (
+        "AKSHARE:SINA:akshare.stock_zh_a_hist:HISTORICAL_DAILY_QFQ:akshare-qfq-v1"
+    )
 
 
 @async_test

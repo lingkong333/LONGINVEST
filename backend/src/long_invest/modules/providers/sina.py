@@ -14,10 +14,12 @@ from long_invest.modules.providers.contracts import (
     DailyBar,
     DailyBarRequest,
     ProbeResult,
+    ProviderAdapterCode,
     ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
     ProviderItemFailure,
+    ProviderSourceIdentity,
     RealtimeQuote,
     SecurityMasterRecord,
 )
@@ -53,6 +55,34 @@ class SinaRealtimeProvider:
     )
     MASTER_PAGE_SIZE = 100
     MASTER_MAX_PAGES = 100
+
+    def source_identity(self, capability: ProviderCapability) -> ProviderSourceIdentity:
+        history = capability in {
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+            ProviderCapability.HISTORICAL_DAILY_QFQ,
+        }
+        interface = (
+            "akshare.stock_zh_a_hist"
+            if history
+            else (
+                self.REALTIME_URL
+                if capability is ProviderCapability.REALTIME_QUOTE_BATCH
+                else self.MASTER_PAGE_URL
+            )
+        )
+        return ProviderSourceIdentity(
+            adapter=(
+                ProviderAdapterCode.AKSHARE if history else ProviderAdapterCode.HTTPX
+            ),
+            upstream=self.code,
+            interface=interface,
+            capability=capability,
+            algorithm_version=(
+                "akshare-qfq-v1"
+                if capability is ProviderCapability.HISTORICAL_DAILY_QFQ
+                else "raw-v1"
+            ),
+        )
 
     def __init__(
         self,

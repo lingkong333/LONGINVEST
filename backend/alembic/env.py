@@ -59,6 +59,7 @@ from long_invest.modules.positions.models import (  # noqa: F401
     UserPositionHistory,
 )
 from long_invest.modules.providers.models import (  # noqa: F401
+    ProviderCapabilityRegistration,
     ProviderCapabilitySetting,
     ProviderCircuitHistory,
     ProviderCircuitState,
@@ -66,6 +67,7 @@ from long_invest.modules.providers.models import (  # noqa: F401
     ProviderFailureSample,
     ProviderHealthState,
     ProviderMutationRequest,
+    ProviderRoutePolicyVersion,
 )
 from long_invest.modules.qfq.models import (  # noqa: F401
     QfqDataset,

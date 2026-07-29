@@ -7,12 +7,15 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
+from long_invest.modules.market_data.contracts import OpenQualityIssue, QualitySeverity
+from long_invest.modules.market_data.repository import QualityIssueRepository
+from long_invest.modules.market_data.service import QualityIssueService
 from long_invest.modules.providers.browser_http_client import (
     BrowserProviderHttpClient,
     create_browser_json_client,
 )
 from long_invest.modules.providers.budget import ProviderRequestBudget
-from long_invest.modules.providers.contracts import ProviderCode
+from long_invest.modules.providers.contracts import DailyBar, ProviderCode
 from long_invest.modules.providers.eastmoney import EastmoneyProvider
 from long_invest.modules.providers.http_client import (
     ProviderHttpClient,
@@ -93,6 +96,35 @@ class ProviderEventAdapter:
             queue="domain-events",
             payload={"event_type": event_type, **payload},
             dedupe_key=f"providers:{event_type}:{digest}",
+        )
+
+
+class ProviderConflictQualityAdapter:
+    def __init__(self, session: AsyncSession) -> None:
+        self._service = QualityIssueService(QualityIssueRepository(session))
+
+    async def record_daily_conflict(
+        self, primary: DailyBar, candidate: DailyBar
+    ) -> None:
+        await self._service.open(
+            OpenQualityIssue(
+                issue_type="PROVIDER_DATA_CONFLICT",
+                subject_type="daily_bar_unadjusted",
+                subject_id=f"{primary.symbol}:{primary.trading_date}",
+                symbol=primary.symbol,
+                severity=QualitySeverity.ERROR,
+                evidence={
+                    "trade_date": primary.trading_date.isoformat(),
+                    "sources": {
+                        primary.source.value: _bar_evidence(primary),
+                        candidate.source.value: _bar_evidence(candidate),
+                    },
+                },
+                dedupe_key=(
+                    f"provider-conflict:{primary.symbol}:{primary.trading_date}"
+                ),
+                requires_review=True,
+            )
         )
 
 
@@ -217,6 +249,7 @@ def build_provider_service(
         config=repository,
         runtime=active.runtime,
         observer=repository,
+        conflict_observer=ProviderConflictQualityAdapter(session),
     )
     return ProviderService(
         provider_router,
@@ -225,3 +258,19 @@ def build_provider_service(
         active.runtime,
         active.budget,
     )
+
+
+def _bar_evidence(bar: DailyBar) -> dict[str, object]:
+    return {
+        "open": str(bar.open),
+        "high": str(bar.high),
+        "low": str(bar.low),
+        "close": str(bar.close),
+        "volume": bar.volume,
+        "amount": str(bar.amount),
+        "source_identity": (
+            bar.source_identity.contract_version
+            if bar.source_identity is not None
+            else None
+        ),
+    }

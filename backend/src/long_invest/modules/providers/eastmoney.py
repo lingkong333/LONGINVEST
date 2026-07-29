@@ -16,10 +16,12 @@ from long_invest.modules.providers.contracts import (
     DailyBar,
     DailyBarRequest,
     ProbeResult,
+    ProviderAdapterCode,
     ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
     ProviderItemFailure,
+    ProviderSourceIdentity,
     RealtimeQuote,
     SecurityMasterRecord,
 )
@@ -68,6 +70,28 @@ class EastmoneyProvider:
     MASTER_PROBE_URL = "https://push2.eastmoney.com/api/qt/stock/get"
     HISTORY_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
     CORPORATE_ACTION_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+
+    def source_identity(self, capability: ProviderCapability) -> ProviderSourceIdentity:
+        interfaces = {
+            ProviderCapability.SECURITY_MASTER: self.MASTER_URL,
+            ProviderCapability.REALTIME_QUOTE_BATCH: self.REALTIME_URL,
+            ProviderCapability.DAILY_BAR_UNADJUSTED: self.HISTORY_URL,
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED: self.HISTORY_URL,
+            ProviderCapability.HISTORICAL_DAILY_QFQ: self.HISTORY_URL,
+            ProviderCapability.CORPORATE_ACTIONS: self.CORPORATE_ACTION_URL,
+        }
+        return ProviderSourceIdentity(
+            adapter=ProviderAdapterCode.HTTPX,
+            upstream=self.code,
+            interface=interfaces[capability],
+            capability=capability,
+            algorithm_version=(
+                "eastmoney-qfq-v1"
+                if capability is ProviderCapability.HISTORICAL_DAILY_QFQ
+                else "raw-v1"
+            ),
+        )
+
     ANNOUNCEMENT_URL = "https://np-anotice-stock.eastmoney.com/api/security/ann"
     ANNOUNCEMENT_CONTENT_URL = "https://np-cnotice-stock.eastmoney.com/api/content/ann"
     REQUEST_HEADERS = {

@@ -292,6 +292,17 @@ async def security_master_refresh(context: JobExecutionContext) -> JobResult:
         source_version=observed_at.isoformat(),
         idempotency_key=str(config["idempotency_key"]),
         items=tuple(_security_item(record) for record in records),
+        source_identity=(
+            {
+                "adapter": records[0].source_identity.adapter.value,
+                "upstream": records[0].source_identity.upstream.value,
+                "interface": records[0].source_identity.interface,
+                "capability": records[0].source_identity.capability.value,
+                "algorithm_version": records[0].source_identity.algorithm_version,
+            }
+            if records[0].source_identity is not None
+            else None
+        ),
     )
     result = await SecurityApplication(
         database,
@@ -641,6 +652,20 @@ async def _fetch_daily_stage(
             "volume": bar.volume,
             "amount": str(bar.amount),
             "source": bar.source.value,
+            "source_identity": (
+                {
+                    "adapter": bar.source_identity.adapter.value,
+                    "upstream": bar.source_identity.upstream.value,
+                    "interface": bar.source_identity.interface,
+                    "capability": bar.source_identity.capability.value,
+                    "algorithm_version": bar.source_identity.algorithm_version,
+                }
+                if bar.source_identity is not None
+                else None
+            ),
+            "collected_at": bar.collected_at.isoformat()
+            if bar.collected_at is not None
+            else datetime.now(UTC).isoformat(),
             "is_new_listing": is_new_listing,
             "is_st": is_st,
             "has_known_corporate_action": has_known_corporate_action,

@@ -74,9 +74,7 @@ class QfqEventPort(Protocol):
 
     async def completed(self, run: QfqRefreshRun, dataset: QfqDataset) -> None: ...
     async def failed(self, run: QfqRefreshRun, current: QfqDataset | None) -> None: ...
-    async def history_imported(
-        self, dataset: QfqDataset, *, reason: str
-    ) -> None: ...
+    async def history_imported(self, dataset: QfqDataset, *, reason: str) -> None: ...
 
 
 class QfqRefreshService:
@@ -112,10 +110,13 @@ class QfqRefreshService:
         ):
             raise ValueError("invalid QFQ history import")
         await self._repository.lock_security(security_id)
-        current = await self._repository.current_dataset(
-            security_id, for_update=True
-        )
-        if current is not None and current.checksum == window.checksum:
+        current = await self._repository.current_dataset(security_id, for_update=True)
+        if (
+            current is not None
+            and current.checksum == window.checksum
+            and current.provider == provider
+            and current.provider_contract_version == provider_contract_version
+        ):
             await self._repository.transition_dataset(
                 current.id,
                 expected_lifecycle=QfqDatasetLifecycle.CURRENT,
@@ -222,7 +223,12 @@ class QfqRefreshService:
             status=QfqRefreshStatus.COMMITTING,
             updated_at=now,
         )
-        if current is not None and current.checksum == window.checksum:
+        if (
+            current is not None
+            and current.checksum == window.checksum
+            and current.provider == run.provider
+            and current.provider_contract_version == provider_contract_version
+        ):
             await self._repository.transition_dataset(
                 current.id,
                 expected_lifecycle=QfqDatasetLifecycle.CURRENT,

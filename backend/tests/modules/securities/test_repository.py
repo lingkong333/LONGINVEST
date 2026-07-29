@@ -154,9 +154,10 @@ async def test_saved_snapshot_does_not_follow_later_security_changes() -> None:
                 is_suspended BOOLEAN NOT NULL,
                 provider_codes JSON NOT NULL,
                 master_version INTEGER NOT NULL,
-                source VARCHAR(64) NOT NULL,
-                source_version VARCHAR(160) NOT NULL,
-                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
+                    source VARCHAR(64) NOT NULL,
+                    source_version VARCHAR(160) NOT NULL,
+                    source_identity JSON,
+                    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP NOT NULL
             )
             """
         )

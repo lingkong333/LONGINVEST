@@ -20,6 +20,43 @@ class ProviderCapability(StrEnum):
 class ProviderCode(StrEnum):
     EASTMONEY = "EASTMONEY"
     SINA = "SINA"
+    TUSHARE = "TUSHARE"
+    BAOSTOCK = "BAOSTOCK"
+
+
+class ProviderAdapterCode(StrEnum):
+    HTTPX = "HTTPX"
+    AKSHARE = "AKSHARE"
+    TUSHARE_SDK = "TUSHARE_SDK"
+    BAOSTOCK_SDK = "BAOSTOCK_SDK"
+
+
+@dataclass(frozen=True, slots=True)
+class ProviderSourceIdentity:
+    adapter: ProviderAdapterCode
+    upstream: ProviderCode
+    interface: str
+    capability: ProviderCapability
+    algorithm_version: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "adapter", ProviderAdapterCode(self.adapter))
+        object.__setattr__(self, "upstream", ProviderCode(self.upstream))
+        object.__setattr__(self, "capability", ProviderCapability(self.capability))
+        if not self.interface.strip() or not self.algorithm_version.strip():
+            raise ValueError("provider source identity is incomplete")
+
+    @property
+    def contract_version(self) -> str:
+        return ":".join(
+            (
+                self.adapter.value,
+                self.upstream.value,
+                self.interface,
+                self.capability.value,
+                self.algorithm_version,
+            )
+        )
 
 
 class CorporateActionType(StrEnum):
@@ -74,6 +111,7 @@ class SecurityMasterRecord:
     suspended: bool | None
     source: ProviderCode
     observed_at: datetime
+    source_identity: ProviderSourceIdentity | None = None
 
     def __post_init__(self) -> None:
         validate_symbol(self.symbol)
@@ -95,6 +133,7 @@ class RealtimeQuote:
     quote_time: datetime
     received_at: datetime
     source: ProviderCode
+    source_identity: ProviderSourceIdentity | None = None
 
     def __post_init__(self) -> None:
         validate_symbol(self.symbol)
@@ -117,6 +156,8 @@ class DailyBar:
     amount: Decimal
     source: ProviderCode
     capability: ProviderCapability
+    collected_at: datetime | None = None
+    source_identity: ProviderSourceIdentity | None = None
 
     def __post_init__(self) -> None:
         validate_symbol(self.symbol)
@@ -129,6 +170,13 @@ class DailyBar:
             ProviderCapability.HISTORICAL_DAILY_QFQ,
         }:
             raise ValueError("invalid daily bar capability")
+        if self.collected_at is not None:
+            _aware(self.collected_at)
+        if self.source_identity is not None:
+            if self.source_identity.upstream is not self.source:
+                raise ValueError("daily bar source identity conflicts with source")
+            if self.source_identity.capability is not self.capability:
+                raise ValueError("daily bar source identity conflicts with capability")
 
 
 @dataclass(frozen=True, slots=True)
@@ -220,10 +268,23 @@ class ProviderItemFailure:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderMissingRange:
+    symbol: str
+    start: date
+    end: date
+
+    def __post_init__(self) -> None:
+        validate_symbol(self.symbol)
+        if self.start > self.end:
+            raise ValueError("missing range start must not be after end")
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderBatchResult[T]:
     items: tuple[T, ...] = ()
     failures: tuple[ProviderItemFailure, ...] = ()
     batch_error_code: str | None = None
+    missing_ranges: tuple[ProviderMissingRange, ...] = ()
 
 
 class MarketDataProvider(Protocol):
@@ -232,6 +293,10 @@ class MarketDataProvider(Protocol):
 
     @property
     def capabilities(self) -> frozenset[ProviderCapability]: ...
+
+    def source_identity(
+        self, capability: ProviderCapability
+    ) -> ProviderSourceIdentity: ...
 
     async def security_master(
         self, deadline: datetime

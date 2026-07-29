@@ -66,6 +66,7 @@ class SettingsRequest(BaseModel):
     rate_per_second: float | None = Field(default=None, gt=0, le=100)
     timeout_seconds: float | None = Field(default=None, gt=0, le=60)
     auto_switch: bool | None = None
+    manual_fixed: bool | None = None
     daily_limit: int | None = Field(default=None, ge=1)
     min_interval_seconds: float | None = Field(default=None, ge=0, le=3600)
     total_daily_limit: int | None = Field(default=None, ge=1)

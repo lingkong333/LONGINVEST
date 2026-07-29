@@ -76,6 +76,7 @@ class SecurityMasterSnapshot:
     source_version: str
     idempotency_key: str
     items: tuple[SecurityMasterItem, ...]
+    source_identity: Mapping[str, str] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -210,6 +211,8 @@ def assess_monitoring_eligibility(item: SecurityMasterItem) -> SecurityEligibili
         code="ELIGIBLE",
         message="该股票可建立正式监控",
     )
+
+
 @dataclass(frozen=True, slots=True)
 class SignalSecuritySnapshot:
     security_id: UUID

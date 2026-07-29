@@ -65,6 +65,7 @@ class Security(Base):
     master_version: Mapped[int] = mapped_column(Integer, nullable=False)
     source: Mapped[str] = mapped_column(String(64), nullable=False)
     source_version: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_identity: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -88,6 +89,7 @@ class SecurityMasterVersion(Base):
     )
     source: Mapped[str] = mapped_column(String(64), nullable=False)
     source_version: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_identity: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     master_version: Mapped[int] = mapped_column(Integer, nullable=False)

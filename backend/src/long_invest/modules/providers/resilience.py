@@ -165,10 +165,23 @@ class ProviderRouteSetting:
     auto_switch: bool = True
 
 
+@dataclass(frozen=True, slots=True)
+class ProviderRoutePlan:
+    capability: ProviderCapability
+    routes: tuple[ProviderRouteSetting, ...]
+    fixed_provider: ProviderCode | None = None
+
+    def __post_init__(self) -> None:
+        if any(route.capability is not self.capability for route in self.routes):
+            raise ValueError("route plan contains a different capability")
+
+
 class ProviderConfigurationPort(Protocol):
     async def routes(
         self, capability: ProviderCapability
     ) -> tuple[ProviderRouteSetting, ...]: ...
+
+    async def route_plan(self, capability: ProviderCapability) -> ProviderRoutePlan: ...
 
 
 class StaticProviderConfiguration:
@@ -258,6 +271,9 @@ class StaticProviderConfiguration:
         return tuple(
             sorted(self._configured.get(capability, ()), key=lambda item: item.priority)
         )
+
+    async def route_plan(self, capability: ProviderCapability) -> ProviderRoutePlan:
+        return ProviderRoutePlan(capability, await self.routes(capability))
 
 
 class ProviderRuntimeStatePort(Protocol):

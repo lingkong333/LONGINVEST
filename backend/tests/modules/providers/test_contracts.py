@@ -22,7 +22,12 @@ def test_provider_contract_enumerations_are_stable() -> None:
         "HISTORICAL_DAILY_QFQ",
         "CORPORATE_ACTIONS",
     }
-    assert {item.value for item in ProviderCode} == {"EASTMONEY", "SINA"}
+    assert {item.value for item in ProviderCode} == {
+        "EASTMONEY",
+        "SINA",
+        "TUSHARE",
+        "BAOSTOCK",
+    }
 
 
 def test_contracts_accept_valid_internal_symbols_and_decimal_values() -> None:

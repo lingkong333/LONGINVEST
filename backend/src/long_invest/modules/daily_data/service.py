@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from contextlib import suppress
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -160,6 +160,8 @@ class DailyDataService:
                 "volume": item.volume,
                 "amount": item.amount,
                 "source": item.source,
+                "source_identity": _source_identity(item.source, item.source_identity),
+                "collected_at": item.collected_at or now,
             }
             if quality.review_required:
                 review_items.append((item, quality.code))
@@ -171,11 +173,14 @@ class DailyDataService:
             existing = existing_by_date.get(trade_date)
             if existing is None:
                 inserted_dates.append(trade_date)
-            elif any(
-                _stored_values(existing)[key] != value
-                for key, value in values.items()
-                if key not in {"security_id", "trade_date", "symbol"}
-            ) or existing.symbol != values["symbol"]:
+            elif (
+                any(
+                    _stored_values(existing)[key] != value
+                    for key, value in values.items()
+                    if key not in {"security_id", "trade_date", "symbol"}
+                )
+                or existing.symbol != values["symbol"]
+            ):
                 changed_dates.append(trade_date)
 
         revision_numbers = await self._repository.latest_revision_numbers(
@@ -735,6 +740,10 @@ def _bar_values(stage: DailyBarStage) -> dict[str, Any]:
         "volume": int(payload["volume"]),
         "amount": Decimal(str(payload["amount"])),
         "source": str(payload["source"]),
+        "source_identity": _source_identity(
+            str(payload["source"]), payload.get("source_identity")
+        ),
+        "collected_at": _collected_at(payload.get("collected_at"), stage.received_at),
     }
 
 
@@ -748,7 +757,40 @@ def _stored_values(bar: DailyBarUnadjusted) -> dict[str, Any]:
         "volume": bar.volume,
         "amount": bar.amount,
         "source": bar.source,
+        "source_identity": bar.source_identity,
+        "collected_at": bar.collected_at,
     }
+
+
+def _source_identity(source: str, value: object) -> dict[str, str]:
+    if isinstance(value, Mapping):
+        required = {
+            "adapter",
+            "upstream",
+            "interface",
+            "capability",
+            "algorithm_version",
+        }
+        result = {key: str(item) for key, item in value.items()}
+        if required <= result.keys() and all(result[key].strip() for key in required):
+            return result
+    return {
+        "adapter": "DIRECT_IMPORT",
+        "upstream": source,
+        "interface": "daily-data-service",
+        "capability": "HISTORICAL_DAILY_UNADJUSTED",
+        "algorithm_version": "raw-v1",
+    }
+
+
+def _collected_at(value: object, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str):
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is not None and parsed.utcoffset() is not None:
+            return parsed
+    return fallback
 
 
 def _json_values(values: dict[str, Any]) -> dict[str, Any]:

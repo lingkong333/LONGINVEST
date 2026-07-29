@@ -175,6 +175,18 @@ def _history_inputs(bars) -> tuple[HistoryBarInput, ...]:
             volume=bar.volume,
             amount=bar.amount,
             source=bar.source.value,
+            source_identity=(
+                {
+                    "adapter": bar.source_identity.adapter.value,
+                    "upstream": bar.source_identity.upstream.value,
+                    "interface": bar.source_identity.interface,
+                    "capability": bar.source_identity.capability.value,
+                    "algorithm_version": bar.source_identity.algorithm_version,
+                }
+                if bar.source_identity is not None
+                else None
+            ),
+            collected_at=bar.collected_at,
         )
         for bar in bars
     )
@@ -206,6 +218,8 @@ class DatabaseHistoryBarStore:
                 volume=bar.volume,
                 amount=bar.amount,
                 source=bar.source,
+                source_identity=bar.source_identity,
+                collected_at=bar.collected_at,
             )
             for bar in bars.unadjusted
         )

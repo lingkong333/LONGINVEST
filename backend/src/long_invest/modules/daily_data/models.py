@@ -151,6 +151,10 @@ class DailyBarUnadjusted(Base):
     volume: Mapped[int] = mapped_column(BigInteger, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(24, 4), nullable=False)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
+    source_identity: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    collected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     data_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()

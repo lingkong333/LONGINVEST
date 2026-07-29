@@ -444,6 +444,7 @@ def _copy_quote(item: QuoteCycleItem, quote: RealtimeQuote) -> None:
     ):
         setattr(item, name, getattr(quote, name))
     item.provider = quote.source
+    item.source_identity = _source_identity(quote)
     item.status = QuoteItemStatus.VALID
     item.error_code = None
     item.eligible_for_evaluation = True
@@ -468,6 +469,20 @@ def _quote_evidence(quote: RealtimeQuote) -> dict[str, object]:
         "quote_time": quote.quote_time.isoformat(),
         "received_at": quote.received_at.isoformat(),
         "source": str(quote.source),
+        "source_identity": _source_identity(quote),
+    }
+
+
+def _source_identity(quote: RealtimeQuote) -> dict[str, str] | None:
+    identity = quote.source_identity
+    if identity is None:
+        return None
+    return {
+        "adapter": identity.adapter.value,
+        "upstream": identity.upstream.value,
+        "interface": identity.interface,
+        "capability": identity.capability.value,
+        "algorithm_version": identity.algorithm_version,
     }
 
 

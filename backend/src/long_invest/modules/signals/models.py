@@ -31,7 +31,10 @@ REASONS = (
 class SignalState(Base):
     __tablename__ = "signal_state"
     __table_args__ = (
-        UniqueConstraint("subscription_id", name="subscription"),
+        UniqueConstraint(
+            "subscription_id",
+            name="uq_signal_state_subscription",
+        ),
         CheckConstraint(f"zone IN ({ZONES})", name="zone_valid"),
         CheckConstraint("version > 0", name="version_positive"),
         CheckConstraint(
@@ -87,7 +90,11 @@ class SignalState(Base):
 class SignalEvaluation(Base):
     __tablename__ = "signal_evaluation"
     __table_args__ = (
-        UniqueConstraint("subscription_id", "idempotency_key", name="idempotency"),
+        UniqueConstraint(
+            "subscription_id",
+            "idempotency_key",
+            name="uq_signal_evaluation_idempotency",
+        ),
         CheckConstraint(f"reason IN ({REASONS})", name="reason_valid"),
         CheckConstraint(
             "result IN ('APPLIED','UNCHANGED','SKIPPED','SUPERSEDED')",
@@ -193,7 +200,7 @@ class SignalEvaluation(Base):
 class SignalEvent(Base):
     __tablename__ = "signal_event"
     __table_args__ = (
-        UniqueConstraint("evaluation_id", name="evaluation"),
+        UniqueConstraint("evaluation_id", name="uq_signal_event_evaluation"),
         CheckConstraint(f"before_zone IN ({ZONES})", name="before_zone_valid"),
         CheckConstraint(f"after_zone IN ({ZONES})", name="after_zone_valid"),
         CheckConstraint("before_zone <> after_zone", name="real_transition"),

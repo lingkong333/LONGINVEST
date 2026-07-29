@@ -28,8 +28,16 @@ from long_invest.platform.database.base import Base
 class TargetRevision(Base):
     __tablename__ = "target_revision"
     __table_args__ = (
-        UniqueConstraint("subscription_id", "revision_no", name="revision_number"),
-        UniqueConstraint("subscription_id", "idempotency_key", name="idempotency"),
+        UniqueConstraint(
+            "subscription_id",
+            "revision_no",
+            name="uq_target_revision_revision_number",
+        ),
+        UniqueConstraint(
+            "subscription_id",
+            "idempotency_key",
+            name="uq_target_revision_idempotency",
+        ),
         CheckConstraint("revision_no > 0", name="revision_positive"),
         CheckConstraint(
             "source IN ('MANUAL','STRATEGY','RESTORED','DATA_CORRECTION',"
@@ -125,7 +133,10 @@ class TargetRevision(Base):
 class SubscriptionTargetBinding(Base):
     __tablename__ = "subscription_target_binding"
     __table_args__ = (
-        UniqueConstraint("subscription_id", name="subscription"),
+        UniqueConstraint(
+            "subscription_id",
+            name="uq_subscription_target_binding_subscription",
+        ),
         CheckConstraint("version > 0", name="version_positive"),
         CheckConstraint(
             "status IN ('READY','STALE','CALCULATING','REVIEW_REQUIRED',"

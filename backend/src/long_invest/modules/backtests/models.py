@@ -695,7 +695,7 @@ class BacktestMetric(Base):
     ending_equity: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
     total_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     realized_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
-    annualized_return: Mapped[Decimal] = mapped_column(Numeric(50, 8), nullable=False)
+    annualized_return: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     max_drawdown: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     volatility: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     sharpe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))

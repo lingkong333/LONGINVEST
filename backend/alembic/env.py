@@ -108,7 +108,10 @@ from long_invest.modules.targets.models import (  # noqa: F401
 from long_invest.modules.watchlists.models import Watchlist, WatchlistItem  # noqa: F401
 from long_invest.platform.audit.models import AuditEvent  # noqa: F401
 from long_invest.platform.config.settings import get_settings
-from long_invest.platform.database.autogenerate import include_database_name
+from long_invest.platform.database.autogenerate import (
+    include_database_name,
+    include_schema_object,
+)
 from long_invest.platform.database.base import Base
 from long_invest.platform.database.registry import table_ownership
 from long_invest.platform.jobs.models import Job, JobItem, JobRun  # noqa: F401
@@ -133,6 +136,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
         include_name=include_database_name,
+        include_object=include_schema_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -144,6 +148,7 @@ def do_run_migrations(connection) -> None:
         target_metadata=target_metadata,
         compare_type=True,
         include_name=include_database_name,
+        include_object=include_schema_object,
     )
     with context.begin_transaction():
         context.run_migrations()

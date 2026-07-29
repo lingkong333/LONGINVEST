@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from time import monotonic
@@ -58,9 +59,11 @@ class SinaRealtimeProvider:
         client: ProviderHttpClient | None,
         *,
         history_loader: Callable[..., Any] | None = None,
+        request_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> None:
         self._client = client
         self._history_loader = history_loader
+        self._request_guard = request_guard
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime
@@ -172,13 +175,14 @@ class SinaRealtimeProvider:
         )
         try:
             async with asyncio.timeout(remaining):
-                frame = await asyncio.to_thread(
-                    loader,
-                    symbol=_sina_symbol(request.symbol),
-                    start_date=request.start.strftime("%Y%m%d"),
-                    end_date=request.end.strftime("%Y%m%d"),
-                    adjust=adjust,
-                )
+                async with self._guard():
+                    frame = await asyncio.to_thread(
+                        loader,
+                        symbol=_sina_symbol(request.symbol),
+                        start_date=request.start.strftime("%Y%m%d"),
+                        end_date=request.end.strftime("%Y%m%d"),
+                        adjust=adjust,
+                    )
             return self.parse_daily_bars(frame, request=request)
         except TimeoutError:
             raise
@@ -190,6 +194,11 @@ class SinaRealtimeProvider:
             raise ProviderHttpError(
                 "PROVIDER_UPSTREAM_FAILED", retryable=True
             ) from error
+
+    def _guard(self) -> AbstractAsyncContextManager[None]:
+        if self._request_guard is None:
+            return _NullRequestGuard()
+        return self._request_guard()
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime
@@ -427,3 +436,11 @@ def _load_sina_history(**kwargs: str) -> Any:
     import akshare as ak
 
     return ak.stock_zh_a_daily(**kwargs)
+
+
+class _NullRequestGuard:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: Any) -> None:
+        del args

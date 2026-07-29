@@ -178,7 +178,10 @@ def get_provider_resources() -> ProviderResources:
                         settings.eastmoney_history_transport == "playwright"
                     ),
                 ),
-                ProviderCode.SINA: SinaRealtimeProvider(provider_http),
+                ProviderCode.SINA: SinaRealtimeProvider(
+                    provider_http,
+                    request_guard=budget.guard,
+                ),
             },
         )
     return _resources

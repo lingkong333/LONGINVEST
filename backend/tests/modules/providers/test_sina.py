@@ -159,6 +159,15 @@ def _history_frame(rows: list[dict[str, object]]) -> pd.DataFrame:
 )
 def test_sina_loads_and_normalizes_historical_daily(capability, adjust) -> None:
     calls = []
+    guard_calls = []
+
+    class Guard:
+        async def __aenter__(self):
+            guard_calls.append("claim")
+
+        async def __aexit__(self, *args):
+            del args
+            guard_calls.append("release")
 
     def loader(**kwargs):
         calls.append(kwargs)
@@ -189,9 +198,11 @@ def test_sina_loads_and_normalizes_historical_daily(capability, adjust) -> None:
         "600000.SH", date(2026, 7, 1), date(2026, 7, 27), capability
     )
     result = asyncio.run(
-        SinaRealtimeProvider(None, history_loader=loader).daily_bars(
-            request, datetime.now(UTC) + timedelta(seconds=5)
-        )
+        SinaRealtimeProvider(
+            None,
+            history_loader=loader,
+            request_guard=Guard,
+        ).daily_bars(request, datetime.now(UTC) + timedelta(seconds=5))
     )
 
     assert calls == [
@@ -202,6 +213,7 @@ def test_sina_loads_and_normalizes_historical_daily(capability, adjust) -> None:
             "adjust": adjust,
         }
     ]
+    assert guard_calls == ["claim", "release"]
     assert [item.trading_date for item in result.items] == [
         date(2026, 7, 24),
         date(2026, 7, 27),

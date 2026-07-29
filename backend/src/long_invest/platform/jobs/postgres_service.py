@@ -254,6 +254,7 @@ class PostgresJobService:
             job.status = JobStatus.PENDING
             job.next_run_at = changed_at
             job.pause_requested = False
+            job.max_attempts = max(job.max_attempts, job.attempt_count + 1)
         elif action == "cancel":
             if status in {JobStatus.PENDING, JobStatus.PAUSED}:
                 _finish(job, JobStatus.CANCELED, changed_at)

@@ -184,6 +184,7 @@ async def test_pause_resume_and_running_cancel_stop_at_safe_point() -> None:
         async with database.transaction() as session:
             resumed = await PostgresJobService(session).command(job.id, "resume")
             assert resumed.status == JobStatus.PENDING
+            assert resumed.max_attempts == 2
         async with database.transaction() as session:
             claim = await PostgresJobService(session).claim_next(
                 worker_id="worker-control",

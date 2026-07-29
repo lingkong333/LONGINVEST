@@ -169,13 +169,18 @@ async def test_market_data_schema_and_year_partition_exist() -> None:
                 await session.execute(
                     text(
                         """
-                    INSERT INTO daily_bar_unadjusted (
-                        security_id, trade_date, symbol, open, high, low, close,
-                        previous_close, volume, amount, source, data_version
-                    ) VALUES (
-                        :security_id, :trade_date, '600000.SH', 10, 11, 9, 10.5,
-                        9.8, 3000000000, 123456.78, 'eastmoney', 1
-                    )
+                        INSERT INTO daily_bar_unadjusted (
+                            security_id, trade_date, symbol, open, high, low, close,
+                            previous_close, volume, amount, source, data_version,
+                            source_identity, collected_at
+                        ) VALUES (
+                            :security_id, :trade_date, '600000.SH', 10, 11, 9, 10.5,
+                            9.8, 3000000000, 123456.78, 'eastmoney', 1,
+                            '{"adapter":"HTTPX","upstream":"EASTMONEY",'
+                            '"interface":"test","capability":"DAILY_BAR_UNADJUSTED",'
+                            '"algorithm_version":"raw-v1"}'::jsonb,
+                            now()
+                        )
                         """
                     ),
                     {"security_id": row_security_id, "trade_date": trade_date},

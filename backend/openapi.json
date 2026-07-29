@@ -18878,7 +18878,9 @@
         "type": "string",
         "enum": [
           "EASTMONEY",
-          "SINA"
+          "SINA",
+          "TUSHARE",
+          "BAOSTOCK"
         ],
         "title": "ProviderCode"
       },

@@ -19,7 +19,7 @@
 
 ## Dependencies
 
-Issue #4, Issue #7, Issue #8, Issue #9, Issue #10, Issue #11
+Issue #4, Issue #7, Issue #8, Issue #9, Issue #10, Issue #11, Issue #13, Issue #14, Issue #15
 
 ## Type
 

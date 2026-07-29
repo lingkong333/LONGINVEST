@@ -69,7 +69,7 @@ class ProviderRequestBudget:
         denial: str | None = None
         token = uuid4().hex
         async with self._database.transaction() as session:
-            now = await session.scalar(select(func.now()))
+            now = await session.scalar(select(func.clock_timestamp()))
             if not isinstance(now, datetime):
                 now = datetime.now(UTC)
             policy, capability_limit, min_interval = await self._configuration(
@@ -79,8 +79,12 @@ class ProviderRequestBudget:
             budget_date = now.astimezone(timezone).date()
             await session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:key))"),
-                {"key": f"provider-budget:{setting.provider.value}:{budget_date}"},
+                {"key": f"provider-budget:{setting.provider.value}"},
             )
+            locked_now = await session.scalar(select(func.clock_timestamp()))
+            if isinstance(locked_now, datetime):
+                now = locked_now
+                budget_date = now.astimezone(timezone).date()
             await session.execute(
                 delete(ProviderRequestLease).where(
                     ProviderRequestLease.provider_code == setting.provider.value,
@@ -196,7 +200,7 @@ class ProviderRequestBudget:
 
     async def snapshot(self, provider: ProviderCode) -> dict[str, Any]:
         async with self._database.transaction() as session:
-            now = await session.scalar(select(func.now()))
+            now = await session.scalar(select(func.clock_timestamp()))
             if not isinstance(now, datetime):
                 now = datetime.now(UTC)
             policy = await self._latest_policy(session, provider)

@@ -59,6 +59,7 @@ COPY deploy/compose.yaml /deploy/compose.yaml
 COPY deploy/data/trading-calendar /deploy/data/trading-calendar
 COPY deploy/docker/backend.Dockerfile /deploy/docker/backend.Dockerfile
 COPY deploy/docker/strategy-runner.Dockerfile /deploy/docker/strategy-runner.Dockerfile
+COPY deploy/docker/nginx.conf /deploy/docker/nginx.conf
 COPY deploy/security/strategy-runner-seccomp.json /deploy/security/strategy-runner-seccomp.json
 
 CMD ["pytest", "-q"]

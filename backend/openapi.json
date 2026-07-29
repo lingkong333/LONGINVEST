@@ -22451,6 +22451,17 @@
             ],
             "title": "Auto Switch"
           },
+          "manual_fixed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manual Fixed"
+          },
           "daily_limit": {
             "anyOf": [
               {

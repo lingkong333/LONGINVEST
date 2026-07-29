@@ -15,7 +15,7 @@ def test_strategy_draft_facts_migration_is_single_head() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["20260728_0028"]
+    assert scripts.get_heads() == ["20260729_0030"]
     assert scripts.get_revision("20260723_0022").down_revision == "20260722_0021"
 
 

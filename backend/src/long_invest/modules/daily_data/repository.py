@@ -11,6 +11,7 @@ from uuid import UUID, uuid4
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.dialects.postgresql.dml import Insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +23,7 @@ from long_invest.modules.daily_data.models import (
     DailyBatchMissingItem,
     DailyDataBatch,
 )
+from long_invest.platform.database.batching import execute_atomic_batches
 from long_invest.platform.errors import AppError
 
 
@@ -223,33 +225,22 @@ class DailyDataRepository:
     async def upsert_historical_bars(
         self, values: Sequence[dict[str, Any]]
     ) -> None:
-        for chunk in _chunks(values, self._HISTORY_CHUNK_SIZE):
-            statement = insert(DailyBarUnadjusted).values(chunk)
-            excluded = statement.excluded
-            await self.session.execute(
-                statement.on_conflict_do_update(
-                    constraint="pk_daily_bar_unadjusted",
-                    set_={
-                        "symbol": excluded.symbol,
-                        "open": excluded.open,
-                        "high": excluded.high,
-                        "low": excluded.low,
-                        "close": excluded.close,
-                        "previous_close": excluded.previous_close,
-                        "volume": excluded.volume,
-                        "amount": excluded.amount,
-                        "source": excluded.source,
-                        "data_version": excluded.data_version,
-                        "updated_at": excluded.updated_at,
-                    },
-                )
-            )
+        await execute_atomic_batches(
+            self.session,
+            values,
+            batch_size=self._HISTORY_CHUNK_SIZE,
+            statement_factory=_historical_bar_upsert,
+        )
 
     async def add_historical_revisions(
         self, values: Sequence[dict[str, Any]]
     ) -> None:
-        for chunk in _chunks(values, self._HISTORY_CHUNK_SIZE):
-            await self.session.execute(insert(DailyBarRevision).values(chunk))
+        await execute_atomic_batches(
+            self.session,
+            values,
+            batch_size=self._HISTORY_CHUNK_SIZE,
+            statement_factory=lambda chunk: insert(DailyBarRevision).values(chunk),
+        )
 
     async def get_bar_by_symbol_date(
         self, symbol: str, trade_date: date
@@ -483,5 +474,22 @@ def _json_value(value: Any) -> Any:
     return value
 
 
-def _chunks[T](values: Sequence[T], size: int) -> tuple[Sequence[T], ...]:
-    return tuple(values[index : index + size] for index in range(0, len(values), size))
+def _historical_bar_upsert(values: tuple[dict[str, Any], ...]) -> Insert:
+    statement = insert(DailyBarUnadjusted).values(values)
+    excluded = statement.excluded
+    return statement.on_conflict_do_update(
+        constraint="pk_daily_bar_unadjusted",
+        set_={
+            "symbol": excluded.symbol,
+            "open": excluded.open,
+            "high": excluded.high,
+            "low": excluded.low,
+            "close": excluded.close,
+            "previous_close": excluded.previous_close,
+            "volume": excluded.volume,
+            "amount": excluded.amount,
+            "source": excluded.source,
+            "data_version": excluded.data_version,
+            "updated_at": excluded.updated_at,
+        },
+    )

@@ -16,6 +16,7 @@ from long_invest.modules.securities.models import (
     SecurityUniverseSnapshot,
     SecurityUniverseSnapshotItem,
 )
+from long_invest.platform.database.pagination import PageWindow
 from long_invest.platform.errors import AppError
 
 _SECURITY_MASTER_LOCK_KEY = 0x4C4F4E47494E5653
@@ -34,12 +35,9 @@ class SecurityRepository:
         return await self._session.scalar(statement)
 
     async def list(self, *, page: int, page_size: int) -> list[Security]:
-        _validate_page(page, page_size)
+        window = PageWindow(page, page_size)
         result = await self._session.scalars(
-            select(Security)
-            .order_by(Security.symbol)
-            .limit(page_size)
-            .offset((page - 1) * page_size)
+            window.apply(select(Security).order_by(Security.symbol))
         )
         return list(result.all())
 
@@ -50,16 +48,16 @@ class SecurityRepository:
     async def search(
         self, query: str, *, page: int, page_size: int
     ) -> list[Security]:
-        _validate_page(page, page_size)
+        window = PageWindow(page, page_size)
         pattern = f"%{query.strip()}%"
         result = await self._session.scalars(
-            select(Security)
-            .where(
-                or_(Security.symbol.ilike(pattern), Security.name.ilike(pattern))
+            window.apply(
+                select(Security)
+                .where(
+                    or_(Security.symbol.ilike(pattern), Security.name.ilike(pattern))
+                )
+                .order_by(Security.symbol)
             )
-            .order_by(Security.symbol)
-            .limit(page_size)
-            .offset((page - 1) * page_size)
         )
         return list(result.all())
 
@@ -197,8 +195,3 @@ class SecurityRepository:
 
     async def flush(self) -> None:
         await self._session.flush()
-
-
-def _validate_page(page: int, page_size: int) -> None:
-    if page < 1 or page_size < 1 or page_size > 200:
-        raise ValueError("分页参数超出有效范围")

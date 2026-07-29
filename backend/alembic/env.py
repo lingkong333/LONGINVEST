@@ -109,8 +109,11 @@ from long_invest.modules.watchlists.models import Watchlist, WatchlistItem  # no
 from long_invest.platform.audit.models import AuditEvent  # noqa: F401
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.base import Base
+from long_invest.platform.database.registry import table_ownership
 from long_invest.platform.jobs.models import Job, JobItem, JobRun  # noqa: F401
 from long_invest.platform.outbox.models import EventOutbox  # noqa: F401
+
+table_ownership()
 
 config = context.config
 config.set_main_option("sqlalchemy.url", get_settings().database_owner_url)

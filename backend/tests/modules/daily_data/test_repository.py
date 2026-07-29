@@ -6,6 +6,7 @@ from functools import wraps
 from uuid import NAMESPACE_DNS, uuid4, uuid5
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 
 from long_invest.modules.daily_data.contracts import CreateDailyBatch
@@ -82,11 +83,15 @@ class FakeSession:
         self.added = []
         self.begin_nested_calls = 0
         self.scalar_statements = []
+        self.executed_statements = []
 
     async def scalar(self, statement):
         assert statement is not None
         self.scalar_statements.append(statement)
         return self.scalar_results.pop(0) if self.scalar_results else None
+
+    async def execute(self, statement):
+        self.executed_statements.append(statement)
 
     def add(self, value):
         self.added.append(value)
@@ -102,6 +107,23 @@ class FakeSession:
 
 
 SNAPSHOT_ID = uuid4()
+
+
+@async_test
+async def test_historical_revisions_are_sent_in_bounded_batches() -> None:
+    session = FakeSession()
+    repository = DailyDataRepository(session)
+
+    await repository.add_historical_revisions(
+        [{"id": uuid4()} for _ in range(501)]
+    )
+
+    assert len(session.executed_statements) == 2
+    parameter_counts = [
+        len(statement.compile(dialect=postgresql.dialect()).params)
+        for statement in session.executed_statements
+    ]
+    assert parameter_counts == [500, 1]
 
 
 @async_test

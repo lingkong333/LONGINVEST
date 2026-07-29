@@ -12,7 +12,11 @@ from long_invest.modules.auth.dependencies import (
     require_authenticated_request,
     require_verified_write_request,
 )
-from long_invest.modules.providers.contracts import ProviderCode, validate_symbol
+from long_invest.modules.providers.contracts import (
+    ProviderCapability,
+    ProviderCode,
+    validate_symbol,
+)
 from long_invest.modules.providers.service import ProviderService
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
@@ -29,12 +33,8 @@ ReadRequest = Annotated[AuthenticatedRequest, Depends(require_authenticated_requ
 
 
 async def require_provider_write_request(
-    request: Annotated[
-        AuthenticatedRequest, Depends(require_verified_write_request)
-    ],
-    idempotency_key: Annotated[
-        str | None, Header(alias="Idempotency-Key")
-    ] = None,
+    request: Annotated[AuthenticatedRequest, Depends(require_verified_write_request)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> AuthenticatedRequest:
     if idempotency_key is None or not idempotency_key.strip():
         raise AppError(
@@ -51,9 +51,7 @@ async def require_provider_write_request(
     )
 
 
-WriteRequest = Annotated[
-    AuthenticatedRequest, Depends(require_provider_write_request)
-]
+WriteRequest = Annotated[AuthenticatedRequest, Depends(require_provider_write_request)]
 
 
 class SettingsRequest(BaseModel):
@@ -61,12 +59,20 @@ class SettingsRequest(BaseModel):
     confirm: bool
     reason: str = Field(min_length=1, max_length=255)
     expected_version: int = Field(ge=0)
+    capability: ProviderCapability | None = None
     enabled: bool | None = None
     priority: int | None = Field(default=None, ge=0, le=20)
-    concurrency: int | None = Field(default=None, ge=1, le=32)
+    concurrency: int | None = Field(default=None, ge=1)
     rate_per_second: float | None = Field(default=None, gt=0, le=100)
     timeout_seconds: float | None = Field(default=None, gt=0, le=60)
     auto_switch: bool | None = None
+    daily_limit: int | None = Field(default=None, ge=1)
+    min_interval_seconds: float | None = Field(default=None, ge=0, le=3600)
+    total_daily_limit: int | None = Field(default=None, ge=1)
+    reset_timezone: str | None = Field(default=None, min_length=1, max_length=64)
+    total_concurrency: int | None = Field(default=None, ge=1)
+    realtime_reserved: int | None = Field(default=None, ge=0)
+    daily_reserved: int | None = Field(default=None, ge=0)
 
 
 class ConfirmedActionRequest(BaseModel):
@@ -170,6 +176,13 @@ async def health(
     provider_code: ProviderCode, service: ServiceDependency, _request: ReadRequest
 ) -> dict:
     return success_response(data=await service.health(provider_code))
+
+
+@router.get("/{provider_code}/budget")
+async def budget(
+    provider_code: ProviderCode, service: ServiceDependency, _request: ReadRequest
+) -> dict:
+    return success_response(data=await service.budget(provider_code))
 
 
 @router.patch("/{provider_code}/settings")

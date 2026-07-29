@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
+from contextlib import AbstractAsyncContextManager
 from datetime import UTC, datetime
 from ipaddress import ip_address
 from typing import Any, Protocol
@@ -37,6 +38,7 @@ class BrowserProviderHttpClient:
         allowed_hosts: frozenset[str],
         max_response_bytes: int = 2_000_000,
         max_header_bytes: int = 16_384,
+        request_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> None:
         self._sessions = tuple(sessions)
         if not self._sessions:
@@ -45,6 +47,7 @@ class BrowserProviderHttpClient:
         self._max_response_bytes = max_response_bytes
         self._max_header_bytes = max_header_bytes
         self._next_session_index = 0
+        self._request_guard = request_guard
 
     async def request_json(
         self, request: ProviderHttpRequest, *, deadline: datetime
@@ -59,14 +62,15 @@ class BrowserProviderHttpClient:
                 raise ProviderHttpError("PROVIDER_TIMEOUT")
             session = self._next_session()
             try:
-                response = await asyncio.to_thread(
-                    session.get,
-                    request.url,
-                    params=request.params,
-                    headers=request.headers,
-                    timeout=remaining,
-                    allow_redirects=False,
-                )
+                async with self._guard():
+                    response = await asyncio.to_thread(
+                        session.get,
+                        request.url,
+                        params=request.params,
+                        headers=request.headers,
+                        timeout=remaining,
+                        allow_redirects=False,
+                    )
             except CertificateVerifyError as error:
                 raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR") from error
             except RequestException as error:
@@ -74,9 +78,7 @@ class BrowserProviderHttpClient:
                     "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
                 ) from error
             if response.status_code in RETRYABLE_STATUSES:
-                raise ProviderHttpError(
-                    "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
-                )
+                raise ProviderHttpError("PROVIDER_UPSTREAM_TEMPORARY", retryable=True)
             if response.status_code >= 400:
                 raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
             body = bytes(response.content)
@@ -92,10 +94,13 @@ class BrowserProviderHttpClient:
 
     def _next_session(self) -> BrowserSession:
         session = self._sessions[self._next_session_index]
-        self._next_session_index = (self._next_session_index + 1) % len(
-            self._sessions
-        )
+        self._next_session_index = (self._next_session_index + 1) % len(self._sessions)
         return session
+
+    def _guard(self) -> AbstractAsyncContextManager[None]:
+        if self._request_guard is None:
+            return _NullRequestGuard()
+        return self._request_guard()
 
     def _validate_target(self, url: str) -> None:
         parsed = urlsplit(url)
@@ -147,6 +152,7 @@ def create_browser_json_client(
     host: str,
     resolve_addresses: Iterable[str],
     max_response_bytes: int = 2_000_000,
+    request_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> BrowserProviderHttpClient:
     addresses = tuple(dict.fromkeys(resolve_addresses))
     for address in addresses:
@@ -164,4 +170,13 @@ def create_browser_json_client(
         sessions,
         allowed_hosts=frozenset({host}),
         max_response_bytes=max_response_bytes,
+        request_guard=request_guard,
     )
+
+
+class _NullRequestGuard:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: Any) -> None:
+        del args

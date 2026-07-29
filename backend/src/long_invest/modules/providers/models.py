@@ -1,10 +1,11 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 from uuid import UUID, uuid4
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     Float,
     Integer,
@@ -48,7 +49,9 @@ class ProviderCapabilitySetting(Base):
             name="provider_code_supported",
         ),
         CheckConstraint("priority >= 0", name="priority_nonnegative"),
-        CheckConstraint("concurrency BETWEEN 1 AND 32", name="concurrency_range"),
+        CheckConstraint("concurrency >= 1", name="concurrency_positive"),
+        CheckConstraint("daily_limit >= 1", name="daily_limit_positive"),
+        CheckConstraint("min_interval_seconds >= 0", name="min_interval_nonnegative"),
         CheckConstraint("rate_per_second > 0", name="rate_positive"),
         CheckConstraint("timeout_seconds > 0", name="timeout_positive"),
     )
@@ -64,6 +67,73 @@ class ProviderCapabilitySetting(Base):
     rate_per_second: Mapped[float] = mapped_column(Float, nullable=False)
     timeout_seconds: Mapped[float] = mapped_column(Float, nullable=False)
     auto_switch: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    daily_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=50_000)
+    min_interval_seconds: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.5
+    )
+
+
+class ProviderBudgetPolicy(Base):
+    __tablename__ = "provider_budget_policy"
+    __table_args__ = (
+        UniqueConstraint("config_version", "provider_code"),
+        CheckConstraint("daily_limit >= 1", name="daily_limit_positive"),
+        CheckConstraint("max_concurrency >= 1", name="max_concurrency_positive"),
+        CheckConstraint("realtime_reserved >= 0", name="realtime_reserved_nonnegative"),
+        CheckConstraint("daily_reserved >= 0", name="daily_reserved_nonnegative"),
+        CheckConstraint(
+            "realtime_reserved + daily_reserved < daily_limit",
+            name="reserved_below_limit",
+        ),
+    )
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    config_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    provider_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    daily_limit: Mapped[int] = mapped_column(Integer, nullable=False, default=50_000)
+    reset_timezone: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="Asia/Shanghai"
+    )
+    max_concurrency: Mapped[int] = mapped_column(Integer, nullable=False, default=8)
+    realtime_reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=500)
+    daily_reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=500)
+
+
+class ProviderBudgetUsage(Base):
+    __tablename__ = "provider_budget_usage"
+    __table_args__ = (
+        UniqueConstraint("provider_code", "capability", "budget_date"),
+        CheckConstraint("used_count >= 0", name="used_count_nonnegative"),
+    )
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    provider_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    capability: Mapped[str] = mapped_column(String(64), nullable=False)
+    budget_date: Mapped[date] = mapped_column(Date, nullable=False)
+    used_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_request_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    latest_limit_reason: Mapped[str | None] = mapped_column(String(100))
+    latest_limited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ProviderRequestLease(Base):
+    __tablename__ = "provider_request_lease"
+    __table_args__ = (UniqueConstraint("token"),)
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    provider_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    capability: Mapped[str] = mapped_column(String(64), nullable=False)
+    acquired_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ProviderHealthState(Base):

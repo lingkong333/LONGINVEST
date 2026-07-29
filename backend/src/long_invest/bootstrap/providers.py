@@ -11,6 +11,7 @@ from long_invest.modules.providers.browser_http_client import (
     BrowserProviderHttpClient,
     create_browser_json_client,
 )
+from long_invest.modules.providers.budget import ProviderRequestBudget
 from long_invest.modules.providers.contracts import ProviderCode
 from long_invest.modules.providers.eastmoney import EastmoneyProvider
 from long_invest.modules.providers.http_client import (
@@ -81,9 +82,7 @@ class ProviderEventAdapter:
         idempotency_key: str,
     ) -> None:
         aggregate_id = str(
-            payload.get("circuit_id")
-            or payload.get("provider_code")
-            or "providers"
+            payload.get("circuit_id") or payload.get("provider_code") or "providers"
         )
         digest = hashlib.sha256(idempotency_key.encode()).hexdigest()
         await self._writer.append(
@@ -104,6 +103,7 @@ class ProviderResources:
     redis: Redis
     runtime: RedisProviderRuntimeState
     providers: dict[ProviderCode, object]
+    budget: ProviderRequestBudget
 
     async def close(self) -> None:
         await self.http_client.aclose()
@@ -116,6 +116,8 @@ _resources: ProviderResources | None = None
 
 def build_history_http_client(
     settings: AppSettings,
+    *,
+    budget: ProviderRequestBudget | None = None,
 ) -> BrowserProviderHttpClient | PlaywrightProviderHttpClient:
     if settings.eastmoney_history_transport == "playwright":
         return create_playwright_json_client(
@@ -125,9 +127,8 @@ def build_history_http_client(
                 for value in settings.eastmoney_history_resolve_ips.split(",")
                 if value.strip()
             ),
-            minimum_interval_seconds=(
-                settings.eastmoney_history_min_interval_seconds
-            ),
+            minimum_interval_seconds=(settings.eastmoney_history_min_interval_seconds),
+            request_guard=budget.guard if budget else None,
         )
     return create_browser_json_client(
         host="push2his.eastmoney.com",
@@ -136,6 +137,7 @@ def build_history_http_client(
             for value in settings.eastmoney_history_resolve_ips.split(",")
             if value.strip()
         ),
+        request_guard=budget.guard if budget else None,
     )
 
 
@@ -143,6 +145,7 @@ def get_provider_resources() -> ProviderResources:
     global _resources
     if _resources is None:
         client = create_async_client()
+        budget = ProviderRequestBudget(get_database())
         provider_http = ProviderHttpClient(
             client,
             allowed_hosts=frozenset(
@@ -156,15 +159,17 @@ def get_provider_resources() -> ProviderResources:
                     "vip.stock.finance.sina.com.cn",
                 }
             ),
+            request_guard=budget.guard,
         )
         settings = get_settings()
-        history_http = build_history_http_client(settings)
+        history_http = build_history_http_client(settings, budget=budget)
         redis = Redis.from_url(settings.redis_url)
         _resources = ProviderResources(
             http_client=client,
             history_http_client=history_http,
             redis=redis,
             runtime=RedisProviderRuntimeState(redis),
+            budget=budget,
             providers={
                 ProviderCode.EASTMONEY: EastmoneyProvider(
                     provider_http,
@@ -215,4 +220,5 @@ def build_provider_service(
         active.providers,
         repository,
         active.runtime,
+        active.budget,
     )

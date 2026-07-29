@@ -5,8 +5,10 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from long_invest.modules.auth.audit import AuditContext
+from long_invest.modules.providers.budget import ProviderRequestBudget
 from long_invest.modules.providers.contracts import (
     CorporateActionRecord,
     CorporateActionRequest,
@@ -36,6 +38,7 @@ class ProviderService:
         providers: dict[ProviderCode, Any],
         repository: ProviderRepositoryPort,
         runtime: ProviderRuntimeStatePort,
+        budget: ProviderRequestBudget | None = None,
     ) -> None:
         if repository is None or runtime is None:
             raise ValueError("provider service requires persistent and shared state")
@@ -43,6 +46,7 @@ class ProviderService:
         self._providers = providers
         self._repository = repository
         self._runtime = runtime
+        self._budget = budget
 
     async def list_providers(self) -> list[dict[str, Any]]:
         codes = await self._repository.list_provider_codes()
@@ -62,9 +66,7 @@ class ProviderService:
         symbols: tuple[str, ...],
         deadline: datetime,
     ) -> ProviderBatchResult[RealtimeQuote]:
-        return await self._router.realtime_quotes_from(
-            provider_code, symbols, deadline
-        )
+        return await self._router.realtime_quotes_from(provider_code, symbols, deadline)
 
     async def daily_bars(
         self,
@@ -98,6 +100,16 @@ class ProviderService:
         self._require(provider_code)
         return await self._repository.health(provider_code)
 
+    async def budget(self, provider_code: ProviderCode) -> dict[str, Any]:
+        self._require(provider_code)
+        if self._budget is None:
+            raise AppError(
+                code="PROVIDER_BUDGET_UNAVAILABLE",
+                message="数据源请求预算暂不可用",
+                status_code=503,
+            )
+        return await self._budget.snapshot(provider_code)
+
     async def update_settings(
         self,
         provider_code: ProviderCode,
@@ -109,6 +121,7 @@ class ProviderService:
     ) -> dict[str, Any]:
         provider = self._require(provider_code)
         self._require_complete_audit(audit_context)
+        await self._validate_budget_settings(provider_code, settings)
         return await self._repository.mutate_settings(
             provider_code,
             provider.capabilities,
@@ -117,6 +130,38 @@ class ProviderService:
             reason=reason,
             context=audit_context,
         )
+
+    async def _validate_budget_settings(
+        self, provider_code: ProviderCode, settings: dict[str, Any]
+    ) -> None:
+        summary = await self._repository.provider_summary(provider_code)
+        current = summary.get("budget_policy", {})
+        total = int(
+            settings.get("total_daily_limit", current.get("total_daily_limit", 50_000))
+        )
+        realtime = int(
+            settings.get("realtime_reserved", current.get("realtime_reserved", 500))
+        )
+        daily = int(settings.get("daily_reserved", current.get("daily_reserved", 500)))
+        timezone = str(
+            settings.get(
+                "reset_timezone", current.get("reset_timezone", "Asia/Shanghai")
+            )
+        )
+        try:
+            ZoneInfo(timezone)
+        except ZoneInfoNotFoundError as error:
+            raise AppError(
+                code="PROVIDER_RESET_TIMEZONE_INVALID",
+                message="额度重置时区无效",
+                status_code=422,
+            ) from error
+        if realtime + daily >= total:
+            raise AppError(
+                code="PROVIDER_RESERVED_BUDGET_INVALID",
+                message="实时行情和当日日线的保留额度之和必须小于总额度",
+                status_code=422,
+            )
 
     async def list_circuits(self) -> list[dict[str, Any]]:
         return await self._repository.circuits()
@@ -236,9 +281,7 @@ class ProviderService:
         circuit = await self._repository.circuit(circuit_id)
         capability = ProviderCapability(circuit["capability"])
         probe_timeout_seconds = (
-            30
-            if capability is ProviderCapability.HISTORICAL_DAILY_UNADJUSTED
-            else 10
+            30 if capability is ProviderCapability.HISTORICAL_DAILY_UNADJUSTED else 10
         )
         setting = ProviderRouteSetting(
             provider=ProviderCode(circuit["provider_code"]),
@@ -379,8 +422,4 @@ class ProviderService:
             Decimal("0.02"),
             max(abs(eastmoney.price), abs(sina.price)) * Decimal("0.002"),
         )
-        return (
-            "CONFLICT"
-            if abs(eastmoney.price - sina.price) > tolerance
-            else "MATCH"
-        )
+        return "CONFLICT" if abs(eastmoney.price - sina.price) > tolerance else "MATCH"

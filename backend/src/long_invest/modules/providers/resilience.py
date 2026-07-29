@@ -10,6 +10,10 @@ from time import monotonic
 from typing import Any, Protocol
 from uuid import uuid4
 
+from long_invest.modules.providers.budget import (
+    enter_request_context,
+    exit_request_context,
+)
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 
 
@@ -607,9 +611,7 @@ class RedisProviderRuntimeState:
         return 1
         """
         try:
-            await self._redis.eval(
-                script, 1, self._circuit_key(setting)
-            )
+            await self._redis.eval(script, 1, self._circuit_key(setting))
         except Exception:
             await self._fallback.force_half_open(setting)
 
@@ -662,11 +664,7 @@ class ProviderInvocationPipeline:
             raise ProviderCallError("PROVIDER_CIRCUIT_OPEN")
         half_open_snapshot = await self._runtime.circuit_snapshot(setting)
         probe_token = half_open_snapshot.get("probe_token")
-        if (
-            observe
-            and half_open_snapshot.get("state") == "HALF_OPEN"
-            and probe_token
-        ):
+        if observe and half_open_snapshot.get("state") == "HALF_OPEN" and probe_token:
             await self._observer.record_half_open(
                 setting,
                 snapshot=half_open_snapshot,
@@ -694,7 +692,11 @@ class ProviderInvocationPipeline:
                 if timeout <= 0:
                     raise TimeoutError("provider deadline expired")
                 async with asyncio.timeout(timeout):
-                    result = await operation()
+                    context_token = enter_request_context(setting)
+                    try:
+                        result = await operation()
+                    finally:
+                        exit_request_context(context_token)
             except Exception as error:
                 await self._runtime.record_failure(setting)
                 if observe:

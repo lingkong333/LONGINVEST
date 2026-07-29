@@ -4,8 +4,8 @@ import asyncio
 import json
 import re
 from collections import OrderedDict
-from collections.abc import Mapping
-from contextlib import suppress
+from collections.abc import Callable, Mapping
+from contextlib import AbstractAsyncContextManager, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from ipaddress import ip_address
@@ -421,6 +421,7 @@ class PlaywrightProviderHttpClient:
         minimum_interval_seconds: float = 3,
         max_response_bytes: int = 2_000_000,
         max_header_bytes: int = 16_384,
+        request_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> None:
         self._fetcher = fetcher
         self._allowed_hosts = allowed_hosts
@@ -429,6 +430,7 @@ class PlaywrightProviderHttpClient:
         self._max_header_bytes = max_header_bytes
         self._request_lock = asyncio.Lock()
         self._last_completed_at: float | None = None
+        self._request_guard = request_guard
 
     async def request_json(
         self, request: ProviderHttpRequest, *, deadline: datetime
@@ -445,11 +447,12 @@ class PlaywrightProviderHttpClient:
                 if remaining <= 0:
                     raise ProviderHttpError("PROVIDER_TIMEOUT")
                 try:
-                    response = await self._fetcher.fetch(
-                        url,
-                        headers=request.headers,
-                        timeout_ms=remaining * 1000,
-                    )
+                    async with self._guard():
+                        response = await self._fetcher.fetch(
+                            url,
+                            headers=request.headers,
+                            timeout_ms=remaining * 1000,
+                        )
                 finally:
                     self._last_completed_at = monotonic()
             if response.status_code in RETRYABLE_STATUSES:
@@ -464,6 +467,11 @@ class PlaywrightProviderHttpClient:
 
     async def close(self) -> None:
         await self._fetcher.close()
+
+    def _guard(self) -> AbstractAsyncContextManager[None]:
+        if self._request_guard is None:
+            return _NullRequestGuard()
+        return self._request_guard()
 
     async def _wait_for_turn(self, deadline: datetime) -> None:
         if self._last_completed_at is None:
@@ -537,6 +545,7 @@ def create_playwright_json_client(
     resolve_addresses: tuple[str, ...] = (),
     minimum_interval_seconds: float = 3,
     max_response_bytes: int = 2_000_000,
+    request_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
 ) -> PlaywrightProviderHttpClient:
     allowed_hosts = frozenset({host})
     addresses = tuple(dict.fromkeys(resolve_addresses))
@@ -550,4 +559,13 @@ def create_playwright_json_client(
         allowed_hosts=allowed_hosts,
         minimum_interval_seconds=minimum_interval_seconds,
         max_response_bytes=max_response_bytes,
+        request_guard=request_guard,
     )
+
+
+class _NullRequestGuard:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: Any) -> None:
+        del args

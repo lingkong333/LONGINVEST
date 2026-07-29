@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import Callable
+from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Protocol
@@ -55,11 +57,13 @@ class ProviderHttpClient:
         allowed_hosts: frozenset[str],
         max_response_bytes: int = 2_000_000,
         max_header_bytes: int = 16_384,
+        request_guard: Callable[[], AbstractAsyncContextManager[None]] | None = None,
     ) -> None:
         self._client = client
         self._allowed_hosts = allowed_hosts
         self._max_response_bytes = max_response_bytes
         self._max_header_bytes = max_header_bytes
+        self._request_guard = request_guard
 
     async def request_json(
         self, request: ProviderHttpRequest, *, deadline: datetime
@@ -73,25 +77,28 @@ class ProviderHttpClient:
             if remaining <= 0:
                 raise ProviderHttpError("PROVIDER_TIMEOUT")
             try:
-                async with asyncio.timeout(remaining):
-                    async with self._client.stream(
-                        "GET",
-                        request.url,
-                        params=request.params,
-                        headers=request.headers,
-                    ) as response:
-                        if response.status_code in RETRYABLE_STATUSES:
-                            raise ProviderHttpError(
-                                "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
-                            )
-                        if response.status_code >= 400:
-                            raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
-                        self._validate_headers(response, JSON_CONTENT_TYPES)
-                        body = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            body.extend(chunk)
-                            if len(body) > self._max_response_bytes:
-                                raise ProviderHttpError("PROVIDER_RESPONSE_TOO_LARGE")
+                async with self._guard():
+                    async with asyncio.timeout(remaining):
+                        async with self._client.stream(
+                            "GET",
+                            request.url,
+                            params=request.params,
+                            headers=request.headers,
+                        ) as response:
+                            if response.status_code in RETRYABLE_STATUSES:
+                                raise ProviderHttpError(
+                                    "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
+                                )
+                            if response.status_code >= 400:
+                                raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
+                            self._validate_headers(response, JSON_CONTENT_TYPES)
+                            body = bytearray()
+                            async for chunk in response.aiter_bytes():
+                                body.extend(chunk)
+                                if len(body) > self._max_response_bytes:
+                                    raise ProviderHttpError(
+                                        "PROVIDER_RESPONSE_TOO_LARGE"
+                                    )
             except TimeoutError as error:
                 raise ProviderHttpError("PROVIDER_TIMEOUT", retryable=True) from error
             return self._decode(bytes(body))
@@ -112,35 +119,38 @@ class ProviderHttpClient:
             if remaining <= 0:
                 raise ProviderHttpError("PROVIDER_TIMEOUT")
             try:
-                async with asyncio.timeout(remaining):
-                    async with self._client.stream(
-                        "GET",
-                        request.url,
-                        params=request.params,
-                        headers=request.headers,
-                    ) as response:
-                        if response.status_code in RETRYABLE_STATUSES:
-                            raise ProviderHttpError(
-                                "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
+                async with self._guard():
+                    async with asyncio.timeout(remaining):
+                        async with self._client.stream(
+                            "GET",
+                            request.url,
+                            params=request.params,
+                            headers=request.headers,
+                        ) as response:
+                            if response.status_code in RETRYABLE_STATUSES:
+                                raise ProviderHttpError(
+                                    "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
+                                )
+                            if response.status_code >= 400:
+                                raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
+                            self._validate_headers(
+                                response,
+                                frozenset(
+                                    {
+                                        "text/plain",
+                                        "application/json",
+                                        "application/javascript",
+                                        "text/javascript",
+                                    }
+                                ),
                             )
-                        if response.status_code >= 400:
-                            raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
-                        self._validate_headers(
-                            response,
-                            frozenset(
-                                {
-                                    "text/plain",
-                                    "application/json",
-                                    "application/javascript",
-                                    "text/javascript",
-                                }
-                            ),
-                        )
-                        body = bytearray()
-                        async for chunk in response.aiter_bytes():
-                            body.extend(chunk)
-                            if len(body) > self._max_response_bytes:
-                                raise ProviderHttpError("PROVIDER_RESPONSE_TOO_LARGE")
+                            body = bytearray()
+                            async for chunk in response.aiter_bytes():
+                                body.extend(chunk)
+                                if len(body) > self._max_response_bytes:
+                                    raise ProviderHttpError(
+                                        "PROVIDER_RESPONSE_TOO_LARGE"
+                                    )
             except TimeoutError as error:
                 raise ProviderHttpError("PROVIDER_TIMEOUT", retryable=True) from error
             lowered = bytes(body).lower()
@@ -154,6 +164,11 @@ class ProviderHttpClient:
                 raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
 
         return await run_with_retry(perform, deadline=deadline)
+
+    def _guard(self) -> AbstractAsyncContextManager[None]:
+        if self._request_guard is None:
+            return _NullRequestGuard()
+        return self._request_guard()
 
     def _validate_target(self, url: str) -> None:
         parsed = urlsplit(url)
@@ -196,3 +211,11 @@ class ProviderHttpClient:
         if not isinstance(value, dict):
             raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
         return value
+
+
+class _NullRequestGuard:
+    async def __aenter__(self) -> None:
+        return None
+
+    async def __aexit__(self, *args: Any) -> None:
+        del args

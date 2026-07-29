@@ -50,6 +50,46 @@ async def test_client_reuses_async_client_and_accepts_bounded_json() -> None:
 
 
 @async_test
+async def test_each_retry_claims_and_releases_its_own_request_budget() -> None:
+    attempts = 0
+    entered = 0
+    exited = 0
+
+    async def handler(_: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(502, headers={"content-type": "application/json"})
+        return httpx.Response(
+            200, headers={"content-type": "application/json"}, json={"ok": True}
+        )
+
+    class Guard:
+        async def __aenter__(self):
+            nonlocal entered
+            entered += 1
+
+        async def __aexit__(self, *args):
+            nonlocal exited
+            del args
+            exited += 1
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as raw:
+        client = ProviderHttpClient(
+            raw,
+            allowed_hosts=frozenset({"x.test"}),
+            request_guard=Guard,
+        )
+        result = await client.request_json(
+            ProviderHttpRequest("https://x.test/api"),
+            deadline=datetime.now(UTC) + timedelta(seconds=2),
+        )
+
+    assert result == {"ok": True}
+    assert (attempts, entered, exited) == (2, 2, 2)
+
+
+@async_test
 @pytest.mark.parametrize(
     "url", ["http://push2.example.test/api", "https://evil.test/api"]
 )

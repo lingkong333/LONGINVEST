@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.models import (
+    ProviderBudgetPolicy,
     ProviderCapabilitySetting,
     ProviderCircuitHistory,
     ProviderCircuitState,
@@ -184,14 +185,8 @@ class ProviderRepository:
                 select(ProviderCapabilitySetting)
                 .join(
                     latest,
-                    (
-                        ProviderCapabilitySetting.provider_code
-                        == latest.c.provider_code
-                    )
-                    & (
-                        ProviderCapabilitySetting.config_version
-                        == latest.c.version
-                    ),
+                    (ProviderCapabilitySetting.provider_code == latest.c.provider_code)
+                    & (ProviderCapabilitySetting.config_version == latest.c.version),
                 )
                 .where(ProviderCapabilitySetting.capability == capability.value)
                 .order_by(ProviderCapabilitySetting.priority)
@@ -215,11 +210,20 @@ class ProviderRepository:
                     status_code=404,
                 )
             settings = await self._settings(provider, current.version)
+            policy = await self._session.scalar(
+                select(ProviderBudgetPolicy).where(
+                    ProviderBudgetPolicy.provider_code == provider.value,
+                    ProviderBudgetPolicy.config_version == current.version,
+                )
+            )
             return {
                 "provider_code": provider.value,
                 "version": current.version,
                 "reason": current.reason,
                 "capabilities": [self._setting_dict(row) for row in settings],
+                "budget_policy": self._policy_dict(policy)
+                if policy is not None
+                else self._default_policy(),
             }
 
     async def health(self, provider: ProviderCode) -> list[dict[str, Any]]:
@@ -279,6 +283,8 @@ class ProviderRepository:
             "reason": reason,
         }
         digest = request_digest(payload)
+        changes = dict(changes)
+        target_capability = changes.pop("capability", None)
         async with self._session.begin():
             await self._session.execute(
                 text("SELECT pg_advisory_xact_lock(hashtext(:provider_key))"),
@@ -311,6 +317,37 @@ class ProviderRepository:
                 ProviderCapability(row.capability): self._setting_dict(row)
                 for row in previous_rows
             }
+            previous_policy_row = await self._session.scalar(
+                select(ProviderBudgetPolicy).where(
+                    ProviderBudgetPolicy.provider_code == provider.value,
+                    ProviderBudgetPolicy.config_version == current_version,
+                )
+            )
+            previous_policy = (
+                self._policy_dict(previous_policy_row)
+                if previous_policy_row is not None
+                else self._default_policy()
+            )
+            policy_keys = {
+                "total_daily_limit",
+                "reset_timezone",
+                "total_concurrency",
+                "realtime_reserved",
+                "daily_reserved",
+            }
+            capability_changes = {
+                key: value for key, value in changes.items() if key not in policy_keys
+            }
+            if (
+                "rate_per_second" in capability_changes
+                and "min_interval_seconds" not in capability_changes
+            ):
+                capability_changes["min_interval_seconds"] = (
+                    1.0 / capability_changes["rate_per_second"]
+                )
+            policy_changes = {
+                key: value for key, value in changes.items() if key in policy_keys
+            }
             next_version = current_version + 1
             next_config = ProviderConfigVersion(
                 provider_code=provider.value,
@@ -318,6 +355,27 @@ class ProviderRepository:
                 reason=reason,
             )
             self._session.add(next_config)
+            self._session.add(
+                ProviderBudgetPolicy(
+                    config_version=next_version,
+                    provider_code=provider.value,
+                    daily_limit=policy_changes.get(
+                        "total_daily_limit", previous_policy["total_daily_limit"]
+                    ),
+                    reset_timezone=policy_changes.get(
+                        "reset_timezone", previous_policy["reset_timezone"]
+                    ),
+                    max_concurrency=policy_changes.get(
+                        "total_concurrency", previous_policy["total_concurrency"]
+                    ),
+                    realtime_reserved=policy_changes.get(
+                        "realtime_reserved", previous_policy["realtime_reserved"]
+                    ),
+                    daily_reserved=policy_changes.get(
+                        "daily_reserved", previous_policy["daily_reserved"]
+                    ),
+                )
+            )
             after_capabilities: list[dict[str, Any]] = []
             for capability in sorted(capabilities, key=lambda item: item.value):
                 values = {
@@ -327,8 +385,14 @@ class ProviderRepository:
                     "rate_per_second": 2.0,
                     "timeout_seconds": 5.0,
                     "auto_switch": True,
+                    "daily_limit": 50_000,
+                    "min_interval_seconds": 0.5,
                     **previous.get(capability, {}),
-                    **changes,
+                    **(
+                        capability_changes
+                        if target_capability in (None, capability.value)
+                        else {}
+                    ),
                 }
                 values.pop("capability", None)
                 row = ProviderCapabilitySetting(
@@ -343,7 +407,15 @@ class ProviderRepository:
                 "version": current_version,
                 "capabilities": list(previous.values()),
             }
-            after = {"version": next_version, "capabilities": after_capabilities}
+            after_policy = {
+                **previous_policy,
+                **policy_changes,
+            }
+            after = {
+                "version": next_version,
+                "capabilities": after_capabilities,
+                "budget_policy": after_policy,
+            }
             self._session.add(
                 self._mutation(
                     context,
@@ -749,9 +821,7 @@ class ProviderRepository:
             else:
                 health.status = "HALF_OPEN"
                 health.consecutive_failures = int(
-                    snapshot.get(
-                        "consecutive_failures", snapshot.get("failures", 0)
-                    )
+                    snapshot.get("consecutive_failures", snapshot.get("failures", 0))
                 )
 
             circuit = await self._session.scalar(
@@ -776,9 +846,7 @@ class ProviderRepository:
             else:
                 circuit.state = "HALF_OPEN"
                 circuit.consecutive_failures = int(
-                    snapshot.get(
-                        "consecutive_failures", snapshot.get("failures", 0)
-                    )
+                    snapshot.get("consecutive_failures", snapshot.get("failures", 0))
                 )
                 circuit.cooldown_index = int(
                     snapshot.get("cooldown_index", snapshot.get("level", 0))
@@ -924,6 +992,28 @@ class ProviderRepository:
             "rate_per_second": row.rate_per_second,
             "timeout_seconds": row.timeout_seconds,
             "auto_switch": row.auto_switch,
+            "daily_limit": row.daily_limit,
+            "min_interval_seconds": row.min_interval_seconds,
+        }
+
+    @staticmethod
+    def _default_policy() -> dict[str, Any]:
+        return {
+            "total_daily_limit": 50_000,
+            "reset_timezone": "Asia/Shanghai",
+            "total_concurrency": 8,
+            "realtime_reserved": 500,
+            "daily_reserved": 500,
+        }
+
+    @staticmethod
+    def _policy_dict(row: ProviderBudgetPolicy) -> dict[str, Any]:
+        return {
+            "total_daily_limit": row.daily_limit,
+            "reset_timezone": row.reset_timezone,
+            "total_concurrency": row.max_concurrency,
+            "realtime_reserved": row.realtime_reserved,
+            "daily_reserved": row.daily_reserved,
         }
 
     @staticmethod

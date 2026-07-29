@@ -18,7 +18,7 @@ def test_historical_partition_migration_is_the_single_head() -> None:
 
     heads = ScriptDirectory.from_config(config).get_heads()
 
-    assert heads == ["20260729_0030"]
+    assert heads == ["20260729_0031"]
 
 
 def test_historical_partition_migration_covers_the_a_share_history_window() -> None:

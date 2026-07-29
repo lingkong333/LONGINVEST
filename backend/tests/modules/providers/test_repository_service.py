@@ -204,6 +204,7 @@ async def test_settings_persists_history_audit_outbox_atomically() -> None:
     assert {item.__tablename__ for item in session.added} == {
         "provider_config_version",
         "provider_capability_setting",
+        "provider_budget_policy",
         "provider_mutation_request",
     }
     assert audit.calls[0]["context"].trusted_ip == "127.0.0.1"

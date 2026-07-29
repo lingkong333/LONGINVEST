@@ -30,6 +30,15 @@ class FakeService:
     async def health(self, provider_code):
         return []
 
+    async def budget(self, provider_code):
+        return {
+            "provider_code": provider_code.value,
+            "used": 12,
+            "remaining": 49_988,
+            "reset_at": "2026-07-30T00:00:00+08:00",
+            "latest_limit_reason": None,
+        }
+
     async def update_settings(
         self, provider_code, settings, *, expected_version, reason, audit_context
     ):
@@ -83,7 +92,7 @@ def app_client(service: FakeService) -> TestClient:
     return TestClient(app, raise_server_exceptions=False)
 
 
-def test_api_defines_exact_v31_nine_routes() -> None:
+def test_api_defines_provider_routes() -> None:
     paths = {
         (method, route.path) for route in router.routes for method in route.methods
     }
@@ -92,6 +101,7 @@ def test_api_defines_exact_v31_nine_routes() -> None:
         ("GET", "/api/v1/providers/{provider_code}"),
         ("GET", "/api/v1/providers/{provider_code}/capabilities"),
         ("GET", "/api/v1/providers/{provider_code}/health"),
+        ("GET", "/api/v1/providers/{provider_code}/budget"),
         ("PATCH", "/api/v1/providers/{provider_code}/settings"),
         ("GET", "/api/v1/providers/circuits"),
         ("POST", "/api/v1/providers/circuits/{circuit_id}/probe"),
@@ -111,6 +121,14 @@ def test_read_api_uses_authenticated_dependency() -> None:
         "allowed_actions": ["UPDATE_SETTINGS", "QUOTE_DIAGNOSTICS"],
     }
     assert circuits.json()["data"][0]["allowed_actions"] == ["PROBE", "RESET"]
+
+
+def test_budget_api_returns_current_usage_and_reset_time() -> None:
+    response = app_client(FakeService()).get("/api/v1/providers/EASTMONEY/budget")
+
+    assert response.status_code == 200
+    assert response.json()["data"]["used"] == 12
+    assert response.json()["data"]["remaining"] == 49_988
 
 
 def test_settings_reject_unsafe_fields_and_require_confirmation_reason() -> None:
@@ -144,16 +162,27 @@ def test_settings_accept_only_safe_fields_and_forward_idempotent_audit_context()
             "confirm": True,
             "reason": "planned adjustment",
             "expected_version": 1,
+            "capability": "HISTORICAL_DAILY_UNADJUSTED",
             "enabled": True,
             "priority": 1,
-            "concurrency": 2,
+            "concurrency": 64,
             "rate_per_second": 3,
             "timeout_seconds": 4,
             "auto_switch": True,
+            "daily_limit": 20_000,
+            "min_interval_seconds": 0.5,
+            "total_daily_limit": 50_000,
+            "realtime_reserved": 500,
+            "daily_reserved": 500,
         },
         headers={"Idempotency-Key": "explicit-idem"},
     )
     assert response.status_code == 200
+    assert service.settings_call[1]["concurrency"] == 64
+    assert (
+        service.settings_call[1]["capability"].value
+        == "HISTORICAL_DAILY_UNADJUSTED"
+    )
     assert service.settings_call[2:] == (
         1,
         "planned adjustment",

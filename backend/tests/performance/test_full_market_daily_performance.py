@@ -567,11 +567,12 @@ async def test_startup_recovery_uses_one_job_for_two_dates_without_job_items() -
         assert claim is not None
 
         provider = SnapshotProviderService(symbols, trade_dates[0])
-        result = await DailyMarketRecoveryJob(
+        handler = DailyMarketRecoveryJob(
             database,
             provider_service_factory=lambda _session: provider,
             now_provider=lambda: now,
-        )(
+        )
+        result = await handler(
             JobExecutionContext(
                 job_id=claim.job_id,
                 fence_token=claim.lease_token,
@@ -617,7 +618,16 @@ async def test_startup_recovery_uses_one_job_for_two_dates_without_job_items() -
                     ).where(DailyBarStage.batch_id.in_(batch_ids))
                 )
             )
+        resumed = await handler(
+            JobExecutionContext(
+                job_id=claim.job_id,
+                fence_token=claim.lease_token,
+                config=claim.config_snapshot,
+                checkpoint=stored_job.checkpoint,
+            )
+        )
         assert result.success is True
+        assert resumed.data["batch_ids"] == result.data["batch_ids"]
         assert [item.trading_date for item in batches] == list(trade_dates)
         assert all(item.status == "SUCCEEDED" for item in batches), {
             "batches": [

@@ -482,7 +482,13 @@ class DailyMarketRecoveryJob:
                 message="日线恢复任务检查点超过日期范围",
                 retryable=False,
             )
-        summaries = []
+        summaries = await self._completed_summaries(trade_dates[:date_index])
+        if summaries is None:
+            return JobResult.failure(
+                code="DAILY_RECOVERY_CHECKPOINT_INVALID",
+                message="日线恢复任务已完成日期缺少终态批次",
+                retryable=False,
+            )
         for current_index in range(date_index, len(trade_dates)):
             trading_date = trade_dates[current_index]
             summary = await self._recover_date(
@@ -526,6 +532,26 @@ class DailyMarketRecoveryJob:
         if partial:
             return JobResult(True, "PARTIAL", "缺失交易日日线部分恢复", False, data)
         return JobResult.success_result(data=data, message="缺失交易日日线恢复完成")
+
+    async def _completed_summaries(
+        self, trade_dates: tuple[date, ...]
+    ) -> list[DailyBatchSummary] | None:
+        terminal = {
+            DailyBatchStatus.SUCCEEDED,
+            DailyBatchStatus.PARTIAL,
+            DailyBatchStatus.FAILED,
+        }
+        summaries: list[DailyBatchSummary] = []
+        async with self._database.session() as session:
+            repository = DailyDataRepository(session)
+            for trading_date in trade_dates:
+                batch = await repository.get_batch_by_idempotency_key(
+                    f"daily-recovery:{trading_date.isoformat()}"
+                )
+                if batch is None or DailyBatchStatus(batch.status) not in terminal:
+                    return None
+                summaries.append(_summary_from_model(batch))
+        return summaries
 
     async def _recover_date(
         self,

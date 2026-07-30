@@ -379,6 +379,39 @@ async def test_successful_batch_commits_valid_bar_and_completed_event() -> None:
 
 
 @async_test
+async def test_provider_source_metadata_is_not_treated_as_price_schema() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command())
+    fetched = _stage()
+    await service.stage(
+        batch.id,
+        StageDailyBar(
+            symbol=fetched.symbol,
+            security_id=fetched.security_id,
+            trading_date=fetched.trading_date,
+            status=fetched.status,
+            provider_payload={
+                **dict(fetched.provider_payload),
+                "source_identity": {
+                    "adapter": "HTTPX",
+                    "upstream": "EASTMONEY",
+                    "interface": "market-snapshot",
+                    "capability": "DAILY_BAR_UNADJUSTED",
+                    "algorithm_version": "raw-v1",
+                },
+                "collected_at": NOW.isoformat(),
+            },
+            received_at=fetched.received_at,
+        ),
+    )
+
+    result = await _validate_and_commit(service, batch.id)
+
+    assert result.status is DailyBatchStatus.SUCCEEDED
+
+
+@async_test
 async def test_explained_missing_does_not_degrade_batch() -> None:
     repo = FakeRepository()
     service = _service(repo)

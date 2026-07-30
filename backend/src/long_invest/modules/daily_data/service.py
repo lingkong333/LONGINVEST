@@ -396,6 +396,8 @@ class DailyDataService:
             has_known_corporate_action = bool(
                 payload.pop("has_known_corporate_action", False)
             )
+            payload.pop("source_identity", None)
+            payload.pop("collected_at", None)
             if "previous_close" in payload:
                 try:
                     previous_close = _positive_previous_close(payload["previous_close"])

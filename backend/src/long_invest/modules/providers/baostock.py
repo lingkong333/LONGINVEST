@@ -167,9 +167,16 @@ class BaoStockProvider:
         try:
             for row in rows:
                 raw_code = row["code"].lower()
-                if not raw_code.startswith(("sh.", "sz.")):
+                code = raw_code[3:]
+                is_a_share = (
+                    raw_code.startswith("sh.")
+                    and code.startswith("6")
+                    or raw_code.startswith("sz.")
+                    and code.startswith(("0", "3"))
+                )
+                if not is_a_share:
                     continue
-                symbol = f"{raw_code[3:]}.{raw_code[:2].upper()}"
+                symbol = f"{code}.{raw_code[:2].upper()}"
                 name = row["code_name"].strip()
                 if not name or symbol in seen:
                     raise ValueError

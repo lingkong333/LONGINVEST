@@ -28,6 +28,7 @@ def test_baostock_normalizes_master_and_skips_non_a_share_markets() -> None:
         [
             {"code": "sh.600000", "code_name": "浦发银行", "tradeStatus": "1"},
             {"code": "sz.000001", "code_name": "平安银行", "tradeStatus": "0"},
+            {"code": "sh.000001", "code_name": "上证指数", "tradeStatus": "1"},
             {"code": "hk.000001", "code_name": "港股", "tradeStatus": "1"},
         ],
         observed_at=datetime.now(UTC),

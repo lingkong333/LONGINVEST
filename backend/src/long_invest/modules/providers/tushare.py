@@ -11,11 +11,15 @@ from typing import Any
 from long_invest.modules.providers.contracts import (
     DailyBar,
     DailyBarRequest,
+    DailyCollectionMode,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     ProbeResult,
     ProviderAdapterCode,
     ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
+    ProviderItemFailure,
     ProviderSourceIdentity,
     SecurityMasterRecord,
 )
@@ -112,6 +116,64 @@ class TushareProvider:
     async def corporate_actions(self, request, deadline):
         del request, deadline
         raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
+
+    def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        return DailyCollectionPlan(
+            self.code,
+            DailyCollectionMode.SNAPSHOT,
+            total_symbols,
+            total_symbols,
+            1,
+        )
+
+    async def market_daily_bars(
+        self, request: MarketDailyGroupRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]:
+        frame = await self._call_sdk(
+            "daily", deadline, trade_date=request.trading_date.strftime("%Y%m%d")
+        )
+        allowed = set(request.symbols)
+        items = []
+        failures = []
+        try:
+            for row in frame.to_dict("records"):
+                symbol = str(row["ts_code"]).upper()
+                if symbol not in allowed:
+                    continue
+                try:
+                    items.append(
+                        DailyBar(
+                            symbol=symbol,
+                            trading_date=request.trading_date,
+                            open=Decimal(str(row["open"])),
+                            high=Decimal(str(row["high"])),
+                            low=Decimal(str(row["low"])),
+                            close=Decimal(str(row["close"])),
+                            volume=int(Decimal(str(row["vol"])) * 100),
+                            amount=Decimal(str(row["amount"])) * 1000,
+                            source=self.code,
+                            capability=ProviderCapability.DAILY_BAR_UNADJUSTED,
+                            collected_at=datetime.now(UTC),
+                        )
+                    )
+                except (InvalidOperation, KeyError, TypeError, ValueError):
+                    failures.append(
+                        ProviderItemFailure(
+                            symbol,
+                            "PROVIDER_ITEM_SCHEMA_INVALID",
+                            "上游返回的单股日线字段无效",
+                            self.code,
+                        )
+                    )
+        except (
+            AttributeError,
+            InvalidOperation,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as error:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
+        return ProviderBatchResult(tuple(items), tuple(failures))
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime

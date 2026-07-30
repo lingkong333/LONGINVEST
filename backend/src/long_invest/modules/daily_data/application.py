@@ -23,8 +23,8 @@ from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 
 class DailyDataApplication:
@@ -32,7 +32,7 @@ class DailyDataApplication:
         self,
         database: Database,
         *,
-        job_service_factory: Callable[..., JobService] = JobService,
+        job_service_factory: Callable[..., Any] = PostgresJobService,
         repository_factory: Callable[..., Any] = DailyDataRepository,
         domain_service_factory: Callable[..., Any] = DailyDataService,
         audit_service_factory: Callable[..., Any] = AuditService,
@@ -167,10 +167,11 @@ class DailyDataApplication:
                         status_code=409,
                     )
                 batch = await repository.get_batch(batch_id)
-                command = SubmitJob(
-                    job_type="DAILY_DATA_RETRY",
-                    queue="daily-market-data",
-                    idempotency_scope=f"daily-data:retry:{batch_id}",
+                command = SubmitPostgresJob(
+                    job_type="DAILY_MARKET_DATA",
+                    module_owner="market_data",
+                    priority=1,
+                    idempotency_scope=f"daily-market-data:retry:{batch_id}",
                     idempotency_key=audit_context.idempotency_key,
                     request_id=audit_context.request_id,
                     config_snapshot={
@@ -184,12 +185,16 @@ class DailyDataApplication:
                             if symbol in batch.known_corporate_action_symbols
                         ],
                         "reason": audit_context.reason,
+                        "trigger": "MANUAL_RETRY",
                     },
                     business_object_type="daily_data_batch",
                     business_object_id=str(batch_id),
                     created_by_user_id=audit_context.actor_user_id,
                     soft_timeout_seconds=300,
                     hard_timeout_seconds=600,
+                    max_attempts=2,
+                    recoverable=True,
+                    max_recoveries=1,
                 )
                 job = await self._job_service_factory(session).submit(command)
                 audit = self._audit_service_factory(session)

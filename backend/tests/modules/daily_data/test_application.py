@@ -279,7 +279,8 @@ async def test_retry_job_and_audit_share_transaction_session() -> None:
 
     job = database.state["jobs"][0]
     audit = database.state["audits"][0]
-    assert job.job_type == "DAILY_DATA_RETRY"
+    assert job.job_type == "DAILY_MARKET_DATA"
+    assert job.config_snapshot["trigger"] == "MANUAL_RETRY"
     assert job.config_snapshot["known_corporate_action_symbols"] == ["600000.SH"]
     assert audit.action_code == "daily_data.batch_retry_requested"
     assert audit.object_type == "daily_data_batch"

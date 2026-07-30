@@ -15,6 +15,9 @@ from long_invest.modules.providers.contracts import (
     CorporateActionType,
     DailyBar,
     DailyBarRequest,
+    DailyCollectionMode,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     ProbeResult,
     ProviderAdapterCode,
     ProviderBatchResult,
@@ -146,6 +149,84 @@ class EastmoneyProvider:
         except ProviderHttpError as error:
             self._attach_schema_sample(error, payload)
             raise
+
+    def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        return DailyCollectionPlan(
+            self.code,
+            DailyCollectionMode.PAGED,
+            total_symbols,
+            100,
+            0.5,
+        )
+
+    async def market_daily_bars(
+        self, request: MarketDailyGroupRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]:
+        payload = await self._json(
+            self.MASTER_URL,
+            {
+                "fs": "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23",
+                "fields": "f2,f5,f6,f12,f15,f16,f17,f18",
+                "fid": "f12",
+                "fltt": "2",
+                "invt": "2",
+                "np": "1",
+                "pn": str(request.group_index + 1),
+                "po": "1",
+                "pz": "100",
+                "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+            },
+            deadline,
+        )
+        try:
+            data = payload.get("data") if isinstance(payload, dict) else None
+            rows = data.get("diff") if isinstance(data, dict) else None
+            if payload.get("rc") != 0 or not isinstance(rows, list):
+                raise ValueError
+            allowed = set(request.symbols)
+            items = []
+            failures = []
+            for row in rows:
+                try:
+                    symbol = _symbol(str(row["f12"]))
+                except (KeyError, TypeError, ValueError, ProviderHttpError):
+                    continue
+                if symbol not in allowed:
+                    continue
+                try:
+                    items.append(
+                        DailyBar(
+                            symbol=symbol,
+                            trading_date=request.trading_date,
+                            open=_decimal(row["f17"]),
+                            high=_decimal(row["f15"]),
+                            low=_decimal(row["f16"]),
+                            close=_decimal(row["f2"]),
+                            volume=int(row["f5"]),
+                            amount=_decimal(row["f6"]),
+                            source=self.code,
+                            capability=ProviderCapability.DAILY_BAR_UNADJUSTED,
+                            collected_at=datetime.now(UTC),
+                        )
+                    )
+                except (
+                    KeyError,
+                    TypeError,
+                    ValueError,
+                    InvalidOperation,
+                    ProviderHttpError,
+                ):
+                    failures.append(
+                        ProviderItemFailure(
+                            symbol,
+                            "PROVIDER_ITEM_SCHEMA_INVALID",
+                            "上游返回的单股日线字段无效",
+                            self.code,
+                        )
+                    )
+            return ProviderBatchResult(tuple(items), tuple(failures))
+        except (KeyError, TypeError, ValueError) as error:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
 
     async def realtime_quotes(
         self, symbols: tuple[str, ...], deadline: datetime

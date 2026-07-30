@@ -78,12 +78,13 @@ class PostgresJobService:
         *,
         worker_id: str,
         lease_duration: timedelta,
+        job_types: tuple[str, ...] | None = None,
         now: datetime | None = None,
     ) -> ClaimedPostgresJob | None:
         if not worker_id.strip() or lease_duration <= timedelta(0):
             raise ValueError("worker id and positive lease duration are required")
         claimed_at = now or datetime.now(UTC)
-        job = await self._jobs.claim_next(claimed_at)
+        job = await self._jobs.claim_next(claimed_at, job_types=job_types)
         if job is None:
             return None
 

@@ -64,6 +64,7 @@ class FakeRepository:
         self.batch_lock_requests = []
         self.bar_write_order = []
         self.previous_closes = {}
+        self.bulk_write_calls = 0
 
     async def claim_batch(self, command, now):
         existing = self.by_key.get(command.idempotency_key)
@@ -119,6 +120,21 @@ class FakeRepository:
         )
         self.stages[(batch_id, item.symbol)] = stage
         return stage
+
+    async def upsert_stages(self, batch_id, items, expires_at):
+        for item in items:
+            await self.upsert_stage(batch_id, item, expires_at)
+
+    async def count_stages(self, batch_id):
+        return sum(stored_batch_id == batch_id for stored_batch_id, _ in self.stages)
+
+    async def count_retryable_stages(self, batch_id):
+        return sum(
+            stored_batch_id == batch_id
+            and DailyStageStatus(stage.status)
+            in {DailyStageStatus.FAILED, DailyStageStatus.INVALID}
+            for (stored_batch_id, _), stage in self.stages.items()
+        )
 
     async def list_stages(self, batch_id):
         return [v for (bid, _), v in self.stages.items() if bid == batch_id]
@@ -177,6 +193,61 @@ class FakeRepository:
 
     async def get_previous_close(self, security_id, trading_date):
         return self.previous_closes.get((security_id, trading_date))
+
+    async def get_previous_closes(self, security_ids, trading_date):
+        return {
+            security_id: value
+            for security_id in security_ids
+            if (value := self.previous_closes.get((security_id, trading_date)))
+            is not None
+        }
+
+    async def list_bars_for_update(self, security_ids, trading_date):
+        self.bar_write_order.append(("bulk-read", len(security_ids), trading_date))
+        return [
+            bar
+            for security_id in security_ids
+            if (bar := self.bars.get((security_id, trading_date))) is not None
+        ]
+
+    async def latest_revision_numbers_for_date(self, security_ids, trading_date):
+        return {
+            security_id: max(
+                (
+                    revision.revision_no
+                    for revision in self.revisions
+                    if revision.daily_bar_security_id == security_id
+                    and revision.daily_bar_trade_date == trading_date
+                ),
+                default=0,
+            )
+            for security_id in security_ids
+        }
+
+    async def store_current_daily_bars(self, rows, revisions_by_key):
+        from long_invest.modules.daily_data.models import (
+            DailyBarRevision,
+            DailyBarUnadjusted,
+        )
+
+        self.bulk_write_calls += 1
+        succeeded, failed = set(), {}
+        for row in rows:
+            key = (row["security_id"], row["trade_date"])
+            if row["symbol"] in self.fail_symbols:
+                failed[key] = "RuntimeError"
+                continue
+            existing = self.bars.get(key)
+            if existing is None:
+                self.bars[key] = DailyBarUnadjusted(**row)
+            else:
+                for field, value in row.items():
+                    if field not in {"security_id", "trade_date", "created_at"}:
+                        setattr(existing, field, value)
+            if key in revisions_by_key:
+                self.revisions.append(DailyBarRevision(**revisions_by_key[key]))
+            succeeded.add(key)
+        return succeeded, failed
 
     async def add_bar(self, bar):
         if bar.symbol in self.fail_symbols:
@@ -377,7 +448,7 @@ async def test_same_value_replay_has_no_revision_and_changed_value_revises() -> 
 
 
 @async_test
-async def test_commit_locks_security_before_reading_current_fact() -> None:
+async def test_commit_reads_and_writes_all_ready_symbols_in_batches() -> None:
     repo = FakeRepository()
     service = _service(repo)
     batch = await service.create(_command())
@@ -386,10 +457,8 @@ async def test_commit_locks_security_before_reading_current_fact() -> None:
 
     await _validate_and_commit(service, batch.id)
 
-    assert repo.bar_write_order[:2] == [
-        ("lock-security", staged.security_id),
-        ("get", staged.security_id, DAY),
-    ]
+    assert repo.bar_write_order == [("bulk-read", 1, DAY)]
+    assert repo.bulk_write_calls == 1
 
 
 @async_test
@@ -447,6 +516,26 @@ async def test_stage_rejects_symbol_or_date_outside_frozen_contract() -> None:
     )
     with pytest.raises(AppError, match="日期"):
         await service.stage(batch.id, wrong)
+
+
+@async_test
+async def test_stage_many_persists_exact_collection_progress() -> None:
+    repo = FakeRepository()
+    service = _service(repo)
+    batch = await service.create(_command(("600000.SH", "000001.SZ")))
+
+    summary = await service.stage_many(
+        batch.id,
+        (
+            _stage(),
+            _stage("000001.SZ", status=DailyStageStatus.FAILED),
+        ),
+        requested_count=2,
+    )
+
+    assert summary.fetched_count == 2
+    assert summary.requested_count == 2
+    assert summary.pending_retry_count == 1
 
 
 @async_test

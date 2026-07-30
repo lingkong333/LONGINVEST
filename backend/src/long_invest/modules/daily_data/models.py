@@ -41,6 +41,10 @@ class DailyDataBatch(Base):
         UniqueConstraint("idempotency_key", name="uq_daily_batch_idempotency"),
         CheckConstraint("expected_count > 0", name="daily_batch_expected_positive"),
         CheckConstraint(
+            "requested_count >= 0 AND pending_retry_count >= 0",
+            name="daily_batch_progress_nonnegative",
+        ),
+        CheckConstraint(
             "status IN ('PENDING','FETCHING','VALIDATING','COMMITTING',"
             "'SUCCEEDED','PARTIAL','FAILED')",
             name="daily_batch_status_valid",
@@ -72,6 +76,13 @@ class DailyDataBatch(Base):
     committed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     missing_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    requested_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    pending_retry_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    plan_snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

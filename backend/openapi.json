@@ -16051,6 +16051,21 @@
             "type": "integer",
             "title": "Failed Count"
           },
+          "requested_count": {
+            "type": "integer",
+            "title": "Requested Count",
+            "default": 0
+          },
+          "pending_retry_count": {
+            "type": "integer",
+            "title": "Pending Retry Count",
+            "default": 0
+          },
+          "plan_snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Plan Snapshot"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",

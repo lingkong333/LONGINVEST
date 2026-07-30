@@ -14,6 +14,8 @@ from long_invest.modules.providers.contracts import (
     CorporateActionRequest,
     DailyBar,
     DailyBarRequest,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
@@ -82,6 +84,17 @@ class ProviderService:
             deadline,
             concurrency=concurrency,
         )
+
+    async def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        return await self._router.daily_collection_plan(total_symbols)
+
+    async def market_daily_bars(
+        self,
+        plan: DailyCollectionPlan,
+        request: MarketDailyGroupRequest,
+        deadline: datetime,
+    ) -> ProviderBatchResult[DailyBar]:
+        return await self._router.market_daily_bars(plan, request, deadline)
 
     async def corporate_actions(
         self, request: CorporateActionRequest, deadline: datetime

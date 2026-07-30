@@ -70,6 +70,9 @@ class DailyDataRepository:
             committed_count=0,
             missing_count=0,
             failed_count=0,
+            requested_count=0,
+            pending_retry_count=0,
+            plan_snapshot=dict(command.plan_snapshot),
             created_at=now,
             deadline_at=command.deadline_at,
         )
@@ -111,6 +114,15 @@ class DailyDataRepository:
             )
         return await self.session.scalar(statement)
 
+    async def get_batch_by_idempotency_key(
+        self, idempotency_key: str
+    ) -> DailyDataBatch | None:
+        return await self.session.scalar(
+            select(DailyDataBatch).where(
+                DailyDataBatch.idempotency_key == idempotency_key
+            )
+        )
+
     async def upsert_stage(
         self,
         batch_id: UUID,
@@ -143,6 +155,60 @@ class DailyDataRepository:
             .returning(DailyBarStage)
         )
         return (await self.session.execute(statement)).scalar_one()
+
+    async def upsert_stages(
+        self,
+        batch_id: UUID,
+        items: Sequence[StageDailyBar],
+        expires_at: datetime,
+    ) -> None:
+        values = [
+            {
+                "id": uuid4(),
+                "batch_id": batch_id,
+                "security_id": item.security_id,
+                "symbol": item.symbol,
+                "trading_date": item.trading_date,
+                "status": item.status.value,
+                "provider_payload": _json_value(dict(item.provider_payload or {}))
+                or None,
+                "missing_reason": (
+                    item.missing_reason.value if item.missing_reason else None
+                ),
+                "error_code": item.error_code,
+                "quality_code": item.quality_code,
+                "received_at": item.received_at,
+                "expires_at": expires_at,
+            }
+            for item in items
+        ]
+        await execute_atomic_batches(
+            self.session,
+            values,
+            batch_size=self._HISTORY_CHUNK_SIZE,
+            statement_factory=_stage_upsert,
+        )
+
+    async def count_stages(self, batch_id: UUID) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count(DailyBarStage.id)).where(
+                    DailyBarStage.batch_id == batch_id
+                )
+            )
+            or 0
+        )
+
+    async def count_retryable_stages(self, batch_id: UUID) -> int:
+        return int(
+            await self.session.scalar(
+                select(func.count(DailyBarStage.id)).where(
+                    DailyBarStage.batch_id == batch_id,
+                    DailyBarStage.status.in_(("FAILED", "INVALID")),
+                )
+            )
+            or 0
+        )
 
     async def list_stages(self, batch_id: UUID) -> list[DailyBarStage]:
         result = await self.session.scalars(
@@ -264,6 +330,98 @@ class DailyDataRepository:
             .order_by(DailyBarUnadjusted.trade_date.desc())
             .limit(1)
         )
+
+    async def get_previous_closes(
+        self, security_ids: Sequence[UUID], trading_date: date
+    ) -> dict[UUID, Decimal]:
+        if not security_ids:
+            return {}
+        rows = await self.session.execute(
+            select(DailyBarUnadjusted.security_id, DailyBarUnadjusted.close)
+            .where(
+                DailyBarUnadjusted.security_id.in_(security_ids),
+                DailyBarUnadjusted.trade_date < trading_date,
+            )
+            .distinct(DailyBarUnadjusted.security_id)
+            .order_by(
+                DailyBarUnadjusted.security_id,
+                DailyBarUnadjusted.trade_date.desc(),
+            )
+        )
+        return {security_id: close for security_id, close in rows}
+
+    async def list_bars_for_update(
+        self, security_ids: Sequence[UUID], trading_date: date
+    ) -> list[DailyBarUnadjusted]:
+        if not security_ids:
+            return []
+        rows = await self.session.scalars(
+            select(DailyBarUnadjusted)
+            .where(
+                DailyBarUnadjusted.security_id.in_(security_ids),
+                DailyBarUnadjusted.trade_date == trading_date,
+            )
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        return list(rows)
+
+    async def latest_revision_numbers_for_date(
+        self, security_ids: Sequence[UUID], trading_date: date
+    ) -> dict[UUID, int]:
+        if not security_ids:
+            return {}
+        rows = await self.session.execute(
+            select(
+                DailyBarRevision.daily_bar_security_id,
+                func.max(DailyBarRevision.revision_no),
+            )
+            .where(
+                DailyBarRevision.daily_bar_security_id.in_(security_ids),
+                DailyBarRevision.daily_bar_trade_date == trading_date,
+            )
+            .group_by(DailyBarRevision.daily_bar_security_id)
+        )
+        return {security_id: int(number) for security_id, number in rows}
+
+    async def store_current_daily_bars(
+        self,
+        rows: Sequence[dict[str, Any]],
+        revisions_by_key: dict[tuple[UUID, date], dict[str, Any]],
+    ) -> tuple[set[tuple[UUID, date]], dict[tuple[UUID, date], str]]:
+        succeeded: set[tuple[UUID, date]] = set()
+        failed: dict[tuple[UUID, date], str] = {}
+
+        async def write_chunk(chunk: tuple[dict[str, Any], ...]) -> None:
+            try:
+                async with self.session.begin_nested():
+                    await self.session.execute(_historical_bar_upsert(chunk))
+                    revisions = [
+                        revisions_by_key[key]
+                        for row in chunk
+                        if (key := (row["security_id"], row["trade_date"]))
+                        in revisions_by_key
+                    ]
+                    if revisions:
+                        await self.session.execute(
+                            insert(DailyBarRevision).values(revisions)
+                        )
+            except IntegrityError as error:
+                if len(chunk) > 1:
+                    middle = len(chunk) // 2
+                    await write_chunk(chunk[:middle])
+                    await write_chunk(chunk[middle:])
+                    return
+                key = (chunk[0]["security_id"], chunk[0]["trade_date"])
+                failed[key] = getattr(error, "code", type(error).__name__)
+                return
+            succeeded.update(
+                (row["security_id"], row["trade_date"]) for row in chunk
+            )
+
+        for start in range(0, len(rows), self._HISTORY_CHUNK_SIZE):
+            await write_chunk(tuple(rows[start : start + self._HISTORY_CHUNK_SIZE]))
+        return succeeded, failed
 
     async def add_bar(self, bar: DailyBarUnadjusted) -> None:
         self.session.add(bar)
@@ -401,6 +559,7 @@ def _validate_batch_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or tuple(existing.security_ids) != tuple(map(str, command.security_ids))
         or tuple(existing.known_corporate_action_symbols)
         != command.known_corporate_action_symbols
+        or dict(existing.plan_snapshot or {}) != dict(command.plan_snapshot)
         or existing.parent_batch_id != command.parent_batch_id
     ):
         raise AppError(
@@ -420,6 +579,7 @@ def _validate_scope_replay(existing: DailyDataBatch, command: CreateDailyBatch) 
         or tuple(existing.security_ids) != tuple(map(str, command.security_ids))
         or tuple(existing.known_corporate_action_symbols)
         != command.known_corporate_action_symbols
+        or dict(existing.plan_snapshot or {}) != dict(command.plan_snapshot)
     ):
         raise AppError(
             code="DAILY_BATCH_SCOPE_CONFLICT",
@@ -491,5 +651,24 @@ def _historical_bar_upsert(values: tuple[dict[str, Any], ...]) -> Insert:
             "source": excluded.source,
             "data_version": excluded.data_version,
             "updated_at": excluded.updated_at,
+        },
+    )
+
+
+def _stage_upsert(values: tuple[dict[str, Any], ...]) -> Insert:
+    statement = insert(DailyBarStage).values(values)
+    excluded = statement.excluded
+    return statement.on_conflict_do_update(
+        constraint="uq_daily_stage_symbol",
+        set_={
+            "security_id": excluded.security_id,
+            "trading_date": excluded.trading_date,
+            "status": excluded.status,
+            "provider_payload": excluded.provider_payload,
+            "missing_reason": excluded.missing_reason,
+            "error_code": excluded.error_code,
+            "quality_code": excluded.quality_code,
+            "received_at": excluded.received_at,
+            "expires_at": excluded.expires_at,
         },
     )

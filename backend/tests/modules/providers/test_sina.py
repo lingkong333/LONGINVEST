@@ -27,6 +27,7 @@ def test_sina_declares_realtime_master_and_history_capabilities() -> None:
         {
             ProviderCapability.SECURITY_MASTER,
             ProviderCapability.REALTIME_QUOTE_BATCH,
+            ProviderCapability.DAILY_BAR_UNADJUSTED,
             ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
             ProviderCapability.HISTORICAL_DAILY_QFQ,
         }

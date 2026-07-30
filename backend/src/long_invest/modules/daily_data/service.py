@@ -19,7 +19,6 @@ from long_invest.modules.daily_data.contracts import (
     StageDailyBar,
 )
 from long_invest.modules.daily_data.models import (
-    DailyBarRevision,
     DailyBarStage,
     DailyBarUnadjusted,
     DailyBatchMissingItem,
@@ -298,6 +297,58 @@ class DailyDataService:
         batch.fetched_count = len(stages)
         await self._repository.flush()
 
+    async def stage_many(
+        self,
+        batch_id: UUID,
+        items: tuple[StageDailyBar, ...],
+        *,
+        requested_count: int,
+    ) -> DailyBatchSummary:
+        if not items:
+            raise ValueError("批量暂存不能为空")
+        batch = await self._batch(batch_id, for_update=True)
+        status = DailyBatchStatus(batch.status)
+        if status not in {
+            DailyBatchStatus.PENDING,
+            DailyBatchStatus.FETCHING,
+            DailyBatchStatus.VALIDATING,
+        }:
+            raise AppError(
+                code="DAILY_BATCH_STATE_CONFLICT",
+                message="日线批次当前状态不允许暂存",
+                status_code=409,
+                details={"status": status.value},
+            )
+        frozen = dict(zip(batch.symbols, batch.security_ids, strict=True))
+        seen = set()
+        for item in items:
+            if (
+                item.symbol in seen
+                or item.symbol not in frozen
+                or str(item.security_id) != str(frozen.get(item.symbol))
+                or item.trading_date != batch.trading_date
+            ):
+                raise AppError(
+                    code="DAILY_STAGE_BATCH_INVALID",
+                    message="批量暂存与冻结范围不一致",
+                    status_code=422,
+                )
+            seen.add(item.symbol)
+        if requested_count < 0:
+            raise ValueError("日线采集进度不能为负数")
+        await self._repository.upsert_stages(
+            batch_id, items, self._now() + timedelta(days=7)
+        )
+        batch.status = DailyBatchStatus.FETCHING
+        batch.started_at = batch.started_at or self._now()
+        batch.fetched_count = await self._repository.count_stages(batch_id)
+        batch.requested_count = min(requested_count, batch.expected_count)
+        batch.pending_retry_count = await self._repository.count_retryable_stages(
+            batch_id
+        )
+        await self._repository.flush()
+        return _summary(batch)
+
     async def validate(self, batch_id: UUID) -> DailyBatchSummary:
         batch = await self._batch(batch_id, for_update=True)
         status = DailyBatchStatus(batch.status)
@@ -322,6 +373,15 @@ class DailyDataService:
         batch.status = DailyBatchStatus.VALIDATING
         seen: set[tuple[str, object]] = set()
         validated = 0
+        needs_previous_close = [
+            stage.security_id
+            for stage in stages
+            if DailyStageStatus(stage.status) is DailyStageStatus.FETCHED
+            and "previous_close" not in (stage.provider_payload or {})
+        ]
+        previous_closes = await self._repository.get_previous_closes(
+            needs_previous_close, batch.trading_date
+        )
         for stage in stages:
             if DailyStageStatus(stage.status) is not DailyStageStatus.FETCHED:
                 if DailyStageStatus(stage.status) in {
@@ -347,9 +407,7 @@ class DailyDataService:
                     )
                     continue
             else:
-                previous_close = await self._repository.get_previous_close(
-                    stage.security_id, batch.trading_date
-                )
+                previous_close = previous_closes.get(stage.security_id)
                 if previous_close is None:
                     if not is_new_listing:
                         _invalidate_stage(
@@ -402,6 +460,9 @@ class DailyDataService:
                 stage.status = DailyStageStatus.INVALID
                 stage.error_code = result.code
         batch.validated_count = validated
+        batch.pending_retry_count = await self._repository.count_retryable_stages(
+            batch_id
+        )
         await self._repository.flush()
         return _summary(batch)
 
@@ -425,6 +486,7 @@ class DailyDataService:
         stages = await self._repository.list_stages(batch_id)
         committed_symbols: list[str] = []
         missing: list[DailyBatchMissingItem] = []
+        ready_stages: list[DailyBarStage] = []
 
         staged_by_symbol = {item.symbol: item for item in stages}
         for symbol in batch.symbols:
@@ -479,33 +541,21 @@ class DailyDataService:
                     )
                 )
                 continue
-            try:
-                async with self._repository.item_savepoint():
-                    changed = await self._commit_stage(stage)
-                    if changed:
-                        await self._event_writer().append(
-                            topic="daily_bar.corrected",
-                            aggregate_id=f"{stage.security_id}:{stage.trading_date}",
-                            payload={
-                                "event_type": "daily_bar.corrected",
-                                "security_id": str(stage.security_id),
-                                "symbol": stage.symbol,
-                                "trade_date": stage.trading_date.isoformat(),
-                            },
-                            dedupe_key=f"daily-bar-corrected:{stage.security_id}:{stage.trading_date}:{changed}",
-                        )
-                committed_symbols.append(symbol)
-            except Exception as exc:
-                missing.append(
-                    _missing(
-                        batch.id,
-                        symbol,
-                        stage.security_id,
-                        DailyMissingReason.UNEXPLAINED,
-                        _failure_code(exc),
-                        self._now(),
-                    )
-                )
+            ready_stages.append(stage)
+
+        bulk_committed, bulk_missing = await self._commit_stages(ready_stages)
+        committed_symbols.extend(bulk_committed)
+        missing.extend(
+            _missing(
+                batch.id,
+                stage.symbol,
+                stage.security_id,
+                DailyMissingReason.UNEXPLAINED,
+                error_code,
+                self._now(),
+            )
+            for stage, error_code in bulk_missing
+        )
 
         await self._repository.replace_missing(batch.id, missing)
         unexplained = [item for item in missing if not item.explained]
@@ -535,6 +585,7 @@ class DailyDataService:
         )
         batch.missing_count = len(missing)
         batch.failed_count = len(unexplained)
+        batch.pending_retry_count = 0
         if not unexplained:
             batch.status = DailyBatchStatus.SUCCEEDED
         elif committed_symbols:
@@ -573,6 +624,109 @@ class DailyDataService:
                 dedupe_key=f"{topic}:{batch.id}",
             )
         return _summary(batch)
+
+    async def _commit_stages(
+        self, stages: list[DailyBarStage]
+    ) -> tuple[list[str], list[tuple[DailyBarStage, str]]]:
+        if not stages:
+            return [], []
+        trade_date = stages[0].trading_date
+        existing_by_key = {
+            (item.security_id, item.trade_date): item
+            for item in await self._repository.list_bars_for_update(
+                [stage.security_id for stage in stages], trade_date
+            )
+        }
+        changed_ids: list[UUID] = []
+        prepared: list[tuple[DailyBarStage, dict[str, Any], Any, tuple[str, ...]]] = []
+        committed = []
+        now = self._now()
+        for stage in stages:
+            key = (stage.security_id, stage.trading_date)
+            values = _bar_values(stage)
+            existing = existing_by_key.get(key)
+            changed_fields = (
+                tuple(values)
+                if existing is None
+                else tuple(
+                    field
+                    for field, value in values.items()
+                    if _stored_values(existing)[field] != value
+                )
+            )
+            if existing is not None and not changed_fields:
+                committed.append(stage.symbol)
+                continue
+            if existing is not None:
+                changed_ids.append(stage.security_id)
+            prepared.append((stage, values, existing, changed_fields))
+
+        revision_numbers = await self._repository.latest_revision_numbers_for_date(
+            changed_ids, trade_date
+        )
+        rows: list[dict[str, Any]] = []
+        revisions: dict[tuple[UUID, date], dict[str, Any]] = {}
+        changed_revision: dict[tuple[UUID, date], int] = {}
+        stage_by_key = {}
+        for stage, values, existing, changed_fields in prepared:
+            key = (stage.security_id, stage.trading_date)
+            stage_by_key[key] = stage
+            rows.append(
+                {
+                    "security_id": stage.security_id,
+                    "trade_date": stage.trading_date,
+                    "symbol": stage.symbol,
+                    **values,
+                    "data_version": (
+                        1 if existing is None else existing.data_version + 1
+                    ),
+                    "created_at": existing.created_at if existing is not None else now,
+                    "updated_at": now,
+                }
+            )
+            if existing is None:
+                continue
+            revision_no = revision_numbers.get(stage.security_id, 0) + 1
+            changed_revision[key] = revision_no
+            revisions[key] = {
+                "id": uuid4(),
+                "daily_bar_security_id": stage.security_id,
+                "daily_bar_trade_date": stage.trading_date,
+                "symbol": stage.symbol,
+                "revision_no": revision_no,
+                "old_values": _json_values(_stored_values(existing)),
+                "new_values": _json_values(values),
+                "changed_fields": list(changed_fields),
+                "source": values["source"],
+                "reason": "provider_replay_changed",
+                "created_at": now,
+            }
+
+        succeeded, failures = await self._repository.store_current_daily_bars(
+            rows, revisions
+        )
+        committed.extend(stage_by_key[key].symbol for key in succeeded)
+        for key in succeeded:
+            revision_no = changed_revision.get(key)
+            if revision_no is None:
+                continue
+            stage = stage_by_key[key]
+            await self._event_writer().append(
+                topic="daily_bar.corrected",
+                aggregate_id=f"{stage.security_id}:{stage.trading_date}",
+                payload={
+                    "event_type": "daily_bar.corrected",
+                    "security_id": str(stage.security_id),
+                    "symbol": stage.symbol,
+                    "trade_date": stage.trading_date.isoformat(),
+                },
+                dedupe_key=(
+                    f"daily-bar-corrected:{stage.security_id}:"
+                    f"{stage.trading_date}:{revision_no}"
+                ),
+            )
+        failed = [(stage_by_key[key], code) for key, code in failures.items()]
+        return committed, failed
 
     async def retry_scope(self, batch_id: UUID) -> tuple[str, ...]:
         batch = await self._batch(batch_id, for_update=True)
@@ -618,56 +772,6 @@ class DailyDataService:
                 status_code=404,
             )
         return batch
-
-    async def _commit_stage(
-        self, stage: DailyBarStage, *, revision_reason: str = "provider_replay_changed"
-    ) -> int:
-        values = _bar_values(stage)
-        await self._repository.lock_security_bars(stage.security_id)
-        existing = await self._repository.get_bar(stage.security_id, stage.trading_date)
-        if existing is None:
-            await self._repository.add_bar(
-                DailyBarUnadjusted(
-                    security_id=stage.security_id,
-                    trade_date=stage.trading_date,
-                    symbol=stage.symbol,
-                    data_version=1,
-                    created_at=self._now(),
-                    updated_at=self._now(),
-                    **values,
-                )
-            )
-            return 0
-        old_values = _stored_values(existing)
-        changed_fields = tuple(
-            key for key, value in values.items() if old_values[key] != value
-        )
-        if not changed_fields:
-            return 0
-        revision_no = await self._repository.next_revision_no(
-            stage.security_id, stage.trading_date
-        )
-        await self._repository.add_revision(
-            DailyBarRevision(
-                id=uuid4(),
-                daily_bar_security_id=stage.security_id,
-                daily_bar_trade_date=stage.trading_date,
-                symbol=stage.symbol,
-                revision_no=revision_no,
-                old_values=_json_values(old_values),
-                new_values=_json_values(values),
-                changed_fields=list(changed_fields),
-                source=values["source"],
-                reason=revision_reason,
-                created_at=self._now(),
-            )
-        )
-        for key, value in values.items():
-            setattr(existing, key, value)
-        existing.data_version += 1
-        existing.updated_at = self._now()
-        await self._repository.flush()
-        return revision_no
 
     async def _open_review_issue(
         self, batch: Any, stage: DailyBarStage, code: str
@@ -722,6 +826,9 @@ def _summary(batch: Any) -> DailyBatchSummary:
         committed_count=batch.committed_count,
         missing_count=batch.missing_count,
         failed_count=batch.failed_count,
+        requested_count=getattr(batch, "requested_count", 0) or 0,
+        pending_retry_count=getattr(batch, "pending_retry_count", 0) or 0,
+        plan_snapshot=getattr(batch, "plan_snapshot", {}) or {},
         created_at=batch.created_at,
         started_at=batch.started_at,
         deadline_at=batch.deadline_at,
@@ -850,10 +957,3 @@ def _missing(batch_id, symbol, security_id, reason, error_code, now):
         explained=reason.explained,
         created_at=now,
     )
-
-
-def _failure_code(exc: Exception) -> str:
-    text = str(exc).lower()
-    if "partition" in text:
-        return "DAILY_PARTITION_UNAVAILABLE"
-    return "DAILY_BAR_COMMIT_FAILED"

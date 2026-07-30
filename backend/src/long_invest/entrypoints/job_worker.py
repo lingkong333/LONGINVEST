@@ -7,10 +7,6 @@ from long_invest.bootstrap.backtest_jobs import (
 )
 from long_invest.bootstrap.history_backfills import build_history_backfill_job_handler
 from long_invest.bootstrap.jobs import (
-    daily_data_coordinate,
-    daily_data_finalize,
-    daily_data_item,
-    daily_data_retry,
     qfq_refresh,
     quote_diagnostic,
     realtime_quote_cycle,
@@ -43,10 +39,6 @@ from long_invest.platform.jobs.worker import execute_job as execute_platform_job
 HANDLERS["SECURITY_MASTER_REFRESH"] = security_master_refresh
 HANDLERS["REALTIME_QUOTE_CYCLE"] = realtime_quote_cycle
 HANDLERS["QUOTE_DIAGNOSTIC"] = quote_diagnostic
-HANDLERS["DAILY_DATA_COORDINATE"] = daily_data_coordinate
-HANDLERS["DAILY_DATA_ITEM"] = daily_data_item
-HANDLERS["DAILY_DATA_FINALIZE"] = daily_data_finalize
-HANDLERS["DAILY_DATA_RETRY"] = daily_data_retry
 HANDLERS["QFQ_REFRESH"] = qfq_refresh
 HANDLERS["SIGNAL_EVALUATE_BATCH"] = signal_evaluate_batch
 HANDLERS["SIGNAL_REEVALUATE"] = signal_reevaluate

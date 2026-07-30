@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
+from math import ceil
 from typing import Protocol
 
 
@@ -29,6 +30,62 @@ class ProviderAdapterCode(StrEnum):
     AKSHARE = "AKSHARE"
     TUSHARE_SDK = "TUSHARE_SDK"
     BAOSTOCK_SDK = "BAOSTOCK_SDK"
+
+
+class DailyCollectionMode(StrEnum):
+    SNAPSHOT = "SNAPSHOT"
+    PAGED = "PAGED"
+    BATCHED_SYMBOLS = "BATCHED_SYMBOLS"
+    SINGLE_SYMBOL = "SINGLE_SYMBOL"
+
+
+@dataclass(frozen=True, slots=True)
+class DailyCollectionPlan:
+    provider: ProviderCode
+    mode: DailyCollectionMode
+    total_symbols: int
+    group_size: int
+    estimated_seconds_per_request: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "provider", ProviderCode(self.provider))
+        object.__setattr__(self, "mode", DailyCollectionMode(self.mode))
+        if self.total_symbols < 1 or self.group_size < 1:
+            raise ValueError("daily collection scope and group size must be positive")
+        if self.estimated_seconds_per_request <= 0:
+            raise ValueError("daily collection request estimate must be positive")
+
+    @property
+    def estimated_requests(self) -> int:
+        if self.mode is DailyCollectionMode.SNAPSHOT:
+            return 1
+        return ceil(self.total_symbols / self.group_size)
+
+    @property
+    def estimated_seconds(self) -> int:
+        return max(
+            1,
+            ceil(self.estimated_requests * self.estimated_seconds_per_request),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class MarketDailyGroupRequest:
+    trading_date: date
+    symbols: tuple[str, ...]
+    group_index: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.trading_date, date) or isinstance(
+            self.trading_date, datetime
+        ):
+            raise ValueError("trading_date must be a date")
+        if not self.symbols or self.group_index < 0:
+            raise ValueError("daily collection group is invalid")
+        for symbol in self.symbols:
+            validate_symbol(symbol)
+        if len(self.symbols) != len(set(self.symbols)):
+            raise ValueError("daily collection group contains duplicate symbols")
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,6 +365,12 @@ class MarketDataProvider(Protocol):
 
     async def daily_bars(
         self, request: DailyBarRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]: ...
+
+    def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan: ...
+
+    async def market_daily_bars(
+        self, request: MarketDailyGroupRequest, deadline: datetime
     ) -> ProviderBatchResult[DailyBar]: ...
 
     async def corporate_actions(

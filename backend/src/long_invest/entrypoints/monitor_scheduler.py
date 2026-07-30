@@ -7,7 +7,12 @@ from datetime import datetime
 
 import structlog
 
+from long_invest.bootstrap.providers import (
+    build_provider_service,
+    close_provider_resources,
+)
 from long_invest.modules.calendar.application import CalendarApplication
+from long_invest.modules.daily_data.jobs import FullMarketDailyJob
 from long_invest.modules.monitor_schedules.application import MonitorScheduleApplication
 from long_invest.modules.scheduling.runtime import (
     DualPathScheduler,
@@ -17,6 +22,7 @@ from long_invest.modules.system_status.runtime import SchedulerRuntimeApplicatio
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database
 from long_invest.platform.database.notifications import PostgresNotificationListener
+from long_invest.platform.jobs.postgres_runner import PostgresJobRunner
 from long_invest.platform.logging.configure import configure_logging
 
 HEARTBEAT_SECONDS = 5
@@ -53,6 +59,17 @@ async def run() -> None:
         intraday_handler=_intraday_foundation,
         instance_id=f"{socket.gethostname()}:{os.getpid()}",
     )
+    worker_id = f"daily-market:{socket.gethostname()}:{os.getpid()}"
+    runner = PostgresJobRunner(
+        database,
+        {
+            "DAILY_MARKET_DATA": FullMarketDailyJob(
+                database,
+                provider_service_factory=build_provider_service,
+            )
+        },
+        worker_id=worker_id,
+    )
     listener = PostgresNotificationListener(settings.database_url)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -65,6 +82,7 @@ async def run() -> None:
         tasks = [
             asyncio.create_task(listener.run(stop, scheduler.refresh)),
             asyncio.create_task(_heartbeat(scheduler, stop)),
+            asyncio.create_task(runner.run_forever(stop)),
         ]
         await stop.wait()
     finally:
@@ -72,6 +90,7 @@ async def run() -> None:
         await scheduler.stop()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        await close_provider_resources()
         await database.dispose()
 
 

@@ -4793,6 +4793,20 @@ export interface components {
             /** Failed Count */
             failed_count: number;
             /**
+             * Requested Count
+             * @default 0
+             */
+            requested_count: number;
+            /**
+             * Pending Retry Count
+             * @default 0
+             */
+            pending_retry_count: number;
+            /** Plan Snapshot */
+            plan_snapshot?: {
+                [key: string]: unknown;
+            };
+            /**
              * Created At
              * Format: date-time
              */
@@ -5893,7 +5907,7 @@ export interface components {
          * ProviderCode
          * @enum {string}
          */
-        ProviderCode: "EASTMONEY" | "SINA";
+        ProviderCode: "EASTMONEY" | "SINA" | "TUSHARE" | "BAOSTOCK";
         /** ProviderData */
         ProviderData: {
             /** Total */
@@ -7260,6 +7274,8 @@ export interface components {
             timeout_seconds?: number | null;
             /** Auto Switch */
             auto_switch?: boolean | null;
+            /** Manual Fixed */
+            manual_fixed?: boolean | null;
             /** Daily Limit */
             daily_limit?: number | null;
             /** Min Interval Seconds */

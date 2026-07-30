@@ -13,6 +13,9 @@ from typing import Any
 from long_invest.modules.providers.contracts import (
     DailyBar,
     DailyBarRequest,
+    DailyCollectionMode,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     ProbeResult,
     ProviderAdapterCode,
     ProviderBatchResult,
@@ -39,6 +42,7 @@ class SinaRealtimeProvider:
         {
             ProviderCapability.SECURITY_MASTER,
             ProviderCapability.REALTIME_QUOTE_BATCH,
+            ProviderCapability.DAILY_BAR_UNADJUSTED,
             ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
             ProviderCapability.HISTORICAL_DAILY_QFQ,
         }
@@ -66,7 +70,11 @@ class SinaRealtimeProvider:
             if history
             else (
                 self.REALTIME_URL
-                if capability is ProviderCapability.REALTIME_QUOTE_BATCH
+                if capability
+                in {
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    ProviderCapability.DAILY_BAR_UNADJUSTED,
+                }
                 else self.MASTER_PAGE_URL
             )
         )
@@ -224,6 +232,52 @@ class SinaRealtimeProvider:
             raise ProviderHttpError(
                 "PROVIDER_UPSTREAM_FAILED", retryable=True
             ) from error
+
+    def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        return DailyCollectionPlan(
+            self.code,
+            DailyCollectionMode.BATCHED_SYMBOLS,
+            total_symbols,
+            100,
+            0.5,
+        )
+
+    async def market_daily_bars(
+        self, request: MarketDailyGroupRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]:
+        quotes = await self.realtime_quotes(request.symbols, deadline)
+        items = []
+        failures = list(quotes.failures)
+        for quote in quotes.items:
+            quote_date = quote.quote_time.astimezone(CHINA_TIMEZONE).date()
+            if quote_date != request.trading_date:
+                failures.append(
+                    ProviderItemFailure(
+                        quote.symbol,
+                        "PROVIDER_ITEM_STALE",
+                        "行情日期与目标交易日不一致",
+                        self.code,
+                    )
+                )
+                continue
+            items.append(
+                DailyBar(
+                    symbol=quote.symbol,
+                    trading_date=request.trading_date,
+                    open=quote.open,
+                    high=quote.high,
+                    low=quote.low,
+                    close=quote.price,
+                    volume=quote.volume,
+                    amount=quote.amount,
+                    source=self.code,
+                    capability=ProviderCapability.DAILY_BAR_UNADJUSTED,
+                    collected_at=quote.received_at,
+                )
+            )
+        return ProviderBatchResult(
+            tuple(items), tuple(failures), quotes.batch_error_code
+        )
 
     def _guard(self) -> AbstractAsyncContextManager[None]:
         if self._request_guard is None:

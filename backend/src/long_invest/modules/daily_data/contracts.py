@@ -163,6 +163,7 @@ class CreateDailyBatch:
     known_corporate_action_symbols: tuple[str, ...] = ()
     parent_batch_id: UUID | None = None
     deadline_at: datetime | None = None
+    plan_snapshot: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         _require_date(self.trading_date, "目标日期")
@@ -202,6 +203,18 @@ class CreateDailyBatch:
             _require_uuid(self.parent_batch_id, "原批次编号")
         if self.deadline_at is not None:
             _require_aware(self.deadline_at, "截止时间")
+        plan_snapshot = dict(self.plan_snapshot)
+        if plan_snapshot:
+            required = {
+                "provider",
+                "mode",
+                "estimated_requests",
+                "estimated_seconds",
+                "group_size",
+            }
+            if not required <= plan_snapshot.keys():
+                raise ValueError("日线采集计划快照不完整")
+        object.__setattr__(self, "plan_snapshot", MappingProxyType(plan_snapshot))
 
 
 @dataclass(frozen=True, slots=True)
@@ -289,6 +302,9 @@ class DailyBatchSummary:
     committed_count: int = 0
     missing_count: int = 0
     failed_count: int = 0
+    requested_count: int = 0
+    pending_retry_count: int = 0
+    plan_snapshot: Mapping[str, Any] = field(default_factory=dict)
     created_at: datetime | None = None
     started_at: datetime | None = None
     deadline_at: datetime | None = None
@@ -306,6 +322,8 @@ class DailyBatchSummary:
             self.committed_count,
             self.missing_count,
             self.failed_count,
+            self.requested_count,
+            self.pending_retry_count,
         )
         if any(value < 0 for value in counts):
             raise ValueError("批次数量不能为负数")
@@ -317,6 +335,9 @@ class DailyBatchSummary:
         ):
             if value is not None:
                 _require_aware(value, "批次时间")
+        object.__setattr__(
+            self, "plan_snapshot", MappingProxyType(dict(self.plan_snapshot))
+        )
 
 
 @dataclass(frozen=True, slots=True)

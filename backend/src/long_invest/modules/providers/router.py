@@ -9,6 +9,8 @@ from long_invest.modules.providers.contracts import (
     CorporateActionRequest,
     DailyBar,
     DailyBarRequest,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     MarketDataProvider,
     ProviderBatchResult,
     ProviderCapability,
@@ -146,6 +148,44 @@ class ProviderRouter:
             request,
             concurrency_override=concurrency,
         )
+
+    async def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        route_plan = await self._route_plan(ProviderCapability.DAILY_BAR_UNADJUSTED)
+        for setting in route_plan.routes:
+            provider = self._providers.get(setting.provider)
+            if setting.enabled and provider is not None:
+                return provider.daily_collection_plan(total_symbols)
+        code = (
+            "PROVIDER_FIXED_SOURCE_UNAVAILABLE"
+            if route_plan.fixed_provider is not None
+            else "PROVIDER_UNAVAILABLE"
+        )
+        raise ProviderRoutingError(code)
+
+    async def market_daily_bars(
+        self,
+        plan: DailyCollectionPlan,
+        request: MarketDailyGroupRequest,
+        deadline: datetime,
+    ) -> ProviderBatchResult[DailyBar]:
+        route_plan = await self._route_plan(ProviderCapability.DAILY_BAR_UNADJUSTED)
+        setting = next(
+            (
+                item
+                for item in route_plan.routes
+                if item.provider is plan.provider and item.enabled
+            ),
+            None,
+        )
+        provider = self._providers.get(plan.provider)
+        if setting is None or provider is None:
+            raise ProviderRoutingError("PROVIDER_UNAVAILABLE")
+        result = await self._pipeline.call(
+            setting,
+            lambda: provider.market_daily_bars(request, deadline),
+            deadline=deadline,
+        )
+        return self._enrich_result(result, provider, setting)
 
     async def corporate_actions(
         self, request: CorporateActionRequest, deadline: datetime

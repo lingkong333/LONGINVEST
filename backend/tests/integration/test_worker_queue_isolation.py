@@ -16,7 +16,7 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
         and service["build"].get("target") == "runtime"
     }
 
-    assert len(backend_services) == 19
+    assert len(backend_services) == 18
     assert {service["image"] for service in backend_services.values()} == {
         "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
     }
@@ -26,7 +26,6 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
     expected = {
         "worker-maintenance": "maintenance",
         "worker-realtime-quotes": "realtime-quotes",
-        "worker-daily-market-data": "daily-market-data",
         "worker-qfq-refresh": "qfq-refresh",
         "worker-signals": "signals",
     }

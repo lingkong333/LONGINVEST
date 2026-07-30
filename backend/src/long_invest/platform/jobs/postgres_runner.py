@@ -85,6 +85,7 @@ class PostgresJobRunner:
             claim = await PostgresJobService(session).claim_next(
                 worker_id=self._worker_id,
                 lease_duration=self._lease_duration,
+                job_types=tuple(self._handlers),
             )
         if claim is None:
             return PostgresRunnerReport(

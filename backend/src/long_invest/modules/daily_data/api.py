@@ -69,6 +69,9 @@ class DailyBatchRecord(BaseModel):
     committed_count: int
     missing_count: int
     failed_count: int
+    requested_count: int = 0
+    pending_retry_count: int = 0
+    plan_snapshot: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     started_at: datetime | None
     deadline_at: datetime | None

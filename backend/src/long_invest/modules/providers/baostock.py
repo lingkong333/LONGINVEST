@@ -11,6 +11,9 @@ from typing import Any
 from long_invest.modules.providers.contracts import (
     DailyBar,
     DailyBarRequest,
+    DailyCollectionMode,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     ProbeResult,
     ProviderAdapterCode,
     ProviderBatchResult,
@@ -95,6 +98,30 @@ class BaoStockProvider:
     async def corporate_actions(self, request, deadline):
         del request, deadline
         raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
+
+    def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        return DailyCollectionPlan(
+            self.code,
+            DailyCollectionMode.SINGLE_SYMBOL,
+            total_symbols,
+            1,
+            1,
+        )
+
+    async def market_daily_bars(
+        self, request: MarketDailyGroupRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]:
+        if len(request.symbols) != 1:
+            raise ProviderHttpError("PROVIDER_GROUP_SIZE_INVALID")
+        return await self.daily_bars(
+            DailyBarRequest(
+                request.symbols[0],
+                request.trading_date,
+                request.trading_date,
+                ProviderCapability.DAILY_BAR_UNADJUSTED,
+            ),
+            deadline,
+        )
 
     async def probe(
         self, capability: ProviderCapability, deadline: datetime

@@ -216,7 +216,8 @@ async def test_refresh_submits_public_job_in_database_transaction() -> None:
     assert captured["session"] is database.session
     command = captured["command"]
     assert command.job_type == "SECURITY_MASTER_REFRESH"
-    assert command.queue == "maintenance"
+    assert command.module_owner == "securities"
+    assert command.priority == 2
     assert command.idempotency_scope == "securities:refresh"
     assert command.idempotency_key == "refresh-key"
     assert command.created_by_user_id == "user-1"
@@ -240,7 +241,7 @@ async def test_allowed_actions_follow_real_refresh_job_state() -> None:
                 self.active
                 and filters["status"] is JobStatus.RUNNING
                 and filters["job_type"] == "SECURITY_MASTER_REFRESH"
-                and filters["queue"] == "maintenance"
+                and filters["module_owner"] == "securities"
             )
             return SimpleNamespace(total=total)
 

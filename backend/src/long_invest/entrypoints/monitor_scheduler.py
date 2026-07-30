@@ -12,6 +12,7 @@ import structlog
 from long_invest.bootstrap.history_backfills import (
     build_history_backfill_job_handler,
 )
+from long_invest.bootstrap.jobs import qfq_refresh, security_master_refresh
 from long_invest.bootstrap.providers import (
     build_provider_service,
     close_provider_resources,
@@ -41,6 +42,21 @@ from long_invest.platform.logging.configure import configure_logging
 HEARTBEAT_SECONDS = 5
 logger = structlog.get_logger(__name__)
 SHANGHAI = ZoneInfo("Asia/Shanghai")
+
+
+def build_market_data_handlers(database: Database):
+    return {
+        "DAILY_MARKET_DATA": FullMarketDailyJob(
+            database,
+            provider_service_factory=build_provider_service,
+        ),
+        "DAILY_MARKET_RECOVERY": DailyMarketRecoveryJob(
+            database,
+            provider_service_factory=build_provider_service,
+        ),
+        "QFQ_REFRESH": qfq_refresh,
+        "SECURITY_MASTER_REFRESH": security_master_refresh,
+    }
 
 
 async def _run_intraday(
@@ -130,16 +146,7 @@ async def run() -> None:
     worker_id = f"daily-market:{socket.gethostname()}:{os.getpid()}"
     runner = PostgresJobRunner(
         database,
-        {
-            "DAILY_MARKET_DATA": FullMarketDailyJob(
-                database,
-                provider_service_factory=build_provider_service,
-            ),
-            "DAILY_MARKET_RECOVERY": DailyMarketRecoveryJob(
-                database,
-                provider_service_factory=build_provider_service,
-            ),
-        },
+        build_market_data_handlers(database),
         worker_id=worker_id,
     )
     history_runner = PostgresJobRunner(
@@ -176,13 +183,13 @@ async def run() -> None:
         await database.dispose()
 
 
-def main() -> None:
+def main(*, service: str = "longinvest-monitor-scheduler") -> None:
     settings = get_settings()
     configure_logging(
         level=settings.log_level,
         queue_capacity=settings.log_queue_capacity,
         log_file=settings.log_file,
-        service="longinvest-monitor-scheduler",
+        service=service,
     )
     asyncio.run(run())
 

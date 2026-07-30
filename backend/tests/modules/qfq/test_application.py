@@ -356,7 +356,8 @@ async def test_submit_freezes_inputs_and_audits_atomically() -> None:
 
     command = database.state["jobs"][0]
     assert job.job_type == "QFQ_REFRESH"
-    assert command.queue == "qfq-refresh"
+    assert command.module_owner == "qfq"
+    assert command.priority == 2
     assert command.idempotency_scope == f"qfq-refresh:{security.security_id}"
     assert command.soft_timeout_seconds == 240
     assert command.hard_timeout_seconds == 300

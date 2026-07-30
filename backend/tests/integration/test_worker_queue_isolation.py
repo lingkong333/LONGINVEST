@@ -82,7 +82,7 @@ def test_history_backfill_runs_inside_the_existing_core_background() -> None:
     assert "FROM base AS collector-runtime" not in dockerfile
     assert "uv sync --frozen --no-dev --extra collector" in dockerfile
     assert any(
-        spec.module == "long_invest.entrypoints.monitor_scheduler"
+        spec.module == "long_invest.entrypoints.background"
         for spec in process_specs("core")
     )
 
@@ -109,15 +109,15 @@ def test_frontend_proxy_refreshes_api_container_address() -> None:
     assert "proxy_pass http://api:8000;" not in nginx_config
 
 
-def test_monitor_scheduler_is_an_isolated_private_service() -> None:
+def test_postgres_background_is_an_isolated_private_service() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     service = services["background-core"]
-    scheduler = next(
-        spec for spec in process_specs("core") if spec.name == "monitor-scheduler"
+    background = next(
+        spec for spec in process_specs("core") if spec.name == "background"
     )
 
-    assert scheduler.module == "long_invest.entrypoints.monitor_scheduler"
+    assert background.module == "long_invest.entrypoints.background"
     assert "ports" not in service
     assert service["read_only"] is True
     assert "no-new-privileges:true" in service["security_opt"]

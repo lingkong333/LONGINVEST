@@ -26,6 +26,7 @@ from long_invest.bootstrap.jobs import (
     signal_reevaluate,
 )
 from long_invest.entrypoints.job_worker import HANDLERS
+from long_invest.entrypoints.monitor_scheduler import build_market_data_handlers
 from long_invest.modules.daily_data.contracts import DailyMissingReason
 from long_invest.modules.providers.contracts import ProviderCode, SecurityMasterRecord
 from long_invest.platform.jobs.contracts import JobExecutionContext
@@ -41,15 +42,24 @@ def test_market_data_handlers_are_registered_on_the_real_worker() -> None:
         "SECURITY_MASTER_REFRESH": security_master_refresh,
         "REALTIME_QUOTE_CYCLE": realtime_quote_cycle,
         "QUOTE_DIAGNOSTIC": quote_diagnostic,
-        "DAILY_DATA_COORDINATE": daily_data_coordinate,
-        "DAILY_DATA_ITEM": daily_data_item,
-        "DAILY_DATA_FINALIZE": daily_data_finalize,
-        "DAILY_DATA_RETRY": daily_data_retry,
         "QFQ_REFRESH": qfq_refresh,
         "SIGNAL_EVALUATE_BATCH": signal_evaluate_batch,
         "SIGNAL_REEVALUATE": signal_reevaluate,
     }
     assert expected.items() <= HANDLERS.items()
+
+
+def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None:
+    handlers = build_market_data_handlers(SimpleNamespace())
+
+    assert handlers["SECURITY_MASTER_REFRESH"] is security_master_refresh
+    assert handlers["QFQ_REFRESH"] is qfq_refresh
+    assert set(handlers) == {
+        "DAILY_MARKET_DATA",
+        "DAILY_MARKET_RECOVERY",
+        "QFQ_REFRESH",
+        "SECURITY_MASTER_REFRESH",
+    }
 
 
 @pytest.mark.parametrize(

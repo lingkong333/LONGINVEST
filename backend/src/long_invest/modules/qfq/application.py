@@ -47,8 +47,8 @@ from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 
 class QfqApplication:
@@ -60,7 +60,7 @@ class QfqApplication:
         calendar_application: CalendarApplication,
         daily_application: DailyDataApplication,
         repository_factory: Callable[..., Any] = QfqRepository,
-        job_service_factory: Callable[..., Any] = JobService,
+        job_service_factory: Callable[..., Any] = PostgresJobService,
         audit_service_factory: Callable[..., Any] = AuditService,
         event_factory: Callable[..., Any] = QfqEventAdapter,
         domain_service_factory: Callable[..., Any] = QfqRefreshService,
@@ -311,9 +311,10 @@ class QfqApplication:
             "expected_version": expected_version,
             "provider": "eastmoney",
         }
-        submission = SubmitJob(
+        submission = SubmitPostgresJob(
             job_type="QFQ_REFRESH",
-            queue="qfq-refresh",
+            module_owner="qfq",
+            priority=2,
             idempotency_scope=f"qfq-refresh:{security.security_id}",
             idempotency_key=command.idempotency_key,
             request_id=command.request_id,

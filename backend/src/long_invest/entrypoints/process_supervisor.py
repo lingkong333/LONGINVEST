@@ -42,7 +42,7 @@ PROCESS_GROUPS: dict[str, tuple[ProcessSpec, ...]] = {
     "core": (
         ProcessSpec("dispatcher", "long_invest.entrypoints.dispatcher"),
         ProcessSpec("watchdog", "long_invest.entrypoints.watchdog"),
-        ProcessSpec("monitor-scheduler", "long_invest.entrypoints.monitor_scheduler"),
+        ProcessSpec("background", "long_invest.entrypoints.background"),
         _worker("worker-maintenance", "maintenance"),
         _worker("worker-qfq-refresh", "qfq-refresh"),
         ProcessSpec("signal-projector", "long_invest.entrypoints.signal_projector"),

@@ -40,9 +40,9 @@ from long_invest.platform.jobs.admin import JobAdminService
 from long_invest.platform.jobs.contracts import (
     TERMINAL_JOB_STATUSES,
     JobStatus,
-    SubmitJob,
+    SubmitPostgresJob,
 )
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 
 class SecurityApplication:
@@ -50,7 +50,7 @@ class SecurityApplication:
         self,
         database: Database,
         *,
-        job_service_factory: Callable[..., JobService] = JobService,
+        job_service_factory: Callable[..., Any] = PostgresJobService,
         outbox_writer: TransactionBoundOutboxWriter | None = None,
         audit_factory: Callable[..., Any] = SecurityAuditAdapter,
         event_factory: Callable[..., Any] = TransactionalSecurityEventAdapter,
@@ -169,9 +169,10 @@ class SecurityApplication:
                 message="刷新原因必须为 1 到 500 个字符",
                 status_code=422,
             )
-        command = SubmitJob(
+        command = SubmitPostgresJob(
             job_type="SECURITY_MASTER_REFRESH",
-            queue="maintenance",
+            module_owner="securities",
+            priority=2,
             idempotency_scope="securities:refresh",
             idempotency_key=idempotency_key,
             request_id=request_id,
@@ -201,7 +202,7 @@ class SecurityApplication:
                 active = await _has_active_job(
                     self._job_admin_factory(session),
                     job_type="SECURITY_MASTER_REFRESH",
-                    queue="maintenance",
+                    module_owner="securities",
                 )
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
@@ -342,7 +343,7 @@ def _backend_unavailable() -> AppError:
 
 
 async def _has_active_job(
-    admin: Any, *, job_type: str, queue: str
+    admin: Any, *, job_type: str, module_owner: str
 ) -> bool:
     for status in JobStatus:
         if status in TERMINAL_JOB_STATUSES:
@@ -352,7 +353,7 @@ async def _has_active_job(
             page_size=1,
             status=status,
             job_type=job_type,
-            queue=queue,
+            module_owner=module_owner,
         )
         if page.total > 0:
             return True

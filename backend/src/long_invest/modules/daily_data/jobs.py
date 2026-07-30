@@ -67,12 +67,14 @@ class FullMarketDailyJob:
             )
 
         checkpoint = dict(context.checkpoint)
+        retry_index = 0
         if checkpoint:
             try:
                 snapshot_id = UUID(str(checkpoint["universe_snapshot_id"]))
                 batch_id = UUID(str(checkpoint["batch_id"]))
                 plan = _restore_plan(checkpoint["plan"])
                 next_group = int(checkpoint.get("next_group", 0))
+                retry_index = int(checkpoint.get("retry_index", 0))
             except (KeyError, TypeError, ValueError):
                 return JobResult.failure(
                     code="DAILY_MARKET_CHECKPOINT_INVALID",
@@ -292,7 +294,17 @@ class FullMarketDailyJob:
                 now_provider=self._now,
             )
             await service.validate(batch_id)
-        await self._retry_failed(batch_id, trading_date, security_by_symbol, plan)
+        retry_status = await self._retry_failed(
+            context,
+            snapshot_id,
+            batch_id,
+            trading_date,
+            security_by_symbol,
+            plan,
+            start_index=retry_index,
+        )
+        if retry_status in {JobStatus.CANCELED, JobStatus.PAUSED}:
+            return _stopped(retry_status, batch_id)
         async with self._database.transaction() as session:
             service = DailyDataService(
                 DailyDataRepository(session),
@@ -316,25 +328,48 @@ class FullMarketDailyJob:
 
     async def _retry_failed(
         self,
+        context: JobExecutionContext,
+        snapshot_id: UUID,
         batch_id: UUID,
         trading_date: date,
         security_by_symbol: dict[str, Any],
         plan: DailyCollectionPlan,
-    ) -> None:
+        *,
+        start_index: int,
+    ) -> JobStatus | None:
         async with self._database.session() as session:
             stages = await DailyDataRepository(session).list_stages(batch_id)
+            batch = await DailyDataRepository(session).get_batch(batch_id)
         staged = {item.symbol: item for item in stages}
-        retry_symbols = tuple(
-            symbol
-            for symbol in security_by_symbol
-            if symbol not in staged
-            or DailyStageStatus(staged[symbol].status)
-            in {DailyStageStatus.FAILED, DailyStageStatus.INVALID}
+        symbols = tuple(security_by_symbol)
+        if start_index < 0 or start_index > len(symbols):
+            raise ValueError("日线补缺检查点超过采集范围")
+        status = await self._report(
+            context,
+            completed=start_index,
+            total=len(symbols),
+            message=f"准备补缺，已检查 {start_index}/{len(symbols)}",
+            checkpoint=_checkpoint(
+                snapshot_id,
+                batch_id,
+                plan,
+                len(_groups(plan, symbols)),
+                retry_index=start_index,
+            ),
         )
-        if not retry_symbols:
-            return
-        retry_stages = []
-        for index, symbol in enumerate(retry_symbols):
+        if status in {JobStatus.CANCELED, JobStatus.PAUSED}:
+            return status
+
+        pending: list[StageDailyBar] = []
+        requested_count = int(getattr(batch, "requested_count", 0))
+        for index in range(start_index, len(symbols)):
+            symbol = symbols[index]
+            existing = staged.get(symbol)
+            if existing is not None and DailyStageStatus(existing.status) not in {
+                DailyStageStatus.FAILED,
+                DailyStageStatus.INVALID,
+            }:
+                continue
             try:
                 async with self._database.session() as session:
                     result = await self._providers(session).daily_bars(
@@ -355,7 +390,7 @@ class FullMarketDailyJob:
                     ),
                     None,
                 )
-                retry_stages.append(
+                pending.append(
                     _bar_stage(bar, security_by_symbol[symbol], self._now())
                     if bar is not None
                     else _failed_stage(
@@ -366,7 +401,7 @@ class FullMarketDailyJob:
                     )
                 )
             except Exception as error:
-                retry_stages.append(
+                pending.append(
                     _failed_stage(
                         security_by_symbol[symbol],
                         trading_date,
@@ -374,16 +409,37 @@ class FullMarketDailyJob:
                         self._now(),
                     )
                 )
-            if index + 1 < len(retry_symbols):
+            if index + 1 < len(symbols):
                 await asyncio.sleep(plan.estimated_seconds_per_request)
-        async with self._database.transaction() as session:
-            await DailyDataService(
-                DailyDataRepository(session), now_provider=self._now
-            ).stage_many(
-                batch_id,
-                tuple(retry_stages),
-                requested_count=plan.total_symbols,
+            if len(pending) < 20 and index + 1 < len(symbols):
+                continue
+            if pending:
+                requested_count = max(requested_count, index + 1)
+                async with self._database.transaction() as session:
+                    await DailyDataService(
+                        DailyDataRepository(session), now_provider=self._now
+                    ).stage_many(
+                        batch_id,
+                        tuple(pending),
+                        requested_count=requested_count,
+                    )
+                pending.clear()
+            status = await self._report(
+                context,
+                completed=index + 1,
+                total=len(symbols),
+                message=f"正在补缺 {index + 1}/{len(symbols)}",
+                checkpoint=_checkpoint(
+                    snapshot_id,
+                    batch_id,
+                    plan,
+                    len(_groups(plan, symbols)),
+                    retry_index=index + 1,
+                ),
             )
+            if status in {JobStatus.CANCELED, JobStatus.PAUSED}:
+                return status
+        return None
 
     async def _report(
         self,
@@ -960,12 +1016,15 @@ def _checkpoint(
     batch_id: UUID,
     plan: DailyCollectionPlan,
     next_group: int,
+    *,
+    retry_index: int = 0,
 ) -> dict[str, object]:
     return {
         "universe_snapshot_id": str(snapshot_id),
         "batch_id": str(batch_id),
         "plan": _plan_snapshot(plan),
         "next_group": next_group,
+        "retry_index": retry_index,
     }
 
 

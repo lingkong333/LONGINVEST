@@ -1,7 +1,9 @@
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -29,7 +31,7 @@ from long_invest.modules.providers.contracts import (
     ProviderItemFailure,
 )
 from long_invest.modules.securities.contracts import FrozenSecurity, ListingStatus
-from long_invest.platform.jobs.contracts import JobExecutionContext
+from long_invest.platform.jobs.contracts import JobExecutionContext, JobStatus
 
 DAY = date(2026, 7, 30)
 NOW = datetime(2026, 7, 30, 9, tzinfo=UTC)
@@ -109,6 +111,64 @@ def test_collection_plan_budget_snapshot_is_json_serializable() -> None:
         "latest_limited_at": limited_at.isoformat(),
         "capabilities": [],
     }
+
+
+@pytest.mark.anyio
+async def test_daily_fallback_honors_cancel_before_single_symbol_requests(
+    monkeypatch,
+) -> None:
+    class Database:
+        @asynccontextmanager
+        async def session(self):
+            yield object()
+
+    class Repository:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def list_stages(self, _batch_id):
+            return ()
+
+        async def get_batch(self, _batch_id):
+            return SimpleNamespace(requested_count=0)
+
+    monkeypatch.setattr(
+        "long_invest.modules.daily_data.jobs.DailyDataRepository",
+        Repository,
+    )
+    job = FullMarketDailyJob(
+        Database(),
+        provider_service_factory=lambda _session: pytest.fail(
+            "canceled fallback must not call the provider"
+        ),
+    )
+
+    async def report(*_args, **_kwargs):
+        return JobStatus.CANCELED
+
+    monkeypatch.setattr(job, "_report", report)
+    result = await job._retry_failed(
+        JobExecutionContext(
+            job_id=uuid4(),
+            fence_token=uuid4(),
+            config={"trade_date": DAY.isoformat()},
+            checkpoint={},
+        ),
+        uuid4(),
+        uuid4(),
+        DAY,
+        {"600000.SH": _security("600000.SH")},
+        DailyCollectionPlan(
+            ProviderCode.EASTMONEY,
+            DailyCollectionMode.PAGED,
+            1,
+            100,
+            0.5,
+        ),
+        start_index=0,
+    )
+
+    assert result is JobStatus.CANCELED
 
 
 def test_group_result_isolates_missing_and_suspended_symbols() -> None:

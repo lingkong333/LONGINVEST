@@ -1,4 +1,5 @@
 import asyncio
+import json
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
@@ -15,6 +16,7 @@ from long_invest.modules.daily_data.jobs import (
     _group_stages,
     _groups,
     _historical_absence,
+    _plan_snapshot,
     _stored_bar_stage,
 )
 from long_invest.modules.providers.contracts import (
@@ -79,6 +81,34 @@ def test_collection_plan_builds_recoverable_groups(mode, group_size, expected_si
     )
 
     assert [len(group) for group in _groups(plan, symbols)] == expected_sizes
+
+
+def test_collection_plan_budget_snapshot_is_json_serializable() -> None:
+    plan = DailyCollectionPlan(
+        ProviderCode.EASTMONEY,
+        DailyCollectionMode.SNAPSHOT,
+        10,
+        10,
+        0.5,
+    )
+    limited_at = NOW.replace(minute=30)
+
+    snapshot = _plan_snapshot(
+        plan,
+        budget={
+            "remaining": 49_000,
+            "reset_at": NOW,
+            "latest_limited_at": limited_at,
+            "capabilities": [],
+        },
+    )
+
+    assert json.loads(json.dumps(snapshot))["budget"] == {
+        "remaining": 49_000,
+        "reset_at": NOW.isoformat(),
+        "latest_limited_at": limited_at.isoformat(),
+        "capabilities": [],
+    }
 
 
 def test_group_result_isolates_missing_and_suspended_symbols() -> None:

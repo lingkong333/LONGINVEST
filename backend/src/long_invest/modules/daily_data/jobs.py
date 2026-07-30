@@ -930,8 +930,18 @@ def _plan_snapshot(
         "estimated_seconds_per_request": plan.estimated_seconds_per_request,
     }
     if budget is not None:
-        snapshot["budget"] = budget
+        snapshot["budget"] = {
+            **budget,
+            "reset_at": _iso_datetime(budget.get("reset_at")),
+            "latest_limited_at": _iso_datetime(
+                budget.get("latest_limited_at")
+            ),
+        }
     return snapshot
+
+
+def _iso_datetime(value: object) -> object:
+    return value.isoformat() if isinstance(value, datetime) else value
 
 
 def _restore_plan(value: Any) -> DailyCollectionPlan:

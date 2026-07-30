@@ -441,6 +441,8 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
                 )
                 or 0
             )
+        if batch is not None:
+            snapshot_id = batch.universe_snapshot_id
         assert result.success is True
         assert batch is not None
         assert batch.status == "SUCCEEDED"
@@ -448,7 +450,6 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
         assert stored_job is not None
         assert stored_job.checkpoint["next_group"] == 1
         assert job_items == 0
-        snapshot_id = batch.universe_snapshot_id
     finally:
         async with database.transaction() as session:
             if batch_id is not None:

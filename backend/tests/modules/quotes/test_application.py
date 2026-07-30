@@ -9,9 +9,11 @@ from long_invest.modules.quotes.application import (
     QuoteApplication,
     TransactionalQuoteSignalPort,
 )
-from long_invest.modules.quotes.collection import DEFAULT_CLEANUP_TIMEOUT_SECONDS
-from long_invest.modules.quotes.contracts import QuoteItemStatus, SignalQuoteSnapshot
-from long_invest.platform.jobs.contracts import JobStatus
+from long_invest.modules.quotes.contracts import (
+    QuoteItemStatus,
+    RealtimeCheckMode,
+    SignalQuoteSnapshot,
+)
 
 
 class Transaction:
@@ -77,16 +79,22 @@ class UniverseFreezer:
 
 
 @pytest.mark.anyio
-async def test_manual_and_diagnostic_use_distinct_idempotent_job_types() -> None:
-    Jobs.commands = []
-    Jobs.sessions = []
-    Jobs.stored = {}
-    database = Database()
-    freezer = UniverseFreezer()
+async def test_manual_and_diagnostic_run_directly_without_jobs() -> None:
+    class Runtime:
+        def __init__(self):
+            self.calls = []
+
+        async def run(self, **values):
+            self.calls.append(values)
+            return SimpleNamespace(mode=values["mode"])
+
+    class Calendar:
+        async def is_trading_session(self, _at):
+            return True
+
+    runtime = Runtime()
     app = QuoteApplication(
-        database,
-        job_service_factory=Jobs,
-        universe_freezer=freezer,
+        Database(), runtime_factory=lambda: runtime, calendar=Calendar()
     )
     common = {
         "symbols": ("600000.SH",),
@@ -95,83 +103,43 @@ async def test_manual_and_diagnostic_use_distinct_idempotent_job_types() -> None
         "created_by_user_id": "user-1",
         "reason": "人工核对行情",
     }
-    await app.submit_manual(timeout_seconds=30, **common)
-    await app.submit_diagnostic(
+    manual = await app.submit_manual(timeout_seconds=30, **common)
+    diagnostic = await app.submit_diagnostic(
         session_id="session-1",
         trusted_ip="127.0.0.1",
         **common,
     )
-    assert [command.job_type for command in Jobs.commands] == [
-        "REALTIME_QUOTE_CYCLE",
-        "QUOTE_DIAGNOSTIC",
-    ]
-    assert Jobs.commands[0].config_snapshot["symbols"] == ["600000.SH"]
-    assert Jobs.commands[0].config_snapshot["universe_snapshot_id"] == "snapshot-1"
-    assert Jobs.commands[0].config_snapshot["universe_snapshot_version"] == 7
-    assert Jobs.commands[0].soft_timeout_seconds == 35
-    assert Jobs.commands[0].hard_timeout_seconds == 45
-    assert (
-        Jobs.commands[0].hard_timeout_seconds
-        - Jobs.commands[0].soft_timeout_seconds
-        > DEFAULT_CLEANUP_TIMEOUT_SECONDS
-    )
-    assert freezer.scopes == [("600000.SH",), ("600000.SH",)]
-    assert Jobs.commands[0].idempotency_scope != Jobs.commands[1].idempotency_scope
-    assert Jobs.commands[1].config_snapshot["audit"] == {
-        "request_id": "req-1",
-        "idempotency_key": "same",
-        "actor_user_id": "user-1",
-        "session_id": "session-1",
-        "trusted_ip": "127.0.0.1",
-        "reason": "人工核对行情",
-    }
-    assert Jobs.sessions == [
-        transaction.session for transaction in database.transactions
-    ]
+    assert manual.mode is RealtimeCheckMode.MANUAL
+    assert diagnostic.mode is RealtimeCheckMode.DIAGNOSTIC
+    assert runtime.calls[0]["evaluate_signals"] is True
+    assert runtime.calls[0]["timeout_seconds"] == 30
+    assert runtime.calls[1]["evaluate_signals"] is False
 
 
 @pytest.mark.anyio
 async def test_allowed_actions_isolate_manual_and_diagnostic_active_jobs() -> None:
-    class Admin:
-        def __init__(self, _session, active_type: str | None) -> None:
-            self.active_type = active_type
-
-        async def list_jobs(self, **filters):
-            total = int(
-                filters["status"] is JobStatus.RUNNING
-                and filters["job_type"] == self.active_type
-            )
-            return SimpleNamespace(total=total)
-
     database = Database()
-    available = QuoteApplication(
-        database,
-        job_admin_factory=lambda session: Admin(session, None),
-    )
-    collecting = QuoteApplication(
-        database,
-        job_admin_factory=lambda session: Admin(
-            session, "REALTIME_QUOTE_CYCLE"
-        ),
-    )
+    available = QuoteApplication(database)
 
     assert [item.value for item in await available.allowed_actions()] == [
         "MANUAL_COLLECT",
         "DIAGNOSE",
     ]
-    assert [item.value for item in await collecting.allowed_actions()] == [
-        "DIAGNOSE"
-    ]
+    assert database.transactions == []
 
 
 @pytest.mark.anyio
-async def test_idempotent_replay_reuses_the_original_universe_snapshot() -> None:
-    Jobs.commands = []
-    Jobs.sessions = []
-    Jobs.stored = {}
-    freezer = UniverseFreezer()
+async def test_manual_outside_session_never_evaluates_signals() -> None:
+    class Runtime:
+        async def run(self, **values):
+            return SimpleNamespace(**values)
+
+    class Calendar:
+        async def is_trading_session(self, _at):
+            return False
+
     app = QuoteApplication(
-        Database(), job_service_factory=Jobs, universe_freezer=freezer
+        Database(), runtime_factory=Runtime, calendar=Calendar()
     )
     values = {
         "symbols": ("600000.SH",),
@@ -181,15 +149,9 @@ async def test_idempotent_replay_reuses_the_original_universe_snapshot() -> None
         "created_by_user_id": "user-1",
         "reason": "补采行情",
     }
-    first = await app.submit_manual(**values)
-    values["request_id"] = "request-2"
-    replay = await app.submit_manual(**values)
-
-    assert replay is first
-    assert freezer.scopes == [("600000.SH",)]
-    assert Jobs.commands[-1].config_snapshot == Jobs.commands[0].config_snapshot
-    assert Jobs.commands[-1].soft_timeout_seconds == 65
-    assert Jobs.commands[-1].hard_timeout_seconds == 75
+    result = await app.submit_manual(**values)
+    assert result.mode is RealtimeCheckMode.DIAGNOSTIC
+    assert result.evaluate_signals is False
 
 
 @pytest.mark.anyio

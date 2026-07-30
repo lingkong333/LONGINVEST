@@ -15,6 +15,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -69,6 +70,8 @@ class SignalState(Base):
         DateTime(timezone=True)
     )
     last_quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    last_quote_source: Mapped[str | None] = mapped_column(String(32))
+    last_quote_source_identity: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     last_target_revision_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("target_revision.id", ondelete="RESTRICT")
     )
@@ -185,6 +188,8 @@ class SignalEvaluation(Base):
         DateTime(timezone=True)
     )
     quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    quote_source: Mapped[str | None] = mapped_column(String(32))
+    quote_source_identity: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     hysteresis_applied: Mapped[bool] = mapped_column(Boolean, nullable=False)
     used_stale_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
     skip_code: Mapped[str | None] = mapped_column(String(100))
@@ -269,6 +274,8 @@ class SignalEvent(Base):
         DateTime(timezone=True)
     )
     quote_item_id: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
+    quote_source: Mapped[str | None] = mapped_column(String(32))
+    quote_source_identity: Mapped[dict[str, str] | None] = mapped_column(JSONB)
     used_stale_target: Mapped[bool] = mapped_column(Boolean, nullable=False)
     state_version: Mapped[int] = mapped_column(Integer, nullable=False)
     notification_class: Mapped[str] = mapped_column(String(16), nullable=False)

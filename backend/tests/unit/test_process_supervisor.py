@@ -10,7 +10,7 @@ def test_process_groups_keep_queue_and_permission_boundaries() -> None:
     core = process_supervisor.process_specs("core")
     strategy = process_supervisor.process_specs("strategy")
 
-    assert len(core) == 11
+    assert len(core) == 9
     assert len(strategy) == 4
     assert {spec.name for spec in core}.isdisjoint(
         {spec.name for spec in strategy}

@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
-from long_invest.modules.calendar.contracts import TradingDateWindow
+from long_invest.modules.calendar.contracts import (
+    SHANGHAI_TZ,
+    CalendarDayStatus,
+    TradingDateWindow,
+)
 from long_invest.modules.calendar.repository import CalendarRepository
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
@@ -75,6 +79,32 @@ class CalendarApplication:
                 status_code=404,
             )
         return item.trade_date
+
+    async def is_trading_session(
+        self, at: datetime, market: str = "CN_A"
+    ) -> bool:
+        if at.tzinfo is None or at.utcoffset() is None:
+            raise ValueError("at must include timezone")
+        local = at.astimezone(SHANGHAI_TZ)
+        try:
+            async with self._database.session() as session:
+                item = await self._repository_factory(session).get_day(
+                    market, local.date()
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        if (
+            item is None
+            or not item.is_trading_day
+            or CalendarDayStatus(item.status)
+            not in {CalendarDayStatus.CONFIRMED, CalendarDayStatus.OVERRIDDEN}
+        ):
+            return False
+        current_time = local.time().replace(tzinfo=None)
+        return any(
+            value.starts_at <= current_time <= value.ends_at
+            for value in item.sessions
+        )
 
 
 def get_calendar_application() -> CalendarApplication:

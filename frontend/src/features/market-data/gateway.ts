@@ -470,7 +470,7 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
         },
       }
       if (command.action === "MANUAL_COLLECT") {
-        await api.request(api.client.POST("/api/v1/quote-cycles/manual", {
+        await api.request(api.client.POST("/api/v1/quotes/check-now", {
           ...request,
           body: {
             ...request.body,

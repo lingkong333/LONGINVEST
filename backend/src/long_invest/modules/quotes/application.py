@@ -1,32 +1,26 @@
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from long_invest.modules.calendar.application import CalendarApplication
 from long_invest.modules.quotes.contracts import (
     QuoteCycleStatus,
     QuoteItemStatus,
     QuoteOperationAction,
+    RealtimeBatchResult,
+    RealtimeCheckMode,
     SignalQuoteSnapshot,
 )
 from long_invest.modules.quotes.repository import QuoteCycleRepository
 from long_invest.modules.quotes.service import (
     _item_view,
     _summary,
-    quote_operation_allowed_actions,
 )
-from long_invest.modules.securities.application import get_security_application
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.admin import JobAdminService
-from long_invest.platform.jobs.contracts import (
-    TERMINAL_JOB_STATUSES,
-    JobStatus,
-    SubmitJob,
-)
-from long_invest.platform.jobs.service import JobService
 
 
 class QuoteApplication:
@@ -34,14 +28,13 @@ class QuoteApplication:
         self,
         database: Database,
         *,
-        job_service_factory: Callable[..., JobService] = JobService,
-        universe_freezer: Callable[[tuple[str, ...]], Awaitable[Any]] | None = None,
-        job_admin_factory: Callable[..., Any] = JobAdminService,
+        runtime_factory: Callable[[], Any] | None = None,
+        calendar: CalendarApplication | None = None,
+        **_legacy_factories: Any,
     ) -> None:
         self._database = database
-        self._job_service_factory = job_service_factory
-        self._universe_freezer = universe_freezer
-        self._job_admin_factory = job_admin_factory
+        self._runtime_factory = runtime_factory
+        self._calendar = calendar or CalendarApplication(database)
 
     async def list_cycles(
         self,
@@ -92,24 +85,9 @@ class QuoteApplication:
             raise _backend_unavailable() from exc
 
     async def allowed_actions(self) -> tuple[QuoteOperationAction, ...]:
-        try:
-            async with self._database.session() as session:
-                admin = self._job_admin_factory(session)
-                manual = await _has_active_job(
-                    admin,
-                    job_type="REALTIME_QUOTE_CYCLE",
-                    queue="realtime-quotes",
-                )
-                diagnosis = await _has_active_job(
-                    admin,
-                    job_type="QUOTE_DIAGNOSTIC",
-                    queue="realtime-quotes",
-                )
-        except (SQLAlchemyError, TimeoutError) as exc:
-            raise _backend_unavailable() from exc
-        return quote_operation_allowed_actions(
-            manual_collection_in_progress=manual,
-            diagnosis_in_progress=diagnosis,
+        return (
+            QuoteOperationAction.MANUAL_COLLECT,
+            QuoteOperationAction.DIAGNOSE,
         )
 
     async def submit_manual(
@@ -121,19 +99,21 @@ class QuoteApplication:
         request_id: str,
         created_by_user_id: str,
         reason: str,
-    ) -> Any:
-        reason = _operation_reason(reason)
-        return await self._submit(
-            job_type="REALTIME_QUOTE_CYCLE",
-            queue="realtime-quotes",
-            scope="quotes:manual",
+    ) -> RealtimeBatchResult:
+        _operation_reason(reason)
+        now = datetime.now(UTC)
+        in_session = await self._calendar.is_trading_session(now)
+        return await self._runtime().run(
             symbols=symbols,
-            idempotency_key=idempotency_key,
-            request_id=request_id,
-            created_by_user_id=created_by_user_id,
-            extra={"timeout_seconds": timeout_seconds, "reason": reason},
-            soft_timeout_seconds=timeout_seconds + 5,
-            hard_timeout_seconds=timeout_seconds + 15,
+            scheduled_at=now,
+            mode=(
+                RealtimeCheckMode.MANUAL
+                if in_session
+                else RealtimeCheckMode.DIAGNOSTIC
+            ),
+            evaluate_signals=in_session,
+            timeout_seconds=timeout_seconds,
+            operation_key=f"manual:{created_by_user_id}:{idempotency_key}:{request_id}",
         )
 
     async def submit_diagnostic(
@@ -146,96 +126,29 @@ class QuoteApplication:
         session_id: str,
         trusted_ip: str,
         reason: str,
-    ) -> Any:
-        reason = _operation_reason(reason)
-        return await self._submit(
-            job_type="QUOTE_DIAGNOSTIC",
-            queue="realtime-quotes",
-            scope="quotes:diagnostic",
+    ) -> RealtimeBatchResult:
+        _operation_reason(reason)
+        now = datetime.now(UTC)
+        return await self._runtime().run(
             symbols=symbols,
-            idempotency_key=idempotency_key,
-            request_id=request_id,
-            created_by_user_id=created_by_user_id,
-            extra={
-                "audit": {
-                    "request_id": request_id,
-                    "idempotency_key": idempotency_key,
-                    "actor_user_id": created_by_user_id,
-                    "session_id": session_id,
-                    "trusted_ip": trusted_ip,
-                    "reason": reason,
-                }
-            },
-            soft_timeout_seconds=45,
-            hard_timeout_seconds=60,
+            scheduled_at=now,
+            mode=RealtimeCheckMode.DIAGNOSTIC,
+            evaluate_signals=False,
+            timeout_seconds=30,
+            operation_key=(
+                f"diagnose:{created_by_user_id}:{session_id}:{trusted_ip}:"
+                f"{idempotency_key}:{request_id}"
+            ),
         )
 
-    async def _submit(
-        self,
-        *,
-        job_type: str,
-        queue: str,
-        scope: str,
-        symbols: tuple[str, ...],
-        idempotency_key: str,
-        request_id: str,
-        created_by_user_id: str,
-        extra: dict[str, object],
-        soft_timeout_seconds: int,
-        hard_timeout_seconds: int,
-    ) -> Any:
-        idempotency_scope = f"{scope}:{created_by_user_id}"
-        try:
-            async with self._database.transaction() as session:
-                jobs = self._job_service_factory(session)
-                await jobs.lock_submission(idempotency_scope, idempotency_key)
-                existing = await jobs.find_submission(
-                    idempotency_scope, idempotency_key
-                )
-                if existing is None:
-                    freezer = self._universe_freezer
-                    if freezer is None:
-                        freezer = get_security_application().freeze_symbols
-                    snapshot = await freezer(symbols)
-                    snapshot_id = str(snapshot.id)
-                    snapshot_version = snapshot.master_version
-                    requested_at = datetime.now(UTC).isoformat()
-                else:
-                    snapshot_id = str(
-                        existing.config_snapshot.get("universe_snapshot_id", "")
-                    )
-                    snapshot_version = int(
-                        existing.config_snapshot.get("universe_snapshot_version", 0)
-                    )
-                    requested_at = str(
-                        existing.config_snapshot.get("requested_at", "")
-                    )
-                effective_extra = dict(extra)
-                if existing is not None and "audit" in existing.config_snapshot:
-                    effective_extra["audit"] = existing.config_snapshot["audit"]
-                command = SubmitJob(
-                    job_type=job_type,
-                    queue=queue,
-                    idempotency_scope=idempotency_scope,
-                    idempotency_key=idempotency_key,
-                    request_id=request_id,
-                    config_snapshot={
-                        "symbols": list(symbols),
-                        "universe_snapshot_id": snapshot_id,
-                        "universe_snapshot_version": snapshot_version,
-                        "requested_at": requested_at,
-                        **effective_extra,
-                    },
-                    business_object_type="quote_cycle_request",
-                    created_by_user_id=created_by_user_id,
-                    soft_timeout_seconds=soft_timeout_seconds,
-                    hard_timeout_seconds=hard_timeout_seconds,
-                )
-                return await jobs.submit(command)
-        except AppError:
-            raise
-        except (SQLAlchemyError, TimeoutError) as exc:
-            raise _backend_unavailable() from exc
+    def _runtime(self) -> Any:
+        if self._runtime_factory is None:
+            from long_invest.bootstrap.realtime_quotes import (
+                get_realtime_quote_runtime,
+            )
+
+            self._runtime_factory = get_realtime_quote_runtime
+        return self._runtime_factory()
 
 
 class TransactionalQuoteSignalPort:
@@ -302,21 +215,3 @@ def _operation_reason(reason: str) -> str:
             status_code=422,
         )
     return normalized
-
-
-async def _has_active_job(
-    admin: Any, *, job_type: str, queue: str
-) -> bool:
-    for status in JobStatus:
-        if status in TERMINAL_JOB_STATUSES:
-            continue
-        page = await admin.list_jobs(
-            page=1,
-            page_size=1,
-            status=status,
-            job_type=job_type,
-            queue=queue,
-        )
-        if page.total > 0:
-            return True
-    return False

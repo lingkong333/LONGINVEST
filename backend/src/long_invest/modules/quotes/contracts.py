@@ -35,6 +35,51 @@ class QuoteItemStatus(StrEnum):
     NOT_EXPECTED_TO_TRADE = "NOT_EXPECTED_TO_TRADE"
 
 
+class RealtimeBatchStatus(StrEnum):
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+    OVERLAP_SKIPPED = "OVERLAP_SKIPPED"
+
+
+class RealtimeCheckMode(StrEnum):
+    SCHEDULED = "SCHEDULED"
+    MANUAL = "MANUAL"
+    DIAGNOSTIC = "DIAGNOSTIC"
+
+
+@dataclass(frozen=True, slots=True)
+class RealtimeQuoteFailure:
+    symbol: str
+    code: str
+
+
+@dataclass(frozen=True, slots=True)
+class RealtimeBatchResult:
+    status: RealtimeBatchStatus
+    mode: RealtimeCheckMode
+    scheduled_at: datetime
+    started_at: datetime
+    completed_at: datetime
+    expected_symbols: tuple[str, ...]
+    quotes: tuple[RealtimeQuote, ...]
+    failures: tuple[RealtimeQuoteFailure, ...]
+    signal_succeeded: int = 0
+    signal_failed: int = 0
+
+    @property
+    def expected_count(self) -> int:
+        return len(self.expected_symbols)
+
+    @property
+    def valid_count(self) -> int:
+        return len(self.quotes)
+
+    @property
+    def failed_count(self) -> int:
+        return len(self.failures)
+
+
 @dataclass(frozen=True, slots=True)
 class SignalQuoteSnapshot:
     cycle_id: UUID

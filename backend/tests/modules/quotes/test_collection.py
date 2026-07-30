@@ -13,14 +13,72 @@ from long_invest.modules.providers.contracts import (
     ProviderItemFailure,
     RealtimeQuote,
 )
-from long_invest.modules.quotes.collection import QuoteCollectionService
+from long_invest.modules.quotes.collection import (
+    InMemoryQuoteCollector,
+    QuoteCollectionService,
+)
 from long_invest.modules.quotes.contracts import (
     CreateQuoteCycle,
     QuoteCycleStatus,
     QuoteCycleSummary,
+    RealtimeBatchStatus,
+    RealtimeCheckMode,
 )
 
 NOW = datetime(2026, 7, 16, 2, 0, tzinfo=UTC)
+
+
+class RoutedProvider:
+    def __init__(self, result):
+        self.result = result
+
+    async def realtime_quotes(self, _symbols, _deadline):
+        return self.result
+
+
+@pytest.mark.anyio
+async def test_in_memory_collection_waits_for_whole_scope_and_marks_missing() -> None:
+    collector = InMemoryQuoteCollector(
+        RoutedProvider(ProviderBatchResult(items=(quote("600000.SH"),))),
+        now=lambda: NOW,
+    )
+
+    result = await collector.collect(
+        symbols=("600000.SH", "000001.SZ"),
+        scheduled_at=NOW,
+        mode=RealtimeCheckMode.SCHEDULED,
+    )
+
+    assert result.status is RealtimeBatchStatus.PARTIAL
+    assert result.valid_count == 1
+    assert result.failures[0].symbol == "000001.SZ"
+    assert result.failures[0].code == "PROVIDER_ITEM_MISSING"
+
+
+@pytest.mark.anyio
+async def test_in_memory_collection_rejects_conflicting_duplicate_quotes() -> None:
+    collector = InMemoryQuoteCollector(
+        RoutedProvider(
+            ProviderBatchResult(
+                items=(
+                    quote("600000.SH"),
+                    replace(
+                        quote("600000.SH"),
+                        price=Decimal("12"),
+                        high=Decimal("12"),
+                    ),
+                )
+            )
+        ),
+        now=lambda: NOW,
+    )
+
+    result = await collector.collect(
+        symbols=("600000.SH",), scheduled_at=NOW
+    )
+
+    assert result.status is RealtimeBatchStatus.FAILED
+    assert result.failures[0].code == "QUOTE_CONFLICT"
 
 
 def quote(symbol: str, source: ProviderCode = ProviderCode.EASTMONEY):

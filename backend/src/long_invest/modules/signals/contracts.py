@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from enum import StrEnum
@@ -109,6 +110,8 @@ class SignalInput(StrictContract):
     targets: TargetValues
     quote_cycle_id: UUID | None = None
     quote_item_id: UUID | None = None
+    quote_source: str | None = Field(default=None, max_length=32)
+    quote_source_identity: Mapping[str, str] | None = None
     position_version: int = Field(ge=0)
     hysteresis_ratio: Decimal = Field(ge=0)
     hysteresis_min: Decimal = Field(ge=0)
@@ -139,11 +142,25 @@ class SignalInput(StrictContract):
     def validate_quote_eligibility(self) -> SignalInput:
         if not self.quote_eligible and not self.quote_ineligibility_code:
             raise ValueError("ineligible quote requires a reason")
-        if (self.quote_cycle_id is None) != (self.quote_scheduled_at is None):
-            raise ValueError("quote cycle and scheduled time must be provided together")
+        if self.quote_cycle_id is not None and self.quote_scheduled_at is None:
+            raise ValueError("persisted quote cycle requires its scheduled time")
         if (self.quote_cycle_id is None) != (self.quote_item_id is None):
             raise ValueError("quote cycle and item must be provided together")
         return self
+
+
+class RealtimeSignalPreparation(StrictContract):
+    subscription_id: UUID
+    security_id: UUID
+    symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    security_name: str = Field(min_length=1, max_length=100)
+    subscription_version: int = Field(ge=1)
+    target_revision_id: UUID
+    target_version: int = Field(ge=1)
+    target_date: date
+    targets: TargetValues
+    hysteresis_ratio: Decimal = Field(ge=0)
+    hysteresis_min: Decimal = Field(ge=0)
 
 
 class SignalStateView(StrictContract):
@@ -157,6 +174,8 @@ class SignalStateView(StrictContract):
     last_quote_cycle_id: UUID | None = None
     last_quote_scheduled_at: AwareDatetime | None = None
     last_quote_item_id: UUID | None = None
+    last_quote_source: str | None = None
+    last_quote_source_identity: Mapping[str, str] | None = None
     last_target_revision_id: UUID | None = None
     last_target_version: int | None = Field(default=None, ge=1)
     last_position_version: int | None = Field(default=None, ge=0)
@@ -182,6 +201,8 @@ class SignalEvaluationView(StrictContract):
     quote_cycle_id: UUID | None = None
     quote_scheduled_at: AwareDatetime | None = None
     quote_item_id: UUID | None = None
+    quote_source: str | None = None
+    quote_source_identity: Mapping[str, str] | None = None
     hysteresis_applied: bool
     used_stale_target: bool
     skip_code: str | None = None
@@ -237,6 +258,8 @@ class SignalEventView(StrictContract):
     quote_cycle_id: UUID | None = None
     quote_scheduled_at: AwareDatetime | None = None
     quote_item_id: UUID | None = None
+    quote_source: str | None = None
+    quote_source_identity: Mapping[str, str] | None = None
     used_stale_target: bool
     state_version: int = Field(ge=1)
     notification_class: NotificationClass

@@ -4,6 +4,8 @@ import signal
 import socket
 from contextlib import suppress
 from datetime import datetime
+from functools import partial
+from zoneinfo import ZoneInfo
 
 import structlog
 
@@ -14,17 +16,21 @@ from long_invest.bootstrap.providers import (
     build_provider_service,
     close_provider_resources,
 )
+from long_invest.bootstrap.realtime_quotes import get_realtime_quote_runtime
 from long_invest.modules.calendar.application import CalendarApplication
 from long_invest.modules.daily_data.jobs import (
     DailyMarketRecoveryJob,
     FullMarketDailyJob,
 )
 from long_invest.modules.monitor_schedules.application import MonitorScheduleApplication
+from long_invest.modules.monitoring.application import MonitorSubscriptionApplication
+from long_invest.modules.quotes.contracts import RealtimeCheckMode
 from long_invest.modules.scheduling.runtime import (
     DailyGapPlanner,
     DualPathScheduler,
     PostgresPersistentJobSubmitter,
 )
+from long_invest.modules.securities.application import SecurityApplication
 from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database
@@ -34,13 +40,55 @@ from long_invest.platform.logging.configure import configure_logging
 
 HEARTBEAT_SECONDS = 5
 logger = structlog.get_logger(__name__)
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
-async def _intraday_foundation(scheduled_at: datetime) -> None:
-    logger.info(
-        "intraday_schedule_triggered",
-        category="scheduler",
-        scheduled_at=scheduled_at.isoformat(),
+async def _run_intraday(
+    scheduled_at: datetime,
+    *,
+    schedules: MonitorScheduleApplication,
+    subscriptions: MonitorSubscriptionApplication,
+) -> None:
+    local_time = scheduled_at.astimezone(SHANGHAI).time().replace(tzinfo=None)
+    grouped = {
+        item.schedule_id: item.subscriptions
+        for item in await subscriptions.enabled_schedule_snapshots()
+    }
+    selected = {}
+    for schedule in await schedules.list():
+        current = grouped.get(schedule.id, ())
+        if not current:
+            continue
+        try:
+            revision = await schedules.current_revision(schedule.id)
+        except Exception:
+            logger.exception(
+                "intraday_schedule_scope_failed",
+                category="scheduler",
+                schedule_id=str(schedule.id),
+            )
+            continue
+        if local_time not in revision.times:
+            continue
+        for subscription in current:
+            selected[subscription.symbol] = subscription
+    if not selected:
+        logger.info(
+            "intraday_schedule_scope_empty",
+            category="scheduler",
+            scheduled_at=scheduled_at.isoformat(),
+        )
+        return
+    ordered = tuple(selected[symbol] for symbol in sorted(selected))
+    await get_realtime_quote_runtime().run(
+        symbols=tuple(item.symbol for item in ordered),
+        scheduled_at=scheduled_at,
+        mode=RealtimeCheckMode.SCHEDULED,
+        evaluate_signals=True,
+        expected_subscription_versions={
+            item.symbol: item.version for item in ordered
+        },
+        operation_key=f"scheduled:{scheduled_at.isoformat()}",
     )
 
 
@@ -58,12 +106,22 @@ async def run() -> None:
     settings = get_settings()
     database = Database(settings.database_url)
     runtime = SchedulerRuntimeApplication(database)
+    schedule_application = MonitorScheduleApplication(database)
+    subscription_application = MonitorSubscriptionApplication(
+        database,
+        security_application=SecurityApplication(database),
+        schedule_application=schedule_application,
+    )
     scheduler = DualPathScheduler(
         calendar=CalendarApplication(database),
-        schedules=MonitorScheduleApplication(database),
+        schedules=schedule_application,
         runtime=runtime,
         persistent_submitter=PostgresPersistentJobSubmitter(database),
-        intraday_handler=_intraday_foundation,
+        intraday_handler=partial(
+            _run_intraday,
+            schedules=schedule_application,
+            subscriptions=subscription_application,
+        ),
         instance_id=f"{socket.gethostname()}:{os.getpid()}",
         daily_gap_planner=DailyGapPlanner(
             database, CalendarApplication(database)

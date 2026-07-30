@@ -25,7 +25,6 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
 def test_compose_workers_listen_only_to_their_role_queue() -> None:
     expected = {
         "worker-maintenance": "maintenance",
-        "worker-realtime-quotes": "realtime-quotes",
         "worker-qfq-refresh": "qfq-refresh",
         "worker-signals": "signals",
     }

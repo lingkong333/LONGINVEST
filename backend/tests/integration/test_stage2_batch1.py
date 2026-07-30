@@ -27,6 +27,7 @@ def test_market_data_routes_are_registered() -> None:
     assert "get" in paths["/api/v1/quote-cycles"]
     assert "get" in paths["/api/v1/quote-cycles/{cycle_id}/items"]
     assert "post" in paths["/api/v1/quote-cycles/manual"]
+    assert "post" in paths["/api/v1/quotes/check-now"]
     assert "post" in paths["/api/v1/quotes/diagnose"]
     assert "get" in paths["/api/v1/daily-data/batches"]
     assert "get" in paths["/api/v1/daily-data/batches/{batch_id}/missing"]
@@ -40,8 +41,9 @@ def test_market_data_success_responses_publish_concrete_schemas() -> None:
     operations = (
         ("/api/v1/quote-cycles", "get", "200"),
         ("/api/v1/quote-cycles/{cycle_id}/items", "get", "200"),
-        ("/api/v1/quote-cycles/manual", "post", "202"),
-        ("/api/v1/quotes/diagnose", "post", "202"),
+        ("/api/v1/quote-cycles/manual", "post", "200"),
+        ("/api/v1/quotes/check-now", "post", "200"),
+        ("/api/v1/quotes/diagnose", "post", "200"),
         ("/api/v1/daily-data/batches", "get", "200"),
         ("/api/v1/daily-data/batches/{batch_id}/missing", "get", "200"),
         ("/api/v1/daily-data/batches/{batch_id}/retry", "post", "202"),

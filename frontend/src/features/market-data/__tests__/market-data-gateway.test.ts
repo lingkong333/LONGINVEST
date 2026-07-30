@@ -152,7 +152,7 @@ describe("行情数据中心请求边界", () => {
         },
       ),
       http.post(
-        "http://localhost/api/v1/quote-cycles/manual",
+        "http://localhost/api/v1/quotes/check-now",
         async ({ request }) => {
           received.push(await request.json())
           return HttpResponse.json(envelope({

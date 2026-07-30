@@ -1,3 +1,5 @@
+from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -19,7 +21,28 @@ from long_invest.platform.http.middleware import RequestContextMiddleware
 class FakeApplication:
     def __init__(self) -> None:
         self.calls = []
-        self.job = SimpleNamespace(id=uuid4(), status="PENDING_DISPATCH")
+        now = datetime.now(UTC)
+        self.result = SimpleNamespace(
+            status="COMPLETE",
+            mode="MANUAL",
+            scheduled_at=now,
+            started_at=now,
+            completed_at=now,
+            expected_symbols=("600000.SH",),
+            expected_count=1,
+            valid_count=1,
+            failed_count=0,
+            signal_succeeded=1,
+            signal_failed=0,
+            quotes=(SimpleNamespace(
+                symbol="600000.SH", price=Decimal("10"), open=Decimal("9"),
+                high=Decimal("11"), low=Decimal("8"),
+                previous_close=Decimal("9"), volume=1, amount=Decimal("10"),
+                quote_time=now, received_at=now, source="SINA",
+                source_identity=None,
+            ),),
+            failures=(),
+        )
 
     async def list_cycles(self, **kwargs):
         self.calls.append(("list", kwargs))
@@ -34,11 +57,11 @@ class FakeApplication:
 
     async def submit_manual(self, **kwargs):
         self.calls.append(("manual", kwargs))
-        return self.job
+        return self.result
 
     async def submit_diagnostic(self, **kwargs):
         self.calls.append(("diagnostic", kwargs))
-        return self.job
+        return self.result
 
 
 class FakeAuthApplication:
@@ -74,13 +97,14 @@ def client(application=None, *, auth=True, write=True):
     return TestClient(app, raise_server_exceptions=False), application
 
 
-def test_router_exposes_exactly_four_v31_routes() -> None:
+def test_router_exposes_realtime_and_legacy_read_routes() -> None:
     assert {
         (method, route.path) for route in router.routes for method in route.methods
     } == {
         ("GET", "/api/v1/quote-cycles"),
         ("GET", "/api/v1/quote-cycles/{cycle_id}/items"),
         ("POST", "/api/v1/quote-cycles/manual"),
+        ("POST", "/api/v1/quotes/check-now"),
         ("POST", "/api/v1/quotes/diagnose"),
     }
 
@@ -123,7 +147,7 @@ def test_manual_requires_confirmation_and_idempotency_key() -> None:
     assert application.calls == []
 
 
-def test_manual_submits_job_without_creating_cycle_or_waiting_for_provider() -> None:
+def test_manual_returns_completed_result_without_creating_a_job() -> None:
     http, application = client()
     response = http.post(
         "/api/v1/quote-cycles/manual",
@@ -135,8 +159,10 @@ def test_manual_submits_job_without_creating_cycle_or_waiting_for_provider() -> 
         },
         headers={"Idempotency-Key": "manual-1"},
     )
-    assert response.status_code == 202
-    assert response.json()["data"]["job_id"] == str(application.job.id)
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "COMPLETE"
+    assert response.json()["data"]["valid_count"] == 1
+    assert "job_id" not in response.json()["data"]
     call = application.calls[0]
     assert call[0] == "manual"
     assert call[1]["symbols"] == ("600000.SH",)
@@ -144,7 +170,7 @@ def test_manual_submits_job_without_creating_cycle_or_waiting_for_provider() -> 
     assert call[1]["reason"] == "手动采集"
 
 
-def test_diagnostic_submits_separate_job_and_does_not_call_manual() -> None:
+def test_diagnostic_returns_direct_result_and_does_not_call_manual() -> None:
     http, application = client()
     response = http.post(
         "/api/v1/quotes/diagnose",
@@ -155,7 +181,7 @@ def test_diagnostic_submits_separate_job_and_does_not_call_manual() -> None:
         },
         headers={"Idempotency-Key": "diagnose-1"},
     )
-    assert response.status_code == 202
+    assert response.status_code == 200
     assert [call[0] for call in application.calls] == ["diagnostic"]
     assert application.calls[0][1]["session_id"] == "session-1"
     assert application.calls[0][1]["trusted_ip"] == "127.0.0.1"

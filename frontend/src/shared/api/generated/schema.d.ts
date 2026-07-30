@@ -729,8 +729,28 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Submit Manual Cycle */
+        /**
+         * Submit Manual Cycle
+         * @deprecated
+         */
         post: operations["submit_manual_cycle_api_v1_quote_cycles_manual_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/quotes/check-now": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Manual Cycle */
+        post: operations["submit_manual_cycle_api_v1_quotes_check_now_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3349,13 +3369,10 @@ export interface components {
              * Format: uuid
              */
             subscription_id: string;
-            /**
-             * Job Id
-             * Format: uuid
-             */
-            job_id: string;
-            /** Status */
-            status: string;
+            /** Result */
+            result: {
+                [key: string]: unknown;
+            };
         };
         /** ActionRequest */
         ActionRequest: {
@@ -6461,18 +6478,44 @@ export interface components {
             server_time: string;
             data: components["schemas"]["QuoteItemsData"];
         };
-        /** QuoteJobData */
-        QuoteJobData: {
-            /**
-             * Job Id
-             * Format: uuid
-             */
-            job_id: string;
+        /** RealtimeCheckData */
+        RealtimeCheckData: {
             /** Status */
             status: string;
+            /** Mode */
+            mode: string;
+            /**
+             * Scheduled At
+             * Format: date-time
+             */
+            scheduled_at: string;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /**
+             * Completed At
+             * Format: date-time
+             */
+            completed_at: string;
+            /** Expected Count */
+            expected_count: number;
+            /** Valid Count */
+            valid_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Signal Succeeded */
+            signal_succeeded: number;
+            /** Signal Failed */
+            signal_failed: number;
+            /** Quotes */
+            quotes: components["schemas"]["RealtimeQuoteRecord"][];
+            /** Failures */
+            failures: components["schemas"]["RealtimeFailureRecord"][];
         };
-        /** QuoteJobResponse */
-        QuoteJobResponse: {
+        /** RealtimeCheckResponse */
+        RealtimeCheckResponse: {
             /**
              * Success
              * @constant
@@ -6489,7 +6532,49 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QuoteJobData"];
+            data: components["schemas"]["RealtimeCheckData"];
+        };
+        /** RealtimeFailureRecord */
+        RealtimeFailureRecord: {
+            /** Symbol */
+            symbol: string;
+            /** Code */
+            code: string;
+        };
+        /** RealtimeQuoteRecord */
+        RealtimeQuoteRecord: {
+            /** Symbol */
+            symbol: string;
+            /** Price */
+            price: string;
+            /** Open */
+            open: string;
+            /** High */
+            high: string;
+            /** Low */
+            low: string;
+            /** Previous Close */
+            previous_close: string;
+            /** Volume */
+            volume: number;
+            /** Amount */
+            amount: string;
+            /**
+             * Quote Time
+             * Format: date-time
+             */
+            quote_time: string;
+            /**
+             * Received At
+             * Format: date-time
+             */
+            received_at: string;
+            /** Source */
+            source: string;
+            /** Source Identity */
+            source_identity: {
+                [key: string]: unknown;
+            } | null;
         };
         /** RemoveItemBody */
         RemoveItemBody: {
@@ -7434,6 +7519,12 @@ export interface components {
             quote_scheduled_at?: string | null;
             /** Quote Item Id */
             quote_item_id?: string | null;
+            /** Quote Source */
+            quote_source?: string | null;
+            /** Quote Source Identity */
+            quote_source_identity?: {
+                [key: string]: string;
+            } | null;
             /** Hysteresis Applied */
             hysteresis_applied: boolean;
             /** Used Stale Target */
@@ -7543,6 +7634,12 @@ export interface components {
             quote_scheduled_at?: string | null;
             /** Quote Item Id */
             quote_item_id?: string | null;
+            /** Quote Source */
+            quote_source?: string | null;
+            /** Quote Source Identity */
+            quote_source_identity?: {
+                [key: string]: string;
+            } | null;
             /** Used Stale Target */
             used_stale_target: boolean;
             /** State Version */
@@ -7711,6 +7808,12 @@ export interface components {
             last_quote_scheduled_at?: string | null;
             /** Last Quote Item Id */
             last_quote_item_id?: string | null;
+            /** Last Quote Source */
+            last_quote_source?: string | null;
+            /** Last Quote Source Identity */
+            last_quote_source_identity?: {
+                [key: string]: string;
+            } | null;
             /** Last Target Revision Id */
             last_target_revision_id?: string | null;
             /** Last Target Version */
@@ -10359,12 +10462,47 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            202: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QuoteJobResponse"];
+                    "application/json": components["schemas"]["RealtimeCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_manual_cycle_api_v1_quotes_check_now_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualQuoteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RealtimeCheckResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10394,12 +10532,12 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            202: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["QuoteJobResponse"];
+                    "application/json": components["schemas"]["RealtimeCheckResponse"];
                 };
             };
             /** @description Validation Error */
@@ -11790,7 +11928,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            202: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11827,7 +11965,7 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            202: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };

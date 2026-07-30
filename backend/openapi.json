@@ -2212,6 +2212,7 @@
         ],
         "summary": "Submit Manual Cycle",
         "operationId": "submit_manual_cycle_api_v1_quote_cycles_manual_post",
+        "deprecated": true,
         "parameters": [
           {
             "name": "Idempotency-Key",
@@ -2236,12 +2237,66 @@
           }
         },
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QuoteJobResponse"
+                  "$ref": "#/components/schemas/RealtimeCheckResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/quotes/check-now": {
+      "post": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "Submit Manual Cycle",
+        "operationId": "submit_manual_cycle_api_v1_quotes_check_now_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualQuoteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RealtimeCheckResponse"
                 }
               }
             }
@@ -2290,12 +2345,12 @@
           }
         },
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/QuoteJobResponse"
+                  "$ref": "#/components/schemas/RealtimeCheckResponse"
                 }
               }
             }
@@ -4665,7 +4720,7 @@
           }
         },
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -4729,7 +4784,7 @@
           }
         },
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -12267,21 +12322,16 @@
             "format": "uuid",
             "title": "Subscription Id"
           },
-          "job_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Job Id"
-          },
-          "status": {
-            "type": "string",
-            "title": "Status"
+          "result": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Result"
           }
         },
         "type": "object",
         "required": [
           "subscription_id",
-          "job_id",
-          "status"
+          "result"
         ],
         "title": "ActionData"
       },
@@ -20406,26 +20456,84 @@
         ],
         "title": "QuoteItemsResponse"
       },
-      "QuoteJobData": {
+      "RealtimeCheckData": {
         "properties": {
-          "job_id": {
-            "type": "string",
-            "format": "uuid",
-            "title": "Job Id"
-          },
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled At"
+          },
+          "started_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Started At"
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          },
+          "expected_count": {
+            "type": "integer",
+            "title": "Expected Count"
+          },
+          "valid_count": {
+            "type": "integer",
+            "title": "Valid Count"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "signal_succeeded": {
+            "type": "integer",
+            "title": "Signal Succeeded"
+          },
+          "signal_failed": {
+            "type": "integer",
+            "title": "Signal Failed"
+          },
+          "quotes": {
+            "items": {
+              "$ref": "#/components/schemas/RealtimeQuoteRecord"
+            },
+            "type": "array",
+            "title": "Quotes"
+          },
+          "failures": {
+            "items": {
+              "$ref": "#/components/schemas/RealtimeFailureRecord"
+            },
+            "type": "array",
+            "title": "Failures"
           }
         },
         "type": "object",
         "required": [
-          "job_id",
-          "status"
+          "status",
+          "mode",
+          "scheduled_at",
+          "started_at",
+          "completed_at",
+          "expected_count",
+          "valid_count",
+          "failed_count",
+          "signal_succeeded",
+          "signal_failed",
+          "quotes",
+          "failures"
         ],
-        "title": "QuoteJobData"
+        "title": "RealtimeCheckData"
       },
-      "QuoteJobResponse": {
+      "RealtimeCheckResponse": {
         "properties": {
           "success": {
             "type": "boolean",
@@ -20450,7 +20558,7 @@
             "title": "Server Time"
           },
           "data": {
-            "$ref": "#/components/schemas/QuoteJobData"
+            "$ref": "#/components/schemas/RealtimeCheckData"
           }
         },
         "type": "object",
@@ -20462,7 +20570,109 @@
           "server_time",
           "data"
         ],
-        "title": "QuoteJobResponse"
+        "title": "RealtimeCheckResponse"
+      },
+      "RealtimeFailureRecord": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "code"
+        ],
+        "title": "RealtimeFailureRecord"
+      },
+      "RealtimeQuoteRecord": {
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "title": "Symbol"
+          },
+          "price": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Price"
+          },
+          "open": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Open"
+          },
+          "high": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "High"
+          },
+          "low": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Low"
+          },
+          "previous_close": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Previous Close"
+          },
+          "volume": {
+            "type": "integer",
+            "title": "Volume"
+          },
+          "amount": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Amount"
+          },
+          "quote_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Quote Time"
+          },
+          "received_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Received At"
+          },
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "source_identity": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Identity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "symbol",
+          "price",
+          "open",
+          "high",
+          "low",
+          "previous_close",
+          "volume",
+          "amount",
+          "quote_time",
+          "received_at",
+          "source",
+          "source_identity"
+        ],
+        "title": "RealtimeQuoteRecord"
       },
       "RemoveItemBody": {
         "properties": {
@@ -23007,6 +23217,31 @@
             ],
             "title": "Quote Item Id"
           },
+          "quote_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Source"
+          },
+          "quote_source_identity": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Source Identity"
+          },
           "hysteresis_applied": {
             "type": "boolean",
             "title": "Hysteresis Applied"
@@ -23249,6 +23484,31 @@
               }
             ],
             "title": "Quote Item Id"
+          },
+          "quote_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Source"
+          },
+          "quote_source_identity": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quote Source Identity"
           },
           "used_stale_target": {
             "type": "boolean",
@@ -23653,6 +23913,31 @@
               }
             ],
             "title": "Last Quote Item Id"
+          },
+          "last_quote_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Quote Source"
+          },
+          "last_quote_source_identity": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Quote Source Identity"
           },
           "last_target_revision_id": {
             "anyOf": [

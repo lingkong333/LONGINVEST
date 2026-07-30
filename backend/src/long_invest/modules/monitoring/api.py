@@ -147,8 +147,7 @@ class ResultResponse(SuccessEnvelope):
 
 class ActionData(BaseModel):
     subscription_id: UUID
-    job_id: UUID
-    status: str
+    result: dict[str, Any]
 
 
 class ActionResponse(SuccessEnvelope):
@@ -362,7 +361,7 @@ async def restore(
 
 
 @router.post(
-    "/{subscription_id}/check-now", response_model=ActionResponse, status_code=202
+    "/{subscription_id}/check-now", response_model=ActionResponse
 )
 async def check_now(
     subscription_id: UUID,
@@ -372,7 +371,7 @@ async def check_now(
     key: IdempotencyKey,
 ):
     _confirm(body.confirm)
-    job = await application.check_now(
+    result = await application.check_now(
         subscription_id,
         expected_version=body.expected_version,
         idempotency_key=key.strip(),
@@ -383,15 +382,14 @@ async def check_now(
     return success_response(
         data={
             "subscription_id": subscription_id,
-            "job_id": job.id,
-            "status": str(job.status),
+            "result": _action_result(result),
         },
-        code="MONITOR_CHECK_REQUESTED",
+        code="MONITOR_CHECK_COMPLETED",
     )
 
 
 @router.post(
-    "/{subscription_id}/diagnose", response_model=ActionResponse, status_code=202
+    "/{subscription_id}/diagnose", response_model=ActionResponse
 )
 async def diagnose(
     subscription_id: UUID,
@@ -401,7 +399,7 @@ async def diagnose(
     key: IdempotencyKey,
 ):
     _confirm(body.confirm)
-    job = await application.diagnose(
+    result = await application.diagnose(
         subscription_id,
         expected_version=body.expected_version,
         idempotency_key=key.strip(),
@@ -414,11 +412,38 @@ async def diagnose(
     return success_response(
         data={
             "subscription_id": subscription_id,
-            "job_id": job.id,
-            "status": str(job.status),
+            "result": _action_result(result),
         },
-        code="MONITOR_DIAGNOSTIC_REQUESTED",
+        code="MONITOR_DIAGNOSTIC_COMPLETED",
     )
+
+
+def _action_result(result: Any) -> dict[str, Any]:
+    return {
+        "status": result.status,
+        "mode": result.mode,
+        "scheduled_at": result.scheduled_at,
+        "started_at": result.started_at,
+        "completed_at": result.completed_at,
+        "expected_count": result.expected_count,
+        "valid_count": result.valid_count,
+        "failed_count": result.failed_count,
+        "signal_succeeded": result.signal_succeeded,
+        "signal_failed": result.signal_failed,
+        "quotes": [
+            {
+                "symbol": item.symbol,
+                "price": item.price,
+                "quote_time": item.quote_time,
+                "source": item.source,
+            }
+            for item in result.quotes
+        ],
+        "failures": [
+            {"symbol": item.symbol, "code": item.code}
+            for item in result.failures
+        ],
+    }
 
 
 def _owner(x):

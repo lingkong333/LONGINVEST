@@ -885,7 +885,9 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                         : ""}
           </DialogTitle>
           <DialogDescription>
-            操作将创建后台任务。确认后请在当前区域查看最新状态。
+            {marketCommand?.kind === "QUOTE"
+              ? "确认后立即获取行情并返回结果；诊断不会触发交易信号。"
+              : "操作将创建后台任务。确认后请在当前区域查看最新状态。"}
           </DialogDescription>
           {marketCommand?.kind === "QUOTE" ? (
             <>

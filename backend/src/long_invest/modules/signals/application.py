@@ -1,8 +1,19 @@
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.exc import SQLAlchemyError
 
+from long_invest.modules.monitoring.application import (
+    transactional_monitor_subscription_port,
+)
+from long_invest.modules.providers.contracts import RealtimeQuote
+from long_invest.modules.securities.application import TransactionalSignalSecurityPort
+from long_invest.modules.signals.contracts import (
+    EvaluationReason,
+    RealtimeSignalPreparation,
+    SignalInput,
+)
 from long_invest.modules.signals.integrations import (
     TransactionalPositionPort,
     TransactionalQuotePort,
@@ -13,6 +24,8 @@ from long_invest.modules.signals.integrations import (
 from long_invest.modules.signals.outbox import SignalOutbox
 from long_invest.modules.signals.repository import SignalRepository
 from long_invest.modules.signals.service import SignalService
+from long_invest.modules.targets.application import TransactionalTargetSnapshotPort
+from long_invest.modules.targets.contracts import TargetStatus
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
@@ -70,6 +83,128 @@ class SignalApplication:
                 message="信号服务暂时不可用",
                 status_code=503,
             ) from exc
+
+    async def prepare_realtime(
+        self,
+        symbols: tuple[str, ...],
+        *,
+        expected_subscription_versions: Mapping[str, int] | None = None,
+    ) -> tuple[RealtimeSignalPreparation, ...]:
+        expected = expected_subscription_versions or {}
+        prepared: list[RealtimeSignalPreparation] = []
+        async with self._database.session() as session:
+            subscriptions = transactional_monitor_subscription_port(session)
+            targets = TransactionalTargetSnapshotPort(session)
+            securities = TransactionalSignalSecurityPort(session)
+            for symbol in symbols:
+                subscription = await subscriptions.get_subscription_snapshot_by_symbol(
+                    symbol
+                )
+                if subscription is None:
+                    continue
+                expected_version = expected.get(symbol)
+                if (
+                    expected_version is not None
+                    and subscription.version != expected_version
+                ):
+                    continue
+                target = await targets.get_target_snapshot(
+                    subscription.subscription_id
+                )
+                if target is None or target.status not in {
+                    TargetStatus.READY,
+                    TargetStatus.STALE,
+                }:
+                    continue
+                security = await securities.get_signal_security(symbol)
+                if (
+                    security is None
+                    or security.security_id != subscription.security_id
+                ):
+                    continue
+                prepared.append(
+                    RealtimeSignalPreparation(
+                        subscription_id=subscription.subscription_id,
+                        security_id=subscription.security_id,
+                        symbol=subscription.symbol,
+                        security_name=security.name,
+                        subscription_version=subscription.version,
+                        target_revision_id=target.revision_id,
+                        target_version=target.binding_version,
+                        target_date=target.target_date,
+                        targets=target.values,
+                        hysteresis_ratio=subscription.hysteresis_ratio,
+                        hysteresis_min=subscription.hysteresis_min,
+                    )
+                )
+        return tuple(prepared)
+
+    async def evaluate_realtime(
+        self,
+        preparation: RealtimeSignalPreparation,
+        quote: RealtimeQuote,
+        *,
+        scheduled_at: datetime,
+        reason: EvaluationReason,
+        request_id: str,
+        idempotency_key: str,
+    ):
+        identity = quote.source_identity
+        source_identity = (
+            {
+                "adapter": identity.adapter.value,
+                "upstream": identity.upstream.value,
+                "interface": identity.interface,
+                "capability": identity.capability.value,
+                "algorithm_version": identity.algorithm_version,
+            }
+            if identity is not None
+            else None
+        )
+        price_version = max(
+            1,
+            int(
+                max(scheduled_at.timestamp(), quote.quote_time.timestamp())
+                * 1_000_000
+            ),
+        )
+        async with self._database.transaction() as session:
+            position = await self._position_factory(session).get_position_snapshot(
+                preparation.security_id
+            )
+            command = SignalInput(
+                subscription_id=preparation.subscription_id,
+                security_id=preparation.security_id,
+                symbol=preparation.symbol,
+                security_name=preparation.security_name,
+                subscription_version=preparation.subscription_version,
+                price=quote.price,
+                price_at=quote.quote_time,
+                quote_scheduled_at=scheduled_at,
+                price_version=price_version,
+                target_revision_id=preparation.target_revision_id,
+                target_version=preparation.target_version,
+                target_date=preparation.target_date,
+                targets=preparation.targets,
+                quote_source=quote.source.value,
+                quote_source_identity=source_identity,
+                position_version=position.version if position is not None else 0,
+                hysteresis_ratio=preparation.hysteresis_ratio,
+                hysteresis_min=preparation.hysteresis_min,
+                reason=reason,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+            )
+            service = self._service_factory(
+                self._repository_factory(session),
+                subscriptions=self._subscription_factory(session),
+                targets=self._target_factory(session),
+                quotes=self._quote_factory(session),
+                positions=self._position_factory(session),
+                notifications=self._notification_factory(session),
+                events=self._event_factory(session),
+            )
+            return await service.evaluate(command)
 
     async def reset(self, command):
         return await self._write("reset", command)

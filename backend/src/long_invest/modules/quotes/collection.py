@@ -1,6 +1,7 @@
 import asyncio
+from collections import defaultdict
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 from uuid import UUID
 
@@ -16,7 +17,12 @@ from long_invest.modules.quotes.contracts import (
     QuoteCycleStatus,
     QuoteCycleSummary,
     QuoteSubmission,
+    RealtimeBatchResult,
+    RealtimeBatchStatus,
+    RealtimeCheckMode,
+    RealtimeQuoteFailure,
 )
+from long_invest.modules.quotes.quality import compare_quotes, validate_quote
 from long_invest.modules.quotes.service import fallback_symbols
 
 logger = structlog.get_logger(__name__)
@@ -30,6 +36,151 @@ TERMINAL_CYCLE_STATUSES = frozenset(
         QuoteCycleStatus.CANCELED,
     }
 )
+
+
+class RoutedQuoteProviderPort(Protocol):
+    async def realtime_quotes(
+        self, symbols: tuple[str, ...], deadline: datetime
+    ) -> ProviderBatchResult[RealtimeQuote]: ...
+
+
+class InMemoryQuoteCollector:
+    """Collect a complete realtime scope without persisting raw quote state."""
+
+    def __init__(
+        self,
+        provider: RoutedQuoteProviderPort,
+        *,
+        now: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._provider = provider
+        self._now = now or (lambda: datetime.now(UTC))
+
+    async def collect(
+        self,
+        *,
+        symbols: tuple[str, ...],
+        scheduled_at: datetime,
+        timeout_seconds: int = 30,
+        mode: RealtimeCheckMode = RealtimeCheckMode.SCHEDULED,
+    ) -> RealtimeBatchResult:
+        if not symbols or len(symbols) != len(set(symbols)):
+            raise ValueError("realtime scope must contain unique symbols")
+        if not 10 <= timeout_seconds <= 60:
+            raise ValueError("timeout_seconds must be between 10 and 60")
+        if scheduled_at.tzinfo is None or scheduled_at.utcoffset() is None:
+            raise ValueError("scheduled_at must include timezone")
+
+        started_at = self._now()
+        deadline = started_at + timedelta(seconds=timeout_seconds)
+        try:
+            remaining = max(0.001, (deadline - self._now()).total_seconds())
+            batch = await asyncio.wait_for(
+                self._provider.realtime_quotes(symbols, deadline),
+                timeout=remaining,
+            )
+        except TimeoutError:
+            return self._result(
+                symbols=symbols,
+                scheduled_at=scheduled_at,
+                started_at=started_at,
+                mode=mode,
+                quotes=(),
+                failures=tuple(
+                    RealtimeQuoteFailure(symbol, "QUOTE_BATCH_TIMEOUT")
+                    for symbol in symbols
+                ),
+            )
+        except Exception as exc:
+            code = str(getattr(exc, "code", "QUOTE_ALL_PROVIDERS_FAILED"))
+            return self._result(
+                symbols=symbols,
+                scheduled_at=scheduled_at,
+                started_at=started_at,
+                mode=mode,
+                quotes=(),
+                failures=tuple(
+                    RealtimeQuoteFailure(symbol, code) for symbol in symbols
+                ),
+            )
+
+        grouped: dict[str, list[RealtimeQuote]] = defaultdict(list)
+        for quote in batch.items:
+            if quote.symbol in symbols:
+                grouped[quote.symbol].append(quote)
+        provider_failures = {item.symbol: item.code for item in batch.failures}
+        valid_quotes: list[RealtimeQuote] = []
+        failures: list[RealtimeQuoteFailure] = []
+        checked_at = self._now()
+        for symbol in symbols:
+            candidates = grouped.get(symbol, [])
+            valid = [
+                quote
+                for quote in candidates
+                if validate_quote(quote, symbol=symbol, now=checked_at).valid
+            ]
+            if len(valid) > 1 and compare_quotes(valid[0], valid[1]).conflict:
+                failures.append(RealtimeQuoteFailure(symbol, "QUOTE_CONFLICT"))
+                continue
+            if valid:
+                valid_quotes.append(valid[0])
+                continue
+            invalid_code = next(
+                (
+                    validation.error_code
+                    for quote in candidates
+                    if not (
+                        validation := validate_quote(
+                            quote, symbol=symbol, now=checked_at
+                        )
+                    ).valid
+                ),
+                None,
+            )
+            failures.append(
+                RealtimeQuoteFailure(
+                    symbol,
+                    invalid_code
+                    or provider_failures.get(symbol)
+                    or batch.batch_error_code
+                    or "PROVIDER_ITEM_MISSING",
+                )
+            )
+        return self._result(
+            symbols=symbols,
+            scheduled_at=scheduled_at,
+            started_at=started_at,
+            mode=mode,
+            quotes=tuple(valid_quotes),
+            failures=tuple(failures),
+        )
+
+    def _result(
+        self,
+        *,
+        symbols: tuple[str, ...],
+        scheduled_at: datetime,
+        started_at: datetime,
+        mode: RealtimeCheckMode,
+        quotes: tuple[RealtimeQuote, ...],
+        failures: tuple[RealtimeQuoteFailure, ...],
+    ) -> RealtimeBatchResult:
+        if quotes and failures:
+            status = RealtimeBatchStatus.PARTIAL
+        elif quotes:
+            status = RealtimeBatchStatus.COMPLETE
+        else:
+            status = RealtimeBatchStatus.FAILED
+        return RealtimeBatchResult(
+            status=status,
+            mode=mode,
+            scheduled_at=scheduled_at,
+            started_at=started_at,
+            completed_at=self._now(),
+            expected_symbols=symbols,
+            quotes=quotes,
+            failures=failures,
+        )
 
 
 class QuoteProviderPort(Protocol):

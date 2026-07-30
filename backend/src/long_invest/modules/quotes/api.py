@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, status
+from fastapi import APIRouter, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from long_invest.modules.auth.dependencies import (
@@ -110,9 +110,39 @@ class QuoteItemsData(BaseModel):
     items: list[QuoteItemRecord]
 
 
-class QuoteJobData(BaseModel):
-    job_id: UUID
+class RealtimeQuoteRecord(BaseModel):
+    symbol: str
+    price: Decimal
+    open: Decimal
+    high: Decimal
+    low: Decimal
+    previous_close: Decimal
+    volume: int
+    amount: Decimal
+    quote_time: datetime
+    received_at: datetime
+    source: str
+    source_identity: dict[str, Any] | None
+
+
+class RealtimeFailureRecord(BaseModel):
+    symbol: str
+    code: str
+
+
+class RealtimeCheckData(BaseModel):
     status: str
+    mode: str
+    scheduled_at: datetime
+    started_at: datetime
+    completed_at: datetime
+    expected_count: int
+    valid_count: int
+    failed_count: int
+    signal_succeeded: int
+    signal_failed: int
+    quotes: list[RealtimeQuoteRecord]
+    failures: list[RealtimeFailureRecord]
 
 
 class QuoteCyclePageResponse(SuccessEnvelope):
@@ -123,8 +153,8 @@ class QuoteItemsResponse(SuccessEnvelope):
     data: QuoteItemsData
 
 
-class QuoteJobResponse(SuccessEnvelope):
-    data: QuoteJobData
+class RealtimeCheckResponse(SuccessEnvelope):
+    data: RealtimeCheckData
 
 
 @router.get(
@@ -166,9 +196,13 @@ async def list_cycle_items(
 
 
 @router.post(
+    "/api/v1/quotes/check-now",
+    response_model=RealtimeCheckResponse,
+)
+@router.post(
     "/api/v1/quote-cycles/manual",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=QuoteJobResponse,
+    response_model=RealtimeCheckResponse,
+    deprecated=True,
 )
 async def submit_manual_cycle(
     body: ManualQuoteRequest,
@@ -177,7 +211,7 @@ async def submit_manual_cycle(
     idempotency_key: IdempotencyKey,
 ) -> dict:
     _require_confirmation(body.confirm)
-    job = await application.submit_manual(
+    result = await application.submit_manual(
         symbols=body.symbols,
         timeout_seconds=body.timeout_seconds,
         idempotency_key=_idempotency_key(idempotency_key),
@@ -185,13 +219,12 @@ async def submit_manual_cycle(
         created_by_user_id=str(authenticated.user.id),
         reason=body.reason,
     )
-    return success_response(data=_job_data(job), code="JOB_ACCEPTED")
+    return success_response(data=_realtime_data(result), code="QUOTE_CHECK_COMPLETED")
 
 
 @router.post(
     "/api/v1/quotes/diagnose",
-    status_code=status.HTTP_202_ACCEPTED,
-    response_model=QuoteJobResponse,
+    response_model=RealtimeCheckResponse,
 )
 async def diagnose_quotes(
     body: DiagnoseQuoteRequest,
@@ -200,7 +233,7 @@ async def diagnose_quotes(
     idempotency_key: IdempotencyKey,
 ) -> dict:
     _require_confirmation(body.confirm)
-    job = await application.submit_diagnostic(
+    result = await application.submit_diagnostic(
         symbols=body.symbols,
         idempotency_key=_idempotency_key(idempotency_key),
         request_id=authenticated.audit_context.request_id,
@@ -209,7 +242,9 @@ async def diagnose_quotes(
         trusted_ip=authenticated.audit_context.trusted_ip or "unknown",
         reason=body.reason,
     )
-    return success_response(data=_job_data(job), code="JOB_ACCEPTED")
+    return success_response(
+        data=_realtime_data(result), code="QUOTE_DIAGNOSTIC_COMPLETED"
+    )
 
 
 def _require_confirmation(confirm: bool) -> None:
@@ -240,9 +275,40 @@ def _validate_symbols(value: tuple[str, ...]) -> tuple[str, ...]:
     return value
 
 
-def _job_data(job: Any) -> dict[str, object]:
-    value = job.status.value if hasattr(job.status, "value") else str(job.status)
-    return {"job_id": str(job.id), "status": value}
+def _realtime_data(result: Any) -> dict[str, object]:
+    return {
+        "status": result.status,
+        "mode": result.mode,
+        "scheduled_at": result.scheduled_at,
+        "started_at": result.started_at,
+        "completed_at": result.completed_at,
+        "expected_count": result.expected_count,
+        "valid_count": result.valid_count,
+        "failed_count": result.failed_count,
+        "signal_succeeded": result.signal_succeeded,
+        "signal_failed": result.signal_failed,
+        "quotes": [
+            {
+                "symbol": item.symbol,
+                "price": item.price,
+                "open": item.open,
+                "high": item.high,
+                "low": item.low,
+                "previous_close": item.previous_close,
+                "volume": item.volume,
+                "amount": item.amount,
+                "quote_time": item.quote_time,
+                "received_at": item.received_at,
+                "source": item.source,
+                "source_identity": _json_data(item.source_identity),
+            }
+            for item in result.quotes
+        ],
+        "failures": [
+            {"symbol": item.symbol, "code": item.code}
+            for item in result.failures
+        ],
+    }
 
 
 def _json_data(value: Any) -> Any:

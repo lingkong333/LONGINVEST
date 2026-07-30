@@ -484,6 +484,12 @@ class SignalService:
         state.last_quote_cycle_id = command.quote_cycle_id
         state.last_quote_scheduled_at = command.quote_scheduled_at
         state.last_quote_item_id = command.quote_item_id
+        state.last_quote_source = command.quote_source
+        state.last_quote_source_identity = (
+            dict(command.quote_source_identity)
+            if command.quote_source_identity is not None
+            else None
+        )
         state.last_target_revision_id = command.target_revision_id
         state.last_target_version = command.target_version
         state.last_position_version = position_version
@@ -714,6 +720,12 @@ class SignalService:
             quote_cycle_id=command.quote_cycle_id,
             quote_scheduled_at=command.quote_scheduled_at,
             quote_item_id=command.quote_item_id,
+            quote_source=command.quote_source,
+            quote_source_identity=(
+                dict(command.quote_source_identity)
+                if command.quote_source_identity is not None
+                else None
+            ),
             hysteresis_applied=before not in {SignalZone.UNKNOWN, SignalZone.NORMAL},
             used_stale_target=stale,
             skip_code=skip_code,
@@ -758,6 +770,12 @@ class SignalService:
             quote_cycle_id=command.quote_cycle_id,
             quote_scheduled_at=command.quote_scheduled_at,
             quote_item_id=command.quote_item_id,
+            quote_source=command.quote_source,
+            quote_source_identity=(
+                dict(command.quote_source_identity)
+                if command.quote_source_identity is not None
+                else None
+            ),
             used_stale_target=stale,
             state_version=state_version,
             notification_class=kind.value,
@@ -806,6 +824,8 @@ def _state_view(row) -> SignalStateView:
         last_quote_cycle_id=row.last_quote_cycle_id,
         last_quote_scheduled_at=row.last_quote_scheduled_at,
         last_quote_item_id=row.last_quote_item_id,
+        last_quote_source=row.last_quote_source,
+        last_quote_source_identity=row.last_quote_source_identity,
         last_target_revision_id=row.last_target_revision_id,
         last_target_version=row.last_target_version,
         last_position_version=row.last_position_version,
@@ -843,6 +863,8 @@ def _evaluation_view(row) -> SignalEvaluationView:
         quote_cycle_id=row.quote_cycle_id,
         quote_scheduled_at=row.quote_scheduled_at,
         quote_item_id=row.quote_item_id,
+        quote_source=row.quote_source,
+        quote_source_identity=row.quote_source_identity,
         hysteresis_applied=row.hysteresis_applied,
         used_stale_target=row.used_stale_target,
         skip_code=row.skip_code,
@@ -877,6 +899,8 @@ def _event_view(row) -> SignalEventView:
         quote_cycle_id=row.quote_cycle_id,
         quote_scheduled_at=row.quote_scheduled_at,
         quote_item_id=row.quote_item_id,
+        quote_source=row.quote_source,
+        quote_source_identity=row.quote_source_identity,
         used_stale_target=row.used_stale_target,
         state_version=row.state_version,
         notification_class=row.notification_class,

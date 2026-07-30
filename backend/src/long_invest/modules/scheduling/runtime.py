@@ -4,6 +4,8 @@ import asyncio
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from hashlib import sha256
+from uuid import UUID
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -11,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.date import DateTrigger
 
+from long_invest.modules.daily_data.repository import DailyDataRepository
 from long_invest.platform.jobs.contracts import SubmitPostgresJob
 from long_invest.platform.jobs.postgres_service import PostgresJobService
 
@@ -45,6 +48,34 @@ DAILY_MARKET_DATA = PersistentSchedule(
     at=time(17),
     priority=1,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class DailyGapPlan:
+    dates: tuple[date, ...]
+    calendar_version_id: UUID
+
+
+class DailyGapPlanner:
+    def __init__(self, database, calendar) -> None:
+        self._database = database
+        self._calendar = calendar
+
+    async def plan(self, *, before: date) -> DailyGapPlan | None:
+        async with self._database.session() as session:
+            repository = DailyDataRepository(session)
+            bounds = await repository.batch_date_bounds()
+        if bounds is None or bounds[0] >= before:
+            return None
+        window = await self._calendar.trading_dates(bounds[0], before)
+        async with self._database.session() as session:
+            existing = await DailyDataRepository(session).batch_dates(
+                start=bounds[0], end=before
+            )
+        missing = tuple(item for item in window.dates if item not in existing)
+        if not missing:
+            return None
+        return DailyGapPlan(missing, window.version_id)
 
 
 class PostgresPersistentJobSubmitter:
@@ -84,6 +115,40 @@ class PostgresPersistentJobSubmitter:
         async with self._database.transaction() as session:
             await PostgresJobService(session).submit(command, now=scheduled_at)
 
+    async def submit_recovery(
+        self,
+        dates: tuple[date, ...],
+        *,
+        calendar_version_id: UUID,
+        scheduled_at: datetime,
+    ) -> None:
+        encoded_dates = [item.isoformat() for item in dates]
+        digest = sha256(",".join(encoded_dates).encode()).hexdigest()[:16]
+        command = SubmitPostgresJob(
+            job_type="DAILY_MARKET_RECOVERY",
+            module_owner="market_data",
+            priority=3,
+            idempotency_scope="scheduler:daily-market-recovery",
+            idempotency_key=f"{encoded_dates[0]}:{encoded_dates[-1]}:{digest}",
+            request_id=f"scheduler-daily-recovery-{digest}",
+            config_snapshot={
+                "trade_dates": encoded_dates,
+                "calendar_version_id": str(calendar_version_id),
+                "scheduled_at": scheduled_at.isoformat(),
+                "trigger": "STARTUP_RECOVERY",
+                "concurrency": 4,
+            },
+            business_object_type="daily-market-recovery",
+            business_object_id=digest,
+            soft_timeout_seconds=82800,
+            hard_timeout_seconds=86400,
+            max_attempts=2,
+            recoverable=True,
+            max_recoveries=3,
+        )
+        async with self._database.transaction() as session:
+            await PostgresJobService(session).submit(command, now=scheduled_at)
+
 
 class DualPathScheduler:
     def __init__(
@@ -95,6 +160,7 @@ class DualPathScheduler:
         persistent_submitter,
         intraday_handler: Callable[[datetime], Awaitable[None]],
         instance_id: str,
+        daily_gap_planner=None,
         persistent_plans: Sequence[PersistentSchedule] = (DAILY_MARKET_DATA,),
         scheduler: AsyncIOScheduler | None = None,
     ) -> None:
@@ -104,6 +170,7 @@ class DualPathScheduler:
         self._persistent_submitter = persistent_submitter
         self._intraday_handler = intraday_handler
         self._instance_id = instance_id
+        self._daily_gap_planner = daily_gap_planner
         self._persistent_plans = tuple(persistent_plans)
         self._scheduler = scheduler or AsyncIOScheduler(timezone=SHANGHAI)
         self._refresh_lock = asyncio.Lock()
@@ -151,6 +218,16 @@ class DualPathScheduler:
             await self._record_runtime(success=True)
             return
         local_now = decision.database_time.astimezone(SHANGHAI)
+        if self._daily_gap_planner is not None:
+            gap = await self._daily_gap_planner.plan(
+                before=local_now.date() - timedelta(days=1)
+            )
+            if gap is not None:
+                await self._persistent_submitter.submit_recovery(
+                    gap.dates,
+                    calendar_version_id=gap.calendar_version_id,
+                    scheduled_at=decision.database_time,
+                )
         for plan in self._persistent_plans:
             scheduled_at = datetime.combine(
                 local_now.date(), plan.at, tzinfo=SHANGHAI

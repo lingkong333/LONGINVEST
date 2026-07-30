@@ -15,11 +15,13 @@ class ProviderHttpError(RuntimeError):
         *,
         retryable: bool = False,
         response_sample: dict[str, object] | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         super().__init__(code)
         self.code = code
         self.retryable = retryable
         self.response_sample = response_sample
+        self.retry_after_seconds = retry_after_seconds
 
 
 def _retryable(error: Exception) -> bool:

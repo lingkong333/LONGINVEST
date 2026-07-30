@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -59,7 +61,26 @@ class ProviderRequestBudget:
         if context is None:
             yield
             return
-        lease = await self.claim(context.setting)
+        deadline = monotonic() + context.setting.timeout_seconds
+        while True:
+            try:
+                lease = await self.claim(context.setting)
+                break
+            except ProviderHttpError as error:
+                if error.code not in {
+                    "PROVIDER_MIN_INTERVAL_LIMITED",
+                    "PROVIDER_TOTAL_CONCURRENCY_LIMITED",
+                    "PROVIDER_CAPABILITY_CONCURRENCY_LIMITED",
+                }:
+                    raise
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    raise ProviderHttpError(
+                        error.code, retryable=True
+                    ) from error
+                await asyncio.sleep(
+                    min(error.retry_after_seconds or 0.05, remaining)
+                )
         try:
             yield
         finally:
@@ -67,6 +88,7 @@ class ProviderRequestBudget:
 
     async def claim(self, setting: ProviderRouteSetting) -> BudgetLease:
         denial: str | None = None
+        retry_after_seconds: float | None = None
         token = uuid4().hex
         async with self._database.transaction() as session:
             now = await session.scalar(select(func.clock_timestamp()))
@@ -138,6 +160,11 @@ class ProviderRequestBudget:
                 and now < usage.last_request_at + timedelta(seconds=min_interval)
             ):
                 denial = "PROVIDER_MIN_INTERVAL_LIMITED"
+                retry_after_seconds = (
+                    usage.last_request_at
+                    + timedelta(seconds=min_interval)
+                    - now
+                ).total_seconds()
             else:
                 active_total = int(
                     await session.scalar(
@@ -164,8 +191,10 @@ class ProviderRequestBudget:
                 )
                 if active_total >= policy.max_concurrency:
                     denial = "PROVIDER_TOTAL_CONCURRENCY_LIMITED"
+                    retry_after_seconds = 0.05
                 elif active_capability >= setting.concurrency:
                     denial = "PROVIDER_CAPABILITY_CONCURRENCY_LIMITED"
+                    retry_after_seconds = 0.05
 
             if denial is not None:
                 usage.latest_limit_reason = denial
@@ -184,7 +213,9 @@ class ProviderRequestBudget:
                     )
                 )
         if denial is not None:
-            raise ProviderHttpError(denial)
+            raise ProviderHttpError(
+                denial, retry_after_seconds=retry_after_seconds
+            )
         return BudgetLease(token)
 
     async def release(self, lease: BudgetLease) -> None:

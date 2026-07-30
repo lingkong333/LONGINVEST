@@ -12,9 +12,13 @@ from long_invest.bootstrap.providers import (
     close_provider_resources,
 )
 from long_invest.modules.calendar.application import CalendarApplication
-from long_invest.modules.daily_data.jobs import FullMarketDailyJob
+from long_invest.modules.daily_data.jobs import (
+    DailyMarketRecoveryJob,
+    FullMarketDailyJob,
+)
 from long_invest.modules.monitor_schedules.application import MonitorScheduleApplication
 from long_invest.modules.scheduling.runtime import (
+    DailyGapPlanner,
     DualPathScheduler,
     PostgresPersistentJobSubmitter,
 )
@@ -58,6 +62,9 @@ async def run() -> None:
         persistent_submitter=PostgresPersistentJobSubmitter(database),
         intraday_handler=_intraday_foundation,
         instance_id=f"{socket.gethostname()}:{os.getpid()}",
+        daily_gap_planner=DailyGapPlanner(
+            database, CalendarApplication(database)
+        ),
     )
     worker_id = f"daily-market:{socket.gethostname()}:{os.getpid()}"
     runner = PostgresJobRunner(
@@ -66,7 +73,11 @@ async def run() -> None:
             "DAILY_MARKET_DATA": FullMarketDailyJob(
                 database,
                 provider_service_factory=build_provider_service,
-            )
+            ),
+            "DAILY_MARKET_RECOVERY": DailyMarketRecoveryJob(
+                database,
+                provider_service_factory=build_provider_service,
+            ),
         },
         worker_id=worker_id,
     )

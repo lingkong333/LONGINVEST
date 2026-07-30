@@ -13,7 +13,10 @@ from long_invest.modules.daily_data.contracts import (
     DailyStageStatus,
     StageDailyBar,
 )
-from long_invest.modules.daily_data.jobs import FullMarketDailyJob
+from long_invest.modules.daily_data.jobs import (
+    DailyMarketRecoveryJob,
+    FullMarketDailyJob,
+)
 from long_invest.modules.daily_data.models import (
     DailyBarRevision,
     DailyBarStage,
@@ -107,14 +110,22 @@ class SnapshotProviderService:
 
     async def daily_bars(self, request, deadline):
         del deadline
-        return await self.market_daily_bars(
-            None,
-            type(
-                "Request",
-                (),
-                {"trading_date": request.start, "symbols": (request.symbol,)},
-            )(),
-            None,
+        return ProviderBatchResult(
+            (
+                DailyBar(
+                    symbol=request.symbol,
+                    trading_date=request.start,
+                    open=Decimal("10"),
+                    high=Decimal("11"),
+                    low=Decimal("9"),
+                    close=Decimal("10.5"),
+                    volume=100,
+                    amount=Decimal("1000"),
+                    source=ProviderCode.TUSHARE,
+                    capability=request.capability,
+                    collected_at=datetime(2026, 7, 30, 9, tzinfo=UTC),
+                ),
+            )
         )
 
 
@@ -478,6 +489,157 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
                 )
                 await session.execute(
                     delete(DailyDataBatch).where(DailyDataBatch.id == batch_id)
+                )
+            if job_id is not None:
+                await session.execute(delete(JobRun).where(JobRun.job_id == job_id))
+                await session.execute(delete(JobItem).where(JobItem.job_id == job_id))
+                await session.execute(delete(Job).where(Job.id == job_id))
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_startup_recovery_uses_one_job_for_two_dates_without_job_items() -> None:
+    database = Database(AppSettings(_env_file=None).database_owner_url)
+    trade_dates = (date(2026, 7, 28), date(2026, 7, 29))
+    now = datetime(2026, 7, 30, 1, tzinfo=UTC)
+    symbols = tuple(f"{330000 + index:06d}.SZ" for index in range(10))
+    security_ids = tuple(uuid4() for _ in symbols)
+    version_id = uuid4()
+    job_id = None
+    batch_ids: tuple[UUID, ...] = ()
+    try:
+        async with database.transaction() as session:
+            session.add(
+                SecurityMasterVersion(
+                    id=version_id,
+                    source="SERVER_RECOVERY_TEST",
+                    source_version=uuid4().hex,
+                    idempotency_key=uuid4().hex,
+                    content_hash="b" * 64,
+                    master_version=2,
+                    item_count=len(symbols),
+                )
+            )
+            session.add_all(
+                Security(
+                    id=security_id,
+                    symbol=symbol,
+                    exchange_code=symbol[:6],
+                    name=f"recovery-{index}",
+                    market="SZ",
+                    security_type="A_SHARE",
+                    listed_on=trade_dates[0],
+                    listing_status="LISTED",
+                    is_st=False,
+                    is_suspended=False,
+                    provider_codes={},
+                    master_version=2,
+                    source="SERVER_RECOVERY_TEST",
+                    source_version="1",
+                )
+                for index, (symbol, security_id) in enumerate(
+                    zip(symbols, security_ids, strict=True)
+                )
+            )
+            submitted = await PostgresJobService(session).submit(
+                SubmitPostgresJob(
+                    job_type="DAILY_MARKET_RECOVERY",
+                    module_owner="market_data",
+                    idempotency_scope=f"server-recovery:{uuid4()}",
+                    idempotency_key="two-dates",
+                    request_id=f"server-recovery-{uuid4()}",
+                    config_snapshot={
+                        "trade_dates": [item.isoformat() for item in trade_dates],
+                        "concurrency": 4,
+                    },
+                    recoverable=True,
+                ),
+                now=now,
+            )
+            job_id = submitted.id
+        async with database.transaction() as session:
+            claim = await PostgresJobService(session).claim_next(
+                worker_id="server-recovery-test",
+                lease_duration=timedelta(minutes=1),
+                job_types=("DAILY_MARKET_RECOVERY",),
+                now=now,
+            )
+        assert claim is not None
+
+        provider = SnapshotProviderService(symbols, trade_dates[0])
+        result = await DailyMarketRecoveryJob(
+            database,
+            provider_service_factory=lambda _session: provider,
+            now_provider=lambda: now,
+        )(
+            JobExecutionContext(
+                job_id=claim.job_id,
+                fence_token=claim.lease_token,
+                config=claim.config_snapshot,
+                checkpoint=claim.checkpoint,
+            )
+        )
+        batch_ids = tuple(UUID(item) for item in result.data["batch_ids"])
+
+        async with database.session() as session:
+            stored_job = await session.get(Job, job_id)
+            batches = list(
+                await session.scalars(
+                    select(DailyDataBatch)
+                    .where(DailyDataBatch.id.in_(batch_ids))
+                    .order_by(DailyDataBatch.trading_date)
+                )
+            )
+            stored_rows = int(
+                await session.scalar(
+                    select(func.count())
+                    .select_from(DailyBarUnadjusted)
+                    .where(DailyBarUnadjusted.security_id.in_(security_ids))
+                )
+                or 0
+            )
+            job_items = int(
+                await session.scalar(
+                    select(func.count()).select_from(JobItem).where(
+                        JobItem.job_id == job_id
+                    )
+                )
+                or 0
+            )
+        assert result.success is True
+        assert [item.trading_date for item in batches] == list(trade_dates)
+        assert all(item.status == "SUCCEEDED" for item in batches)
+        assert stored_rows == len(symbols) * len(trade_dates)
+        assert stored_job is not None
+        assert stored_job.checkpoint["date_index"] == len(trade_dates)
+        assert job_items == 0
+    finally:
+        async with database.transaction() as session:
+            if batch_ids:
+                await session.execute(
+                    delete(EventOutbox).where(
+                        EventOutbox.aggregate_id.in_(
+                            tuple(str(item) for item in batch_ids)
+                        )
+                    )
+                )
+                await session.execute(
+                    delete(DailyBarUnadjusted).where(
+                        DailyBarUnadjusted.security_id.in_(security_ids)
+                    )
+                )
+                await session.execute(
+                    delete(DailyBatchMissingItem).where(
+                        DailyBatchMissingItem.batch_id.in_(batch_ids)
+                    )
+                )
+                await session.execute(
+                    delete(DailyBarStage).where(
+                        DailyBarStage.batch_id.in_(batch_ids)
+                    )
+                )
+                await session.execute(
+                    delete(DailyDataBatch).where(DailyDataBatch.id.in_(batch_ids))
                 )
             if job_id is not None:
                 await session.execute(delete(JobRun).where(JobRun.job_id == job_id))

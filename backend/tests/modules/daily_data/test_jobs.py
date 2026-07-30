@@ -10,9 +10,11 @@ from long_invest.modules.daily_data.contracts import (
     DailyStageStatus,
 )
 from long_invest.modules.daily_data.jobs import (
+    DailyMarketRecoveryJob,
     FullMarketDailyJob,
     _group_stages,
     _groups,
+    _stored_bar_stage,
 )
 from long_invest.modules.providers.contracts import (
     DailyBar,
@@ -137,3 +139,60 @@ def test_job_rejects_missing_trade_date_before_touching_dependencies() -> None:
 
     assert result.success is False
     assert result.code == "DAILY_MARKET_CONFIG_INVALID"
+
+
+def test_recovery_job_rejects_unsorted_dates_before_touching_dependencies() -> None:
+    result = asyncio.run(
+        DailyMarketRecoveryJob(
+            object(), provider_service_factory=lambda _session: object()
+        )(
+            JobExecutionContext(
+                job_id=uuid4(),
+                fence_token=uuid4(),
+                config={
+                    "trade_dates": ["2026-07-16", "2026-07-15"],
+                    "concurrency": 4,
+                },
+                checkpoint={},
+            )
+        )
+    )
+
+    assert result.success is False
+    assert result.code == "DAILY_RECOVERY_CONFIG_INVALID"
+
+
+def test_recovery_reuses_an_existing_bar_without_losing_metadata() -> None:
+    security = _security("600000.SH")
+    stored = type(
+        "StoredBar",
+        (),
+        {
+            "security_id": security.security_id,
+            "symbol": security.symbol,
+            "trade_date": DAY,
+            "open": Decimal("10"),
+            "high": Decimal("11"),
+            "low": Decimal("9"),
+            "close": Decimal("10.5"),
+            "previous_close": Decimal("9.8"),
+            "volume": 100,
+            "amount": Decimal("1000"),
+            "source": "EASTMONEY",
+            "source_identity": {
+                "adapter": "EASTMONEY",
+                "upstream": "EASTMONEY",
+                "interface": "history",
+                "capability": "HISTORICAL_DAILY_UNADJUSTED",
+                "algorithm_version": "raw-v1",
+            },
+            "collected_at": NOW,
+        },
+    )()
+
+    stage = _stored_bar_stage(stored, security, NOW)
+
+    assert stage.status is DailyStageStatus.FETCHED
+    assert stage.provider_payload["previous_close"] == "9.8"
+    assert stage.provider_payload["source"] == "EASTMONEY"
+    assert stage.provider_payload["source_identity"]["interface"] == "history"

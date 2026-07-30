@@ -9,6 +9,7 @@ from long_invest.modules.providers.budget import (
 from long_invest.modules.providers.contracts import ProviderCapability, ProviderCode
 from long_invest.modules.providers.models import ProviderBudgetPolicy
 from long_invest.modules.providers.resilience import ProviderRouteSetting
+from long_invest.modules.providers.retry import ProviderHttpError
 
 
 def policy() -> ProviderBudgetPolicy:
@@ -80,3 +81,37 @@ def test_guard_claims_only_inside_provider_invocation_context() -> None:
         "claim:REALTIME_QUOTE_BATCH",
         "release:lease",
     ]
+
+
+def test_guard_waits_for_transient_interval_without_failing_provider_call() -> None:
+    class LimitedOnceBudget(ProviderRequestBudget):
+        def __init__(self) -> None:
+            self.claims = 0
+
+        async def claim(self, setting):
+            del setting
+            self.claims += 1
+            if self.claims == 1:
+                raise ProviderHttpError(
+                    "PROVIDER_MIN_INTERVAL_LIMITED", retry_after_seconds=0
+                )
+            return BudgetLease("lease")
+
+        async def release(self, lease):
+            del lease
+
+    async def run() -> int:
+        budget = LimitedOnceBudget()
+        setting = ProviderRouteSetting(
+            ProviderCode.EASTMONEY,
+            ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+        )
+        token = enter_request_context(setting)
+        try:
+            async with budget.guard():
+                pass
+        finally:
+            exit_request_context(token)
+        return budget.claims
+
+    assert asyncio.run(run()) == 2

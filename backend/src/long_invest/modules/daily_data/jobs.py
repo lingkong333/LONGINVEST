@@ -3,12 +3,14 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
+from math import ceil
 from typing import Any
 from uuid import UUID
 
 from long_invest.modules.daily_data.contracts import (
     CreateDailyBatch,
     DailyBatchStatus,
+    DailyBatchSummary,
     DailyMissingReason,
     DailyStageStatus,
     StageDailyBar,
@@ -403,6 +405,344 @@ class FullMarketDailyJob:
             )
 
 
+class DailyMarketRecoveryJob:
+    def __init__(
+        self,
+        database: Any,
+        *,
+        provider_service_factory: Callable[[Any], Any],
+        now_provider: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._database = database
+        self._providers = provider_service_factory
+        self._now = now_provider or (lambda: datetime.now(UTC))
+
+    async def __call__(self, context: JobExecutionContext) -> JobResult:
+        try:
+            trade_dates = tuple(
+                date.fromisoformat(str(item))
+                for item in context.config["trade_dates"]
+            )
+            concurrency = int(context.config.get("concurrency", 4))
+            if (
+                not trade_dates
+                or trade_dates != tuple(sorted(set(trade_dates)))
+                or concurrency < 1
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            return JobResult.failure(
+                code="DAILY_RECOVERY_CONFIG_INVALID",
+                message="日线恢复任务的交易日期或并发配置无效",
+                retryable=False,
+            )
+
+        checkpoint = dict(context.checkpoint)
+        if checkpoint:
+            try:
+                snapshot_id = UUID(str(checkpoint["universe_snapshot_id"]))
+                date_index = int(checkpoint.get("date_index", 0))
+                group_index = int(checkpoint.get("group_index", 0))
+            except (KeyError, TypeError, ValueError):
+                return JobResult.failure(
+                    code="DAILY_RECOVERY_CHECKPOINT_INVALID",
+                    message="日线恢复任务检查点无效",
+                    retryable=False,
+                )
+            frozen = await SecurityApplication(self._database).frozen_universe(
+                snapshot_id
+            )
+        else:
+            async with self._database.transaction() as session:
+                frozen = await SecurityApplication(
+                    self._database
+                ).freeze_daily_universe_in_transaction(session)
+            if not frozen.items:
+                return JobResult.failure(
+                    code="DAILY_MARKET_UNIVERSE_EMPTY",
+                    message="全市场股票范围为空，未启动日线恢复",
+                    retryable=False,
+                )
+            snapshot_id = frozen.id
+            date_index = 0
+            group_index = 0
+            status = await self._report(
+                context,
+                completed=0,
+                total=len(trade_dates),
+                message="已冻结日线恢复范围",
+                checkpoint=_recovery_checkpoint(snapshot_id, 0, 0),
+            )
+            if status in {JobStatus.CANCELED, JobStatus.PAUSED}:
+                return _stopped(status, context.job_id)
+
+        if date_index > len(trade_dates):
+            return JobResult.failure(
+                code="DAILY_RECOVERY_CHECKPOINT_INVALID",
+                message="日线恢复任务检查点超过日期范围",
+                retryable=False,
+            )
+        summaries = []
+        for current_index in range(date_index, len(trade_dates)):
+            trading_date = trade_dates[current_index]
+            summary = await self._recover_date(
+                context,
+                frozen,
+                trading_date,
+                concurrency=concurrency,
+                date_index=current_index,
+                date_count=len(trade_dates),
+                start_group=(group_index if current_index == date_index else 0),
+            )
+            if isinstance(summary, JobResult):
+                return summary
+            summaries.append(summary)
+            group_index = 0
+            status = await self._report(
+                context,
+                completed=current_index + 1,
+                total=len(trade_dates),
+                message=(
+                    f"已完成缺失交易日 {current_index + 1}/{len(trade_dates)}"
+                ),
+                checkpoint=_recovery_checkpoint(
+                    snapshot_id, current_index + 1, 0
+                ),
+            )
+            if status in {JobStatus.CANCELED, JobStatus.PAUSED}:
+                return _stopped(status, summary.id)
+        partial = any(
+            item.status is not DailyBatchStatus.SUCCEEDED for item in summaries
+        )
+        data = {
+            "trade_dates": [item.isoformat() for item in trade_dates],
+            "batch_ids": [str(item.id) for item in summaries],
+            "partial_dates": [
+                item.trading_date.isoformat()
+                for item in summaries
+                if item.status is not DailyBatchStatus.SUCCEEDED
+            ],
+        }
+        if partial:
+            return JobResult(True, "PARTIAL", "缺失交易日日线部分恢复", False, data)
+        return JobResult.success_result(data=data, message="缺失交易日日线恢复完成")
+
+    async def _recover_date(
+        self,
+        context: JobExecutionContext,
+        frozen: Any,
+        trading_date: date,
+        *,
+        concurrency: int,
+        date_index: int,
+        date_count: int,
+        start_group: int,
+    ) -> Any:
+        idempotency_key = f"daily-recovery:{trading_date.isoformat()}"
+        async with self._database.session() as session:
+            repository = DailyDataRepository(session)
+            existing_batch = await repository.get_batch_by_idempotency_key(
+                idempotency_key
+            )
+            stored_bars = await repository.bars_for_date(
+                [item.security_id for item in frozen.items], trading_date
+            )
+        if existing_batch is not None and DailyBatchStatus(existing_batch.status) in {
+            DailyBatchStatus.SUCCEEDED,
+            DailyBatchStatus.PARTIAL,
+            DailyBatchStatus.FAILED,
+        }:
+            return _summary_from_model(existing_batch)
+
+        bars_by_security = {item.security_id: item for item in stored_bars}
+        network_items = tuple(
+            item for item in frozen.items if item.security_id not in bars_by_security
+        )
+        estimated_requests = len(network_items)
+        if existing_batch is None:
+            command = CreateDailyBatch(
+                trading_date=trading_date,
+                universe_snapshot_id=frozen.id,
+                symbols=tuple(item.symbol for item in frozen.items),
+                security_ids=tuple(item.security_id for item in frozen.items),
+                idempotency_key=idempotency_key,
+                deadline_at=self._now() + timedelta(hours=23),
+                plan_snapshot={
+                    "provider": "ROUTED_HISTORY",
+                    "mode": DailyCollectionMode.BATCHED_SYMBOLS.value,
+                    "total_symbols": len(frozen.items),
+                    "group_size": concurrency,
+                    "estimated_requests": estimated_requests,
+                    "estimated_seconds": max(
+                        1, ceil(estimated_requests / concurrency)
+                    ),
+                },
+            )
+            async with self._database.transaction() as session:
+                batch = await DailyDataService(
+                    DailyDataRepository(session), now_provider=self._now
+                ).create(command)
+        else:
+            batch = _summary_from_model(existing_batch)
+
+        if stored_bars:
+            security_by_id = {item.security_id: item for item in frozen.items}
+            stages = tuple(
+                _stored_bar_stage(
+                    bar, security_by_id[bar.security_id], self._now()
+                )
+                for bar in stored_bars
+            )
+            async with self._database.transaction() as session:
+                await DailyDataService(
+                    DailyDataRepository(session), now_provider=self._now
+                ).stage_many(
+                    batch.id,
+                    stages,
+                    requested_count=0,
+                )
+
+        groups = tuple(
+            network_items[index : index + concurrency]
+            for index in range(0, len(network_items), concurrency)
+        )
+        if start_group > len(groups):
+            return JobResult.failure(
+                code="DAILY_RECOVERY_CHECKPOINT_INVALID",
+                message="日线恢复分组检查点超过范围",
+                retryable=False,
+            )
+        for current_group in range(start_group, len(groups)):
+            stages = await self._fetch_group(groups[current_group], trading_date)
+            async with self._database.transaction() as session:
+                await DailyDataService(
+                    DailyDataRepository(session), now_provider=self._now
+                ).stage_many(
+                    batch.id,
+                    stages,
+                    requested_count=min(
+                        (current_group + 1) * concurrency, len(network_items)
+                    ),
+                )
+            status = await self._report(
+                context,
+                completed=date_index,
+                total=date_count,
+                message=(
+                    f"正在恢复 {trading_date.isoformat()}，"
+                    f"分组 {current_group + 1}/{len(groups)}"
+                ),
+                checkpoint=_recovery_checkpoint(
+                    frozen.id, date_index, current_group + 1
+                ),
+            )
+            if status in {JobStatus.CANCELED, JobStatus.PAUSED}:
+                return _stopped(status, batch.id)
+
+        async with self._database.transaction() as session:
+            service = _daily_service(session, self._now)
+            await service.validate(batch.id)
+        await self._retry_invalid(batch.id, frozen.items, trading_date)
+        async with self._database.transaction() as session:
+            service = _daily_service(session, self._now)
+            await service.validate(batch.id)
+            return await service.commit(batch.id)
+
+    async def _fetch_group(
+        self, items: tuple[Any, ...], trading_date: date
+    ) -> tuple[StageDailyBar, ...]:
+        return tuple(
+            await asyncio.gather(
+                *(
+                    self._fetch_symbol(item, trading_date)
+                    for item in items
+                )
+            )
+        )
+
+    async def _fetch_symbol(self, security: Any, trading_date: date) -> StageDailyBar:
+        try:
+            async with self._database.session() as session:
+                result = await self._providers(session).daily_bars(
+                    DailyBarRequest(
+                        security.symbol,
+                        trading_date,
+                        trading_date,
+                        ProviderCapability.HISTORICAL_DAILY_UNADJUSTED,
+                    ),
+                    self._now() + timedelta(seconds=180),
+                )
+            bar = next(
+                (
+                    item
+                    for item in result.items
+                    if item.symbol == security.symbol
+                    and item.trading_date == trading_date
+                ),
+                None,
+            )
+            if bar is not None:
+                return _bar_stage(bar, security, self._now())
+            return _failed_stage(
+                security,
+                trading_date,
+                result.batch_error_code
+                or (
+                    result.failures[0].code
+                    if result.failures
+                    else "DAILY_BAR_MISSING"
+                ),
+                self._now(),
+            )
+        except Exception as error:
+            return _failed_stage(
+                security,
+                trading_date,
+                getattr(error, "code", "DAILY_PROVIDER_FAILED"),
+                self._now(),
+            )
+
+    async def _retry_invalid(
+        self, batch_id: UUID, items: tuple[Any, ...], trading_date: date
+    ) -> None:
+        async with self._database.session() as session:
+            stages = await DailyDataRepository(session).list_stages(batch_id)
+        by_symbol = {item.symbol: item for item in stages}
+        retry = tuple(
+            item
+            for item in items
+            if item.symbol not in by_symbol
+            or DailyStageStatus(by_symbol[item.symbol].status)
+            in {DailyStageStatus.FAILED, DailyStageStatus.INVALID}
+        )
+        if not retry:
+            return
+        stages = await self._fetch_group(retry, trading_date)
+        async with self._database.transaction() as session:
+            await DailyDataService(
+                DailyDataRepository(session), now_provider=self._now
+            ).stage_many(batch_id, stages, requested_count=len(items))
+
+    async def _report(
+        self,
+        context: JobExecutionContext,
+        *,
+        completed: int,
+        total: int,
+        message: str,
+        checkpoint: dict[str, object],
+    ) -> JobStatus | None:
+        async with self._database.transaction() as session:
+            return await PostgresJobService(session).report_progress(
+                context.job_id,
+                context.fence_token,
+                progress=JobProgress(completed, total, message),
+                checkpoint=checkpoint,
+                lease_duration=timedelta(seconds=60),
+                now=self._now(),
+            )
+
+
 def _groups(
     plan: DailyCollectionPlan, symbols: tuple[str, ...]
 ) -> tuple[tuple[str, ...], ...]:
@@ -552,6 +892,78 @@ def _checkpoint(
         "plan": _plan_snapshot(plan),
         "next_group": next_group,
     }
+
+
+def _recovery_checkpoint(
+    snapshot_id: UUID, date_index: int, group_index: int
+) -> dict[str, object]:
+    return {
+        "universe_snapshot_id": str(snapshot_id),
+        "date_index": date_index,
+        "group_index": group_index,
+    }
+
+
+def _daily_service(
+    session: Any, now_provider: Callable[[], datetime]
+) -> DailyDataService:
+    return DailyDataService(
+        DailyDataRepository(session),
+        events=DailyDataEventWriter(session),
+        quality_issues=QualityIssueService(QualityIssueRepository(session)),
+        now_provider=now_provider,
+    )
+
+
+def _summary_from_model(batch: Any) -> DailyBatchSummary:
+    return DailyBatchSummary(
+        id=batch.id,
+        trading_date=batch.trading_date,
+        universe_snapshot_id=batch.universe_snapshot_id,
+        status=batch.status,
+        expected_count=batch.expected_count,
+        fetched_count=batch.fetched_count,
+        validated_count=batch.validated_count,
+        committed_count=batch.committed_count,
+        missing_count=batch.missing_count,
+        failed_count=batch.failed_count,
+        requested_count=getattr(batch, "requested_count", 0) or 0,
+        pending_retry_count=getattr(batch, "pending_retry_count", 0) or 0,
+        plan_snapshot=getattr(batch, "plan_snapshot", {}) or {},
+        created_at=batch.created_at,
+        started_at=batch.started_at,
+        deadline_at=batch.deadline_at,
+        completed_at=batch.completed_at,
+    )
+
+
+def _stored_bar_stage(bar: Any, security: Any, now: datetime) -> StageDailyBar:
+    return StageDailyBar(
+        symbol=bar.symbol,
+        security_id=bar.security_id,
+        trading_date=bar.trade_date,
+        status=DailyStageStatus.FETCHED,
+        received_at=now,
+        provider_payload={
+            "symbol": bar.symbol,
+            "trading_date": bar.trade_date,
+            "open": str(bar.open),
+            "high": str(bar.high),
+            "low": str(bar.low),
+            "close": str(bar.close),
+            "previous_close": (
+                str(bar.previous_close) if bar.previous_close is not None else None
+            ),
+            "volume": bar.volume,
+            "amount": str(bar.amount),
+            "source": bar.source,
+            "source_identity": bar.source_identity,
+            "collected_at": bar.collected_at.isoformat(),
+            "is_new_listing": security.listed_on == bar.trade_date,
+            "is_st": security.is_st,
+            "has_known_corporate_action": False,
+        },
+    )
 
 
 def _result(batch: Any) -> JobResult:

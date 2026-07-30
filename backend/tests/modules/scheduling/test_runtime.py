@@ -6,6 +6,7 @@ import pytest
 
 from long_invest.modules.scheduling.runtime import (
     DAILY_MARKET_DATA,
+    DailyGapPlan,
     DualPathScheduler,
 )
 
@@ -53,9 +54,26 @@ class Runtime:
 class Submitter:
     def __init__(self) -> None:
         self.calls = []
+        self.recovery_calls = []
 
     async def submit(self, plan, **values):
         self.calls.append((plan, values))
+
+    async def submit_recovery(self, dates, **values):
+        self.recovery_calls.append((dates, values))
+
+
+class GapPlanner:
+    def __init__(self, dates: tuple[date, ...]) -> None:
+        self.dates = dates
+        self.version_id = uuid4()
+        self.before = None
+
+    async def plan(self, *, before):
+        self.before = before
+        if not self.dates:
+            return None
+        return DailyGapPlan(self.dates, self.version_id)
 
 
 def subject(
@@ -138,6 +156,23 @@ async def test_startup_recovers_due_persistent_plan_on_trading_day():
     assert plan is DAILY_MARKET_DATA
     assert values["trade_date"] == date(2026, 7, 17)
     assert values["scheduled_at"] == datetime(2026, 7, 17, 9, tzinfo=UTC)
+
+
+@pytest.mark.anyio
+async def test_startup_merges_missing_dates_into_one_recovery_job():
+    now = datetime(2026, 7, 17, 9, 1, tzinfo=UTC)
+    scheduler, _, _, submitter, _ = subject(now)
+    gap_planner = GapPlanner((date(2026, 7, 14), date(2026, 7, 16)))
+    scheduler._daily_gap_planner = gap_planner
+
+    await scheduler.recover_persistent(now=now)
+
+    assert gap_planner.before == date(2026, 7, 16)
+    assert len(submitter.recovery_calls) == 1
+    dates, values = submitter.recovery_calls[0]
+    assert dates == (date(2026, 7, 14), date(2026, 7, 16))
+    assert values["calendar_version_id"] == gap_planner.version_id
+    assert len(submitter.calls) == 1
 
 
 @pytest.mark.anyio

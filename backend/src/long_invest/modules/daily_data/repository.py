@@ -469,6 +469,43 @@ class DailyDataRepository:
             await self.session.scalar(select(func.count(DailyDataBatch.id))) or 0
         )
 
+    async def batch_date_bounds(self) -> tuple[date, date] | None:
+        row = (
+            await self.session.execute(
+                select(
+                    func.min(DailyDataBatch.trading_date),
+                    func.max(DailyDataBatch.trading_date),
+                ).where(
+                    DailyDataBatch.status.in_(("SUCCEEDED", "PARTIAL"))
+                )
+            )
+        ).one()
+        if row[0] is None or row[1] is None:
+            return None
+        return row[0], row[1]
+
+    async def batch_dates(self, *, start: date, end: date) -> set[date]:
+        rows = await self.session.scalars(
+            select(DailyDataBatch.trading_date).where(
+                DailyDataBatch.trading_date.between(start, end),
+                DailyDataBatch.status.in_(("SUCCEEDED", "PARTIAL")),
+            )
+        )
+        return set(rows)
+
+    async def bars_for_date(
+        self, security_ids: Sequence[UUID], trading_date: date
+    ) -> list[DailyBarUnadjusted]:
+        if not security_ids:
+            return []
+        rows = await self.session.scalars(
+            select(DailyBarUnadjusted).where(
+                DailyBarUnadjusted.security_id.in_(security_ids),
+                DailyBarUnadjusted.trade_date == trading_date,
+            )
+        )
+        return list(rows)
+
     async def list_missing(
         self, batch_id: UUID, *, page: int, page_size: int
     ) -> list[DailyBatchMissingItem]:

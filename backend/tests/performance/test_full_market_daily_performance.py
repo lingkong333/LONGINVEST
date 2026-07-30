@@ -1,5 +1,6 @@
 import os
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from time import monotonic
 from uuid import uuid4
 
@@ -22,6 +23,7 @@ from long_invest.modules.daily_data.models import (
 from long_invest.modules.daily_data.outbox import DailyDataEventWriter
 from long_invest.modules.daily_data.repository import DailyDataRepository
 from long_invest.modules.daily_data.service import DailyDataService
+from long_invest.modules.market_data.models import DataQualityIssue
 from long_invest.modules.market_data.repository import QualityIssueRepository
 from long_invest.modules.market_data.service import QualityIssueService
 from long_invest.platform.config.settings import AppSettings
@@ -32,6 +34,13 @@ pytestmark = pytest.mark.skipif(
     os.getenv("RUN_SERVER_PERFORMANCE") != "1",
     reason="server performance acceptance is opt-in",
 )
+
+
+class OneInvalidRowRepository(DailyDataRepository):
+    async def store_current_daily_bars(self, rows, revisions_by_key):
+        changed = [dict(row) for row in rows]
+        changed[len(changed) // 2]["close"] = Decimal("-1")
+        return await super().store_current_daily_bars(changed, revisions_by_key)
 
 
 @pytest.mark.anyio
@@ -137,8 +146,110 @@ async def test_full_market_daily_5500_rows_use_batched_database_writes() -> None
                     )
                 )
                 await session.execute(
+                    delete(DataQualityIssue).where(
+                        DataQualityIssue.subject_id == str(batch_id)
+                    )
+                )
+                await session.execute(
                     delete(DailyBarRevision).where(
                         DailyBarRevision.daily_bar_security_id.in_(security_ids)
+                    )
+                )
+                await session.execute(
+                    delete(DailyBarUnadjusted).where(
+                        DailyBarUnadjusted.security_id.in_(security_ids)
+                    )
+                )
+                await session.execute(
+                    delete(DailyBatchMissingItem).where(
+                        DailyBatchMissingItem.batch_id == batch_id
+                    )
+                )
+                await session.execute(
+                    delete(DailyBarStage).where(DailyBarStage.batch_id == batch_id)
+                )
+                await session.execute(
+                    delete(DailyDataBatch).where(DailyDataBatch.id == batch_id)
+                )
+        await database.dispose()
+
+
+@pytest.mark.anyio
+async def test_one_database_row_failure_does_not_rollback_the_batch() -> None:
+    database = Database(AppSettings(_env_file=None).database_owner_url)
+    trading_date = date(2026, 7, 30)
+    now = datetime(2026, 7, 30, 9, tzinfo=UTC)
+    symbols = tuple(f"{310000 + index:06d}.SZ" for index in range(100))
+    security_ids = tuple(uuid4() for _ in symbols)
+    batch_id = None
+    try:
+        async with database.transaction() as session:
+            service = DailyDataService(
+                DailyDataRepository(session), now_provider=lambda: now
+            )
+            batch = await service.create(
+                CreateDailyBatch(
+                    trading_date=trading_date,
+                    universe_snapshot_id=uuid4(),
+                    symbols=symbols,
+                    security_ids=security_ids,
+                    idempotency_key=f"failure-isolation:{uuid4()}",
+                )
+            )
+            batch_id = batch.id
+            await service.stage_many(
+                batch.id,
+                tuple(
+                    StageDailyBar(
+                        symbol=symbol,
+                        security_id=security_id,
+                        trading_date=trading_date,
+                        status=DailyStageStatus.FETCHED,
+                        provider_payload={
+                            "symbol": symbol,
+                            "trading_date": trading_date,
+                            "open": "10",
+                            "high": "11",
+                            "low": "9",
+                            "close": "10.5",
+                            "previous_close": "10",
+                            "volume": 100,
+                            "amount": "1000",
+                            "source": "EASTMONEY",
+                        },
+                        received_at=now,
+                    )
+                    for symbol, security_id in zip(
+                        symbols, security_ids, strict=True
+                    )
+                ),
+                requested_count=len(symbols),
+            )
+
+        async with database.transaction() as session:
+            service = DailyDataService(
+                OneInvalidRowRepository(session),
+                events=DailyDataEventWriter(session),
+                quality_issues=QualityIssueService(QualityIssueRepository(session)),
+                now_provider=lambda: now,
+            )
+            await service.validate(batch_id)
+            result = await service.commit(batch_id)
+
+        assert result.status is DailyBatchStatus.PARTIAL
+        assert result.committed_count == 99
+        assert result.failed_count == 1
+    finally:
+        if batch_id is not None:
+            async with database.transaction() as session:
+                await session.execute(
+                    delete(EventOutbox).where(
+                        EventOutbox.aggregate_id == str(batch_id)
+                    )
+                )
+                await session.execute(
+                    delete(DataQualityIssue).where(
+                        DataQualityIssue.subject_id == str(batch_id)
                     )
                 )
                 await session.execute(

@@ -606,9 +606,32 @@ async def test_startup_recovery_uses_one_job_for_two_dates_without_job_items() -
                 )
                 or 0
             )
+            diagnostics = list(
+                await session.execute(
+                    select(
+                        DailyBarStage.symbol,
+                        DailyBarStage.trading_date,
+                        DailyBarStage.status,
+                        DailyBarStage.error_code,
+                        DailyBarStage.quality_code,
+                    ).where(DailyBarStage.batch_id.in_(batch_ids))
+                )
+            )
         assert result.success is True
         assert [item.trading_date for item in batches] == list(trade_dates)
-        assert all(item.status == "SUCCEEDED" for item in batches)
+        assert all(item.status == "SUCCEEDED" for item in batches), {
+            "batches": [
+                {
+                    "date": item.trading_date.isoformat(),
+                    "status": item.status,
+                    "committed": item.committed_count,
+                    "missing": item.missing_count,
+                    "failed": item.failed_count,
+                }
+                for item in batches
+            ],
+            "stages": diagnostics,
+        }
         assert stored_rows == len(symbols) * len(trade_dates)
         assert stored_job is not None
         assert stored_job.checkpoint["date_index"] == len(trade_dates)

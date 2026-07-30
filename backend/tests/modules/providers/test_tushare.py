@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -118,4 +119,19 @@ def test_tushare_converts_sdk_failure_to_safe_error() -> None:
     with pytest.raises(ProviderHttpError, match="PROVIDER_UPSTREAM_FAILED"):
         asyncio.run(
             provider.security_master(datetime.now(UTC) + timedelta(seconds=1))
+        )
+
+
+def test_tushare_enforces_total_deadline() -> None:
+    def slow(**kwargs):
+        del kwargs
+        time.sleep(0.05)
+        return pd.DataFrame()
+
+    provider = TushareProvider(token_resolver=token, sdk_loader=slow)
+    with pytest.raises(TimeoutError):
+        asyncio.run(
+            provider.security_master(
+                datetime.now(UTC) + timedelta(milliseconds=5)
+            )
         )

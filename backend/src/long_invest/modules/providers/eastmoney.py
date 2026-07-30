@@ -861,11 +861,16 @@ class EastmoneyProvider:
                     observed_at=datetime.now(UTC),
                 )
             elif capability is ProviderCapability.CORPORATE_ACTIONS:
-                today = date.today()
-                await self.corporate_actions(
-                    CorporateActionRequest(
-                        "600000.SH", today - timedelta(days=30), today
-                    ),
+                await self._report_rows(
+                    "RPT_SHAREBONUS_DET",
+                    "PLAN_NOTICE_DATE",
+                    "688981.SH",
+                    deadline,
+                )
+                await self._report_rows(
+                    "RPT_IPO_ALLOTMENT",
+                    "EQUITY_RECORD_DATE",
+                    "688981.SH",
                     deadline,
                 )
             else:

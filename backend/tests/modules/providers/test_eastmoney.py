@@ -132,6 +132,16 @@ def test_corporate_actions_builds_verified_dividend_factor() -> None:
     assert len(item.raw_payload_hash) == 64
 
 
+def test_corporate_action_probe_accepts_no_recent_event() -> None:
+    result = asyncio.run(
+        EastmoneyProvider(CorporateActionClient()).probe(
+            ProviderCapability.CORPORATE_ACTIONS,
+            datetime.now(UTC) + timedelta(seconds=5),
+        )
+    )
+    assert result.healthy
+
+
 def test_corporate_actions_rejects_announcement_terms_that_do_not_match() -> None:
     request = CorporateActionRequest("300033.SZ", date(2025, 4, 10), date(2025, 4, 10))
     with pytest.raises(ProviderHttpError, match="ADJUSTMENT_DATA_UNAVAILABLE"):

@@ -1,4 +1,5 @@
 import asyncio
+import time
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
@@ -111,3 +112,18 @@ def test_baostock_passes_adjustment_mode_and_safe_failure() -> None:
             )
         )
     assert calls[0]["adjustflag"] == "2"
+
+
+def test_baostock_enforces_total_deadline() -> None:
+    def slow(**kwargs):
+        del kwargs
+        time.sleep(0.05)
+        return []
+
+    provider = BaoStockProvider(sdk_loader=slow)
+    with pytest.raises(TimeoutError):
+        asyncio.run(
+            provider.security_master(
+                datetime.now(UTC) + timedelta(milliseconds=5)
+            )
+        )

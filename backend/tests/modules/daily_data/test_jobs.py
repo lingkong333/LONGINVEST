@@ -14,6 +14,7 @@ from long_invest.modules.daily_data.jobs import (
     FullMarketDailyJob,
     _group_stages,
     _groups,
+    _historical_absence,
     _stored_bar_stage,
 )
 from long_invest.modules.providers.contracts import (
@@ -196,3 +197,9 @@ def test_recovery_reuses_an_existing_bar_without_losing_metadata() -> None:
     assert stage.provider_payload["previous_close"] == "9.8"
     assert stage.provider_payload["source"] == "EASTMONEY"
     assert stage.provider_payload["source_identity"]["interface"] == "history"
+
+
+def test_historical_absence_does_not_apply_current_suspension_to_past_dates() -> None:
+    security = _security("600000.SH", suspended=True)
+
+    assert _historical_absence(security, DAY) is None

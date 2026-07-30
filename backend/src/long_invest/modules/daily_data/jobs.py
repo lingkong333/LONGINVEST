@@ -555,8 +555,17 @@ class DailyMarketRecoveryJob:
             return _summary_from_model(existing_batch)
 
         bars_by_security = {item.security_id: item for item in stored_bars}
+        known_absent = tuple(
+            item
+            for item in frozen.items
+            if item.security_id not in bars_by_security
+            and _historical_absence(item, trading_date) is not None
+        )
         network_items = tuple(
-            item for item in frozen.items if item.security_id not in bars_by_security
+            item
+            for item in frozen.items
+            if item.security_id not in bars_by_security
+            and _historical_absence(item, trading_date) is None
         )
         estimated_requests = len(network_items)
         if existing_batch is None:
@@ -585,13 +594,18 @@ class DailyMarketRecoveryJob:
         else:
             batch = _summary_from_model(existing_batch)
 
-        if stored_bars:
+        if stored_bars or known_absent:
             security_by_id = {item.security_id: item for item in frozen.items}
             stages = tuple(
                 _stored_bar_stage(
                     bar, security_by_id[bar.security_id], self._now()
                 )
                 for bar in stored_bars
+            ) + tuple(
+                _historical_failed_stage(
+                    item, trading_date, "DAILY_BAR_MISSING", self._now()
+                )
+                for item in known_absent
             )
             async with self._database.transaction() as session:
                 await DailyDataService(
@@ -683,7 +697,7 @@ class DailyMarketRecoveryJob:
             )
             if bar is not None:
                 return _bar_stage(bar, security, self._now())
-            return _failed_stage(
+            return _historical_failed_stage(
                 security,
                 trading_date,
                 result.batch_error_code
@@ -695,7 +709,7 @@ class DailyMarketRecoveryJob:
                 self._now(),
             )
         except Exception as error:
-            return _failed_stage(
+            return _historical_failed_stage(
                 security,
                 trading_date,
                 getattr(error, "code", "DAILY_PROVIDER_FAILED"),
@@ -849,6 +863,31 @@ def _known_absence(security: Any, trading_date: date) -> DailyMissingReason | No
         return DailyMissingReason.DELISTED
     if security.is_suspended:
         return DailyMissingReason.SUSPENDED
+    return None
+
+
+def _historical_failed_stage(
+    security: Any, trading_date: date, error_code: str, now: datetime
+) -> StageDailyBar:
+    reason = _historical_absence(security, trading_date)
+    return StageDailyBar(
+        symbol=security.symbol,
+        security_id=security.security_id,
+        trading_date=trading_date,
+        status=(DailyStageStatus.MISSING if reason else DailyStageStatus.FAILED),
+        received_at=now,
+        missing_reason=reason,
+        error_code=(f"DAILY_{reason.value}" if reason else error_code),
+    )
+
+
+def _historical_absence(
+    security: Any, trading_date: date
+) -> DailyMissingReason | None:
+    if security.listed_on and trading_date < security.listed_on:
+        return DailyMissingReason.NOT_YET_LISTED
+    if security.delisted_on and trading_date > security.delisted_on:
+        return DailyMissingReason.DELISTED
     return None
 
 

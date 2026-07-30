@@ -438,7 +438,17 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
                 )
                 or 0
             )
-        assert result.success is True
+            stage_diagnostics = list(
+                await session.execute(
+                    select(
+                        DailyBarStage.symbol,
+                        DailyBarStage.status,
+                        DailyBarStage.error_code,
+                        DailyBarStage.quality_code,
+                    ).where(DailyBarStage.batch_id == batch_id)
+                )
+            )
+        assert result.success is True, stage_diagnostics
         assert batch is not None
         assert batch.status == "SUCCEEDED"
         assert batch.committed_count == len(symbols)

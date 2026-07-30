@@ -9,6 +9,7 @@ import type {
   MarketDataGateway,
   QfqDatasetSummary,
   QualityIssueSummary,
+  QuoteCheckResult,
   QuoteCycleSummary,
   QuoteItemSummary,
   SecuritySummary,
@@ -92,6 +93,21 @@ const quoteItemsSchema = z.object({
     quote_time: z.string().nullable(),
     error_code: z.string().nullable(),
     eligible_for_evaluation: z.boolean(),
+  })),
+})
+
+const quoteCheckSchema = z.object({
+  status: z.string().min(1),
+  mode: z.string().min(1),
+  expected_count: z.number().int().nonnegative(),
+  valid_count: z.number().int().nonnegative(),
+  failed_count: z.number().int().nonnegative(),
+  signal_succeeded: z.number().int().nonnegative(),
+  signal_failed: z.number().int().nonnegative(),
+  completed_at: z.string().min(1),
+  failures: z.array(z.object({
+    symbol: z.string().min(1),
+    code: z.string().min(1),
   })),
 })
 
@@ -469,17 +485,30 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
           reason: command.reason,
         },
       }
+      let value: unknown
       if (command.action === "MANUAL_COLLECT") {
-        await api.request(api.client.POST("/api/v1/quotes/check-now", {
+        value = await api.request(api.client.POST("/api/v1/quotes/check-now", {
           ...request,
           body: {
             ...request.body,
             timeout_seconds: command.timeoutSeconds ?? 30,
           },
         }))
-        return
+      } else {
+        value = await api.request(api.client.POST("/api/v1/quotes/diagnose", request))
       }
-      await api.request(api.client.POST("/api/v1/quotes/diagnose", request))
+      const result = parse(quoteCheckSchema, value, "QUOTE_CHECK_RESULT_INVALID")
+      return {
+        status: result.status,
+        mode: result.mode,
+        expectedCount: result.expected_count,
+        validCount: result.valid_count,
+        failedCount: result.failed_count,
+        signalSucceeded: result.signal_succeeded,
+        signalFailed: result.signal_failed,
+        failures: result.failures,
+        completedAt: result.completed_at,
+      } satisfies QuoteCheckResult
     },
 
     async loadDailyBatches() {

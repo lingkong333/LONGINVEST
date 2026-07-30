@@ -27,6 +27,7 @@ import type {
   QuoteOperationAction,
   QualityIssueAction,
   QualityIssueSummary,
+  QuoteCheckResult,
 } from "@/features/market-data/types"
 import { ApiError } from "@/shared/api/client"
 import { Alert, AlertDescription } from "@/shared/ui/alert"
@@ -235,6 +236,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
   const [commandReason, setCommandReason] = useState("")
   const [commandSymbols, setCommandSymbols] = useState("")
   const [quoteTimeout, setQuoteTimeout] = useState(30)
+  const [lastQuoteResult, setLastQuoteResult] = useState<QuoteCheckResult | null>(null)
   const [backfillScope, setBackfillScope] = useState<
     "SINGLE" | "SELECTED" | "ALL"
   >("SINGLE")
@@ -342,10 +344,14 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
         reason: commandReason.trim(),
       })
     },
-    onSuccess: async () => {
+    onSuccess: async (result) => {
       const command = marketCommand
       setMarketCommand(null)
       if (!command) return
+      if (command.kind === "QUOTE" && result) {
+        setLastQuoteResult(result as QuoteCheckResult)
+        return
+      }
       const query = command.kind === "SECURITY_REFRESH"
         ? "securities"
         : command.kind === "QUOTE"
@@ -488,8 +494,8 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
         </Panel>
 
         <Panel
-          title="实时采集周期"
-          description="批次屏障状态及逐股有效性诊断"
+          title="实时行情检查"
+          description="立即检查当前行情；下方保留旧批次历史供追溯"
           icon={ActivityIcon}
         >
           {quoteCycles.data ? (
@@ -521,6 +527,19 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                 </Button>
               ) : null}
             </div>
+          ) : null}
+          {lastQuoteResult ? (
+            <Alert className="mb-3">
+              <AlertDescription>
+                本次检查完成：有效 {lastQuoteResult.validCount}/
+                {lastQuoteResult.expectedCount}，失败 {lastQuoteResult.failedCount}，
+                信号成功 {lastQuoteResult.signalSucceeded}，信号失败
+                {lastQuoteResult.signalFailed}。
+                {lastQuoteResult.failures.length > 0
+                  ? ` 失败项：${lastQuoteResult.failures.map((item) => `${item.symbol}（${item.code}）`).join("、")}`
+                  : ""}
+              </AlertDescription>
+            </Alert>
           ) : null}
           {quoteCycles.isPending ? (
             <PageState state="loading" title="正在读取实时采集周期" description="正在加载最近批次。" />

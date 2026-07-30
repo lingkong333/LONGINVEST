@@ -88,6 +88,18 @@ export interface QuoteItemSummary {
   eligibleForEvaluation: boolean
 }
 
+export interface QuoteCheckResult {
+  status: string
+  mode: string
+  expectedCount: number
+  validCount: number
+  failedCount: number
+  signalSucceeded: number
+  signalFailed: number
+  failures: { symbol: string; code: string }[]
+  completedAt: string
+}
+
 export interface DailyBatchSummary {
   id: string
   tradingDate: string
@@ -188,7 +200,7 @@ export interface MarketDataGateway {
     symbols: string[]
     reason: string
     timeoutSeconds?: number
-  }): Promise<void>
+  }): Promise<QuoteCheckResult>
   loadDailyBatches(): Promise<PagedResult<DailyBatchSummary>>
   retryDailyBatch(command: {
     batchId: string

@@ -43,6 +43,21 @@ const issue = {
   selected_source: null,
 }
 
+const quoteResult = {
+  status: "COMPLETE",
+  mode: "MANUAL",
+  scheduled_at: "2026-07-23T03:00:00Z",
+  started_at: "2026-07-23T03:00:00Z",
+  completed_at: "2026-07-23T03:00:01Z",
+  expected_count: 1,
+  valid_count: 1,
+  failed_count: 0,
+  signal_succeeded: 1,
+  signal_failed: 0,
+  quotes: [],
+  failures: [],
+}
+
 describe("行情数据中心请求边界", () => {
   it("股票列表搜索提交服务端分页参数", async () => {
     server.use(
@@ -155,10 +170,7 @@ describe("行情数据中心请求边界", () => {
         "http://localhost/api/v1/quotes/check-now",
         async ({ request }) => {
           received.push(await request.json())
-          return HttpResponse.json(envelope({
-            job_id: "00000000-0000-4000-8000-000000000011",
-            status: "PENDING_DISPATCH",
-          }))
+          return HttpResponse.json(envelope(quoteResult))
         },
       ),
       http.post(
@@ -166,8 +178,9 @@ describe("行情数据中心请求边界", () => {
         async ({ request }) => {
           received.push(await request.json())
           return HttpResponse.json(envelope({
-            job_id: "00000000-0000-4000-8000-000000000012",
-            status: "PENDING_DISPATCH",
+            ...quoteResult,
+            mode: "DIAGNOSTIC",
+            signal_succeeded: 0,
           }))
         },
       ),

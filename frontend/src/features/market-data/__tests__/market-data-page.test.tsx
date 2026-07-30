@@ -66,7 +66,17 @@ function gateway(overrides: Partial<MarketDataGateway> = {}): MarketDataGateway 
       errorCode: null,
       eligibleForEvaluation: true,
     }]),
-    runQuoteOperation: vi.fn().mockResolvedValue(undefined),
+    runQuoteOperation: vi.fn().mockResolvedValue({
+      status: "PARTIAL",
+      mode: "MANUAL",
+      expectedCount: 2,
+      validCount: 1,
+      failedCount: 1,
+      signalSucceeded: 1,
+      signalFailed: 0,
+      failures: [{ symbol: "000001.SZ", code: "PROVIDER_ITEM_MISSING" }],
+      completedAt: "2026-07-23T02:00:30Z",
+    }),
     loadDailyBatches: vi.fn().mockResolvedValue(page([{
       id: "batch-1",
       tradingDate: "2026-07-22",
@@ -162,7 +172,7 @@ describe("行情数据中心", () => {
     renderPage(gateway())
 
     expect(await screen.findByText("贵州茅台")).toBeInTheDocument()
-    expect(screen.getByText("实时采集周期")).toBeInTheDocument()
+    expect(screen.getByText("实时行情检查")).toBeInTheDocument()
     expect(screen.getByText("日线批次")).toBeInTheDocument()
     expect(screen.getByText("前复权数据")).toBeInTheDocument()
     expect(screen.getByText(/来源冲突/)).toBeInTheDocument()
@@ -257,6 +267,27 @@ describe("行情数据中心", () => {
       .not.toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "新建回填" }))
       .not.toBeInTheDocument()
+  })
+
+  it("手动行情检查完成后直接展示本次结果", async () => {
+    renderPage(gateway())
+
+    await userEvent.click(await screen.findByRole("button", { name: "手动采集" }))
+    const dialog = screen.getByRole("dialog")
+    await userEvent.type(
+      within(dialog).getByRole("textbox", { name: "股票代码" }),
+      "600000.SH 000001.SZ",
+    )
+    await userEvent.type(
+      within(dialog).getByRole("textbox", { name: "操作原因" }),
+      "立即核对监控行情",
+    )
+    await userEvent.click(within(dialog).getByRole("button", { name: "确认执行" }))
+
+    expect(await screen.findByText(/本次检查完成：有效 1\/2，失败 1/))
+      .toBeInTheDocument()
+    expect(screen.getByText(/000001.SZ（PROVIDER_ITEM_MISSING）/))
+      .toBeInTheDocument()
   })
 
   it("历史回填默认并发为四且不设置固定上限", async () => {

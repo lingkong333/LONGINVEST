@@ -8,10 +8,12 @@ from sqlalchemy import (
     Date,
     DateTime,
     Float,
+    Index,
     Integer,
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
@@ -144,6 +146,7 @@ class ProviderBudgetUsage(Base):
     __table_args__ = (
         UniqueConstraint("provider_code", "capability", "budget_date"),
         CheckConstraint("used_count >= 0", name="used_count_nonnegative"),
+        Index("ix_provider_budget_usage_provider_date", "provider_code", "budget_date"),
     )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
@@ -159,7 +162,16 @@ class ProviderBudgetUsage(Base):
 
 class ProviderRequestLease(Base):
     __tablename__ = "provider_request_lease"
-    __table_args__ = (UniqueConstraint("token"),)
+    __table_args__ = (
+        UniqueConstraint("token"),
+        Index(
+            "ix_provider_request_lease_active",
+            "provider_code",
+            "capability",
+            "expires_at",
+            postgresql_where=text("released_at IS NULL"),
+        ),
+    )
     id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), primary_key=True, default=uuid4
     )

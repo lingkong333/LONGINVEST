@@ -339,7 +339,11 @@ class PostgresJobService:
         for job in jobs:
             job.last_error_code = "JOB_LEASE_EXPIRED"
             job.last_error_summary = "任务执行权过期，原执行结果已失效"
-            if job.recoverable and job.recovery_count < job.max_recoveries:
+            if job.cancel_requested:
+                _finish(job, JobStatus.CANCELED, recovered_at)
+            elif job.pause_requested:
+                _finish(job, JobStatus.PAUSED, recovered_at)
+            elif job.recoverable and job.recovery_count < job.max_recoveries:
                 job.recovery_count += 1
                 job.status = JobStatus.PENDING
                 job.next_run_at = recovered_at

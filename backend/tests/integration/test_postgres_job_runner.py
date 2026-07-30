@@ -160,6 +160,44 @@ async def test_expired_lease_recovers_once_and_rejects_late_result() -> None:
 
 
 @pytest.mark.anyio
+async def test_expired_lease_finishes_an_existing_cancel_request() -> None:
+    database = Database(AppSettings(_env_file=None).database_owner_url)
+    unique = uuid4().hex
+    start = datetime.now(UTC)
+    async with database.transaction() as session:
+        job = await PostgresJobService(session).submit(
+            command(unique, recoverable=True), now=start
+        )
+    try:
+        async with database.transaction() as session:
+            claim = await PostgresJobService(session).claim_next(
+                worker_id="worker-stopped",
+                lease_duration=timedelta(seconds=1),
+                now=start,
+            )
+        assert claim is not None
+        async with database.transaction() as session:
+            running = await PostgresJobService(session).command(job.id, "cancel")
+            assert running.cancel_requested is True
+
+        after_expiry = start + timedelta(seconds=2)
+        async with database.transaction() as session:
+            report = await PostgresJobService(session).recover_expired(
+                now=after_expiry
+            )
+            stopped = await PostgresJobService(session).get(job.id)
+
+        assert report == (0, 0)
+        assert stopped is not None
+        assert stopped.status == JobStatus.CANCELED
+        assert stopped.lease_token is None
+        assert stopped.cancel_requested is False
+    finally:
+        await remove_job(database, job.id)
+        await database.dispose()
+
+
+@pytest.mark.anyio
 async def test_pause_resume_and_running_cancel_stop_at_safe_point() -> None:
     database = Database(AppSettings(_env_file=None).database_owner_url)
     unique = uuid4().hex

@@ -38,8 +38,6 @@ from long_invest.modules.providers.contracts import (
 from long_invest.modules.securities.models import (
     Security,
     SecurityMasterVersion,
-    SecurityUniverseSnapshot,
-    SecurityUniverseSnapshotItem,
 )
 from long_invest.platform.config.settings import AppSettings
 from long_invest.platform.database.engine import Database
@@ -358,7 +356,6 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
     version_id = uuid4()
     job_id = None
     batch_id = None
-    snapshot_id = None
     try:
         async with database.transaction() as session:
             session.add(
@@ -441,8 +438,6 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
                 )
                 or 0
             )
-        if batch is not None:
-            snapshot_id = batch.universe_snapshot_id
         assert result.success is True
         assert batch is not None
         assert batch.status == "SUCCEEDED"
@@ -478,23 +473,4 @@ async def test_full_market_job_uses_one_job_and_one_batch_with_checkpoint() -> N
                 await session.execute(delete(JobRun).where(JobRun.job_id == job_id))
                 await session.execute(delete(JobItem).where(JobItem.job_id == job_id))
                 await session.execute(delete(Job).where(Job.id == job_id))
-            if snapshot_id is not None:
-                await session.execute(
-                    delete(SecurityUniverseSnapshotItem).where(
-                        SecurityUniverseSnapshotItem.snapshot_id == snapshot_id
-                    )
-                )
-                await session.execute(
-                    delete(SecurityUniverseSnapshot).where(
-                        SecurityUniverseSnapshot.id == snapshot_id
-                    )
-                )
-            await session.execute(
-                delete(Security).where(Security.id.in_(security_ids))
-            )
-            await session.execute(
-                delete(SecurityMasterVersion).where(
-                    SecurityMasterVersion.id == version_id
-                )
-            )
         await database.dispose()

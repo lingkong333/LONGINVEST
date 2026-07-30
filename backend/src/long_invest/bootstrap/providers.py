@@ -10,6 +10,7 @@ from long_invest.modules.auth.audit import AuditContext
 from long_invest.modules.market_data.contracts import OpenQualityIssue, QualitySeverity
 from long_invest.modules.market_data.repository import QualityIssueRepository
 from long_invest.modules.market_data.service import QualityIssueService
+from long_invest.modules.providers.baostock import BaoStockProvider
 from long_invest.modules.providers.browser_http_client import (
     BrowserProviderHttpClient,
     create_browser_json_client,
@@ -30,6 +31,8 @@ from long_invest.modules.providers.resilience import RedisProviderRuntimeState
 from long_invest.modules.providers.router import ProviderRouter
 from long_invest.modules.providers.service import ProviderService
 from long_invest.modules.providers.sina import SinaRealtimeProvider
+from long_invest.modules.providers.tushare import TushareProvider
+from long_invest.modules.settings.application import get_settings_application
 from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.config.settings import AppSettings, get_settings
@@ -214,6 +217,13 @@ def get_provider_resources() -> ProviderResources:
                     provider_http,
                     request_guard=budget.guard,
                 ),
+                ProviderCode.TUSHARE: TushareProvider(
+                    token_resolver=_resolve_tushare_token,
+                    request_guard=budget.guard,
+                ),
+                ProviderCode.BAOSTOCK: BaoStockProvider(
+                    request_guard=budget.guard,
+                ),
             },
         )
     return _resources
@@ -244,8 +254,7 @@ def build_provider_service(
         events=ProviderEventAdapter(session),
     )
     provider_router = ProviderRouter(
-        active.providers[ProviderCode.EASTMONEY],
-        active.providers[ProviderCode.SINA],
+        providers=active.providers,
         config=repository,
         runtime=active.runtime,
         observer=repository,
@@ -274,3 +283,9 @@ def _bar_evidence(bar: DailyBar) -> dict[str, object]:
             else None
         ),
     }
+
+
+async def _resolve_tushare_token() -> str | None:
+    return await get_settings_application().read(
+        "resolve_secret", "provider.tushare.token"
+    )

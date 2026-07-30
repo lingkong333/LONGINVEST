@@ -20,9 +20,7 @@ class SystemAlertPolicyValue(StrictModel):
     error: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
     critical: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
     recovered: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
-    daily_unresolved: list[Literal["WECOM", "EMAIL"]] = Field(
-        default_factory=list
-    )
+    daily_unresolved: list[Literal["WECOM", "EMAIL"]] = Field(default_factory=list)
 
 
 class WeComChannelValue(StrictModel):
@@ -52,7 +50,13 @@ SETTING_SCHEMAS: dict[str, tuple[type[BaseModel], str]] = {
     "notification.channel.email": (EmailChannelValue, "邮件服务器和固定收件人"),
 }
 
-SECRET_KEYS = frozenset({"notification.wecom.webhook", "notification.email.password"})
+SECRET_KEYS = frozenset(
+    {
+        "notification.wecom.webhook",
+        "notification.email.password",
+        "provider.tushare.token",
+    }
+)
 
 
 def setting_definition(key: str) -> dict[str, Any]:

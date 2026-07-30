@@ -37,6 +37,8 @@ dev = [
 ]
 collector = [
     "akshare==1.18.79",
+    "baostock==0.9.3",
+    "tushare==1.4.29",
 ]
 browser-collector = [
     "playwright==1.61.0",

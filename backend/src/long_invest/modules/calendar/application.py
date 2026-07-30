@@ -58,6 +58,24 @@ class CalendarApplication:
             dates=record.dates,
         )
 
+    async def latest_completed_trading_date(
+        self, as_of_date: date, market: str = "CN_A"
+    ) -> date:
+        try:
+            async with self._database.session() as session:
+                item = await self._repository_factory(session).previous_trading_day(
+                    market, as_of_date
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        if item is None:
+            raise AppError(
+                code="CALENDAR_COMPLETED_DATE_NOT_FOUND",
+                message="最近已完成交易日不存在",
+                status_code=404,
+            )
+        return item.trade_date
+
 
 def get_calendar_application() -> CalendarApplication:
     return CalendarApplication(get_database())

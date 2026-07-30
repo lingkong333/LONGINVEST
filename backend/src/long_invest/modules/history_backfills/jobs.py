@@ -2,145 +2,273 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from typing import Any
 from uuid import UUID
 
 import structlog
 
 from long_invest.modules.history_backfills.contracts import (
-    HistoryBackfillControl,
-    HistoryBackfillExecutionResult,
     HistoryBackfillItemError,
     HistoryBackfillWorkItem,
     HistoryBarsBundle,
     HistoryBarsProviderPort,
     HistoryBarStorePort,
     HistoryDiskGuardPort,
-    HistoryJobFence,
-    HistoryJobItemsPort,
 )
+from long_invest.modules.securities.application import SecurityApplication
 from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.contracts import (
     JobExecutionContext,
-    JobItemStatus,
+    JobProgress,
     JobResult,
+    JobStatus,
 )
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 logger = structlog.get_logger(__name__)
 
 
-class HistoryBackfillExecutor:
+@dataclass(frozen=True, slots=True)
+class HistoryItemOutcome:
+    symbol: str
+    security_id: UUID
+    success: bool
+    error_code: str | None = None
+    retryable: bool = False
+    inserted: int = 0
+    unchanged: int = 0
+    revised: int = 0
+    review_required: int = 0
+    qfq_rows: int = 0
+
+
+class PostgresHistoryBackfillJob:
     def __init__(
         self,
+        database: Any,
         *,
-        provider: HistoryBarsProviderPort,
-        store: HistoryBarStorePort,
-        items: HistoryJobItemsPort,
-        disk_guard: HistoryDiskGuardPort,
+        provider_factory: Callable[[], HistoryBarsProviderPort],
+        store_factory: Callable[[], HistoryBarStorePort],
+        disk_guard_factory: Callable[[], HistoryDiskGuardPort],
         item_timeout_seconds: float = 600,
+        now_provider: Callable[[], datetime] | None = None,
     ) -> None:
         if item_timeout_seconds <= 0:
             raise ValueError("item timeout must be positive")
-        self._provider = provider
-        self._store = store
-        self._items = items
-        self._disk_guard = disk_guard
+        self._database = database
+        self._provider_factory = provider_factory
+        self._store_factory = store_factory
+        self._disk_guard = disk_guard_factory()
         self._item_timeout_seconds = item_timeout_seconds
+        self._now = now_provider or (lambda: datetime.now(UTC))
 
-    async def execute(
-        self,
-        context: JobExecutionContext,
-        *,
-        start_date: date,
-        end_date: date,
-        concurrency: int,
-        reason: str,
-    ) -> HistoryBackfillExecutionResult:
-        if start_date > end_date or concurrency < 1 or not reason.strip():
-            raise ValueError("invalid history execution configuration")
-        fence = HistoryJobFence(context.job_id, context.fence_token)
-        await self._items.recover_incomplete(fence)
-        while True:
-            control = await self._items.control(fence)
-            if control is HistoryBackfillControl.CANCEL_REQUESTED:
-                await self._items.cancel_pending(fence)
-                break
-            if control is HistoryBackfillControl.PAUSE_REQUESTED:
-                break
-            if not await self._disk_guard.is_backfill_safe():
-                await self._items.request_pause(
-                    fence, reason="HISTORY_DISK_CAPACITY_LOW"
+    async def __call__(self, context: JobExecutionContext) -> JobResult:
+        config = _history_config(context.config)
+        if config is None:
+            return JobResult.failure(
+                code="HISTORY_BACKFILL_CONFIG_INVALID",
+                message="历史回填任务缺少有效的冻结范围或日期",
+                retryable=False,
+            )
+        snapshot_id, start_date, end_date, concurrency, reason, complete_mode = config
+        try:
+            frozen = await SecurityApplication(self._database).frozen_universe(
+                snapshot_id
+            )
+        except AppError as error:
+            return JobResult.failure(
+                code=error.code,
+                message=error.message,
+                retryable=error.status_code >= 500,
+            )
+
+        checkpoint = dict(context.checkpoint)
+        retry_items = tuple(str(item) for item in checkpoint.get("retry_items", ()))
+        items_by_symbol = {item.symbol: item for item in frozen.items}
+        if retry_items:
+            if len(retry_items) != len(set(retry_items)) or any(
+                symbol not in items_by_symbol for symbol in retry_items
+            ):
+                return _checkpoint_invalid()
+            selected = tuple(items_by_symbol[symbol] for symbol in retry_items)
+        else:
+            selected = frozen.items
+        try:
+            base_succeeded = int(checkpoint.get("base_succeeded", 0))
+            progress_total = int(checkpoint.get("original_total", len(selected)))
+        except (TypeError, ValueError):
+            return _checkpoint_invalid()
+        if (
+            base_succeeded < 0
+            or progress_total < len(selected)
+            or base_succeeded + len(selected) > progress_total
+        ):
+            return _checkpoint_invalid()
+        state = _restore_history_state(checkpoint, total=len(selected))
+        if state is None:
+            return _checkpoint_invalid()
+        cursor, succeeded, failures, counts = state
+
+        while cursor < len(selected):
+            status = await self._report(
+                context,
+                cursor=cursor,
+                succeeded=succeeded,
+                failures=failures,
+                counts=counts,
+                retry_items=retry_items,
+                base_succeeded=base_succeeded,
+                progress_total=progress_total,
+                message=(
+                    f"正在处理第 {cursor + 1} 至 "
+                    f"{min(cursor + concurrency, len(selected))} 只股票"
+                ),
+            )
+            if status in {JobStatus.PAUSED, JobStatus.CANCELED}:
+                return _history_stopped(
+                    status,
+                    base_succeeded + cursor,
+                    progress_total,
+                    failures,
                 )
-                break
-            claimed = await self._items.claim_pending(fence, limit=concurrency)
-            if not claimed:
-                break
-            await asyncio.gather(
+            if not await self._disk_guard.is_backfill_safe():
+                status = await self._report(
+                    context,
+                    cursor=cursor,
+                    succeeded=succeeded,
+                    failures=failures,
+                    counts=counts,
+                    retry_items=retry_items,
+                    base_succeeded=base_succeeded,
+                    progress_total=progress_total,
+                    message="磁盘使用率达到安全上限，历史回填已暂停",
+                    pause=True,
+                )
+                return _history_stopped(
+                    status or JobStatus.PAUSED,
+                    base_succeeded + cursor,
+                    progress_total,
+                    failures,
+                )
+
+            group = selected[cursor : cursor + concurrency]
+            outcomes = await asyncio.gather(
                 *(
                     self._process_item(
                         context,
-                        fence,
-                        item,
-                        start_date=start_date,
-                        end_date=end_date,
-                        reason=reason,
+                        HistoryBackfillWorkItem(item.security_id, item.symbol),
+                        start_date=(
+                            max(start_date, item.listed_on)
+                            if complete_mode and item.listed_on is not None
+                            else start_date
+                        ),
+                        end_date=(
+                            min(end_date, item.delisted_on)
+                            if complete_mode and item.delisted_on is not None
+                            else end_date
+                        ),
                         concurrency=concurrency,
+                        reason=reason,
                     )
-                    for item in claimed
+                    for item in group
                 )
             )
-            await self._report_progress(fence)
-        summary = await self._items.summary(fence)
-        await self._items.report_progress(fence, summary)
-        control = await self._items.control(fence)
-        return HistoryBackfillExecutionResult(
-            total=summary.total,
-            succeeded=summary.succeeded,
-            failed=summary.failed,
-            canceled=summary.canceled,
-            pending=summary.pending + summary.active,
-            control=control,
+            for outcome in outcomes:
+                if outcome.success:
+                    succeeded += 1
+                    for name in counts:
+                        counts[name] += int(getattr(outcome, name))
+                else:
+                    failures.append(
+                        {
+                            "security_id": str(outcome.security_id),
+                            "symbol": outcome.symbol,
+                            "error_code": outcome.error_code
+                            or "HISTORY_ITEM_FAILED",
+                            "retryable": outcome.retryable,
+                        }
+                    )
+            cursor += len(group)
+            status = await self._report(
+                context,
+                cursor=cursor,
+                succeeded=succeeded,
+                failures=failures,
+                counts=counts,
+                retry_items=retry_items,
+                base_succeeded=base_succeeded,
+                progress_total=progress_total,
+                message=f"已处理 {cursor}/{len(selected)} 只股票",
+            )
+            if status in {JobStatus.PAUSED, JobStatus.CANCELED}:
+                return _history_stopped(
+                    status,
+                    base_succeeded + cursor,
+                    progress_total,
+                    failures,
+                )
+
+        data = {
+            "total": progress_total,
+            "succeeded": base_succeeded + succeeded,
+            "failed": len(failures),
+            "canceled": 0,
+            "pending": 0,
+            "inserted": counts["inserted"],
+            "unchanged": counts["unchanged"],
+            "revised": counts["revised"],
+            "review_required": counts["review_required"],
+            "qfq_rows": counts["qfq_rows"],
+            "failed_items": [item["symbol"] for item in failures],
+            "failure_details": failures,
+        }
+        if not failures:
+            return JobResult.success_result(data=data, message="历史回填完成")
+        if base_succeeded + succeeded:
+            return JobResult(
+                success=True,
+                code="PARTIAL",
+                message="历史回填部分完成",
+                retryable=False,
+                data=data,
+            )
+        return JobResult.failure(
+            code="HISTORY_BACKFILL_FAILED",
+            message="历史回填没有成功股票",
+            retryable=False,
+            data=data,
         )
 
     async def _process_item(
         self,
         context: JobExecutionContext,
-        fence: HistoryJobFence,
         item: HistoryBackfillWorkItem,
         *,
         start_date: date,
         end_date: date,
-        reason: str,
         concurrency: int,
-    ) -> None:
+        reason: str,
+    ) -> HistoryItemOutcome:
         try:
-            if await self._stop_at_safe_point(fence, item):
-                return
-            deadline = datetime.now(UTC) + timedelta(seconds=self._item_timeout_seconds)
+            deadline = self._now() + timedelta(seconds=self._item_timeout_seconds)
             async with asyncio.timeout(self._item_timeout_seconds):
-                bundle = await self._provider.fetch(
+                bundle = await self._provider_factory().fetch(
                     item,
                     start_date=start_date,
                     end_date=end_date,
                     deadline=deadline,
                     concurrency=concurrency,
                 )
-            await self._items.mark_stage(fence, item.symbol, JobItemStatus.VALIDATING)
             bundle = _validate_bundle(
                 bundle,
                 symbol=item.symbol,
                 start_date=start_date,
                 end_date=end_date,
             )
-            if not await self._disk_guard.is_backfill_safe():
-                await self._items.request_pause(
-                    fence, reason="HISTORY_DISK_CAPACITY_LOW"
-                )
-            if await self._stop_at_safe_point(fence, item):
-                return
-            await self._items.mark_stage(fence, item.symbol, JobItemStatus.SAVING)
-            stored = await self._store.store(
+            stored = await self._store_factory().store(
                 item,
                 bundle,
                 idempotency_key=_store_key(
@@ -148,120 +276,183 @@ class HistoryBackfillExecutor:
                 ),
                 reason=reason,
             )
-            await self._items.finish(
-                fence,
+            return HistoryItemOutcome(
                 item.symbol,
-                status=JobItemStatus.SUCCEEDED,
-                result_ref={
-                    "inserted": stored.inserted,
-                    "unchanged": stored.unchanged,
-                    "revised": stored.revised,
-                    "review_required": stored.review_required,
-                    "qfq_dataset_id": str(stored.qfq_dataset_id),
-                    "qfq_version": stored.qfq_version,
-                    "qfq_rows": stored.qfq_rows,
-                    "qfq_unchanged": stored.qfq_unchanged,
-                    "qfq_actual_start": stored.qfq_actual_start.isoformat(),
-                    "qfq_actual_end": stored.qfq_actual_end.isoformat(),
-                    "qfq_truncated_rows": stored.qfq_truncated_rows,
-                    "start_date": start_date.isoformat(),
-                    "end_date": end_date.isoformat(),
-                },
+                item.security_id,
+                True,
+                inserted=stored.inserted,
+                unchanged=stored.unchanged,
+                revised=stored.revised,
+                review_required=stored.review_required,
+                qfq_rows=stored.qfq_rows,
             )
-        except asyncio.CancelledError:
-            await self._items.release_pending(fence, item.symbol)
-            raise
         except TimeoutError:
-            await self._fail(fence, item, "HISTORY_PROVIDER_TIMEOUT")
-        except HistoryBackfillItemError as exc:
-            await self._fail(fence, item, exc.code)
-        except AppError as exc:
-            await self._fail(fence, item, exc.code)
+            return _failed_outcome(item, "HISTORY_PROVIDER_TIMEOUT", True)
+        except HistoryBackfillItemError as error:
+            return _failed_outcome(item, error.code, error.retryable)
+        except AppError as error:
+            return _failed_outcome(item, error.code, error.status_code >= 500)
         except ValueError:
-            await self._fail(fence, item, "HISTORY_BARS_INVALID")
-        except Exception as exc:
+            return _failed_outcome(item, "HISTORY_BARS_INVALID", False)
+        except Exception as error:
             logger.exception(
                 "history_backfill_item_failed",
                 job_id=str(context.job_id),
                 symbol=item.symbol,
-                error_type=type(exc).__name__,
+                error_type=type(error).__name__,
             )
-            await self._fail(fence, item, "HISTORY_ITEM_FAILED")
+            return _failed_outcome(item, "HISTORY_ITEM_FAILED", False)
 
-    async def _stop_at_safe_point(
-        self, fence: HistoryJobFence, item: HistoryBackfillWorkItem
-    ) -> bool:
-        control = await self._items.control(fence)
-        if control is HistoryBackfillControl.PAUSE_REQUESTED:
-            await self._items.release_pending(fence, item.symbol)
-            return True
-        if control is HistoryBackfillControl.CANCEL_REQUESTED:
-            await self._items.finish(fence, item.symbol, status=JobItemStatus.CANCELED)
-            return True
-        return False
+    async def _report(
+        self,
+        context: JobExecutionContext,
+        *,
+        cursor: int,
+        succeeded: int,
+        failures: list[dict[str, object]],
+        counts: dict[str, int],
+        retry_items: tuple[str, ...],
+        base_succeeded: int,
+        progress_total: int,
+        message: str,
+        pause: bool = False,
+    ) -> JobStatus | None:
+        checkpoint = {
+            "cursor": cursor,
+            "succeeded": succeeded,
+            "failures": failures,
+            "counts": counts,
+        }
+        if retry_items:
+            checkpoint["retry_items"] = list(retry_items)
+            checkpoint["original_total"] = progress_total
+            checkpoint["base_succeeded"] = base_succeeded
+        async with self._database.transaction() as session:
+            return await PostgresJobService(session).report_progress(
+                context.job_id,
+                context.fence_token,
+                progress=JobProgress(
+                    completed=base_succeeded + cursor,
+                    total=progress_total,
+                    message=message,
+                ),
+                checkpoint=checkpoint,
+                lease_duration=timedelta(seconds=60),
+                now=self._now(),
+                pause=pause,
+            )
 
-    async def _fail(
-        self, fence: HistoryJobFence, item: HistoryBackfillWorkItem, code: str
-    ) -> None:
-        await self._items.finish(
-            fence,
-            item.symbol,
-            status=JobItemStatus.FAILED,
-            error_code=code,
-        )
 
-    async def _report_progress(self, fence: HistoryJobFence) -> None:
-        summary = await self._items.summary(fence)
-        await self._items.report_progress(fence, summary)
-
-
-def build_history_backfill_handler(
+def build_postgres_history_backfill_handler(
+    database: Any,
     *,
     provider_factory: Callable[[], HistoryBarsProviderPort],
     store_factory: Callable[[], HistoryBarStorePort],
-    items_factory: Callable[[], HistoryJobItemsPort],
     disk_guard_factory: Callable[[], HistoryDiskGuardPort],
     item_timeout_seconds: float = 600,
 ):
-    async def handle(context: JobExecutionContext) -> JobResult:
-        try:
-            UUID(str(context.config["universe_snapshot_id"]))
-            start_date = date.fromisoformat(str(context.config["start_date"]))
-            end_date = date.fromisoformat(str(context.config["end_date"]))
-            concurrency = int(context.config["concurrency"])
-            reason = str(context.config["reason"]).strip()
-            if start_date > end_date or concurrency < 1 or not reason:
-                raise ValueError
-        except (KeyError, TypeError, ValueError):
-            return JobResult.failure(
-                code="HISTORY_BACKFILL_CONFIG_INVALID",
-                message="历史回填任务缺少有效的冻结范围或日期",
-                retryable=False,
-            )
-        executor = HistoryBackfillExecutor(
-            provider=provider_factory(),
-            store=store_factory(),
-            items=items_factory(),
-            disk_guard=disk_guard_factory(),
-            item_timeout_seconds=item_timeout_seconds,
-        )
-        try:
-            result = await executor.execute(
-                context,
-                start_date=start_date,
-                end_date=end_date,
-                concurrency=concurrency,
-                reason=reason,
-            )
-        except AppError as exc:
-            return JobResult.failure(
-                code=exc.code,
-                message=exc.message,
-                retryable=exc.status_code >= 500,
-            )
-        return _job_result(result)
+    return PostgresHistoryBackfillJob(
+        database,
+        provider_factory=provider_factory,
+        store_factory=store_factory,
+        disk_guard_factory=disk_guard_factory,
+        item_timeout_seconds=item_timeout_seconds,
+    )
 
-    return handle
+
+def _history_config(
+    config: Any,
+) -> tuple[UUID, date, date, int, str, bool] | None:
+    try:
+        snapshot_id = UUID(str(config["universe_snapshot_id"]))
+        start_date = date.fromisoformat(str(config["start_date"]))
+        end_date = date.fromisoformat(str(config["end_date"]))
+        concurrency = int(config["concurrency"])
+        reason = str(config["reason"]).strip()
+        complete_mode = str(config.get("date_mode", "ADVANCED")) == "COMPLETE"
+        if start_date > end_date or concurrency < 1 or not reason:
+            return None
+        return snapshot_id, start_date, end_date, concurrency, reason, complete_mode
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _restore_history_state(
+    checkpoint: dict[str, Any], *, total: int
+) -> tuple[int, int, list[dict[str, object]], dict[str, int]] | None:
+    try:
+        cursor = int(checkpoint.get("cursor", 0))
+        succeeded = int(checkpoint.get("succeeded", 0))
+        failures = [dict(item) for item in checkpoint.get("failures", ())]
+        raw_counts = dict(checkpoint.get("counts", {}))
+        counts = {
+            key: int(raw_counts.get(key, 0))
+            for key in (
+                "inserted",
+                "unchanged",
+                "revised",
+                "review_required",
+                "qfq_rows",
+            )
+        }
+    except (TypeError, ValueError):
+        return None
+    if (
+        cursor < 0
+        or cursor > total
+        or succeeded < 0
+        or succeeded + len(failures) != cursor
+        or any(value < 0 for value in counts.values())
+        or any(
+            not str(item.get("symbol", "")).strip()
+            or not str(item.get("error_code", "")).strip()
+            for item in failures
+        )
+    ):
+        return None
+    return cursor, succeeded, failures, counts
+
+
+def _failed_outcome(
+    item: HistoryBackfillWorkItem, code: str, retryable: bool
+) -> HistoryItemOutcome:
+    return HistoryItemOutcome(
+        item.symbol,
+        item.security_id,
+        False,
+        error_code=code,
+        retryable=retryable,
+    )
+
+
+def _checkpoint_invalid() -> JobResult:
+    return JobResult.failure(
+        code="HISTORY_BACKFILL_CHECKPOINT_INVALID",
+        message="历史回填任务检查点无效",
+        retryable=False,
+    )
+
+
+def _history_stopped(
+    status: JobStatus,
+    cursor: int,
+    total: int,
+    failures: list[dict[str, object]],
+) -> JobResult:
+    return JobResult(
+        success=True,
+        code=f"JOB_{status.value}",
+        message="历史回填已在安全点停止",
+        retryable=False,
+        data={
+            "total": total,
+            "succeeded": cursor - len(failures),
+            "failed": len(failures),
+            "canceled": 0,
+            "pending": total - cursor,
+            "failed_items": [item["symbol"] for item in failures],
+        },
+    )
 
 
 def _validate_bars(
@@ -339,52 +530,3 @@ def _nonnegative_finite(value: Decimal) -> bool:
 
 def _store_key(job_id: UUID, symbol: str, start_date: date, end_date: date) -> str:
     return f"history:{job_id}:{symbol}:{start_date.isoformat()}:{end_date.isoformat()}"
-
-
-def _job_result(result: HistoryBackfillExecutionResult) -> JobResult:
-    data = {
-        "total": result.total,
-        "succeeded": result.succeeded,
-        "failed": result.failed,
-        "canceled": result.canceled,
-        "pending": result.pending,
-    }
-    if result.control is HistoryBackfillControl.PAUSE_REQUESTED:
-        return JobResult(
-            success=True,
-            code="HISTORY_BACKFILL_PAUSED",
-            message="历史回填已在安全点暂停",
-            retryable=False,
-            data=data,
-        )
-    if result.control is HistoryBackfillControl.CANCEL_REQUESTED:
-        return JobResult(
-            success=True,
-            code="HISTORY_BACKFILL_CANCELED",
-            message="历史回填已在安全点取消",
-            retryable=False,
-            data=data,
-        )
-    if result.pending:
-        return JobResult.failure(
-            code="HISTORY_BACKFILL_RECOVERY_REQUIRED",
-            message="历史回填仍有未完成项目",
-            retryable=True,
-            data=data,
-        )
-    if result.failed == 0 and result.canceled == 0:
-        return JobResult.success_result(data=data, message="历史回填完成")
-    if result.succeeded > 0:
-        return JobResult(
-            success=True,
-            code="PARTIAL",
-            message="历史回填部分完成",
-            retryable=False,
-            data=data,
-        )
-    return JobResult.failure(
-        code="HISTORY_BACKFILL_FAILED",
-        message="历史回填没有成功项目",
-        retryable=False,
-        data=data,
-    )

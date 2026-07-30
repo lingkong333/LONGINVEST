@@ -38,7 +38,7 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
     assert actual == expected
 
 
-def test_default_compose_has_seven_persistent_containers() -> None:
+def test_default_compose_has_six_persistent_containers() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     default_persistent = {
@@ -54,7 +54,6 @@ def test_default_compose_has_seven_persistent_containers() -> None:
         "frontend",
         "background-core",
         "background-strategy",
-        "worker-bulk-history",
     }
 
 
@@ -72,32 +71,21 @@ def test_consolidated_background_containers_keep_permission_boundary() -> None:
     assert strategy["healthcheck"]["test"][-1] == "strategy"
 
 
-def test_bulk_history_worker_uses_lightweight_sdk_image() -> None:
+def test_history_backfill_runs_inside_the_existing_core_background() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     dockerfile_path = (
         Path(__file__).parents[3] / "deploy" / "docker" / "backend.Dockerfile"
     )
-    service = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"][
-        "worker-bulk-history"
-    ]
+    services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     dockerfile = dockerfile_path.read_text(encoding="utf-8")
 
-    assert service["build"]["dockerfile"] == (
-        "deploy/docker/backend.Dockerfile"
-    )
-    assert service["build"]["target"] == "collector-runtime"
-    assert service["environment"]["LONGINVEST_WORKER_QUEUES"] == "bulk-history"
-    assert "LONGINVEST_EASTMONEY_HISTORY_TRANSPORT" not in service["environment"]
-    assert service["read_only"] is True
-    assert "shm_size" not in service
-    assert service["mem_limit"] == "1g"
-    assert "ALL" in service["cap_drop"]
-    assert "ports" not in service
-    assert "FROM base AS collector-runtime" in dockerfile
+    assert "worker-bulk-history" not in services
+    assert "FROM base AS collector-runtime" not in dockerfile
     assert "uv sync --frozen --no-dev --extra collector" in dockerfile
-    assert "playwright install" not in dockerfile
-    assert 'ENV HOME="/tmp"' in dockerfile
-    assert "USER longinvest" in dockerfile
+    assert any(
+        spec.module == "long_invest.entrypoints.monitor_scheduler"
+        for spec in process_specs("core")
+    )
 
 
 def test_compose_publishes_only_the_frontend_on_public_port() -> None:

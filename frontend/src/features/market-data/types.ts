@@ -205,8 +205,8 @@ export interface MarketDataGateway {
   createBackfill(command: {
     scope: "SINGLE" | "SELECTED" | "ALL"
     symbols: string[]
-    startDate: string
-    endDate: string
+    startDate?: string
+    endDate?: string
     concurrency: number
     reason: string
   }): Promise<void>

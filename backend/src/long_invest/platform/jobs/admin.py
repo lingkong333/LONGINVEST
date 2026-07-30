@@ -439,7 +439,19 @@ def _postgres_allowed_actions(job: Job) -> tuple[str, ...]:
         return ("cancel", "resume")
     if status is JobStatus.FAILED:
         return ("retry",)
+    if status is JobStatus.PARTIAL and _postgres_failed_result_items(job):
+        return ("retry",)
     return ()
+
+
+def _postgres_failed_result_items(job: Job) -> tuple[str, ...]:
+    summary = job.result_summary
+    if not isinstance(summary, dict):
+        return ()
+    data = summary.get("data")
+    if not isinstance(data, dict) or not isinstance(data.get("failed_items"), list):
+        return ()
+    return tuple(str(item) for item in data["failed_items"] if str(item).strip())
 
 
 def _state_summary(job: Job) -> dict[str, Any]:

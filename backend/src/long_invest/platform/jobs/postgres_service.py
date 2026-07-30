@@ -4,6 +4,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
 
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +26,18 @@ class PostgresJobService:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
         self._jobs = PostgresJobRepository(session)
+
+    async def lock_submission(self, scope: str, key: str) -> None:
+        await self._session.scalar(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(f"{len(scope)}:{scope}{key}", 0)
+                )
+            )
+        )
+
+    async def find_submission(self, scope: str, key: str) -> Job | None:
+        return await self._jobs.find_by_idempotency(scope, key)
 
     async def submit(
         self,
@@ -139,6 +152,7 @@ class PostgresJobService:
         checkpoint: dict[str, object],
         lease_duration: timedelta,
         now: datetime | None = None,
+        pause: bool = False,
     ) -> JobStatus | None:
         reported_at = now or datetime.now(UTC)
         job = await self._active_job(job_id, lease_token, reported_at)
@@ -157,6 +171,8 @@ class PostgresJobService:
         job.lease_expires_at = reported_at + lease_duration
         job.updated_at = reported_at
         job.version += 1
+        if pause:
+            job.pause_requested = True
         if job.cancel_requested:
             _finish(job, JobStatus.CANCELED, reported_at)
         elif job.pause_requested:
@@ -264,8 +280,38 @@ class PostgresJobService:
             else:
                 raise _invalid_action(action, status)
         else:
-            if status is not JobStatus.FAILED:
+            if status not in {JobStatus.FAILED, JobStatus.PARTIAL}:
                 raise _invalid_action(action, status)
+            failed_items = _failed_result_items(job)
+            if status is JobStatus.PARTIAL and not failed_items:
+                raise _invalid_action(action, status)
+            if failed_items:
+                data = _result_data(job)
+                original_total = _nonnegative_int(
+                    data.get("total"), default=len(failed_items)
+                )
+                base_succeeded = _nonnegative_int(data.get("succeeded"))
+                counts = {
+                    key: _nonnegative_int(data.get(key))
+                    for key in (
+                        "inserted",
+                        "unchanged",
+                        "revised",
+                        "review_required",
+                        "qfq_rows",
+                    )
+                }
+                job.checkpoint = {
+                    "retry_items": failed_items,
+                    "original_total": original_total,
+                    "base_succeeded": base_succeeded,
+                    "counts": counts,
+                }
+                job.progress = {
+                    "completed": base_succeeded,
+                    "total": original_total,
+                    "message": "等待重试失败股票",
+                }
             job.status = JobStatus.PENDING
             job.next_run_at = changed_at
             job.max_attempts = max(job.max_attempts, job.attempt_count + 1)
@@ -318,6 +364,37 @@ class PostgresJobService:
         ):
             return None
         return job
+
+
+def _failed_result_items(job: Job) -> list[str]:
+    data = _result_data(job)
+    values = data.get("failed_items")
+    if not isinstance(values, list):
+        return []
+    result = [str(item).strip() for item in values]
+    if (
+        not result
+        or any(not item for item in result)
+        or len(result) != len(set(result))
+    ):
+        return []
+    return result
+
+
+def _result_data(job: Job) -> dict[str, object]:
+    summary = job.result_summary
+    if not isinstance(summary, dict):
+        return {}
+    data = summary.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _nonnegative_int(value: object, *, default: int = 0) -> int:
+    try:
+        result = int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return default
+    return result if result >= 0 else default
 
 
 def _request_hash(command: SubmitPostgresJob) -> str:

@@ -64,8 +64,8 @@ class CreateBackfillBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     scope: HistoryBackfillScope
-    start_date: date
-    end_date: date
+    start_date: date | None = None
+    end_date: date | None = None
     concurrency: int = Field(default=4, ge=1)
     symbols: list[str] = Field(default_factory=list)
     watchlist_id: UUID | None = None
@@ -115,6 +115,13 @@ class BackfillResultCounts(BaseModel):
     failed: int = Field(ge=0)
     canceled: int = Field(ge=0)
     pending: int = Field(ge=0)
+    inserted: int = Field(default=0, ge=0)
+    unchanged: int = Field(default=0, ge=0)
+    revised: int = Field(default=0, ge=0)
+    review_required: int = Field(default=0, ge=0)
+    qfq_rows: int = Field(default=0, ge=0)
+    failed_items: list[str] = Field(default_factory=list)
+    failure_details: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BackfillResult(BaseModel):
@@ -147,11 +154,15 @@ class BackfillScopeSnapshot(BaseModel):
     requested_watchlist_id: UUID | None
     universe_snapshot_id: UUID
     universe_master_version: int = Field(ge=1)
+    date_mode: str = "ADVANCED"
+    requested_start_date: date | None = None
+    requested_end_date: date | None = None
     start_date: date
     end_date: date
     concurrency: int = Field(ge=1)
     reason: str
-    items: list[BackfillScopeItem]
+    item_count: int = Field(default=0, ge=0)
+    items: list[BackfillScopeItem] = Field(default_factory=list)
 
 
 class BackfillView(BaseModel):

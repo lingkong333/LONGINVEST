@@ -278,6 +278,7 @@ describe("行情数据中心", () => {
     await userEvent.clear(concurrency)
     await userEvent.type(concurrency, "12")
     await userEvent.type(screen.getByRole("textbox", { name: "股票代码" }), "600519.SH")
+    await userEvent.click(screen.getByText("指定日期范围（高级修复）"))
     await userEvent.type(screen.getByLabelText("开始日期"), "2020-01-01")
     await userEvent.type(screen.getByLabelText("结束日期"), "2025-12-31")
     await userEvent.type(

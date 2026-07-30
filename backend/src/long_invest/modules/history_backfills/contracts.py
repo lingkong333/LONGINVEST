@@ -4,13 +4,12 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.providers.contracts import validate_symbol
-from long_invest.platform.jobs.contracts import JobItemStatus
 
 
 class HistoryBackfillScope(StrEnum):
@@ -18,12 +17,6 @@ class HistoryBackfillScope(StrEnum):
     SELECTED = "SELECTED"
     WATCHLIST = "WATCHLIST"
     ALL = "ALL"
-
-
-class HistoryBackfillControl(StrEnum):
-    RUNNING = "RUNNING"
-    PAUSE_REQUESTED = "PAUSE_REQUESTED"
-    CANCEL_REQUESTED = "CANCEL_REQUESTED"
 
 
 class HistoryBackfillAction(StrEnum):
@@ -37,8 +30,8 @@ class HistoryBackfillAction(StrEnum):
 @dataclass(frozen=True, slots=True)
 class CreateHistoryBackfill:
     scope: HistoryBackfillScope
-    start_date: date
-    end_date: date
+    start_date: date | None
+    end_date: date | None
     concurrency: int
     symbols: tuple[str, ...] = ()
     watchlist_id: UUID | None = None
@@ -49,7 +42,13 @@ class CreateHistoryBackfill:
         for symbol in normalized:
             validate_symbol(symbol)
         object.__setattr__(self, "symbols", normalized)
-        if self.start_date > self.end_date:
+        if (self.start_date is None) != (self.end_date is None):
+            raise ValueError("开始日期和结束日期必须同时填写或同时留空")
+        if (
+            self.start_date is not None
+            and self.end_date is not None
+            and self.start_date > self.end_date
+        ):
             raise ValueError("开始日期不能晚于结束日期")
         if self.concurrency < 1:
             raise ValueError("并发数必须是正整数")
@@ -120,28 +119,8 @@ class HistoryScopeSnapshotPort(Protocol):
     ) -> FrozenHistoryScope: ...
 
 
-@dataclass(frozen=True, slots=True)
-class HistoryBackfillExecutionResult:
-    total: int
-    succeeded: int
-    failed: int
-    canceled: int = 0
-    pending: int = 0
-    control: HistoryBackfillControl = HistoryBackfillControl.RUNNING
-
-    def __post_init__(self) -> None:
-        object.__setattr__(self, "control", HistoryBackfillControl(self.control))
-        counts = (
-            self.total,
-            self.succeeded,
-            self.failed,
-            self.canceled,
-            self.pending,
-        )
-        if any(value < 0 for value in counts):
-            raise ValueError("历史回填结果数量不能为负数")
-        if self.succeeded + self.failed + self.canceled + self.pending > self.total:
-            raise ValueError("历史回填结果数量超过冻结范围")
+class HistoryDateRangePort(Protocol):
+    async def complete_range(self) -> tuple[date, date]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,12 +128,6 @@ class HistoryBackfillWorkItem:
     security_id: UUID
     symbol: str
     attempt_count: int = 0
-
-
-@dataclass(frozen=True, slots=True)
-class HistoryJobFence:
-    job_id: UUID
-    fence_token: UUID
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,30 +188,6 @@ class HistoryBarStoreResult:
             raise ValueError("历史日线写入数量不能为负数")
 
 
-@dataclass(frozen=True, slots=True)
-class HistoryJobItemSummary:
-    total: int
-    pending: int
-    active: int
-    succeeded: int
-    failed: int
-    canceled: int
-
-    def __post_init__(self) -> None:
-        counts = (
-            self.total,
-            self.pending,
-            self.active,
-            self.succeeded,
-            self.failed,
-            self.canceled,
-        )
-        if any(value < 0 for value in counts):
-            raise ValueError("历史回填任务项数量不能为负数")
-        if sum(counts[1:]) != self.total:
-            raise ValueError("历史回填任务项汇总不一致")
-
-
 class HistoryBackfillItemError(RuntimeError):
     def __init__(self, code: str, *, retryable: bool) -> None:
         super().__init__(code)
@@ -267,42 +216,6 @@ class HistoryBarStorePort(Protocol):
         idempotency_key: str,
         reason: str,
     ) -> HistoryBarStoreResult: ...
-
-
-class HistoryJobItemsPort(Protocol):
-    async def recover_incomplete(self, fence: HistoryJobFence) -> None: ...
-
-    async def control(self, fence: HistoryJobFence) -> HistoryBackfillControl: ...
-
-    async def claim_pending(
-        self, fence: HistoryJobFence, *, limit: int
-    ) -> tuple[HistoryBackfillWorkItem, ...]: ...
-
-    async def mark_stage(
-        self, fence: HistoryJobFence, symbol: str, status: JobItemStatus
-    ) -> None: ...
-
-    async def release_pending(self, fence: HistoryJobFence, symbol: str) -> None: ...
-
-    async def finish(
-        self,
-        fence: HistoryJobFence,
-        symbol: str,
-        *,
-        status: JobItemStatus,
-        result_ref: dict[str, Any] | None = None,
-        error_code: str | None = None,
-    ) -> None: ...
-
-    async def summary(self, fence: HistoryJobFence) -> HistoryJobItemSummary: ...
-
-    async def report_progress(
-        self, fence: HistoryJobFence, summary: HistoryJobItemSummary
-    ) -> None: ...
-
-    async def request_pause(self, fence: HistoryJobFence, *, reason: str) -> None: ...
-
-    async def cancel_pending(self, fence: HistoryJobFence) -> None: ...
 
 
 class HistoryDiskGuardPort(Protocol):

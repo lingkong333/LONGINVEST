@@ -7,6 +7,9 @@ from datetime import datetime
 
 import structlog
 
+from long_invest.bootstrap.history_backfills import (
+    build_history_backfill_job_handler,
+)
 from long_invest.bootstrap.providers import (
     build_provider_service,
     close_provider_resources,
@@ -81,6 +84,15 @@ async def run() -> None:
         },
         worker_id=worker_id,
     )
+    history_runner = PostgresJobRunner(
+        database,
+        {
+            "MARKET_HISTORY_BACKFILL": build_history_backfill_job_handler(
+                database
+            )
+        },
+        worker_id=f"history-backfill:{socket.gethostname()}:{os.getpid()}",
+    )
     listener = PostgresNotificationListener(settings.database_url)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -94,6 +106,7 @@ async def run() -> None:
             asyncio.create_task(listener.run(stop, scheduler.refresh)),
             asyncio.create_task(_heartbeat(scheduler, stop)),
             asyncio.create_task(runner.run_forever(stop)),
+            asyncio.create_task(history_runner.run_forever(stop)),
         ]
         await stop.wait()
     finally:

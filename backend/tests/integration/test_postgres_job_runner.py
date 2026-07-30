@@ -235,12 +235,27 @@ async def test_partial_result_is_preserved_as_terminal_status() -> None:
                     code="PARTIAL",
                     message="部分项目失败",
                     retryable=False,
+                    data={
+                        "total": 100,
+                        "succeeded": 99,
+                        "failed": 1,
+                        "inserted": 99,
+                        "failed_items": ["600000.SH"],
+                    },
                 ),
             )
         assert accepted is True
         async with database.session() as session:
             stored = await session.get(Job, job.id)
             assert stored is not None and stored.status == JobStatus.PARTIAL
+        async with database.transaction() as session:
+            retried = await PostgresJobService(session).command(job.id, "retry")
+            assert retried.status == JobStatus.PENDING
+            assert retried.checkpoint["retry_items"] == ["600000.SH"]
+            assert retried.checkpoint["original_total"] == 100
+            assert retried.checkpoint["base_succeeded"] == 99
+            assert retried.progress["completed"] == 99
+            assert retried.progress["total"] == 100
     finally:
         await remove_job(database, job.id)
         await database.dispose()
@@ -256,6 +271,7 @@ async def test_retryable_failure_is_limited_and_manual_retry_is_explicit() -> No
         code="UPSTREAM_TIMEOUT",
         message="上游超时",
         retryable=True,
+        data={"failed_items": ["000001.SZ"]},
     )
     try:
         for expected in (JobStatus.PENDING, JobStatus.FAILED):
@@ -277,6 +293,7 @@ async def test_retryable_failure_is_limited_and_manual_retry_is_explicit() -> No
             retried = await PostgresJobService(session).command(job.id, "retry")
             assert retried.status == JobStatus.PENDING
             assert retried.max_attempts == 3
+            assert retried.checkpoint["retry_items"] == ["000001.SZ"]
     finally:
         await remove_job(database, job.id)
         await database.dispose()

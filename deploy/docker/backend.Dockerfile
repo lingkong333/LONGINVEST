@@ -27,7 +27,7 @@ COPY backend/src ./src
 COPY backend/alembic.ini ./alembic.ini
 COPY backend/alembic ./alembic
 
-RUN uv sync --frozen --no-dev
+RUN uv sync --frozen --no-dev --extra collector
 
 ENV PATH="/app/.venv/bin:$PATH"
 
@@ -38,16 +38,6 @@ USER longinvest
 EXPOSE 8000
 
 CMD ["uvicorn", "long_invest.entrypoints.api:app", "--host", "0.0.0.0", "--port", "8000", "--no-access-log"]
-
-FROM base AS collector-runtime
-
-RUN uv sync --frozen --no-dev --extra collector
-
-ENV HOME="/tmp"
-
-USER longinvest
-
-CMD ["python", "-m", "long_invest.entrypoints.worker"]
 
 FROM base AS test
 

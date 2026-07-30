@@ -1,126 +1,24 @@
 import asyncio
 from datetime import date
 from decimal import Decimal
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from uuid import uuid4
 
 import pytest
 
 from long_invest.modules.history_backfills.contracts import (
-    HistoryBackfillControl,
     HistoryBackfillItemError,
-    HistoryBackfillWorkItem,
     HistoryBarInput,
     HistoryBarsBundle,
     HistoryBarStoreResult,
-    HistoryJobItemSummary,
 )
 from long_invest.modules.history_backfills.jobs import (
-    HistoryBackfillExecutor,
-    build_history_backfill_handler,
+    PostgresHistoryBackfillJob,
 )
 from long_invest.platform.jobs.contracts import (
     JobExecutionContext,
-    JobItemStatus,
+    JobStatus,
 )
-
-
-class Items:
-    def __init__(self, symbols, *, succeeded=(), active=()) -> None:
-        self.job_control = HistoryBackfillControl.RUNNING
-        self.statuses = {
-            symbol: (
-                JobItemStatus.SUCCEEDED
-                if symbol in succeeded
-                else JobItemStatus.FETCHING
-                if symbol in active
-                else JobItemStatus.PENDING
-            )
-            for symbol in symbols
-        }
-        self.security_ids = {symbol: uuid4() for symbol in symbols}
-        self.results = {}
-        self.errors = {}
-        self.pause_reasons = []
-        self.claim_limits = []
-        self.recovered = 0
-        self.progress_reports = []
-
-    async def recover_incomplete(self, _fence):
-        self.recovered += 1
-        for symbol, status in self.statuses.items():
-            if status in {
-                JobItemStatus.FETCHING,
-                JobItemStatus.VALIDATING,
-                JobItemStatus.RUNNING,
-                JobItemStatus.SAVING,
-            }:
-                self.statuses[symbol] = JobItemStatus.PENDING
-
-    async def control(self, _job_id):
-        return self.job_control
-
-    async def claim_pending(self, _job_id, *, limit):
-        self.claim_limits.append(limit)
-        symbols = [
-            symbol
-            for symbol, status in self.statuses.items()
-            if status is JobItemStatus.PENDING
-        ][:limit]
-        for symbol in symbols:
-            self.statuses[symbol] = JobItemStatus.FETCHING
-        return tuple(
-            HistoryBackfillWorkItem(self.security_ids[symbol], symbol)
-            for symbol in symbols
-        )
-
-    async def mark_stage(self, _job_id, symbol, status):
-        self.statuses[symbol] = status
-
-    async def release_pending(self, _job_id, symbol):
-        self.statuses[symbol] = JobItemStatus.PENDING
-
-    async def finish(
-        self,
-        _job_id,
-        symbol,
-        *,
-        status,
-        result_ref=None,
-        error_code=None,
-    ):
-        self.statuses[symbol] = status
-        self.results[symbol] = result_ref
-        self.errors[symbol] = error_code
-
-    async def summary(self, _job_id):
-        active_statuses = {
-            JobItemStatus.FETCHING,
-            JobItemStatus.VALIDATING,
-            JobItemStatus.RUNNING,
-            JobItemStatus.SAVING,
-        }
-        values = tuple(self.statuses.values())
-        return HistoryJobItemSummary(
-            total=len(values),
-            pending=values.count(JobItemStatus.PENDING),
-            active=sum(status in active_statuses for status in values),
-            succeeded=values.count(JobItemStatus.SUCCEEDED),
-            failed=values.count(JobItemStatus.FAILED),
-            canceled=values.count(JobItemStatus.CANCELED),
-        )
-
-    async def request_pause(self, _job_id, *, reason):
-        self.pause_reasons.append(reason)
-        self.job_control = HistoryBackfillControl.PAUSE_REQUESTED
-
-    async def report_progress(self, _fence, summary):
-        self.progress_reports.append(summary)
-
-    async def cancel_pending(self, _fence):
-        for symbol, status in self.statuses.items():
-            if status is JobItemStatus.PENDING:
-                self.statuses[symbol] = JobItemStatus.CANCELED
 
 
 class Provider:
@@ -130,12 +28,14 @@ class Provider:
         self.delay = delay
         self.calls = []
         self.concurrencies = []
+        self.ranges = []
         self.active = 0
         self.max_active = 0
 
     async def fetch(self, item, **_values):
         self.calls.append(item.symbol)
         self.concurrencies.append(_values["concurrency"])
+        self.ranges.append((_values["start_date"], _values["end_date"]))
         self.active += 1
         self.max_active = max(self.max_active, self.active)
         try:
@@ -201,265 +101,234 @@ def bundle(symbol: str) -> HistoryBarsBundle:
     )
 
 
-def context(config=None) -> JobExecutionContext:
+def context(config=None, checkpoint=None) -> JobExecutionContext:
     return JobExecutionContext(
         job_id=uuid4(),
         fence_token=uuid4(),
         config=MappingProxyType(config or {}),
+        checkpoint=MappingProxyType(checkpoint or {}),
     )
 
 
-def executor(provider, items, store=None, disk=None, timeout=1):
-    return HistoryBackfillExecutor(
-        provider=provider,
-        store=store or Store(),
-        items=items,
-        disk_guard=disk or Disk(),
-        item_timeout_seconds=timeout,
+class PostgresSubject(PostgresHistoryBackfillJob):
+    def __init__(
+        self, provider, store, *, status_at=None, disk=None, timeout=1
+    ) -> None:
+        super().__init__(
+            object(),
+            provider_factory=lambda: provider,
+            store_factory=lambda: store,
+            disk_guard_factory=lambda: disk or Disk(),
+            item_timeout_seconds=timeout,
+        )
+        self.reports = []
+        self.status_at = status_at
+
+    async def _report(self, _context, **values):
+        self.reports.append(values)
+        if values.get("pause", False):
+            return JobStatus.PAUSED
+        if self.status_at is not None and values["cursor"] == self.status_at:
+            return JobStatus.PAUSED
+        return JobStatus.RUNNING
+
+
+def postgres_config(snapshot_id, *, concurrency=2):
+    return {
+        "universe_snapshot_id": str(snapshot_id),
+        "start_date": "2010-01-01",
+        "end_date": "2020-12-31",
+        "concurrency": concurrency,
+        "reason": "补齐历史",
+    }
+
+
+def install_frozen_scope(monkeypatch, symbols, *, listed_on=None, delisted_on=None):
+    snapshot_id = uuid4()
+    items = tuple(
+        SimpleNamespace(
+            security_id=uuid4(),
+            symbol=symbol,
+            listed_on=listed_on,
+            delisted_on=delisted_on,
+        )
+        for symbol in symbols
     )
+
+    class Securities:
+        def __init__(self, _database):
+            pass
+
+        async def frozen_universe(self, actual_snapshot_id):
+            assert actual_snapshot_id == snapshot_id
+            return SimpleNamespace(items=items)
+
+    monkeypatch.setattr(
+        "long_invest.modules.history_backfills.jobs.SecurityApplication",
+        Securities,
+    )
+    return snapshot_id
 
 
 @pytest.mark.anyio
-async def test_executor_limits_concurrency_and_completes_each_item() -> None:
-    items = Items(("000001.SZ", "600000.SH", "600001.SH"))
+async def test_postgres_job_uses_internal_cursor_and_configured_concurrency(
+    monkeypatch,
+) -> None:
+    snapshot_id = install_frozen_scope(
+        monkeypatch, ("000001.SZ", "600000.SH", "600001.SH")
+    )
     provider = Provider(delay=0.01)
     store = Store()
-    job_context = context()
-    result = await executor(provider, items, store=store).execute(
-        job_context,
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=2,
-        reason="补齐历史",
-    )
-    assert result.succeeded == 3
-    assert result.failed == 0
+    subject = PostgresSubject(provider, store)
+
+    result = await subject(context(postgres_config(snapshot_id)))
+
+    assert result.success is True
+    assert result.data["succeeded"] == 3
     assert provider.max_active == 2
-    assert provider.concurrencies == [2, 2, 2]
-    assert items.claim_limits == [2, 2, 2]
-    assert items.recovered == 1
-    assert items.progress_reports[-1].succeeded == 3
-    assert all(
-        values["idempotency_key"].startswith(f"history:{job_context.job_id}:")
-        for _symbol, _bars, values in store.calls
-    )
+    assert subject.reports[-1]["cursor"] == 3
+    assert subject.reports[-1]["counts"]["inserted"] == 3
 
 
 @pytest.mark.anyio
-async def test_one_provider_failure_does_not_block_other_stocks() -> None:
-    items = Items(("000001.SZ", "600000.SH"))
-    provider = Provider(
+async def test_postgres_job_resumes_after_the_last_saved_group(monkeypatch) -> None:
+    snapshot_id = install_frozen_scope(
+        monkeypatch, ("000001.SZ", "600000.SH", "600001.SH")
+    )
+    first_provider = Provider()
+    first = PostgresSubject(first_provider, Store(), status_at=2)
+
+    paused = await first(context(postgres_config(snapshot_id)))
+    saved = first.reports[-1]
+    checkpoint = {
+        "cursor": saved["cursor"],
+        "succeeded": saved["succeeded"],
+        "failures": saved["failures"],
+        "counts": saved["counts"],
+    }
+    second_provider = Provider()
+    resumed = await PostgresSubject(second_provider, Store())(
+        context(postgres_config(snapshot_id), checkpoint)
+    )
+
+    assert paused.code == "JOB_PAUSED"
+    assert first_provider.calls == ["000001.SZ", "600000.SH"]
+    assert resumed.success is True
+    assert second_provider.calls == ["600001.SH"]
+
+
+@pytest.mark.anyio
+async def test_postgres_job_retry_scope_contains_only_failed_symbols(
+    monkeypatch,
+) -> None:
+    snapshot_id = install_frozen_scope(
+        monkeypatch, ("000001.SZ", "600000.SH")
+    )
+    failed_provider = Provider(
         failures={
-            "000001.SZ": HistoryBackfillItemError(
-                "PROVIDER_CIRCUIT_OPEN", retryable=True
+            "600000.SH": HistoryBackfillItemError(
+                "PROVIDER_TIMEOUT", retryable=True
             )
         }
     )
-    result = await executor(provider, items).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=2,
-        reason="补齐历史",
+    first = await PostgresSubject(failed_provider, Store())(
+        context(postgres_config(snapshot_id))
     )
-    assert result.succeeded == 1
-    assert result.failed == 1
-    assert items.errors["000001.SZ"] == "PROVIDER_CIRCUIT_OPEN"
-
-
-@pytest.mark.anyio
-async def test_pause_after_fetch_releases_item_without_writing() -> None:
-    items = Items(("600000.SH",))
-    provider = Provider(
-        after_fetch=lambda _symbol: setattr(
-            items, "job_control", HistoryBackfillControl.PAUSE_REQUESTED
+    retry_provider = Provider()
+    retried = await PostgresSubject(retry_provider, Store())(
+        context(
+            postgres_config(snapshot_id),
+            {"retry_items": first.data["failed_items"]},
         )
     )
-    store = Store()
-    result = await executor(provider, items, store=store).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="补齐历史",
-    )
-    assert result.control is HistoryBackfillControl.PAUSE_REQUESTED
-    assert items.statuses["600000.SH"] is JobItemStatus.PENDING
-    assert store.calls == []
+
+    assert first.code == "PARTIAL"
+    assert first.data["failed_items"] == ["600000.SH"]
+    assert retried.success is True
+    assert retry_provider.calls == ["600000.SH"]
 
 
 @pytest.mark.anyio
-async def test_cancel_after_fetch_marks_item_canceled() -> None:
-    items = Items(("600000.SH",))
-    provider = Provider(
-        after_fetch=lambda _symbol: setattr(
-            items, "job_control", HistoryBackfillControl.CANCEL_REQUESTED
-        )
-    )
-    result = await executor(provider, items).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="补齐历史",
-    )
-    assert result.canceled == 1
-    assert items.statuses["600000.SH"] is JobItemStatus.CANCELED
-
-
-@pytest.mark.anyio
-async def test_cancel_before_claim_marks_all_pending_items_canceled() -> None:
-    items = Items(("000001.SZ", "600000.SH"))
-    items.job_control = HistoryBackfillControl.CANCEL_REQUESTED
+async def test_postgres_job_pauses_before_fetch_when_disk_is_full(monkeypatch) -> None:
+    snapshot_id = install_frozen_scope(monkeypatch, ("000001.SZ",))
     provider = Provider()
-    result = await executor(provider, items).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=2,
-        reason="取消回填",
-    )
-    assert result.canceled == 2
+    subject = PostgresSubject(provider, Store(), disk=Disk(False))
+
+    result = await subject(context(postgres_config(snapshot_id)))
+
+    assert result.code == "JOB_PAUSED"
     assert provider.calls == []
+    assert subject.reports[-1]["pause"] is True
 
 
 @pytest.mark.anyio
-async def test_disk_guard_requests_pause_before_claiming() -> None:
-    items = Items(("600000.SH",))
-    provider = Provider()
-    result = await executor(provider, items, disk=Disk(False)).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="补齐历史",
+async def test_complete_mode_uses_dates_frozen_with_the_security_scope(
+    monkeypatch,
+) -> None:
+    snapshot_id = install_frozen_scope(
+        monkeypatch,
+        ("000001.SZ",),
+        listed_on=date(2015, 1, 5),
+        delisted_on=date(2020, 12, 31),
     )
-    assert result.control is HistoryBackfillControl.PAUSE_REQUESTED
-    assert provider.calls == []
-    assert items.pause_reasons == ["HISTORY_DISK_CAPACITY_LOW"]
+    provider = Provider()
+    config = postgres_config(snapshot_id)
+    config["date_mode"] = "COMPLETE"
+
+    result = await PostgresSubject(provider, Store())(context(config))
+
+    assert result.success is True
+    assert provider.ranges == [(date(2015, 1, 5), date(2020, 12, 31))]
 
 
 @pytest.mark.anyio
-async def test_successful_item_is_not_fetched_on_resume_or_retry() -> None:
-    items = Items(
-        ("000001.SZ", "600000.SH"),
-        succeeded=("000001.SZ",),
+async def test_invalid_stock_data_fails_without_blocking_valid_stock(
+    monkeypatch,
+) -> None:
+    snapshot_id = install_frozen_scope(
+        monkeypatch, ("000001.SZ", "600000.SH")
     )
     provider = Provider()
-    result = await executor(provider, items).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=2,
-        reason="重试失败项",
-    )
-    assert result.succeeded == 2
-    assert provider.calls == ["600000.SH"]
+    original_fetch = provider.fetch
 
+    async def mixed_fetch(item, **values):
+        if item.symbol == "600000.SH":
+            return HistoryBarsBundle(
+                unadjusted=(bar(item.symbol, high="8"),),
+                qfq=(bar(item.symbol),),
+                provider_contract_version="SINA:config-v2",
+            )
+        return await original_fetch(item, **values)
 
-@pytest.mark.anyio
-async def test_recovery_requeues_only_incomplete_item() -> None:
-    items = Items(
-        ("000001.SZ", "600000.SH"),
-        succeeded=("000001.SZ",),
-        active=("600000.SH",),
-    )
-    provider = Provider()
-    result = await executor(provider, items).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="中断恢复",
-    )
-    assert result.succeeded == 2
-    assert provider.calls == ["600000.SH"]
-
-
-@pytest.mark.anyio
-async def test_invalid_bar_fails_before_store() -> None:
-    items = Items(("600000.SH",))
-    provider = Provider()
-
-    async def invalid_fetch(_item, **_values):
-        return HistoryBarsBundle(
-            unadjusted=(bar("600000.SH", high="8"),),
-            qfq=(bar("600000.SH"),),
-            provider_contract_version="SINA:config-v2",
-        )
-
-    provider.fetch = invalid_fetch
+    provider.fetch = mixed_fetch
     store = Store()
-    await executor(provider, items, store=store).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="补齐历史",
+
+    result = await PostgresSubject(provider, store)(
+        context(postgres_config(snapshot_id))
     )
-    assert items.errors["600000.SH"] == "HISTORY_BARS_INVALID"
-    assert store.calls == []
+
+    assert result.code == "PARTIAL"
+    assert result.data["succeeded"] == 1
+    assert result.data["failed_items"] == ["600000.SH"]
+    assert [call[0] for call in store.calls] == ["000001.SZ"]
 
 
 @pytest.mark.anyio
-async def test_qfq_date_gap_fails_before_store() -> None:
-    items = Items(("600000.SH",))
-    provider = Provider()
+async def test_provider_timeout_is_recorded_as_retryable_stock_failure(
+    monkeypatch,
+) -> None:
+    snapshot_id = install_frozen_scope(monkeypatch, ("600000.SH",))
 
-    async def invalid_fetch(_item, **_values):
-        first = bar("600000.SH")
-        second = HistoryBarInput(
-            symbol="600000.SH",
-            trade_date=date(2020, 1, 3),
-            open=Decimal("10"),
-            high=Decimal("11"),
-            low=Decimal("9"),
-            close=Decimal("10.5"),
-            volume=100,
-            amount=Decimal("1000"),
-            source="SINA",
-        )
-        return HistoryBarsBundle(
-            unadjusted=(first, second),
-            qfq=(first,),
-            provider_contract_version="SINA:config-v2",
-        )
+    result = await PostgresSubject(
+        Provider(delay=0.05), Store(), timeout=0.001
+    )(context(postgres_config(snapshot_id)))
 
-    provider.fetch = invalid_fetch
-    store = Store()
-    await executor(provider, items, store=store).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="补齐历史",
-    )
-
-    assert items.errors["600000.SH"] == "HISTORY_QFQ_WINDOW_MISMATCH"
-    assert store.calls == []
-
-
-@pytest.mark.anyio
-async def test_provider_timeout_isolated_to_item() -> None:
-    items = Items(("600000.SH",))
-    await executor(Provider(delay=0.05), items, timeout=0.001).execute(
-        context(),
-        start_date=date(2010, 1, 1),
-        end_date=date(2020, 12, 31),
-        concurrency=1,
-        reason="补齐历史",
-    )
-    assert items.errors["600000.SH"] == "HISTORY_PROVIDER_TIMEOUT"
-
-
-@pytest.mark.anyio
-async def test_handler_rejects_invalid_frozen_config() -> None:
-    handler = build_history_backfill_handler(
-        provider_factory=Provider,
-        store_factory=Store,
-        items_factory=lambda: Items(()),
-        disk_guard_factory=Disk,
-    )
-    result = await handler(context({}))
-    assert result.success is False
-    assert result.code == "HISTORY_BACKFILL_CONFIG_INVALID"
+    assert result.code == "HISTORY_BACKFILL_FAILED"
+    assert result.data["failure_details"] == [
+        {
+            "security_id": result.data["failure_details"][0]["security_id"],
+            "symbol": "600000.SH",
+            "error_code": "HISTORY_PROVIDER_TIMEOUT",
+            "retryable": True,
+        }
+    ]

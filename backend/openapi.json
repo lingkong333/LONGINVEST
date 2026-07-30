@@ -12967,6 +12967,51 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Pending"
+          },
+          "inserted": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Inserted",
+            "default": 0
+          },
+          "unchanged": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Unchanged",
+            "default": 0
+          },
+          "revised": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Revised",
+            "default": 0
+          },
+          "review_required": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Review Required",
+            "default": 0
+          },
+          "qfq_rows": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Qfq Rows",
+            "default": 0
+          },
+          "failed_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Failed Items"
+          },
+          "failure_details": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Failure Details"
           }
         },
         "type": "object",
@@ -13032,6 +13077,35 @@
             "minimum": 1.0,
             "title": "Universe Master Version"
           },
+          "date_mode": {
+            "type": "string",
+            "title": "Date Mode",
+            "default": "ADVANCED"
+          },
+          "requested_start_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested Start Date"
+          },
+          "requested_end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested End Date"
+          },
           "start_date": {
             "type": "string",
             "format": "date",
@@ -13051,6 +13125,12 @@
             "type": "string",
             "title": "Reason"
           },
+          "item_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Item Count",
+            "default": 0
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/BackfillScopeItem"
@@ -13069,8 +13149,7 @@
           "start_date",
           "end_date",
           "concurrency",
-          "reason",
-          "items"
+          "reason"
         ],
         "title": "BackfillScopeSnapshot"
       },
@@ -15386,13 +15465,27 @@
             "$ref": "#/components/schemas/HistoryBackfillScope"
           },
           "start_date": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Start Date"
           },
           "end_date": {
-            "type": "string",
-            "format": "date",
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "End Date"
           },
           "concurrency": {
@@ -15435,8 +15528,6 @@
         "type": "object",
         "required": [
           "scope",
-          "start_date",
-          "end_date",
           "confirm",
           "reason"
         ],

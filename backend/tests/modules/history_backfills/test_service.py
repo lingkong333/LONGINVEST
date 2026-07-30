@@ -54,10 +54,10 @@ class Jobs:
             self.job = SimpleNamespace(
                 id=uuid4(),
                 job_type=command.job_type,
-                queue=command.queue,
+                queue="postgres",
                 config_snapshot=command.config_snapshot,
                 created_by_user_id=command.created_by_user_id,
-                status=JobStatus.PENDING_DISPATCH,
+                status=JobStatus.PENDING,
                 progress={"completed": 0, "total": 0},
                 result_summary=None,
                 version=1,
@@ -66,10 +66,6 @@ class Jobs:
                 terminal_at=None,
             )
         return self.job
-
-    async def initialize_items(self, _job_id, item_keys):
-        self.items = item_keys
-
 
 class Admin:
     def __init__(self, job=None) -> None:
@@ -81,7 +77,7 @@ class Admin:
 
     async def list_jobs(self, **filters):
         assert filters["job_type"] == JOB_TYPE
-        assert filters["queue"] == QUEUE
+        assert filters["queue"] is None
         return SimpleNamespace(items=(), page=1, page_size=50, total=0)
 
     async def command(self, _job_id, action, _context):
@@ -98,6 +94,11 @@ class Audit:
 
     async def append(self, write):
         self.writes.append(write)
+
+
+class DateRanges:
+    async def complete_range(self):
+        return date(1990, 12, 19), date(2026, 7, 29)
 
 
 def command(*, concurrency: int = 4) -> CreateHistoryBackfill:
@@ -122,7 +123,7 @@ def context() -> HistoryBackfillAuditContext:
 
 
 @pytest.mark.anyio
-async def test_create_freezes_scope_and_initializes_one_item_per_symbol() -> None:
+async def test_create_freezes_scope_without_creating_symbol_jobs() -> None:
     scopes = ScopeSnapshots()
     jobs = Jobs()
     audit = Audit()
@@ -137,7 +138,9 @@ async def test_create_freezes_scope_and_initializes_one_item_per_symbol() -> Non
 
     assert job.job_type == JOB_TYPE
     assert job.queue == QUEUE
-    assert jobs.items == ("000001.SZ", "600000.SH")
+    assert jobs.items == ()
+    assert job.config_snapshot["item_count"] == 2
+    assert "items" not in job.config_snapshot
     assert job.config_snapshot["start_date"] == "2010-01-01"
     assert job.config_snapshot["end_date"] == "2020-12-31"
     assert job.config_snapshot["concurrency"] == 4
@@ -165,6 +168,34 @@ async def test_create_replay_does_not_freeze_scope_again() -> None:
 
     assert first is second
     assert scopes.calls == 1
+
+
+@pytest.mark.anyio
+async def test_create_complete_mode_freezes_system_calculated_dates() -> None:
+    jobs = Jobs()
+    service = HistoryBackfillService(
+        scope_snapshots=ScopeSnapshots(),
+        jobs=jobs,
+        date_ranges=DateRanges(),
+        admin=Admin(),
+        audit=Audit(),
+    )
+    complete = CreateHistoryBackfill(
+        scope=HistoryBackfillScope.ALL,
+        start_date=None,
+        end_date=None,
+        concurrency=4,
+    )
+
+    job = await service.create(
+        object(), complete, context(), owner_user_id=uuid4()
+    )
+
+    assert job.config_snapshot["date_mode"] == "COMPLETE"
+    assert job.config_snapshot["start_date"] == "1990-12-19"
+    assert job.config_snapshot["end_date"] == "2026-07-29"
+    assert job.config_snapshot["requested_start_date"] is None
+    assert job.config_snapshot["requested_end_date"] is None
 
 
 @pytest.mark.anyio
@@ -201,7 +232,7 @@ async def test_get_rejects_job_from_another_module() -> None:
 
 
 @pytest.mark.anyio
-async def test_retry_failed_maps_to_job_item_control() -> None:
+async def test_retry_failed_maps_to_postgres_task_retry() -> None:
     job = SimpleNamespace(job_type=JOB_TYPE, queue=QUEUE)
     admin = Admin(job)
     service = HistoryBackfillService(
@@ -218,6 +249,31 @@ async def test_retry_failed_maps_to_job_item_control() -> None:
             expected_version=3,
         ),
     )
+    assert admin.action == "retry"
+
+
+@pytest.mark.anyio
+async def test_legacy_job_remains_visible_and_uses_legacy_failed_item_retry() -> None:
+    job = SimpleNamespace(job_type=JOB_TYPE, queue="bulk-history")
+    admin = Admin(job)
+    service = HistoryBackfillService(
+        scope_snapshots=ScopeSnapshots(), jobs=Jobs(), admin=admin, audit=Audit()
+    )
+
+    found = await service.get(uuid4())
+    await service.command(
+        uuid4(),
+        "retry-failed",
+        JobCommandContext(
+            request_id="request-legacy",
+            idempotency_key="idem-legacy",
+            actor_user_id=str(uuid4()),
+            reason="重试旧任务失败股票",
+            expected_version=3,
+        ),
+    )
+
+    assert found is job
     assert admin.action == "retry-failed-items"
 
 

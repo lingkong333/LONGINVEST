@@ -32,6 +32,7 @@ import { ApiError } from "@/shared/api/client"
 import { Alert, AlertDescription } from "@/shared/ui/alert"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
+import { Checkbox } from "@/shared/ui/checkbox"
 import {
   Card,
   CardContent,
@@ -239,6 +240,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
   >("SINGLE")
   const [backfillStart, setBackfillStart] = useState("")
   const [backfillEnd, setBackfillEnd] = useState("")
+  const [backfillAdvanced, setBackfillAdvanced] = useState(false)
   const [backfillConcurrency, setBackfillConcurrency] = useState("4")
 
   const securities = useQuery({
@@ -328,8 +330,8 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
           symbols: backfillScope === "ALL"
             ? []
             : normalizedSymbols(commandSymbols),
-          startDate: backfillStart,
-          endDate: backfillEnd,
+          startDate: backfillAdvanced ? backfillStart : undefined,
+          endDate: backfillAdvanced ? backfillEnd : undefined,
           concurrency: Number(backfillConcurrency),
           reason: commandReason.trim(),
         })
@@ -391,6 +393,7 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
     )
     || (
       marketCommand?.kind === "BACKFILL_CREATE"
+      && backfillAdvanced
       && (!backfillStart || !backfillEnd || backfillStart > backfillEnd)
     )
     || (
@@ -955,24 +958,37 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                   />
                 </label>
               ) : null}
-              <div className="grid grid-cols-2 gap-3">
-                <label className="grid gap-2 text-sm font-medium">
-                  开始日期
-                  <Input
-                    type="date"
-                    value={backfillStart}
-                    onChange={(event) => setBackfillStart(event.target.value)}
-                  />
-                </label>
-                <label className="grid gap-2 text-sm font-medium">
-                  结束日期
-                  <Input
-                    type="date"
-                    value={backfillEnd}
-                    onChange={(event) => setBackfillEnd(event.target.value)}
-                  />
-                </label>
-              </div>
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <Checkbox
+                  checked={backfillAdvanced}
+                  onCheckedChange={(checked) => setBackfillAdvanced(checked === true)}
+                />
+                指定日期范围（高级修复）
+              </label>
+              {backfillAdvanced ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="grid gap-2 text-sm font-medium">
+                    开始日期
+                    <Input
+                      type="date"
+                      value={backfillStart}
+                      onChange={(event) => setBackfillStart(event.target.value)}
+                    />
+                  </label>
+                  <label className="grid gap-2 text-sm font-medium">
+                    结束日期
+                    <Input
+                      type="date"
+                      value={backfillEnd}
+                      onChange={(event) => setBackfillEnd(event.target.value)}
+                    />
+                  </label>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  系统将按上市日期、最近已完成交易日和已有数据自动补齐。
+                </p>
+              )}
               <label className="grid gap-2 text-sm font-medium">
                 并发数
                 <Input

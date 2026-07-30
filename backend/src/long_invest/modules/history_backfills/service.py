@@ -9,16 +9,18 @@ from long_invest.modules.history_backfills.contracts import (
     CreateHistoryBackfill,
     HistoryBackfillAction,
     HistoryBackfillAuditContext,
+    HistoryDateRangePort,
     HistoryScopeSnapshotPort,
 )
 from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.admin import JobAdminService, JobCommandContext
-from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 JOB_TYPE = "MARKET_HISTORY_BACKFILL"
-QUEUE = "bulk-history"
+QUEUE = "postgres"
+LEGACY_QUEUE = "bulk-history"
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,12 +36,16 @@ class HistoryBackfillService:
         self,
         *,
         scope_snapshots: HistoryScopeSnapshotPort,
-        jobs: JobService,
+        jobs: PostgresJobService,
+        legacy_jobs: Any | None = None,
+        date_ranges: HistoryDateRangePort | None = None,
         admin: JobAdminService,
         audit: Any,
     ) -> None:
         self._scope_snapshots = scope_snapshots
         self._jobs = jobs
+        self._legacy_jobs = legacy_jobs
+        self._date_ranges = date_ranges
         self._admin = admin
         self._audit = audit
 
@@ -66,6 +72,18 @@ class HistoryBackfillService:
         frozen = await self._scope_snapshots.freeze(
             session, command, owner_user_id=owner_user_id
         )
+        if command.start_date is None or command.end_date is None:
+            if self._date_ranges is None:
+                raise AppError(
+                    code="HISTORY_DATE_RANGE_NOT_CONFIGURED",
+                    message="历史完整区间计算尚未完成生产装配",
+                    status_code=503,
+                )
+            start_date, end_date = await self._date_ranges.complete_range()
+            date_mode = "COMPLETE"
+        else:
+            start_date, end_date = command.start_date, command.end_date
+            date_mode = "ADVANCED"
         snapshot = {
             "scope": command.scope.value,
             "requested_symbols": list(command.symbols),
@@ -74,19 +92,20 @@ class HistoryBackfillService:
             ),
             "universe_snapshot_id": str(frozen.snapshot_id),
             "universe_master_version": frozen.master_version,
-            "start_date": command.start_date.isoformat(),
-            "end_date": command.end_date.isoformat(),
+            "date_mode": date_mode,
+            "requested_start_date": (
+                command.start_date.isoformat() if command.start_date else None
+            ),
+            "requested_end_date": (
+                command.end_date.isoformat() if command.end_date else None
+            ),
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
             "concurrency": command.concurrency,
             "reason": context.reason,
-            "items": [
-                {"security_id": str(item.security_id), "symbol": item.symbol}
-                for item in frozen.items
-            ],
+            "item_count": len(frozen.items),
         }
         job = await self._jobs.submit(_submit_command(snapshot, context))
-        await self._jobs.initialize_items(
-            job.id, tuple(item.symbol for item in frozen.items)
-        )
         await self._audit.append(
             AuditWrite(
                 action_code="market_history.backfill_created",
@@ -101,8 +120,9 @@ class HistoryBackfillService:
                 after_summary={
                     "scope": command.scope.value,
                     "snapshot_id": str(frozen.snapshot_id),
-                    "start_date": command.start_date.isoformat(),
-                    "end_date": command.end_date.isoformat(),
+                    "date_mode": date_mode,
+                    "start_date": start_date.isoformat(),
+                    "end_date": end_date.isoformat(),
                     "item_count": len(frozen.items),
                     "concurrency": command.concurrency,
                 },
@@ -118,7 +138,7 @@ class HistoryBackfillService:
             page=page,
             page_size=page_size,
             job_type=JOB_TYPE,
-            queue=QUEUE,
+            queue=None,
         )
         return HistoryBackfillPage(
             items=result.items,
@@ -129,7 +149,7 @@ class HistoryBackfillService:
 
     async def get(self, job_id: UUID) -> Any:
         job = await self._admin.get_job(job_id)
-        if job.job_type != JOB_TYPE or job.queue != QUEUE:
+        if job.job_type != JOB_TYPE or job.queue not in {QUEUE, LEGACY_QUEUE}:
             raise _not_found()
         return job
 
@@ -139,9 +159,17 @@ class HistoryBackfillService:
         action: str,
         context: JobCommandContext,
     ) -> Any:
-        await self.get(job_id)
-        mapped = "retry-failed-items" if action == "retry-failed" else action
-        if mapped not in {"pause", "resume", "cancel", "retry-failed-items"}:
+        job = await self.get(job_id)
+        mapped = action
+        if action == "retry-failed":
+            mapped = "retry" if job.queue == QUEUE else "retry-failed-items"
+        if mapped not in {
+            "pause",
+            "resume",
+            "cancel",
+            "retry",
+            "retry-failed-items",
+        }:
             raise ValueError("unsupported history backfill action")
         return await self._admin.command(job_id, mapped, context)
 
@@ -154,9 +182,15 @@ class HistoryBackfillService:
             "pause": HistoryBackfillAction.PAUSE,
             "resume": HistoryBackfillAction.RESUME,
             "cancel": HistoryBackfillAction.CANCEL,
+            "retry": HistoryBackfillAction.RETRY_FAILED,
             "retry-failed-items": HistoryBackfillAction.RETRY_FAILED,
         }
-        return tuple(mapped[action] for action in actions if action in mapped)
+        result: list[HistoryBackfillAction] = []
+        for action in actions:
+            value = mapped.get(action)
+            if value is not None and value not in result:
+                result.append(value)
+        return tuple(result)
 
     async def allowed_actions_many(
         self, job_ids: tuple[UUID, ...]
@@ -166,13 +200,60 @@ class HistoryBackfillService:
             result[job_id] = await self.allowed_actions(job_id)
         return result
 
+    async def item_status_counts_many(
+        self, job_ids: tuple[UUID, ...]
+    ) -> dict[UUID, dict[str, int]]:
+        result: dict[UUID, dict[str, int]] = {}
+        legacy_ids: list[UUID] = []
+        for job_id in job_ids:
+            job = await self.get(job_id)
+            if job.queue == LEGACY_QUEUE:
+                legacy_ids.append(job_id)
+                continue
+            total = int(
+                (job.progress or {}).get("total")
+                or job.config_snapshot.get("item_count", 0)
+            )
+            completed = int((job.progress or {}).get("completed", 0))
+            data = (job.result_summary or {}).get("data", {})
+            checkpoint = job.checkpoint or {}
+            failed = (
+                int(data.get("failed", 0))
+                if isinstance(data, dict) and data
+                else len(checkpoint.get("failures", ()))
+            )
+            succeeded = (
+                int(data.get("succeeded", 0))
+                if isinstance(data, dict) and data
+                else int(checkpoint.get("base_succeeded", 0))
+                + int(
+                    checkpoint.get("succeeded", max(0, completed - failed))
+                )
+            )
+            pending = max(0, total - completed)
+            result[job_id] = {
+                "PENDING": pending,
+                "RUNNING": 0,
+                "SUCCEEDED": succeeded,
+                "FAILED": failed,
+                "CANCELED": 0,
+            }
+        if legacy_ids:
+            if self._legacy_jobs is None:
+                raise RuntimeError("legacy history job reader is not configured")
+            result.update(
+                await self._legacy_jobs.item_status_counts_many(tuple(legacy_ids))
+            )
+        return result
+
 
 def _submit_command(
     snapshot: dict[str, Any], context: HistoryBackfillAuditContext
-) -> SubmitJob:
-    return SubmitJob(
+) -> SubmitPostgresJob:
+    return SubmitPostgresJob(
         job_type=JOB_TYPE,
-        queue=QUEUE,
+        module_owner="market_data",
+        priority=3,
         idempotency_scope="market-history:backfill",
         idempotency_key=context.idempotency_key,
         request_id=context.request_id,
@@ -181,6 +262,9 @@ def _submit_command(
         created_by_user_id=context.actor_user_id,
         soft_timeout_seconds=82800,
         hard_timeout_seconds=86400,
+        max_attempts=2,
+        recoverable=True,
+        max_recoveries=3,
     )
 
 
@@ -200,8 +284,12 @@ def _require_same_request(
         "requested_watchlist_id": (
             str(command.watchlist_id) if command.watchlist_id else None
         ),
-        "start_date": command.start_date.isoformat(),
-        "end_date": command.end_date.isoformat(),
+        "requested_start_date": (
+            command.start_date.isoformat() if command.start_date else None
+        ),
+        "requested_end_date": (
+            command.end_date.isoformat() if command.end_date else None
+        ),
         "concurrency": command.concurrency,
         "reason": context.reason,
     }

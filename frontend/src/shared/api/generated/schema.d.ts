@@ -3610,6 +3610,37 @@ export interface components {
             canceled: number;
             /** Pending */
             pending: number;
+            /**
+             * Inserted
+             * @default 0
+             */
+            inserted: number;
+            /**
+             * Unchanged
+             * @default 0
+             */
+            unchanged: number;
+            /**
+             * Revised
+             * @default 0
+             */
+            revised: number;
+            /**
+             * Review Required
+             * @default 0
+             */
+            review_required: number;
+            /**
+             * Qfq Rows
+             * @default 0
+             */
+            qfq_rows: number;
+            /** Failed Items */
+            failed_items?: string[];
+            /** Failure Details */
+            failure_details?: {
+                [key: string]: unknown;
+            }[];
         };
         /** BackfillScopeItem */
         BackfillScopeItem: {
@@ -3636,6 +3667,15 @@ export interface components {
             /** Universe Master Version */
             universe_master_version: number;
             /**
+             * Date Mode
+             * @default ADVANCED
+             */
+            date_mode: string;
+            /** Requested Start Date */
+            requested_start_date?: string | null;
+            /** Requested End Date */
+            requested_end_date?: string | null;
+            /**
              * Start Date
              * Format: date
              */
@@ -3649,8 +3689,13 @@ export interface components {
             concurrency: number;
             /** Reason */
             reason: string;
+            /**
+             * Item Count
+             * @default 0
+             */
+            item_count: number;
             /** Items */
-            items: components["schemas"]["BackfillScopeItem"][];
+            items?: components["schemas"]["BackfillScopeItem"][];
         };
         /** BackfillView */
         BackfillView: {
@@ -4531,16 +4576,10 @@ export interface components {
         /** CreateBackfillBody */
         CreateBackfillBody: {
             scope: components["schemas"]["HistoryBackfillScope"];
-            /**
-             * Start Date
-             * Format: date
-             */
-            start_date: string;
-            /**
-             * End Date
-             * Format: date
-             */
-            end_date: string;
+            /** Start Date */
+            start_date?: string | null;
+            /** End Date */
+            end_date?: string | null;
             /**
              * Concurrency
              * @default 4

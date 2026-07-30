@@ -5,7 +5,6 @@ from long_invest.bootstrap.backtest_jobs import (
     backtest_bulk_finalize,
     finish_linked_backtest_item,
 )
-from long_invest.bootstrap.history_backfills import build_history_backfill_job_handler
 from long_invest.bootstrap.jobs import (
     qfq_refresh,
     quote_diagnostic,
@@ -60,7 +59,6 @@ async def backtest_single(context):
 HANDLERS["BACKTEST_SINGLE"] = backtest_single
 HANDLERS["BACKTEST_BULK"] = backtest_bulk_coordinate
 HANDLERS["BACKTEST_BULK_FINALIZE"] = backtest_bulk_finalize
-HANDLERS["MARKET_HISTORY_BACKFILL"] = build_history_backfill_job_handler()
 
 
 def execute_job(job_id: str, outbox_id: str) -> dict[str, Any]:

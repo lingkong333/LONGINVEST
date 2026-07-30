@@ -654,8 +654,8 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
         body: {
           scope: command.scope,
           symbols: command.symbols,
-          start_date: command.startDate,
-          end_date: command.endDate,
+          start_date: command.startDate ?? null,
+          end_date: command.endDate ?? null,
           concurrency: command.concurrency,
           watchlist_id: null,
           confirm: true,

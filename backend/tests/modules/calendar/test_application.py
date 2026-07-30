@@ -30,6 +30,12 @@ class FakeRepository:
             raise self.error
         return self.result
 
+    async def previous_trading_day(self, market, before_date):
+        type(self).calls.append((self.session, market, before_date))
+        if self.error is not None:
+            raise self.error
+        return self.result
+
 
 @pytest.fixture(autouse=True)
 def reset_repository() -> None:
@@ -111,3 +117,13 @@ async def test_trading_dates_maps_database_failures_to_stable_error() -> None:
 
     assert caught.value.code == "CALENDAR_BACKEND_UNAVAILABLE"
     assert caught.value.status_code == 503
+
+
+@pytest.mark.anyio
+async def test_latest_completed_date_uses_the_previous_confirmed_trading_day() -> None:
+    FakeRepository.result = SimpleNamespace(trade_date=date(2026, 7, 29))
+
+    result = await application().latest_completed_trading_date(date(2026, 7, 30))
+
+    assert result == date(2026, 7, 29)
+    assert FakeRepository.calls[-1][1:] == ("CN_A", date(2026, 7, 30))

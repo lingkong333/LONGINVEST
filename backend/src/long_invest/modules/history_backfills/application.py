@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from long_invest.modules.history_backfills.contracts import (
     CreateHistoryBackfill,
     HistoryBackfillAuditContext,
+    HistoryDateRangePort,
     HistoryScopeSnapshotPort,
 )
 from long_invest.modules.history_backfills.service import HistoryBackfillService
@@ -16,6 +17,7 @@ from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
 from long_invest.platform.jobs.admin import JobAdminService, JobCommandContext
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 from long_invest.platform.jobs.service import JobService
 
 
@@ -25,13 +27,17 @@ class HistoryBackfillApplication:
         database: Database,
         *,
         scope_snapshots: HistoryScopeSnapshotPort,
-        job_service_factory: Callable[..., Any] = JobService,
+        job_service_factory: Callable[..., Any] = PostgresJobService,
+        legacy_job_service_factory: Callable[..., Any] = JobService,
+        date_ranges: HistoryDateRangePort | None = None,
         admin_service_factory: Callable[..., Any] = JobAdminService,
         audit_service_factory: Callable[..., Any] = AuditService,
     ) -> None:
         self._database = database
         self._scope_snapshots = scope_snapshots
         self._job_service_factory = job_service_factory
+        self._legacy_job_service_factory = legacy_job_service_factory
+        self._date_ranges = date_ranges
         self._admin_service_factory = admin_service_factory
         self._audit_service_factory = audit_service_factory
 
@@ -91,9 +97,7 @@ class HistoryBackfillApplication:
     async def item_status_counts_many(self, job_ids: tuple[UUID, ...]):
         try:
             async with self._database.session() as session:
-                return await self._job_service_factory(
-                    session
-                ).item_status_counts_many(job_ids)
+                return await self._service(session).item_status_counts_many(job_ids)
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
 
@@ -115,6 +119,8 @@ class HistoryBackfillApplication:
         return HistoryBackfillService(
             scope_snapshots=self._scope_snapshots,
             jobs=self._job_service_factory(session),
+            legacy_jobs=self._legacy_job_service_factory(session),
+            date_ranges=self._date_ranges,
             admin=self._admin_service_factory(session),
             audit=self._audit_service_factory(session),
         )

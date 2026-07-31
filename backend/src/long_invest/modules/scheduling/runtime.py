@@ -214,23 +214,39 @@ class DualPathScheduler:
             await self._record_runtime(success=True)
             return
         local_now = decision.database_time.astimezone(SHANGHAI)
+        failures = 0
         if self._daily_gap_planner is not None:
-            gap = await self._daily_gap_planner.plan(
-                before=local_now.date() - timedelta(days=1)
-            )
-            if gap is not None:
-                await self._persistent_submitter.submit_recovery(
-                    gap.dates,
-                    calendar_version_id=gap.calendar_version_id,
-                    scheduled_at=decision.database_time,
+            try:
+                gap = await self._daily_gap_planner.plan(
+                    before=local_now.date() - timedelta(days=1)
                 )
+                if gap is not None:
+                    await self._persistent_submitter.submit_recovery(
+                        gap.dates,
+                        calendar_version_id=gap.calendar_version_id,
+                        scheduled_at=decision.database_time,
+                    )
+            except Exception:
+                failures += 1
+                logger.exception("persistent_recovery_gap_failed", category="scheduler")
         for plan in self._persistent_plans:
             scheduled_at = datetime.combine(
                 local_now.date(), plan.at, tzinfo=SHANGHAI
             ).astimezone(UTC)
             if scheduled_at <= decision.database_time:
-                await self._submit_persistent(plan, scheduled_at)
-        await self._record_runtime(success=True)
+                try:
+                    await self._submit_persistent(plan, scheduled_at)
+                except Exception:
+                    failures += 1
+                    logger.exception(
+                        "persistent_recovery_plan_failed",
+                        category="scheduler",
+                        plan=plan.key,
+                    )
+        await self._record_runtime(
+            success=failures == 0,
+            error_code="PERSISTENT_RECOVERY_PARTIAL" if failures else None,
+        )
 
     async def heartbeat(self) -> None:
         await self._runtime.begin_scan(

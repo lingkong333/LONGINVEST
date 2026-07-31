@@ -195,6 +195,23 @@ async def test_startup_recovers_due_persistent_plan_on_trading_day():
 
 
 @pytest.mark.anyio
+async def test_startup_submission_conflict_does_not_stop_scheduler():
+    now = datetime(2026, 7, 17, 9, 1, tzinfo=UTC)
+    scheduler, runtime, _, submitter, _ = subject(now)
+
+    async def reject_existing_definition(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError("idempotency definition changed")
+
+    submitter.submit = reject_existing_definition
+
+    await scheduler.recover_persistent(now=now)
+
+    assert runtime.finished[-1]["success"] is False
+    assert runtime.finished[-1]["error_code"] == "PERSISTENT_RECOVERY_PARTIAL"
+
+
+@pytest.mark.anyio
 async def test_startup_merges_missing_dates_into_one_recovery_job():
     now = datetime(2026, 7, 17, 9, 1, tzinfo=UTC)
     scheduler, _, _, submitter, _ = subject(now)

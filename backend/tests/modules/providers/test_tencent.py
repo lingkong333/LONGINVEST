@@ -39,10 +39,13 @@ def test_tencent_requests_all_symbols_in_one_call() -> None:
     class Client:
         request = None
 
-        async def request_text(self, request, *, deadline, encoding):
+        async def request_text(
+            self, request, *, deadline, encoding, allowed_content_types
+        ):
             self.request = request
             assert deadline > datetime.now(UTC)
             assert encoding == "gb18030"
+            assert allowed_content_types == frozenset({"text/plain", "text/html"})
             fields = [""] * 38
             for index, value in {
                 3: "10",

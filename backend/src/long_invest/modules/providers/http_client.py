@@ -111,6 +111,7 @@ class ProviderHttpClient:
         *,
         deadline: datetime,
         encoding: str = "utf-8",
+        allowed_content_types: frozenset[str] | None = None,
     ) -> str:
         self._validate_target(request.url)
 
@@ -135,7 +136,8 @@ class ProviderHttpClient:
                                 raise ProviderHttpError("PROVIDER_UPSTREAM_ERROR")
                             self._validate_headers(
                                 response,
-                                frozenset(
+                                allowed_content_types
+                                or frozenset(
                                     {
                                         "text/plain",
                                         "application/json",

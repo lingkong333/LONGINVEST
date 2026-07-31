@@ -54,6 +54,7 @@ class TencentRealtimeProvider:
             ),
             deadline=deadline,
             encoding="gb18030",
+            allowed_content_types=frozenset({"text/plain", "text/html"}),
         )
         return self.parse_quotes(text, symbols, received_at=datetime.now(UTC))
 

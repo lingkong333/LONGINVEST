@@ -178,3 +178,37 @@ async def test_client_accepts_bounded_plain_text_for_sina() -> None:
         )
     assert "浦发银行" in text
     assert seen[0].headers["referer"] == "https://finance.sina.com.cn/"
+
+
+@async_test
+async def test_declared_html_type_still_rejects_html_body() -> None:
+    responses = iter(
+        (
+            httpx.Response(
+                200,
+                headers={"content-type": "text/html; charset=GBK"},
+                content=b'v_sh600000="quote";',
+            ),
+            httpx.Response(
+                200,
+                headers={"content-type": "text/html; charset=GBK"},
+                content=b"<html>blocked</html>",
+            ),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: next(responses))
+    ) as raw:
+        client = ProviderHttpClient(raw, allowed_hosts=frozenset({"qt.gtimg.cn"}))
+        text = await client.request_text(
+            ProviderHttpRequest("https://qt.gtimg.cn/q=sh600000"),
+            deadline=datetime.now(UTC) + timedelta(seconds=1),
+            allowed_content_types=frozenset({"text/html"}),
+        )
+        assert text == 'v_sh600000="quote";'
+        with pytest.raises(ProviderHttpError, match="PROVIDER_UNEXPECTED_CONTENT"):
+            await client.request_text(
+                ProviderHttpRequest("https://qt.gtimg.cn/q=sh600000"),
+                deadline=datetime.now(UTC) + timedelta(seconds=1),
+                allowed_content_types=frozenset({"text/html"}),
+            )

@@ -50,10 +50,8 @@ class DatabaseProviderObserver:
     async def record_outcome(self, setting: Any, **values: Any) -> None:
         await self._record("record_outcome", setting, values)
 
-    async def _record(
-        self, method: str, setting: Any, values: dict[str, Any]
-    ) -> None:
-        async with self._database.transaction() as session:
+    async def _record(self, method: str, setting: Any, values: dict[str, Any]) -> None:
+        async with self._database.session() as session:
             repository = ProviderRepository(
                 session,
                 audit=ProviderAuditAdapter(session),
@@ -195,9 +193,7 @@ class RealtimeQuoteRuntime:
                 audit=ProviderAuditAdapter(session),
                 events=ProviderEventAdapter(session),
             )
-            plan = await repository.route_plan(
-                ProviderCapability.REALTIME_QUOTE_BATCH
-            )
+            plan = await repository.route_plan(ProviderCapability.REALTIME_QUOTE_BATCH)
         resources = get_provider_resources()
         return ProviderRouter(
             providers=resources.providers,

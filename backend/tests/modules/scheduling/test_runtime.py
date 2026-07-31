@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, time, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
@@ -8,6 +9,7 @@ from long_invest.modules.scheduling.runtime import (
     DAILY_MARKET_DATA,
     DailyGapPlan,
     DualPathScheduler,
+    PostgresPersistentJobSubmitter,
 )
 
 
@@ -74,6 +76,40 @@ class GapPlanner:
         if not self.dates:
             return None
         return DailyGapPlan(self.dates, self.version_id)
+
+
+@pytest.mark.anyio
+async def test_daily_submission_survives_several_process_restarts(monkeypatch):
+    captured = []
+
+    class Database:
+        @asynccontextmanager
+        async def transaction(self):
+            yield object()
+
+    class Jobs:
+        def __init__(self, session):
+            del session
+
+        async def submit(self, command, *, now):
+            captured.append((command, now))
+
+    monkeypatch.setattr(
+        "long_invest.modules.scheduling.runtime.PostgresJobService", Jobs
+    )
+    scheduled_at = datetime(2026, 7, 31, 9, tzinfo=UTC)
+
+    await PostgresPersistentJobSubmitter(Database()).submit(
+        DAILY_MARKET_DATA,
+        trade_date=date(2026, 7, 31),
+        calendar_version_id=uuid4(),
+        scheduled_at=scheduled_at,
+    )
+
+    command, submitted_at = captured[0]
+    assert submitted_at == scheduled_at
+    assert command.max_attempts == 5
+    assert command.max_recoveries == 4
 
 
 def subject(
@@ -214,8 +250,6 @@ async def test_broken_schedule_does_not_block_other_intraday_times():
         intraday, _ = scheduler.plan_snapshot()
         assert [item["key"] for item in intraday] == ["2026-07-17T10:15"]
         assert runtime.finished[-2]["success"] is False
-        assert runtime.finished[-2]["error_code"] == (
-            "INTRADAY_PLAN_REFRESH_PARTIAL"
-        )
+        assert runtime.finished[-2]["error_code"] == ("INTRADAY_PLAN_REFRESH_PARTIAL")
     finally:
         await scheduler.stop()

@@ -5963,7 +5963,7 @@ export interface components {
          * ProviderCode
          * @enum {string}
          */
-        ProviderCode: "EASTMONEY" | "SINA" | "TUSHARE" | "BAOSTOCK";
+        ProviderCode: "EASTMONEY" | "SINA" | "TUSHARE" | "BAOSTOCK" | "TENCENT";
         /** ProviderData */
         ProviderData: {
             /** Total */

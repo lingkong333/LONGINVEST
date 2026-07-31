@@ -162,6 +162,11 @@ class StaticProviderConfiguration:
                     ProviderCapability.REALTIME_QUOTE_BATCH,
                     priority=2,
                 ),
+                ProviderRouteSetting(
+                    ProviderCode.TENCENT,
+                    ProviderCapability.REALTIME_QUOTE_BATCH,
+                    priority=3,
+                ),
             ),
             ProviderCapability.SECURITY_MASTER: (
                 ProviderRouteSetting(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from datetime import UTC, date, datetime, time, timedelta
+from hashlib import sha256
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
@@ -71,13 +72,9 @@ class CalendarHistoryDateRange:
     async def complete_range(self) -> tuple[date, date]:
         now = datetime.now(ZoneInfo("Asia/Shanghai"))
         completed_before = (
-            now.date() + timedelta(days=1)
-            if now.time() >= time(17)
-            else now.date()
+            now.date() + timedelta(days=1) if now.time() >= time(17) else now.date()
         )
-        end_date = await self._calendar.latest_completed_trading_date(
-            completed_before
-        )
+        end_date = await self._calendar.latest_completed_trading_date(completed_before)
         return date(1990, 12, 19), end_date
 
 
@@ -228,7 +225,8 @@ def _provider_contract_version(unadjusted, qfq) -> str:
                     )
                 )
             )
-    return "|".join(versions)
+    combined = "|".join(versions)
+    return combined if len(combined) <= 64 else sha256(combined.encode()).hexdigest()
 
 
 class DatabaseHistoryBarStore:

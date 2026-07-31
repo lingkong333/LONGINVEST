@@ -27,7 +27,7 @@ class ProviderConfigVersion(Base):
     __table_args__ = (
         UniqueConstraint("provider_code", "version"),
         CheckConstraint(
-            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK')",
+            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK', 'TENCENT')",
             name="provider_code_supported",
         ),
     )
@@ -47,7 +47,7 @@ class ProviderCapabilitySetting(Base):
     __table_args__ = (
         UniqueConstraint("config_version", "provider_code", "capability"),
         CheckConstraint(
-            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK')",
+            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK', 'TENCENT')",
             name="provider_code_supported",
         ),
         CheckConstraint("priority >= 0", name="priority_nonnegative"),
@@ -192,7 +192,7 @@ class ProviderHealthState(Base):
     __table_args__ = (
         UniqueConstraint("provider_code", "capability"),
         CheckConstraint(
-            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK')",
+            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK', 'TENCENT')",
             name="provider_code_supported",
         ),
     )
@@ -214,7 +214,7 @@ class ProviderCircuitHistory(Base):
     __tablename__ = "provider_circuit_history"
     __table_args__ = (
         CheckConstraint(
-            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK')",
+            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK', 'TENCENT')",
             name="provider_code_supported",
         ),
     )
@@ -236,7 +236,7 @@ class ProviderCircuitState(Base):
     __table_args__ = (
         UniqueConstraint("provider_code", "capability"),
         CheckConstraint(
-            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK')",
+            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK', 'TENCENT')",
             name="provider_code_supported",
         ),
         CheckConstraint("consecutive_failures >= 0", name="failures_nonnegative"),
@@ -286,7 +286,7 @@ class ProviderFailureSample(Base):
     __tablename__ = "provider_failure_sample"
     __table_args__ = (
         CheckConstraint(
-            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK')",
+            "provider_code IN ('EASTMONEY', 'SINA', 'TUSHARE', 'BAOSTOCK', 'TENCENT')",
             name="provider_code_supported",
         ),
     )

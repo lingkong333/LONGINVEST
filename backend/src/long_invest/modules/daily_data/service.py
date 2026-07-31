@@ -904,7 +904,13 @@ def _collected_at(value: object, fallback: datetime) -> datetime:
 
 def _json_values(values: dict[str, Any]) -> dict[str, Any]:
     return {
-        key: str(value) if isinstance(value, Decimal) else value
+        key: (
+            str(value)
+            if isinstance(value, Decimal)
+            else value.isoformat()
+            if isinstance(value, (datetime, date))
+            else value
+        )
         for key, value in values.items()
     }
 

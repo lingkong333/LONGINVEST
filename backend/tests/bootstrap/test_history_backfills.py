@@ -2,6 +2,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
+from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,7 @@ from long_invest.bootstrap import history_backfills
 from long_invest.bootstrap.history_backfills import (
     DatabaseHistoryBarsProvider,
     DatabaseHistoryBarStore,
+    _provider_contract_version,
 )
 from long_invest.modules.daily_data.contracts import HistoricalDailyStoreResult
 from long_invest.modules.history_backfills.contracts import (
@@ -33,6 +35,24 @@ class FakeDatabase:
         yield object()
 
 
+def test_provider_contract_version_is_stable_and_fits_database_column() -> None:
+    identity = SimpleNamespace(
+        adapter=SimpleNamespace(value="AKSHARE"),
+        upstream=SimpleNamespace(value="SINA"),
+        interface="akshare.stock_zh_a_hist.with-a-deliberately-long-interface-name",
+        capability=SimpleNamespace(value="HISTORICAL_DAILY_UNADJUSTED"),
+        algorithm_version="raw-v1-with-a-deliberately-long-version-name",
+    )
+    bar = SimpleNamespace(source_identity=identity)
+
+    first = _provider_contract_version((bar,), (bar,))
+    second = _provider_contract_version((bar,), (bar,))
+
+    assert first == second
+    assert len(first) == 64
+    assert all(character in "0123456789abcdef" for character in first)
+
+
 def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None:
     class FailingProviderService:
         calls = 0
@@ -41,9 +61,7 @@ def test_provider_transport_failure_keeps_stable_error_code(monkeypatch) -> None
             del request, deadline
             assert concurrency == 64
             self.calls += 1
-            raise ProviderHttpError(
-                "PROVIDER_UPSTREAM_TEMPORARY", retryable=True
-            )
+            raise ProviderHttpError("PROVIDER_UPSTREAM_TEMPORARY", retryable=True)
 
     service = FailingProviderService()
     monkeypatch.setattr(

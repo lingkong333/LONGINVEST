@@ -23,6 +23,7 @@ class ProviderCode(StrEnum):
     SINA = "SINA"
     TUSHARE = "TUSHARE"
     BAOSTOCK = "BAOSTOCK"
+    TENCENT = "TENCENT"
 
 
 class ProviderAdapterCode(StrEnum):

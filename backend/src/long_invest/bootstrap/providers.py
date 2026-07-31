@@ -32,6 +32,7 @@ from long_invest.modules.providers.repository import ProviderRepository
 from long_invest.modules.providers.router import ProviderRouter
 from long_invest.modules.providers.service import ProviderService
 from long_invest.modules.providers.sina import SinaRealtimeProvider
+from long_invest.modules.providers.tencent import TencentRealtimeProvider
 from long_invest.modules.providers.tushare import TushareProvider
 from long_invest.modules.settings.application import get_settings_application
 from long_invest.platform.audit.contracts import AuditWrite
@@ -190,6 +191,7 @@ def get_provider_resources() -> ProviderResources:
                     "np-anotice-stock.eastmoney.com",
                     "np-cnotice-stock.eastmoney.com",
                     "hq.sinajs.cn",
+                    "qt.gtimg.cn",
                     "vip.stock.finance.sina.com.cn",
                 }
             ),
@@ -221,6 +223,7 @@ def get_provider_resources() -> ProviderResources:
                 ProviderCode.BAOSTOCK: BaoStockProvider(
                     request_guard=budget.guard,
                 ),
+                ProviderCode.TENCENT: TencentRealtimeProvider(provider_http),
             },
         )
     return _resources

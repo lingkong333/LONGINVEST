@@ -108,9 +108,9 @@ class PostgresPersistentJobSubmitter:
             business_object_id=day,
             soft_timeout_seconds=3600,
             hard_timeout_seconds=7200,
-            max_attempts=2,
+            max_attempts=5,
             recoverable=True,
-            max_recoveries=1,
+            max_recoveries=4,
         )
         async with self._database.transaction() as session:
             await PostgresJobService(session).submit(command, now=scheduled_at)
@@ -199,14 +199,10 @@ class DualPathScheduler:
             self._remove_intraday_triggers()
             failures = 0
             if not decision.automatic_scheduling_paused:
-                failures = await self._register_today_intraday(
-                    decision.database_time
-                )
+                failures = await self._register_today_intraday(decision.database_time)
             await self._record_runtime(
                 success=failures == 0,
-                error_code=(
-                    "INTRADAY_PLAN_REFRESH_PARTIAL" if failures else None
-                ),
+                error_code=("INTRADAY_PLAN_REFRESH_PARTIAL" if failures else None),
             )
 
     async def recover_persistent(self, *, now: datetime | None = None) -> None:

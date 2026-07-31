@@ -19036,7 +19036,8 @@
           "EASTMONEY",
           "SINA",
           "TUSHARE",
-          "BAOSTOCK"
+          "BAOSTOCK",
+          "TENCENT"
         ],
         "title": "ProviderCode"
       },

@@ -192,9 +192,9 @@ class DailyDataApplication:
                     created_by_user_id=audit_context.actor_user_id,
                     soft_timeout_seconds=300,
                     hard_timeout_seconds=600,
-                    max_attempts=2,
+                    max_attempts=5,
                     recoverable=True,
-                    max_recoveries=1,
+                    max_recoveries=4,
                 )
                 job = await self._job_service_factory(session).submit(command)
                 audit = self._audit_service_factory(session)

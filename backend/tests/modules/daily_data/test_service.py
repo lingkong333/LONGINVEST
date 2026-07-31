@@ -29,19 +29,15 @@ DAY = date(2026, 7, 15)
 def test_daily_retry_requires_terminal_batch_with_real_failures(status: str) -> None:
     assert [
         item.value
-        for item in daily_batch_allowed_actions(
-            status, missing_count=1, failed_count=0
-        )
+        for item in daily_batch_allowed_actions(status, missing_count=1, failed_count=0)
     ] == ["RETRY_MISSING"]
-    assert daily_batch_allowed_actions(
-        status, missing_count=0, failed_count=0
-    ) == ()
+    assert daily_batch_allowed_actions(status, missing_count=0, failed_count=0) == ()
 
 
 def test_daily_retry_is_hidden_while_batch_is_active() -> None:
-    assert daily_batch_allowed_actions(
-        "VALIDATING", missing_count=1, failed_count=1
-    ) == ()
+    assert (
+        daily_batch_allowed_actions("VALIDATING", missing_count=1, failed_count=1) == ()
+    )
 
 
 def async_test(function):
@@ -79,9 +75,7 @@ class FakeRepository:
             parent_batch_id=command.parent_batch_id,
             symbols=list(command.symbols),
             security_ids=[str(value) for value in command.security_ids],
-            known_corporate_action_symbols=list(
-                command.known_corporate_action_symbols
-            ),
+            known_corporate_action_symbols=list(command.known_corporate_action_symbols),
             idempotency_key=command.idempotency_key,
             status=DailyBatchStatus.PENDING,
             expected_count=len(command.symbols),
@@ -1104,6 +1098,7 @@ def _historical_bar(
     trade_date,
     *,
     close="10.50",
+    collected_at=None,
 ):
     return HistoricalDailyBarInput(
         security_id=security_id,
@@ -1116,6 +1111,7 @@ def _historical_bar(
         volume=100,
         amount=Decimal("1000"),
         source="SINA",
+        collected_at=collected_at,
     )
 
 
@@ -1125,7 +1121,14 @@ async def test_historical_store_is_bulk_idempotent_and_preserves_revisions() -> 
     service = _service(repo)
     security_id = uuid4()
     first = _historical_bar(security_id, date(2026, 7, 14), close="10.20")
-    second = _historical_bar(security_id, date(2026, 7, 15), close="10.50")
+    first_collected_at = datetime(2026, 7, 16, 1, 2, 3, tzinfo=UTC)
+    second_collected_at = datetime(2026, 7, 16, 2, 3, 4, tzinfo=UTC)
+    second = _historical_bar(
+        security_id,
+        date(2026, 7, 15),
+        close="10.50",
+        collected_at=first_collected_at,
+    )
 
     inserted = await service.store_historical_bars(
         (second, first), reason="history import"
@@ -1134,7 +1137,15 @@ async def test_historical_store_is_bulk_idempotent_and_preserves_revisions() -> 
         (first, second), reason="history replay"
     )
     revised = await service.store_historical_bars(
-        (first, _historical_bar(security_id, second.trade_date, close="10.60")),
+        (
+            first,
+            _historical_bar(
+                security_id,
+                second.trade_date,
+                close="10.60",
+                collected_at=second_collected_at,
+            ),
+        ),
         reason="history correction",
     )
 
@@ -1144,6 +1155,12 @@ async def test_historical_store_is_bulk_idempotent_and_preserves_revisions() -> 
     assert len(repo.revisions) == 1
     assert repo.revisions[0].old_values["close"] == "10.50"
     assert repo.revisions[0].new_values["close"] == "10.60"
+    assert (
+        repo.revisions[0].old_values["collected_at"] == first_collected_at.isoformat()
+    )
+    assert (
+        repo.revisions[0].new_values["collected_at"] == second_collected_at.isoformat()
+    )
     assert [entry[0] for entry in repo.bar_write_order] == [
         "lock-security",
         "lock-security",

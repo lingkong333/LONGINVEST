@@ -51,7 +51,9 @@ def test_consolidated_background_container_has_strategy_runner_permission() -> N
         "-m",
         "long_invest.entrypoints.background",
     ]
-    assert core["healthcheck"]["test"][-1] == "--healthcheck"
+    healthcheck = core["healthcheck"]["test"][-1]
+    assert "longinvest-background-heartbeat" in healthcheck
+    assert "st_mtime <= 30" in healthcheck
 
 
 def test_history_backfill_runs_inside_the_existing_core_background() -> None:

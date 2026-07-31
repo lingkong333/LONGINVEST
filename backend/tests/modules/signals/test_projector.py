@@ -156,7 +156,9 @@ async def test_finalized_quote_event_creates_one_frozen_batch_job() -> None:
     assert report.claimed == 1
     command = database.state["jobs"][0]
     assert command.job_type == "SIGNAL_EVALUATE_BATCH"
-    assert command.queue == "signals"
+    assert command.module_owner == "signals"
+    assert command.priority == 1
+    assert command.recoverable is True
     assert command.idempotency_scope == "signal-event-projector"
     assert command.idempotency_key == f"quote_cycle.finalized:{event_id}"
     assert command.config_snapshot == {

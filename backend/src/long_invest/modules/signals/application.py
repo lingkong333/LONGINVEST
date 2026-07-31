@@ -29,7 +29,7 @@ from long_invest.modules.targets.contracts import TargetStatus
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 
 class SignalApplication:
@@ -47,7 +47,7 @@ class SignalApplication:
         ] = transactional_signal_notification_publisher,
         audit_factory: Callable[[Any], Any] = AuditService,
         event_factory: Callable[[Any], Any] = SignalOutbox,
-        job_factory: Callable[[Any], Any] = JobService,
+        job_factory: Callable[[Any], Any] = PostgresJobService,
         service_factory: Callable[..., Any] = SignalService,
     ) -> None:
         self._database = database

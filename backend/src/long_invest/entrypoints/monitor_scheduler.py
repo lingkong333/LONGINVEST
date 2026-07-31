@@ -12,7 +12,12 @@ import structlog
 from long_invest.bootstrap.history_backfills import (
     build_history_backfill_job_handler,
 )
-from long_invest.bootstrap.jobs import qfq_refresh, security_master_refresh
+from long_invest.bootstrap.jobs import (
+    qfq_refresh,
+    security_master_refresh,
+    signal_evaluate_batch,
+    signal_reevaluate,
+)
 from long_invest.bootstrap.providers import (
     build_provider_service,
     close_provider_resources,
@@ -56,6 +61,8 @@ def build_market_data_handlers(database: Database):
         ),
         "QFQ_REFRESH": qfq_refresh,
         "SECURITY_MASTER_REFRESH": security_master_refresh,
+        "SIGNAL_EVALUATE_BATCH": signal_evaluate_batch,
+        "SIGNAL_REEVALUATE": signal_reevaluate,
     }
 
 

@@ -8,8 +8,8 @@ from uuid import UUID
 from sqlalchemy import Select, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 from long_invest.platform.outbox.models import EventOutbox, OutboxStatus
 
 SUPPORTED_SIGNAL_EVENT_TOPICS = frozenset(
@@ -123,7 +123,7 @@ class SignalEventProjector:
         repository_factory: Callable[[Any], SignalProjectionStore] = (
             SignalProjectionRepository
         ),
-        job_service_factory: Callable[[Any], Any] = JobService,
+        job_service_factory: Callable[[Any], Any] = PostgresJobService,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._database = database
@@ -148,7 +148,7 @@ class SignalEventProjector:
         return SignalProjectionReport(claimed=count, projected=count)
 
 
-def _job_command(event: SignalProjectionEvent) -> SubmitJob:
+def _job_command(event: SignalProjectionEvent) -> SubmitPostgresJob:
     source = {
         "source_event_id": str(event.id),
     }
@@ -156,7 +156,8 @@ def _job_command(event: SignalProjectionEvent) -> SubmitJob:
         f"signal-projector:{event.id}"
     )
     common = {
-        "queue": "signals",
+        "module_owner": "signals",
+        "priority": 1,
         "idempotency_scope": "signal-event-projector",
         "idempotency_key": f"{event.topic}:{event.id}",
         "request_id": request_id,
@@ -164,7 +165,7 @@ def _job_command(event: SignalProjectionEvent) -> SubmitJob:
     if event.topic == "quote_cycle.finalized":
         item_ids = _string_list(event.payload, "valid_item_ids")
         cycle_id = _required_str(event.payload, "cycle_id")
-        return SubmitJob(
+        return SubmitPostgresJob(
             job_type="SIGNAL_EVALUATE_BATCH",
             config_snapshot={
                 **source,
@@ -176,11 +177,13 @@ def _job_command(event: SignalProjectionEvent) -> SubmitJob:
             business_object_id=cycle_id,
             soft_timeout_seconds=240,
             hard_timeout_seconds=300,
+            max_attempts=2,
+            recoverable=True,
             **common,
         )
     if event.topic == "target.activated":
         subscription_id = _required_str(event.payload, "subscription_id")
-        return SubmitJob(
+        return SubmitPostgresJob(
             job_type="SIGNAL_REEVALUATE",
             config_snapshot={
                 **source,
@@ -196,11 +199,13 @@ def _job_command(event: SignalProjectionEvent) -> SubmitJob:
             business_object_id=subscription_id,
             soft_timeout_seconds=30,
             hard_timeout_seconds=60,
+            max_attempts=2,
+            recoverable=True,
             **common,
         )
     if event.topic == "position.became_holding":
         security_id = _required_str(event.payload, "security_id")
-        return SubmitJob(
+        return SubmitPostgresJob(
             job_type="SIGNAL_REEVALUATE",
             config_snapshot={
                 **source,
@@ -216,6 +221,8 @@ def _job_command(event: SignalProjectionEvent) -> SubmitJob:
             business_object_id=security_id,
             soft_timeout_seconds=30,
             hard_timeout_seconds=60,
+            max_attempts=2,
+            recoverable=True,
             **common,
         )
     raise ValueError(f"unsupported signal projection topic: {event.topic}")

@@ -521,7 +521,9 @@ async def test_reset_is_atomic_versioned_audited_and_schedules_reevaluation():
     assert len(audit.records) == len(events.items) == len(jobs.items) == 1
     assert events.items[0].event_type == "signal.state_reset"
     assert jobs.items[0].job_type == "SIGNAL_REEVALUATE"
-    assert jobs.items[0].queue == "signals"
+    assert jobs.items[0].module_owner == "signals"
+    assert jobs.items[0].priority == 1
+    assert jobs.items[0].recoverable is True
     assert jobs.items[0].config_snapshot["reason"] == "STATE_RESET"
 
 

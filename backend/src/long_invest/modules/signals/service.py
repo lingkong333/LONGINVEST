@@ -34,7 +34,7 @@ from long_invest.modules.signals.state_machine import (
 from long_invest.modules.targets.contracts import TargetStatus
 from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import SubmitJob
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
 
 
 class SignalService:
@@ -195,9 +195,10 @@ class SignalService:
         scope: str,
     ):
         return await self._jobs.submit(
-            SubmitJob(
+            SubmitPostgresJob(
                 job_type="SIGNAL_REEVALUATE",
-                queue="signals",
+                module_owner="signals",
+                priority=1,
                 idempotency_scope=f"{scope}:{command.subscription_id}",
                 idempotency_key=command.idempotency_key,
                 request_id=command.request_id,
@@ -212,6 +213,8 @@ class SignalService:
                 created_by_user_id=command.actor_user_id,
                 soft_timeout_seconds=30,
                 hard_timeout_seconds=60,
+                max_attempts=2,
+                recoverable=True,
             )
         )
 

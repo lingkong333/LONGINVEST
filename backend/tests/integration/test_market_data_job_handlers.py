@@ -59,6 +59,8 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
         "DAILY_MARKET_RECOVERY",
         "QFQ_REFRESH",
         "SECURITY_MASTER_REFRESH",
+        "SIGNAL_EVALUATE_BATCH",
+        "SIGNAL_REEVALUATE",
     }
 
 

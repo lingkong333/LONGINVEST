@@ -5,7 +5,11 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateIndex
 
 from long_invest.modules.auth.contracts import SessionStatus, UserStatus
-from long_invest.modules.auth.models import AppUser, UserSession
+from long_invest.modules.auth.models import (
+    AppUser,
+    LoginRateLimitAttempt,
+    UserSession,
+)
 
 
 def test_user_and_session_models_define_the_owned_tables() -> None:
@@ -47,6 +51,21 @@ def test_session_model_has_no_plaintext_token_fields() -> None:
     assert "token" not in column_names
     assert "csrf_token" not in column_names
     assert "session_token" not in column_names
+
+
+def test_login_rate_limit_model_stores_only_identity_digests() -> None:
+    column_names = set(LoginRateLimitAttempt.__table__.columns.keys())
+
+    assert column_names == {
+        "id",
+        "reservation_id",
+        "ip_digest",
+        "username_digest",
+        "outcome",
+        "occurred_at",
+    }
+    assert "ip" not in column_names
+    assert "username" not in column_names
 
 
 def test_model_defaults_match_active_first_version_account() -> None:

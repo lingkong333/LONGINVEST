@@ -134,3 +134,34 @@ class UserSession(Base):
     )
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_reason: Mapped[str | None] = mapped_column(String(255))
+
+
+class LoginRateLimitAttempt(Base):
+    __tablename__ = "auth_login_rate_limit_attempt"
+    __table_args__ = (
+        UniqueConstraint("reservation_id"),
+        CheckConstraint(
+            "outcome IN ('PENDING','FAILED','SUCCEEDED')",
+            name="outcome_valid",
+        ),
+        Index("ix_auth_login_rate_ip_window", "ip_digest", "occurred_at"),
+        Index(
+            "ix_auth_login_rate_username_window",
+            "username_digest",
+            "occurred_at",
+        ),
+        Index("ix_auth_login_rate_outcome_window", "outcome", "occurred_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid4,
+    )
+    reservation_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    ip_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    username_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )

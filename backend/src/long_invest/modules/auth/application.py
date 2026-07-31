@@ -4,7 +4,6 @@ from functools import lru_cache
 from typing import TypeVar
 from uuid import UUID
 
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,11 +16,8 @@ from long_invest.modules.auth.audit import (
 )
 from long_invest.modules.auth.contracts import RequestActivity
 from long_invest.modules.auth.passwords import PasswordService
-from long_invest.modules.auth.rate_limit import (
-    InMemoryLoginRateLimiter,
-    RedisLoginRateLimiter,
-    ResilientLoginRateLimiter,
-)
+from long_invest.modules.auth.postgres_rate_limit import PostgresLoginRateLimiter
+from long_invest.modules.auth.rate_limit import LoginRateLimitPolicy
 from long_invest.modules.auth.repository import SqlAlchemyAuthRepository
 from long_invest.modules.auth.service import (
     AuthenticatedSession,
@@ -31,7 +27,6 @@ from long_invest.modules.auth.service import (
 from long_invest.modules.auth.tokens import CsrfCredentials, TokenService
 from long_invest.platform.audit.contracts import AuditRecord, AuditWrite
 from long_invest.platform.audit.service import AuditService
-from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 
@@ -141,7 +136,7 @@ class AuthApplication:
     def __init__(
         self,
         database: Database,
-        rate_limiter: ResilientLoginRateLimiter,
+        rate_limiter: LoginRateLimitPolicy,
         password_service: PasswordService,
         token_service: TokenService,
         *,
@@ -535,22 +530,14 @@ class AuthApplication:
 
 
 @lru_cache
-def get_auth_redis() -> Redis:
-    settings = get_settings()
-    return Redis.from_url(settings.redis_url, decode_responses=False)
-
-
-@lru_cache
 def get_auth_application() -> AuthApplication:
     passwords = PasswordService()
     tokens = TokenService()
-    limiter = ResilientLoginRateLimiter(
-        RedisLoginRateLimiter(get_auth_redis()),
-        InMemoryLoginRateLimiter(),
-    )
+    database = get_database()
+    limiter = PostgresLoginRateLimiter(database)
     dummy_hash = passwords.hash("fixed startup dummy password value")
     return AuthApplication(
-        get_database(),
+        database,
         limiter,
         passwords,
         tokens,
@@ -559,6 +546,4 @@ def get_auth_application() -> AuthApplication:
 
 
 async def close_auth_resources() -> None:
-    await get_auth_redis().aclose()
     get_auth_application.cache_clear()
-    get_auth_redis.cache_clear()

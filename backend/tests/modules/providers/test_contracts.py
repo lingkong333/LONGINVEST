@@ -27,6 +27,7 @@ def test_provider_contract_enumerations_are_stable() -> None:
         "SINA",
         "TUSHARE",
         "BAOSTOCK",
+        "TENCENT",
     }
 
 

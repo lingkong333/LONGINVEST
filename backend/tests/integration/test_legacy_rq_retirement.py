@@ -42,8 +42,10 @@ async def test_retirement_is_scoped_traceable_and_not_reversed() -> None:
         migrate(environment, "20260731_0036")
         engine = create_async_engine(rendered_owner_url)
         retired_id = uuid4()
+        already_canceled_id = uuid4()
         retained_id = uuid4()
         outbox_id = uuid4()
+        old_outbox_id = uuid4()
         async with engine.begin() as connection:
             for job_id, job_type in (
                 (retired_id, "ADMIN_TEST"),
@@ -81,6 +83,37 @@ async def test_retirement_is_scoped_traceable_and_not_reversed() -> None:
                     "dedupe_key": f"legacy-control:{retired_id}",
                 },
             )
+            await connection.execute(
+                text(
+                    "INSERT INTO job ("
+                    "id, job_type, queue, module_owner, priority, status, "
+                    "idempotency_scope, idempotency_key, request_hash, request_id"
+                    ") VALUES ("
+                    ":id, 'ADMIN_TEST', 'maintenance', 'maintenance', 0, "
+                    "'CANCELED', :scope, :key, :hash, :request_id)"
+                ),
+                {
+                    "id": already_canceled_id,
+                    "scope": f"test:{already_canceled_id}",
+                    "key": str(already_canceled_id),
+                    "hash": "1" * 64,
+                    "request_id": f"request-{already_canceled_id}",
+                },
+            )
+            await connection.execute(
+                text(
+                    "INSERT INTO event_outbox ("
+                    "id, topic, aggregate_type, aggregate_id, queue, payload, "
+                    "dedupe_key, status) VALUES ("
+                    ":id, 'jobs.control', 'job', :aggregate_id, 'maintenance', "
+                    "'{}'::jsonb, :dedupe_key, 'PENDING')"
+                ),
+                {
+                    "id": old_outbox_id,
+                    "aggregate_id": str(already_canceled_id),
+                    "dedupe_key": f"old-control:{already_canceled_id}",
+                },
+            )
 
         migrate(environment, "head")
         async with engine.connect() as connection:
@@ -100,6 +133,10 @@ async def test_retirement_is_scoped_traceable_and_not_reversed() -> None:
                 text("SELECT status FROM event_outbox WHERE id = :id"),
                 {"id": outbox_id},
             )
+            old_outbox_status = await connection.scalar(
+                text("SELECT status FROM event_outbox WHERE id = :id"),
+                {"id": old_outbox_id},
+            )
         assert retired.status == "CANCELED"
         assert retired.last_error_code == "LEGACY_RQ_REMOVED"
         assert retired.result_summary == {
@@ -109,8 +146,9 @@ async def test_retirement_is_scoped_traceable_and_not_reversed() -> None:
         }
         assert retained_status == "QUEUED"
         assert outbox_status == "DEAD"
+        assert old_outbox_status == "DEAD"
 
-        migrate(environment, "20260731_0036")
+        migrate(environment, "20260731_0036", command="downgrade")
         migrate(environment, "head")
         async with engine.connect() as connection:
             replayed = (
@@ -123,9 +161,14 @@ async def test_retirement_is_scoped_traceable_and_not_reversed() -> None:
         await engine.dispose()
 
 
-def migrate(environment: dict[str, str], revision: str) -> None:
+def migrate(
+    environment: dict[str, str],
+    revision: str,
+    *,
+    command: str = "upgrade",
+) -> None:
     subprocess.run(
-        [sys.executable, "-m", "alembic", "upgrade", revision],
+        [sys.executable, "-m", "alembic", command, revision],
         cwd=BACKEND,
         env=environment,
         check=True,

@@ -6,7 +6,6 @@ import pytest
 
 from long_invest.modules.system_status.adapters import (
     PostgresRuntimeStatusAdapter,
-    RqRuntimeStatusAdapter,
     SchedulerStatusAdapter,
 )
 from long_invest.modules.system_status.contracts import HealthStatus
@@ -91,37 +90,6 @@ async def test_scheduler_reports_stale_heartbeat_as_unavailable() -> None:
     assert result.status is HealthStatus.UNAVAILABLE
     assert result.automatic_scheduling_paused is True
     assert result.pause_reason == "scheduler heartbeat is stale"
-
-
-def test_rq_worker_state_uses_enum_value(monkeypatch) -> None:
-    class Connection:
-        def close(self) -> None:
-            pass
-
-    worker = SimpleNamespace(
-        name="worker-1",
-        queues=(SimpleNamespace(name="default"),),
-        state=SimpleNamespace(value="idle"),
-        birth_date=None,
-        last_heartbeat=None,
-        successful_job_count=2,
-        failed_job_count=1,
-        _job_id=None,
-    )
-    monkeypatch.setattr(
-        "long_invest.modules.system_status.adapters.Redis.from_url",
-        lambda _url: Connection(),
-    )
-    monkeypatch.setattr(
-        "long_invest.modules.system_status.adapters.Worker.all",
-        lambda connection: (worker,),
-    )
-
-    result = RqRuntimeStatusAdapter("redis://unused")._workers()
-
-    assert result[0].status == "IDLE"
-    assert result[0].processed_jobs == 2
-    assert result[0].failed_jobs == 1
 
 
 @pytest.mark.anyio

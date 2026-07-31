@@ -84,7 +84,9 @@ class EventOutbox(Base):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     locked_by: Mapped[str | None] = mapped_column(String(128))
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    rq_job_id: Mapped[str | None] = mapped_column(String(200))
+    legacy_dispatch_id: Mapped[str | None] = mapped_column(
+        "rq_job_id", String(200)
+    )
     last_error_code: Mapped[str | None] = mapped_column(String(100))
     last_error_summary: Mapped[str | None] = mapped_column(String(500))
     created_at: Mapped[datetime] = mapped_column(

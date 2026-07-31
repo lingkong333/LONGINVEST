@@ -14,7 +14,7 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
         and service["build"].get("target") == "runtime"
     }
 
-    assert len(backend_services) == 17
+    assert len(backend_services) == 3
     assert {service["image"] for service in backend_services.values()} == {
         "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
     }
@@ -80,7 +80,6 @@ def test_compose_publishes_only_the_frontend_on_public_port() -> None:
     ]
     assert services["api"]["ports"] == ["127.0.0.1:18080:8000"]
     assert "ports" not in services["postgres"]
-    assert "ports" not in services["redis"]
 
 
 def test_frontend_proxy_refreshes_api_container_address() -> None:

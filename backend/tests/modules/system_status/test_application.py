@@ -109,10 +109,10 @@ async def test_health_is_unavailable_when_a_critical_component_is_down() -> None
                     updated_at=NOW,
                 ),
                 ComponentStatus(
-                    name="redis",
-                    category="cache",
+                    name="disk",
+                    category="storage",
                     status=HealthStatus.HEALTHY,
-                    source="redis-probe",
+                    source="local-filesystem",
                     updated_at=NOW,
                 ),
             )
@@ -129,10 +129,10 @@ async def test_health_is_degraded_for_a_noncritical_failure() -> None:
         Components(
             (
                 ComponentStatus(
-                    name="redis",
-                    category="cache",
+                    name="disk",
+                    category="storage",
                     status=HealthStatus.UNAVAILABLE,
-                    source="redis-probe",
+                    source="local-filesystem",
                     updated_at=NOW,
                 ),
             )

@@ -52,12 +52,12 @@ def test_configure_logging_accepts_process_service_name() -> None:
         level="INFO",
         stream=stream,
         use_queue=False,
-        service="longinvest-dispatcher",
+        service="longinvest-background",
     )
 
     structlog.get_logger("test").info("cycle_complete")
 
-    assert json.loads(stream.getvalue())["service"] == "longinvest-dispatcher"
+    assert json.loads(stream.getvalue())["service"] == "longinvest-background"
 
 
 def test_full_log_queue_drops_without_blocking() -> None:

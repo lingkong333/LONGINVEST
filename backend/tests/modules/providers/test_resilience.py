@@ -12,9 +12,7 @@ from long_invest.modules.providers.resilience import (
     InMemoryProviderRuntimeState,
     ProviderCallError,
     ProviderInvocationPipeline,
-    ProviderRateLimiter,
     ProviderRouteSetting,
-    RedisProviderRuntimeState,
     StaticProviderConfiguration,
 )
 
@@ -61,26 +59,6 @@ def test_disabled_circuit_requires_single_probe_to_recover() -> None:
     assert not circuit.allow(*key, now=now)
     circuit.record_success(*key, now=now)
     assert circuit.state(*key, now=now) is CircuitState.CLOSED
-
-
-def test_rate_limiter_reserves_realtime_capacity_and_degrades_conservatively() -> None:
-    limiter = ProviderRateLimiter(
-        global_limit=4, capability_limit=3, realtime_reserved=2
-    )
-    historical = ProviderCapability.HISTORICAL_DAILY_QFQ
-    realtime = ProviderCapability.REALTIME_QUOTE_BATCH
-    assert limiter.acquire(historical)
-    assert limiter.acquire(historical)
-    assert not limiter.acquire(historical)
-    assert limiter.acquire(realtime)
-    assert limiter.acquire(realtime)
-    limiter.redis_failed()
-    limiter.release(historical)
-    limiter.release(historical)
-    limiter.release(realtime)
-    limiter.release(realtime)
-    assert limiter.acquire(historical)
-    assert not limiter.acquire(historical)
 
 
 def test_sina_history_default_route_remains_four_concurrent_requests() -> None:
@@ -168,42 +146,6 @@ def test_sina_history_capabilities_share_one_rate_bucket() -> None:
         assert await runtime.acquire(qfq) is None
         now[0] += 3
         assert await runtime.acquire(qfq) is not None
-
-    asyncio.run(scenario())
-
-
-def test_redis_lease_is_released_by_the_backend_that_acquired_it() -> None:
-    class Redis:
-        def __init__(self) -> None:
-            self.failed = False
-            self.eval_calls = 0
-
-        async def eval(self, *args):
-            del args
-            self.eval_calls += 1
-            if self.failed:
-                raise ConnectionError("redis unavailable")
-            return 1
-
-    redis = Redis()
-    runtime = RedisProviderRuntimeState(redis, realtime_reserved=0)
-    setting = ProviderRouteSetting(
-        ProviderCode.EASTMONEY,
-        ProviderCapability.REALTIME_QUOTE_BATCH,
-        rate_per_second=100,
-    )
-
-    async def scenario() -> None:
-        redis_lease = await runtime.acquire(setting)
-        assert redis_lease is not None and redis_lease.backend == "redis"
-        redis.failed = True
-        await runtime.release(setting, redis_lease)
-        local_lease = await runtime.acquire(setting)
-        assert local_lease is not None and local_lease.backend == "local"
-        redis.failed = False
-        calls = redis.eval_calls
-        await runtime.release(setting, local_lease)
-        assert redis.eval_calls == calls
 
     asyncio.run(scenario())
 

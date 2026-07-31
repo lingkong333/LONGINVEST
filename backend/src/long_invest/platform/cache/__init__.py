@@ -1,2 +1,0 @@
-"""Redis-backed temporary coordination."""
-

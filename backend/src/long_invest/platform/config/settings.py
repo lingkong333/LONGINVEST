@@ -28,7 +28,6 @@ class AppSettings(BaseSettings):
     )
     database_app_role: str = "longinvest_app"
     database_app_password: str = "longinvest-app-local-only"
-    redis_url: str = "redis://redis:6379/0"
     eastmoney_history_transport: Literal["curl", "playwright"] = "curl"
     eastmoney_history_resolve_ips: str = ""
     eastmoney_history_min_interval_seconds: float = Field(default=3, ge=1, le=30)

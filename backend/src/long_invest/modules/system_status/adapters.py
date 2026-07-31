@@ -3,10 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
 
-from redis import Redis
-from rq import Queue, Worker
 from sqlalchemy import func, select
 
 from long_invest.modules.monitoring.scheduler import MonitorOccurrenceApplication
@@ -156,77 +153,6 @@ class PostgresRuntimeStatusAdapter:
         )
 
 
-class RqRuntimeStatusAdapter:
-    def __init__(self, redis_url: str) -> None:
-        self._redis_url = redis_url
-
-    async def list_workers(self) -> tuple[WorkerStatus, ...]:
-        return await asyncio.to_thread(self._workers)
-
-    async def list_queues(self) -> tuple[QueueStatus, ...]:
-        return await asyncio.to_thread(self._queues)
-
-    def _workers(self) -> tuple[WorkerStatus, ...]:
-        connection = Redis.from_url(self._redis_url)
-        try:
-            result = []
-            for worker in Worker.all(connection=connection):
-                current_job_id = _uuid_or_none(getattr(worker, "_job_id", None))
-                queues = tuple(queue.name for queue in worker.queues) or ("unknown",)
-                for queue_name in queues:
-                    result.append(
-                        WorkerStatus(
-                            worker_id=worker.name,
-                            queue=queue_name,
-                            status=str(
-                                getattr(worker.state, "value", worker.state)
-                            ).upper(),
-                            current_job_id=current_job_id,
-                            started_at=getattr(worker, "birth_date", None),
-                            heartbeat_at=getattr(worker, "last_heartbeat", None),
-                            processed_jobs=int(
-                                getattr(worker, "successful_job_count", 0)
-                            ),
-                            failed_jobs=int(getattr(worker, "failed_job_count", 0)),
-                        )
-                    )
-            return tuple(result)
-        finally:
-            connection.close()
-
-    def _queues(self) -> tuple[QueueStatus, ...]:
-        connection = Redis.from_url(self._redis_url)
-        try:
-            now = datetime.now(UTC)
-            workers = Worker.all(connection=connection)
-            active_by_queue: dict[str, int] = {}
-            for worker in workers:
-                for queue in worker.queues:
-                    active_by_queue[queue.name] = active_by_queue.get(queue.name, 0) + 1
-            result = []
-            for queue in Queue.all(connection=connection):
-                active = active_by_queue.get(queue.name, 0)
-                status = (
-                    HealthStatus.HEALTHY
-                    if active > 0 or queue.count == 0
-                    else HealthStatus.DEGRADED
-                )
-                jobs = queue.get_jobs(offset=0, length=1)
-                result.append(
-                    QueueStatus(
-                        name=queue.name,
-                        status=status,
-                        depth=queue.count,
-                        active_workers=active,
-                        oldest_job_at=jobs[0].enqueued_at if jobs else None,
-                        updated_at=now,
-                    )
-                )
-            return tuple(sorted(result, key=lambda item: item.name))
-        finally:
-            connection.close()
-
-
 class SchedulerStatusAdapter:
     def __init__(
         self,
@@ -372,13 +298,6 @@ async def _probe(operation) -> bool:
         return bool(await operation())
     except Exception:
         return False
-
-
-def _uuid_or_none(value) -> UUID | None:
-    try:
-        return UUID(str(value)) if value else None
-    except ValueError:
-        return None
 
 
 def _scheduler_plans(runtime) -> tuple[SchedulerPlan, ...]:

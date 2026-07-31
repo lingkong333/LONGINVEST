@@ -12,7 +12,6 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
         "LONGINVEST_DATABASE_OWNER_URL",
         "LONGINVEST_DATABASE_APP_ROLE",
         "LONGINVEST_DATABASE_APP_PASSWORD",
-        "LONGINVEST_REDIS_URL",
         "LONGINVEST_EASTMONEY_HISTORY_TRANSPORT",
         "LONGINVEST_EASTMONEY_HISTORY_RESOLVE_IPS",
         "LONGINVEST_EASTMONEY_HISTORY_MIN_INTERVAL_SECONDS",
@@ -29,7 +28,6 @@ def test_settings_use_safe_defaults(monkeypatch) -> None:
     assert settings.database_url.startswith("postgresql+")
     assert settings.database_owner_url.startswith("postgresql+")
     assert settings.database_app_role == "longinvest_app"
-    assert settings.redis_url.startswith("redis://")
     assert settings.eastmoney_history_transport == "curl"
     assert settings.eastmoney_history_resolve_ips == ""
     assert settings.eastmoney_history_min_interval_seconds == 3

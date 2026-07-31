@@ -806,7 +806,7 @@ class ProviderRepository:
                 )
                 .with_for_update()
             )
-            previous_state = "UNKNOWN"
+            previous_state = str(snapshot.get("transition_from") or "UNKNOWN")
             if circuit is None:
                 circuit = ProviderCircuitState(
                     provider_code=setting.provider.value,
@@ -820,7 +820,8 @@ class ProviderRepository:
                 )
                 self._session.add(circuit)
             else:
-                previous_state = circuit.state
+                if previous_state == "UNKNOWN":
+                    previous_state = circuit.state
                 circuit.state = state
                 circuit.consecutive_failures = int(failures)
                 circuit.cooldown_index = int(
@@ -828,16 +829,18 @@ class ProviderRepository:
                 )
                 circuit.opened_at = persisted_opened_at
             if previous_state != state:
-                self._session.add(
-                    ProviderCircuitHistory(
-                        provider_code=setting.provider.value,
-                        capability=setting.capability.value,
-                        from_state=previous_state,
-                        to_state=state,
-                        reason_code=error_code or "PROVIDER_REQUEST_SUCCEEDED",
-                        occurred_at=occurred_at,
+                if not snapshot.get("transition_persisted"):
+                    self._session.add(
+                        ProviderCircuitHistory(
+                            provider_code=setting.provider.value,
+                            capability=setting.capability.value,
+                            from_state=previous_state,
+                            to_state=state,
+                            reason_code=error_code
+                            or "PROVIDER_REQUEST_SUCCEEDED",
+                            occurred_at=occurred_at,
+                        )
                     )
-                )
                 await self._events.append(
                     "provider.circuit_state_changed",
                     {
@@ -928,7 +931,10 @@ class ProviderRepository:
                 )
                 .with_for_update()
             )
-            previous_state = "UNKNOWN" if circuit is None else circuit.state
+            previous_state = str(
+                snapshot.get("transition_from")
+                or ("UNKNOWN" if circuit is None else circuit.state)
+            )
             if circuit is None:
                 circuit = ProviderCircuitState(
                     provider_code=setting.provider.value,
@@ -948,16 +954,17 @@ class ProviderRepository:
                     snapshot.get("cooldown_index", snapshot.get("level", 0))
                 )
             if previous_state != "HALF_OPEN":
-                self._session.add(
-                    ProviderCircuitHistory(
-                        provider_code=setting.provider.value,
-                        capability=setting.capability.value,
-                        from_state=previous_state,
-                        to_state="HALF_OPEN",
-                        reason_code="PROVIDER_HALF_OPEN_PROBE_GRANTED",
-                        occurred_at=occurred_at,
+                if not snapshot.get("transition_persisted"):
+                    self._session.add(
+                        ProviderCircuitHistory(
+                            provider_code=setting.provider.value,
+                            capability=setting.capability.value,
+                            from_state=previous_state,
+                            to_state="HALF_OPEN",
+                            reason_code="PROVIDER_HALF_OPEN_PROBE_GRANTED",
+                            occurred_at=occurred_at,
+                        )
                     )
-                )
                 payload = {
                     "provider": setting.provider.value,
                     "capability": setting.capability.value,

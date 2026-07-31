@@ -3,7 +3,6 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
 import httpx
-from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.auth.audit import AuditContext
@@ -26,8 +25,10 @@ from long_invest.modules.providers.playwright_http_client import (
     PlaywrightProviderHttpClient,
     create_playwright_json_client,
 )
+from long_invest.modules.providers.postgres_runtime import (
+    PostgresProviderRuntimeState,
+)
 from long_invest.modules.providers.repository import ProviderRepository
-from long_invest.modules.providers.resilience import RedisProviderRuntimeState
 from long_invest.modules.providers.router import ProviderRouter
 from long_invest.modules.providers.service import ProviderService
 from long_invest.modules.providers.sina import SinaRealtimeProvider
@@ -135,15 +136,13 @@ class ProviderConflictQualityAdapter:
 class ProviderResources:
     http_client: httpx.AsyncClient
     history_http_client: BrowserProviderHttpClient | PlaywrightProviderHttpClient
-    redis: Redis
-    runtime: RedisProviderRuntimeState
+    runtime: PostgresProviderRuntimeState
     providers: dict[ProviderCode, object]
     budget: ProviderRequestBudget
 
     async def close(self) -> None:
         await self.http_client.aclose()
         await self.history_http_client.close()
-        await self.redis.aclose()
 
 
 _resources: ProviderResources | None = None
@@ -198,12 +197,10 @@ def get_provider_resources() -> ProviderResources:
         )
         settings = get_settings()
         history_http = build_history_http_client(settings, budget=budget)
-        redis = Redis.from_url(settings.redis_url)
         _resources = ProviderResources(
             http_client=client,
             history_http_client=history_http,
-            redis=redis,
-            runtime=RedisProviderRuntimeState(redis),
+            runtime=PostgresProviderRuntimeState(get_database()),
             budget=budget,
             providers={
                 ProviderCode.EASTMONEY: EastmoneyProvider(

@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import Protocol
 
-from long_invest.platform.cache.redis import get_redis_probe
 from long_invest.platform.database.engine import get_database
 
 
@@ -25,31 +24,21 @@ class ReadinessService:
         self,
         *,
         database: DatabaseProbe,
-        redis: DependencyProbe,
     ) -> None:
         self._database = database
-        self._redis = redis
 
     async def check(self) -> ReadinessReport:
         postgresql_status = await self._probe(self._database)
         migration_status = await self._probe_migration(self._database)
-        redis_status = await self._probe(self._redis)
         dependencies = {
             "postgresql": postgresql_status,
             "migration": migration_status,
-            "redis": redis_status,
         }
 
         if postgresql_status != "healthy" or migration_status != "compatible":
             return ReadinessReport(
                 status="unavailable",
                 http_status=503,
-                dependencies=dependencies,
-            )
-        if redis_status != "healthy":
-            return ReadinessReport(
-                status="degraded",
-                http_status=200,
                 dependencies=dependencies,
             )
         return ReadinessReport(
@@ -75,7 +64,4 @@ class ReadinessService:
 
 
 def get_readiness_service() -> ReadinessService:
-    return ReadinessService(
-        database=get_database(),
-        redis=get_redis_probe(),
-    )
+    return ReadinessService(database=get_database())

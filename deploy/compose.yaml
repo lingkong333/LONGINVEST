@@ -47,6 +47,7 @@ services:
       - no-new-privileges:true
 
   redis:
+    profiles: ["isolated-processes"]
     image: redis:7-alpine
     command:
       - redis-server
@@ -77,7 +78,6 @@ services:
       LONGINVEST_DATABASE_OWNER_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_DATABASE_APP_ROLE: longinvest_app
       LONGINVEST_DATABASE_APP_PASSWORD: ${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}
-      LONGINVEST_REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,7 +93,6 @@ services:
     environment:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
-      LONGINVEST_REDIS_URL: redis://redis:6379/0
       LONGINVEST_LOG_FILE: /var/log/longinvest/application.jsonl
       LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
       LONGINVEST_BACKTEST_CONCURRENCY: ${LONGINVEST_BACKTEST_CONCURRENCY:-4}
@@ -104,8 +103,6 @@ services:
       migrate:
         condition: service_completed_successfully
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     ports:
       - 127.0.0.1:18080:8000
@@ -175,7 +172,6 @@ services:
     environment:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
-      LONGINVEST_REDIS_URL: redis://redis:6379/0
       LONGINVEST_LOG_FILE: /var/log/longinvest/background-core-supervisor.jsonl
       LONGINVEST_MASTER_KEY: ${LONGINVEST_MASTER_KEY:-}
       LONGINVEST_NOTIFICATION_ALLOWED_SMTP_HOSTS: ${LONGINVEST_NOTIFICATION_ALLOWED_SMTP_HOSTS:-}
@@ -185,8 +181,6 @@ services:
       migrate:
         condition: service_completed_successfully
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     volumes:
       - application_logs:/var/log/longinvest
@@ -691,13 +685,10 @@ services:
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_DATABASE_OWNER_URL: postgresql+asyncpg://${LONGINVEST_POSTGRES_USER:-longinvest}:${LONGINVEST_POSTGRES_PASSWORD:-longinvest-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
       LONGINVEST_DATABASE_APP_ROLE: longinvest_app
-      LONGINVEST_REDIS_URL: redis://redis:6379/1
     depends_on:
       migrate:
         condition: service_completed_successfully
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     read_only: true
     volumes:

@@ -24,23 +24,20 @@ from long_invest.modules.system_status.contracts import (
     WorkerStatus,
 )
 from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
-from long_invest.platform.cache.redis import RedisProbe
 from long_invest.platform.database.engine import Database
 from long_invest.platform.jobs.admin import JobAdminService
 from long_invest.platform.jobs.contracts import JobStatus
 
 
 class ComponentStatusAdapter:
-    def __init__(self, database: Database, redis: RedisProbe) -> None:
+    def __init__(self, database: Database) -> None:
         self._database = database
-        self._redis = redis
 
     async def list_components(self) -> tuple[ComponentStatus, ...]:
         now = datetime.now(UTC)
-        database_ok, migration_ok, redis_ok = await asyncio.gather(
+        database_ok, migration_ok = await asyncio.gather(
             _probe(self._database.ping),
             _probe(self._database.migration_is_current),
-            _probe(self._redis.ping),
         )
         usage = shutil.disk_usage("/")
         free_ratio = usage.free / usage.total if usage.total else 0
@@ -60,13 +57,6 @@ class ComponentStatusAdapter:
                 source="database-probe",
                 updated_at=now,
                 details=(StatusDetail(key="migration_current", value=migration_ok),),
-            ),
-            ComponentStatus(
-                name="redis",
-                category="coordination",
-                status=(HealthStatus.HEALTHY if redis_ok else HealthStatus.UNAVAILABLE),
-                source="redis-probe",
-                updated_at=now,
             ),
             ComponentStatus(
                 name="disk",

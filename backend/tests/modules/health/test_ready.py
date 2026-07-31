@@ -33,35 +33,19 @@ class Probe:
 async def test_readiness_is_ready_when_dependencies_are_healthy() -> None:
     report = await ReadinessService(
         database=Probe(),
-        redis=Probe(),
     ).check()
 
     assert report.status == "ready"
     assert report.dependencies == {
         "postgresql": "healthy",
         "migration": "compatible",
-        "redis": "healthy",
     }
-
-
-@pytest.mark.anyio
-async def test_readiness_is_degraded_when_only_redis_fails() -> None:
-    report = await ReadinessService(
-        database=Probe(),
-        redis=Probe(ConnectionError("redis unavailable")),
-    ).check()
-
-    assert report.status == "degraded"
-    assert report.http_status == 200
-    assert report.dependencies["postgresql"] == "healthy"
-    assert report.dependencies["redis"] == "unavailable"
 
 
 @pytest.mark.anyio
 async def test_readiness_is_unavailable_when_postgresql_fails() -> None:
     report = await ReadinessService(
         database=Probe(ConnectionError("database unavailable")),
-        redis=Probe(),
     ).check()
 
     assert report.status == "unavailable"
@@ -72,7 +56,6 @@ async def test_readiness_is_unavailable_when_postgresql_fails() -> None:
 async def test_readiness_is_unavailable_when_migration_is_not_current() -> None:
     report = await ReadinessService(
         database=Probe(compatible=False),
-        redis=Probe(),
     ).check()
 
     assert report.status == "unavailable"
@@ -97,7 +80,6 @@ async def test_ready_endpoint_returns_standard_failure_when_database_is_down() -
     app = create_app()
     app.dependency_overrides[get_readiness_service] = lambda: ReadinessService(
         database=Probe(ConnectionError("database unavailable")),
-        redis=Probe(),
     )
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

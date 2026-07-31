@@ -20,7 +20,7 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
     }
 
 
-def test_default_compose_has_five_persistent_containers() -> None:
+def test_default_compose_has_four_persistent_containers() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     default_persistent = {
@@ -31,7 +31,6 @@ def test_default_compose_has_five_persistent_containers() -> None:
 
     assert default_persistent == {
         "postgres",
-        "redis",
         "api",
         "frontend",
         "background-core",

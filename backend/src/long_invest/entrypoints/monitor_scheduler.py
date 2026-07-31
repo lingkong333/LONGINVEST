@@ -9,6 +9,10 @@ from zoneinfo import ZoneInfo
 
 import structlog
 
+from long_invest.bootstrap.backtest_postgres_jobs import (
+    backtest_batch,
+    backtest_single,
+)
 from long_invest.bootstrap.history_backfills import (
     build_history_backfill_job_handler,
 )
@@ -75,6 +79,8 @@ def build_market_data_handlers(database: Database):
         "TARGET_CALCULATE": target_calculate,
         "STRATEGY_VALIDATE": strategy_validate,
         "STRATEGY_PUBLISH": strategy_publish,
+        "BACKTEST_SINGLE": backtest_single,
+        "BACKTEST_BATCH": backtest_batch,
     }
 
 

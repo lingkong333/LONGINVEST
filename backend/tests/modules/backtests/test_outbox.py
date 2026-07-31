@@ -2,7 +2,10 @@ import asyncio
 from types import SimpleNamespace
 from uuid import uuid4
 
-from long_invest.modules.backtests.outbox import BacktestOutboxAdapter
+from long_invest.modules.backtests.outbox import (
+    BacktestOutboxAdapter,
+    _backtest_concurrency,
+)
 from long_invest.modules.backtests.service import BacktestEvent
 
 
@@ -17,6 +20,7 @@ class Writer:
 class Jobs:
     def __init__(self) -> None:
         self.values = []
+        self.initialized = None
 
     async def submit(self, command):
         self.values.append(command)
@@ -26,7 +30,13 @@ class Jobs:
         self.initialized = (job_id, item_keys)
 
 
-def test_created_event_uses_an_isolated_single_backtest_queue() -> None:
+def test_backtest_concurrency_accepts_any_positive_integer(monkeypatch) -> None:
+    monkeypatch.setenv("LONGINVEST_BACKTEST_CONCURRENCY", "32")
+
+    assert _backtest_concurrency() == 32
+
+
+def test_created_event_uses_a_postgres_single_backtest_job() -> None:
     async def scenario() -> None:
         writer = Writer()
         jobs = Jobs()
@@ -46,10 +56,12 @@ def test_created_event_uses_an_isolated_single_backtest_queue() -> None:
             )
         )
 
-        assert writer.values[0]["queue"] == "domain-events"
+        assert writer.values == []
         command = jobs.values[0]
         assert command.job_type == "BACKTEST_SINGLE"
-        assert command.queue == "backtest-single"
+        assert command.module_owner == "backtests"
+        assert command.priority == 2
+        assert command.recoverable is True
         assert command.config_snapshot == {
             "backtest_task_id": str(task_id),
             "generation": 1,
@@ -94,7 +106,7 @@ def test_resumed_event_submits_the_requested_recovery_generation() -> None:
     asyncio.run(scenario())
 
 
-def test_market_event_uses_bulk_queue_and_initializes_frozen_items() -> None:
+def test_market_event_uses_one_postgres_batch_job() -> None:
     async def scenario() -> None:
         jobs = Jobs()
         adapter = BacktestOutboxAdapter(
@@ -116,16 +128,16 @@ def test_market_event_uses_bulk_queue_and_initializes_frozen_items() -> None:
         )
 
         assert job_id is not None
-        assert jobs.values[0].job_type == "BACKTEST_BULK"
-        assert jobs.values[0].queue == "bulk-backtest"
+        assert jobs.values[0].job_type == "BACKTEST_BATCH"
+        assert jobs.values[0].module_owner == "backtests"
+        assert jobs.values[0].priority == 3
+        assert jobs.values[0].recoverable is True
         assert jobs.values[0].config_snapshot["item_keys"] == [
             "000001.SZ",
             "600000.SH",
         ]
-        assert jobs.initialized == (
-            job_id,
-            ("000001.SZ", "600000.SH"),
-        )
+        assert jobs.values[0].config_snapshot["concurrency"] == 4
+        assert jobs.initialized is None
 
     asyncio.run(scenario())
 

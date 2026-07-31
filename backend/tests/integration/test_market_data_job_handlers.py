@@ -6,6 +6,10 @@ from uuid import uuid4
 import pytest
 
 import long_invest.bootstrap.jobs as jobs_module
+from long_invest.bootstrap.backtest_postgres_jobs import (
+    backtest_batch,
+    backtest_single,
+)
 from long_invest.bootstrap.jobs import (
     DatabaseQuoteCycles,
     _corporate_action_scope,
@@ -59,6 +63,8 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
     assert handlers["TARGET_CALCULATE"] is target_calculate
     assert handlers["STRATEGY_VALIDATE"] is strategy_validate
     assert handlers["STRATEGY_PUBLISH"] is strategy_publish
+    assert handlers["BACKTEST_SINGLE"] is backtest_single
+    assert handlers["BACKTEST_BATCH"] is backtest_batch
     assert set(handlers) == {
         "DAILY_MARKET_DATA",
         "DAILY_MARKET_RECOVERY",
@@ -69,6 +75,8 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
         "TARGET_CALCULATE",
         "STRATEGY_VALIDATE",
         "STRATEGY_PUBLISH",
+        "BACKTEST_SINGLE",
+        "BACKTEST_BATCH",
     }
 
 

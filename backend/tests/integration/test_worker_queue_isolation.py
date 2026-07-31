@@ -2,8 +2,6 @@ from pathlib import Path
 
 import yaml
 
-from long_invest.entrypoints.process_supervisor import process_specs
-
 
 def test_compose_backend_runtime_services_share_one_image() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
@@ -20,21 +18,6 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
     assert {service["image"] for service in backend_services.values()} == {
         "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
     }
-
-
-def test_compose_workers_listen_only_to_their_role_queue() -> None:
-    expected = {
-        "worker-maintenance": "maintenance",
-        "worker-qfq-refresh": "qfq-refresh",
-        "worker-signals": "signals",
-    }
-    actual = {
-        spec.name: dict(spec.environment).get("LONGINVEST_WORKER_QUEUES")
-        for spec in process_specs("core")
-        if spec.name in expected
-    }
-
-    assert actual == expected
 
 
 def test_default_compose_has_five_persistent_containers() -> None:
@@ -63,7 +46,12 @@ def test_consolidated_background_container_has_strategy_runner_permission() -> N
     assert "background-strategy" not in services
     assert any("docker.sock" in volume for volume in core["volumes"])
     assert core["mem_limit"] == "1536m"
-    assert core["healthcheck"]["test"][-1] == "core"
+    assert core["command"] == [
+        "python",
+        "-m",
+        "long_invest.entrypoints.background",
+    ]
+    assert core["healthcheck"]["test"][-1] == "--healthcheck"
 
 
 def test_history_backfill_runs_inside_the_existing_core_background() -> None:
@@ -77,9 +65,8 @@ def test_history_backfill_runs_inside_the_existing_core_background() -> None:
     assert "worker-bulk-history" not in services
     assert "FROM base AS collector-runtime" not in dockerfile
     assert "uv sync --frozen --no-dev --extra collector" in dockerfile
-    assert any(
-        spec.module == "long_invest.entrypoints.background"
-        for spec in process_specs("core")
+    assert services["background-core"]["command"][-1] == (
+        "long_invest.entrypoints.background"
     )
 
 
@@ -109,25 +96,22 @@ def test_postgres_background_is_an_isolated_private_service() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     service = services["background-core"]
-    background = next(
-        spec for spec in process_specs("core") if spec.name == "background"
-    )
-
-    assert background.module == "long_invest.entrypoints.background"
+    assert service["command"][-1] == "long_invest.entrypoints.background"
     assert "ports" not in service
     assert service["read_only"] is True
     assert "no-new-privileges:true" in service["security_opt"]
 
 
-def test_signal_projector_is_an_isolated_private_service() -> None:
+def test_signal_projector_is_not_a_separate_default_process() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
-    service = services["background-core"]
-    projector = next(
-        spec for spec in process_specs("core") if spec.name == "signal-projector"
-    )
-
-    assert projector.module == "long_invest.entrypoints.signal_projector"
-    assert "ports" not in service
-    assert service["read_only"] is True
-    assert "no-new-privileges:true" in service["security_opt"]
+    default_commands = {
+        tuple(service.get("command", ()))
+        for service in services.values()
+        if "profiles" not in service
+    }
+    assert (
+        "python",
+        "-m",
+        "long_invest.entrypoints.signal_projector",
+    ) not in default_commands

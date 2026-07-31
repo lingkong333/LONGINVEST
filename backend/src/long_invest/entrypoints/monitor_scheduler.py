@@ -5,6 +5,7 @@ import socket
 from contextlib import suppress
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import structlog
@@ -46,6 +47,7 @@ from long_invest.modules.scheduling.runtime import (
     PostgresPersistentJobSubmitter,
 )
 from long_invest.modules.securities.application import SecurityApplication
+from long_invest.modules.signals.projector import SignalEventProjector
 from long_invest.modules.strategies.jobs import (
     configure_strategy_validation_executor,
     strategy_publish,
@@ -60,6 +62,7 @@ from long_invest.platform.jobs.postgres_runner import PostgresJobRunner
 from long_invest.platform.logging.configure import configure_logging
 
 HEARTBEAT_SECONDS = 5
+BACKGROUND_HEARTBEAT_PATH = Path("/tmp/longinvest-background-heartbeat")
 logger = structlog.get_logger(__name__)
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 
@@ -137,6 +140,7 @@ async def _run_intraday(
 
 async def _heartbeat(scheduler: DualPathScheduler, stop: asyncio.Event) -> None:
     while not stop.is_set():
+        BACKGROUND_HEARTBEAT_PATH.touch()
         try:
             await scheduler.heartbeat()
         except Exception:
@@ -165,6 +169,29 @@ async def _run_notification_channel(
         if not worked:
             with suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
+
+
+async def _run_signal_projection(
+    projector: SignalEventProjector,
+    *,
+    stop: asyncio.Event,
+    poll_seconds: float,
+    batch_size: int,
+) -> None:
+    while not stop.is_set():
+        try:
+            report = await projector.project_once(limit=batch_size)
+            if report.claimed:
+                logger.info(
+                    "signal_projection_cycle",
+                    category="signals",
+                    claimed=report.claimed,
+                    projected=report.projected,
+                )
+        except Exception:
+            logger.exception("signal_projection_failed", category="signals")
+        with suppress(TimeoutError):
+            await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
 
 
 async def run() -> None:
@@ -219,6 +246,7 @@ async def run() -> None:
         )
         for channel in DeliveryChannel
     }
+    signal_projector = SignalEventProjector(database)
     listener = PostgresNotificationListener(settings.database_url)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -233,6 +261,14 @@ async def run() -> None:
             asyncio.create_task(_heartbeat(scheduler, stop)),
             asyncio.create_task(runner.run_forever(stop)),
             asyncio.create_task(history_runner.run_forever(stop)),
+            asyncio.create_task(
+                _run_signal_projection(
+                    signal_projector,
+                    stop=stop,
+                    poll_seconds=settings.dispatcher_scan_interval_seconds,
+                    batch_size=settings.dispatcher_batch_size,
+                )
+            ),
             *(
                 asyncio.create_task(
                     _run_notification_channel(

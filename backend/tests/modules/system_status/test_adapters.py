@@ -1,13 +1,16 @@
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
 from long_invest.modules.system_status.adapters import (
+    PostgresRuntimeStatusAdapter,
     RqRuntimeStatusAdapter,
     SchedulerStatusAdapter,
 )
 from long_invest.modules.system_status.contracts import HealthStatus
+from long_invest.platform.jobs.contracts import JobStatus
 
 
 @pytest.mark.anyio
@@ -119,6 +122,97 @@ def test_rq_worker_state_uses_enum_value(monkeypatch) -> None:
     assert result[0].status == "IDLE"
     assert result[0].processed_jobs == 2
     assert result[0].failed_jobs == 1
+
+
+@pytest.mark.anyio
+async def test_postgres_runtime_reports_the_single_background_and_queue(
+    monkeypatch,
+) -> None:
+    now = datetime.now(UTC)
+    current_job_id = uuid4()
+    totals = {
+        JobStatus.RUNNING: 1,
+        JobStatus.PENDING: 3,
+        JobStatus.SUCCEEDED: 7,
+        JobStatus.FAILED: 2,
+    }
+
+    class Jobs:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def list_jobs(self, *, status, **_filters):
+            items = (
+                (SimpleNamespace(id=current_job_id),)
+                if status is JobStatus.RUNNING
+                else ()
+            )
+            return SimpleNamespace(items=items, total=totals[status])
+
+    class SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    database = SimpleNamespace(session=lambda: SessionContext())
+    runtime = SimpleNamespace(
+        get=_async_value(SimpleNamespace(heartbeat_at=now))
+    )
+    monkeypatch.setattr(
+        "long_invest.modules.system_status.adapters.JobAdminService",
+        Jobs,
+    )
+    adapter = PostgresRuntimeStatusAdapter(database, runtime)
+
+    workers = await adapter.list_workers()
+    queues = await adapter.list_queues()
+
+    assert workers[0].worker_id == "ordinary-background"
+    assert workers[0].status == "RUNNING"
+    assert workers[0].current_job_id == current_job_id
+    assert workers[0].processed_jobs == 7
+    assert workers[0].failed_jobs == 2
+    assert queues[0].name == "postgres"
+    assert queues[0].depth == 3
+    assert queues[0].active_workers == 1
+
+
+@pytest.mark.anyio
+async def test_postgres_runtime_reports_stale_background_as_unavailable(
+    monkeypatch,
+) -> None:
+    class Jobs:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def list_jobs(self, **_filters):
+            return SimpleNamespace(items=(), total=0)
+
+    class SessionContext:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, *_args):
+            return None
+
+    database = SimpleNamespace(session=lambda: SessionContext())
+    runtime = SimpleNamespace(
+        get=_async_value(
+            SimpleNamespace(
+                heartbeat_at=datetime.now(UTC) - timedelta(seconds=31)
+            )
+        )
+    )
+    monkeypatch.setattr(
+        "long_invest.modules.system_status.adapters.JobAdminService",
+        Jobs,
+    )
+    adapter = PostgresRuntimeStatusAdapter(database, runtime)
+
+    assert (await adapter.list_workers())[0].status == "UNAVAILABLE"
+    assert (await adapter.list_queues())[0].active_workers == 0
 
 
 def _async_value(value):

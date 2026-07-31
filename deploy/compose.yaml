@@ -171,8 +171,7 @@ services:
     command:
       - python
       - -m
-      - long_invest.entrypoints.process_supervisor
-      - core
+      - long_invest.entrypoints.background
     environment:
       LONGINVEST_ENVIRONMENT: development
       LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
@@ -201,9 +200,8 @@ services:
         - CMD
         - python
         - -m
-        - long_invest.entrypoints.process_supervisor
+        - long_invest.entrypoints.background
         - --healthcheck
-        - core
       interval: 10s
       timeout: 3s
       retries: 6

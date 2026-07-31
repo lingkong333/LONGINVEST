@@ -26,6 +26,8 @@ from long_invest.modules.system_status.contracts import (
 from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
 from long_invest.platform.cache.redis import RedisProbe
 from long_invest.platform.database.engine import Database
+from long_invest.platform.jobs.admin import JobAdminService
+from long_invest.platform.jobs.contracts import JobStatus
 
 
 class ComponentStatusAdapter:
@@ -61,7 +63,7 @@ class ComponentStatusAdapter:
             ),
             ComponentStatus(
                 name="redis",
-                category="queue",
+                category="coordination",
                 status=(HealthStatus.HEALTHY if redis_ok else HealthStatus.UNAVAILABLE),
                 source="redis-probe",
                 updated_at=now,
@@ -78,6 +80,88 @@ class ComponentStatusAdapter:
                         key="free_percent", value=round(free_ratio * 100, 2), unit="%"
                     ),
                 ),
+            ),
+        )
+
+
+class PostgresRuntimeStatusAdapter:
+    def __init__(
+        self,
+        database: Database,
+        runtime: SchedulerRuntimeApplication,
+        *,
+        stale_after_seconds: int = 30,
+    ) -> None:
+        self._database = database
+        self._runtime = runtime
+        self._stale_after_seconds = stale_after_seconds
+
+    async def list_workers(self) -> tuple[WorkerStatus, ...]:
+        now = datetime.now(UTC)
+        runtime = await self._runtime.get()
+        is_fresh = bool(
+            runtime
+            and now - runtime.heartbeat_at
+            <= timedelta(seconds=self._stale_after_seconds)
+        )
+        async with self._database.session() as session:
+            jobs = JobAdminService(session)
+            running = await jobs.list_jobs(
+                page=1,
+                page_size=1,
+                status=JobStatus.RUNNING,
+                queue="postgres",
+            )
+            succeeded = await jobs.list_jobs(
+                page=1,
+                page_size=1,
+                status=JobStatus.SUCCEEDED,
+                queue="postgres",
+            )
+            failed = await jobs.list_jobs(
+                page=1,
+                page_size=1,
+                status=JobStatus.FAILED,
+                queue="postgres",
+            )
+        return (
+            WorkerStatus(
+                worker_id="ordinary-background",
+                queue="postgres",
+                status="RUNNING" if is_fresh else "UNAVAILABLE",
+                current_job_id=(running.items[0].id if running.items else None),
+                heartbeat_at=(runtime.heartbeat_at if runtime else None),
+                processed_jobs=succeeded.total,
+                failed_jobs=failed.total,
+            ),
+        )
+
+    async def list_queues(self) -> tuple[QueueStatus, ...]:
+        now = datetime.now(UTC)
+        runtime = await self._runtime.get()
+        is_fresh = bool(
+            runtime
+            and now - runtime.heartbeat_at
+            <= timedelta(seconds=self._stale_after_seconds)
+        )
+        async with self._database.session() as session:
+            jobs = JobAdminService(session)
+            pending = await jobs.list_jobs(
+                page=1,
+                page_size=1,
+                status=JobStatus.PENDING,
+                queue="postgres",
+            )
+        return (
+            QueueStatus(
+                name="postgres",
+                status=(
+                    HealthStatus.HEALTHY if is_fresh else HealthStatus.UNAVAILABLE
+                ),
+                depth=pending.total,
+                active_workers=1 if is_fresh else 0,
+                oldest_job_at=None,
+                updated_at=now,
             ),
         )
 

@@ -203,7 +203,10 @@ async def test_calculate_only_reserves_and_submits_frozen_background_job() -> No
     assert result.job_id == job_id
     submission = jobs.submit.await_args.args[0]
     assert submission.job_type == "TARGET_CALCULATE"
-    assert submission.queue == "strategy-targets"
+    assert submission.module_owner == "targets"
+    assert submission.priority == 1
+    assert submission.max_attempts == 2
+    assert submission.recoverable is True
     assert submission.config_snapshot == {"run_id": str(run_id)}
     assert submission.idempotency_key == "calculate-1"
     jobs.lock_submission.assert_awaited_once_with(

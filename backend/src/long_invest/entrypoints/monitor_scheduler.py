@@ -38,6 +38,7 @@ from long_invest.modules.scheduling.runtime import (
 )
 from long_invest.modules.securities.application import SecurityApplication
 from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
+from long_invest.modules.targets.jobs import target_calculate
 from long_invest.platform.config.settings import get_settings
 from long_invest.platform.database.engine import Database
 from long_invest.platform.database.notifications import PostgresNotificationListener
@@ -63,6 +64,7 @@ def build_market_data_handlers(database: Database):
         "SECURITY_MASTER_REFRESH": security_master_refresh,
         "SIGNAL_EVALUATE_BATCH": signal_evaluate_batch,
         "SIGNAL_REEVALUATE": signal_reevaluate,
+        "TARGET_CALCULATE": target_calculate,
     }
 
 

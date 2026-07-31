@@ -29,6 +29,7 @@ from long_invest.entrypoints.job_worker import HANDLERS
 from long_invest.entrypoints.monitor_scheduler import build_market_data_handlers
 from long_invest.modules.daily_data.contracts import DailyMissingReason
 from long_invest.modules.providers.contracts import ProviderCode, SecurityMasterRecord
+from long_invest.modules.targets.jobs import target_calculate
 from long_invest.platform.jobs.contracts import JobExecutionContext
 
 
@@ -54,6 +55,7 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
 
     assert handlers["SECURITY_MASTER_REFRESH"] is security_master_refresh
     assert handlers["QFQ_REFRESH"] is qfq_refresh
+    assert handlers["TARGET_CALCULATE"] is target_calculate
     assert set(handlers) == {
         "DAILY_MARKET_DATA",
         "DAILY_MARKET_RECOVERY",
@@ -61,6 +63,7 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
         "SECURITY_MASTER_REFRESH",
         "SIGNAL_EVALUATE_BATCH",
         "SIGNAL_REEVALUATE",
+        "TARGET_CALCULATE",
     }
 
 

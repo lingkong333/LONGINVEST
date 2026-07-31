@@ -18,8 +18,8 @@ from long_invest.modules.targets.strategy_service import (
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
-from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,7 +51,7 @@ class TargetApplication:
         training_data: Any | None = None,
         forecast: Any | None = None,
         strategy_service_factory: Callable[..., Any] = StrategyTargetService,
-        job_service_factory: Callable[..., Any] = JobService,
+        job_service_factory: Callable[..., Any] = PostgresJobService,
     ) -> None:
         self._database = database
         self._subscription_factory = subscription_factory
@@ -111,9 +111,10 @@ class TargetApplication:
                 await jobs.lock_submission(scope, command.idempotency_key)
                 reservation = await service.recalculate_review(command)
                 job = await jobs.submit(
-                    SubmitJob(
+                    SubmitPostgresJob(
                         job_type="TARGET_CALCULATE",
-                        queue="strategy-targets",
+                        module_owner="targets",
+                        priority=1,
                         idempotency_scope=scope,
                         idempotency_key=command.idempotency_key,
                         request_id=command.request_id,
@@ -123,6 +124,8 @@ class TargetApplication:
                         created_by_user_id=command.actor_user_id,
                         soft_timeout_seconds=300,
                         hard_timeout_seconds=360,
+                        max_attempts=2,
+                        recoverable=True,
                     )
                 )
                 return CalculationSubmission(
@@ -339,9 +342,10 @@ class TargetApplication:
                 )
                 reservation = await getattr(service, method)(command)
                 job = await jobs.submit(
-                    SubmitJob(
+                    SubmitPostgresJob(
                         job_type="TARGET_CALCULATE",
-                        queue="strategy-targets",
+                        module_owner="targets",
+                        priority=1,
                         idempotency_scope=scope,
                         idempotency_key=calculation.idempotency_key,
                         request_id=calculation.request_id,
@@ -351,6 +355,8 @@ class TargetApplication:
                         created_by_user_id=calculation.actor_user_id,
                         soft_timeout_seconds=300,
                         hard_timeout_seconds=360,
+                        max_attempts=2,
+                        recoverable=True,
                     )
                 )
                 return CalculationSubmission(

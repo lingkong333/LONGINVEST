@@ -6,8 +6,8 @@ from typing import Any, Protocol
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.strategies.service import StrategyEvent
-from long_invest.platform.jobs.contracts import SubmitJob
-from long_invest.platform.jobs.service import JobService
+from long_invest.platform.jobs.contracts import SubmitPostgresJob
+from long_invest.platform.jobs.postgres_service import PostgresJobService
 from long_invest.platform.outbox.service import TransactionalOutboxWriter
 
 
@@ -20,13 +20,17 @@ class StrategyOutboxAdapter:
         self,
         session: AsyncSession,
         writer: OutboxWriter | None = None,
-        job_service_factory: Callable[[AsyncSession], Any] = JobService,
+        job_service_factory: Callable[[AsyncSession], Any] = PostgresJobService,
     ) -> None:
         self._session = session
         self._writer = writer or TransactionalOutboxWriter()
         self._job_service_factory = job_service_factory
 
     async def emit(self, event: StrategyEvent) -> None:
+        command = _job_for_event(event)
+        if command is not None:
+            await self._job_service_factory(self._session).submit(command)
+            return
         await self._writer.append(
             session=self._session,
             topic=event.topic,
@@ -36,12 +40,9 @@ class StrategyOutboxAdapter:
             payload={"event_type": event.topic, **event.payload},
             dedupe_key=event.dedupe_key,
         )
-        command = _job_for_event(event)
-        if command is not None:
-            await self._job_service_factory(self._session).submit(command)
 
 
-def _job_for_event(event: StrategyEvent) -> SubmitJob | None:
+def _job_for_event(event: StrategyEvent) -> SubmitPostgresJob | None:
     values = event.payload
     request_id = str(values.get("request_id") or event.dedupe_key)
     actor_user_id = str(values.get("actor_user_id") or "") or None
@@ -51,9 +52,10 @@ def _job_for_event(event: StrategyEvent) -> SubmitJob | None:
         config = {"validation_run_id": run_id}
         if backtest_task_id is not None:
             config["backtest_task_id"] = str(backtest_task_id)
-        return SubmitJob(
+        return SubmitPostgresJob(
             job_type="STRATEGY_VALIDATE",
-            queue="strategy",
+            module_owner="strategies",
+            priority=2,
             idempotency_scope="strategy-validation-run",
             idempotency_key=event.dedupe_key,
             request_id=request_id,
@@ -63,12 +65,14 @@ def _job_for_event(event: StrategyEvent) -> SubmitJob | None:
             created_by_user_id=actor_user_id,
             soft_timeout_seconds=900,
             hard_timeout_seconds=1200,
+            recoverable=True,
         )
     if event.topic == "strategy.publish_requested":
         run_id = str(values["run_id"])
-        return SubmitJob(
+        return SubmitPostgresJob(
             job_type="STRATEGY_PUBLISH",
-            queue="strategy",
+            module_owner="strategies",
+            priority=2,
             idempotency_scope="strategy-publish-run",
             idempotency_key=event.dedupe_key,
             request_id=request_id,
@@ -78,5 +82,6 @@ def _job_for_event(event: StrategyEvent) -> SubmitJob | None:
             created_by_user_id=actor_user_id,
             soft_timeout_seconds=30,
             hard_timeout_seconds=45,
+            recoverable=True,
         )
     return None

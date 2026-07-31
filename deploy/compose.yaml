@@ -189,6 +189,7 @@ services:
         condition: service_healthy
     volumes:
       - application_logs:/var/log/longinvest
+      - strategy_git_data:/var/lib/long-invest/strategies
       - /var/run/docker.sock:/var/run/docker.sock
       - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
     group_add:

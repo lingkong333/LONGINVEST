@@ -23,6 +23,9 @@ from long_invest.bootstrap.providers import (
     close_provider_resources,
 )
 from long_invest.bootstrap.realtime_quotes import get_realtime_quote_runtime
+from long_invest.bootstrap.stage4_runtime import (
+    build_strategy_validation_executor,
+)
 from long_invest.modules.calendar.application import CalendarApplication
 from long_invest.modules.daily_data.jobs import (
     DailyMarketRecoveryJob,
@@ -37,6 +40,11 @@ from long_invest.modules.scheduling.runtime import (
     PostgresPersistentJobSubmitter,
 )
 from long_invest.modules.securities.application import SecurityApplication
+from long_invest.modules.strategies.jobs import (
+    configure_strategy_validation_executor,
+    strategy_publish,
+    strategy_validate,
+)
 from long_invest.modules.system_status.runtime import SchedulerRuntimeApplication
 from long_invest.modules.targets.jobs import target_calculate
 from long_invest.platform.config.settings import get_settings
@@ -65,6 +73,8 @@ def build_market_data_handlers(database: Database):
         "SIGNAL_EVALUATE_BATCH": signal_evaluate_batch,
         "SIGNAL_REEVALUATE": signal_reevaluate,
         "TARGET_CALCULATE": target_calculate,
+        "STRATEGY_VALIDATE": strategy_validate,
+        "STRATEGY_PUBLISH": strategy_publish,
     }
 
 
@@ -130,6 +140,7 @@ async def _heartbeat(scheduler: DualPathScheduler, stop: asyncio.Event) -> None:
 async def run() -> None:
     settings = get_settings()
     database = Database(settings.database_url)
+    configure_strategy_validation_executor(build_strategy_validation_executor)
     runtime = SchedulerRuntimeApplication(database)
     schedule_application = MonitorScheduleApplication(database)
     subscription_application = MonitorSubscriptionApplication(

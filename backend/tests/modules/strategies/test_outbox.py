@@ -82,14 +82,16 @@ def test_publish_request_submits_platform_job_in_same_session():
         )
     )
 
-    assert writer.calls[0]["queue"] == "domain-events"
     assert len(jobs.calls) == 1
     command = jobs.calls[0]
     assert command.job_type == "STRATEGY_PUBLISH"
-    assert command.queue == "strategy"
+    assert command.module_owner == "strategies"
+    assert command.priority == 2
+    assert command.recoverable is True
     assert command.idempotency_key == "strategy:publish"
     assert command.config_snapshot == {"strategy_run_id": str(run_id)}
     assert command.request_id == "request-1"
+    assert writer.calls == []
 
 
 def test_validation_request_submits_platform_job():
@@ -119,11 +121,14 @@ def test_validation_request_submits_platform_job():
 
     command = jobs.calls[0]
     assert command.job_type == "STRATEGY_VALIDATE"
-    assert command.queue == "strategy"
+    assert command.module_owner == "strategies"
+    assert command.priority == 2
+    assert command.recoverable is True
     assert command.config_snapshot == {
         "validation_run_id": str(run_id),
         "backtest_task_id": str(backtest_task_id),
     }
+    assert writer.calls == []
 
 
 def test_legacy_validation_event_stays_dispatchable_without_guessing_backtest() -> None:

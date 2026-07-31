@@ -272,13 +272,14 @@ async def test_strategy_revision_validation_and_publish_binding_are_atomic() -> 
             "metadata"
         ]
         assert revision_count == 1
-        assert audit_count == event_count == 8
+        assert audit_count == 8
+        assert event_count == 6
         assert {job.job_type for job in jobs} == {
             "STRATEGY_VALIDATE",
             "STRATEGY_PUBLISH",
         }
-        assert {job.status for job in jobs} == {"PENDING_DISPATCH"}
-        assert dispatch_count == 2
+        assert {job.status for job in jobs} == {"PENDING"}
+        assert dispatch_count == 0
     finally:
         await database.dispose()
 

@@ -16,7 +16,7 @@ def test_compose_backend_runtime_services_share_one_image() -> None:
         and service["build"].get("target") == "runtime"
     }
 
-    assert len(backend_services) == 18
+    assert len(backend_services) == 17
     assert {service["image"] for service in backend_services.values()} == {
         "${LONGINVEST_BACKEND_IMAGE:-longinvest-backend:local}"
     }
@@ -37,7 +37,7 @@ def test_compose_workers_listen_only_to_their_role_queue() -> None:
     assert actual == expected
 
 
-def test_default_compose_has_six_persistent_containers() -> None:
+def test_default_compose_has_five_persistent_containers() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     default_persistent = {
@@ -52,22 +52,18 @@ def test_default_compose_has_six_persistent_containers() -> None:
         "api",
         "frontend",
         "background-core",
-        "background-strategy",
     }
 
 
-def test_consolidated_background_containers_keep_permission_boundary() -> None:
+def test_consolidated_background_container_has_strategy_runner_permission() -> None:
     compose_path = Path(__file__).parents[3] / "deploy" / "compose.yaml"
     services = yaml.safe_load(compose_path.read_text(encoding="utf-8"))["services"]
     core = services["background-core"]
-    strategy = services["background-strategy"]
 
-    assert not any("docker.sock" in volume for volume in core["volumes"])
-    assert any("docker.sock" in volume for volume in strategy["volumes"])
+    assert "background-strategy" not in services
+    assert any("docker.sock" in volume for volume in core["volumes"])
     assert core["mem_limit"] == "1536m"
-    assert strategy["mem_limit"] == "1536m"
     assert core["healthcheck"]["test"][-1] == "core"
-    assert strategy["healthcheck"]["test"][-1] == "strategy"
 
 
 def test_history_backfill_runs_inside_the_existing_core_background() -> None:

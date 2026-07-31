@@ -37,6 +37,8 @@ from long_invest.modules.daily_data.jobs import (
 )
 from long_invest.modules.monitor_schedules.application import MonitorScheduleApplication
 from long_invest.modules.monitoring.application import MonitorSubscriptionApplication
+from long_invest.modules.notifications.contracts import DeliveryChannel
+from long_invest.modules.notifications.runtime import NotificationDeliveryRuntime
 from long_invest.modules.quotes.contracts import RealtimeCheckMode
 from long_invest.modules.scheduling.runtime import (
     DailyGapPlanner,
@@ -143,6 +145,28 @@ async def _heartbeat(scheduler: DualPathScheduler, stop: asyncio.Event) -> None:
             await asyncio.wait_for(stop.wait(), timeout=HEARTBEAT_SECONDS)
 
 
+async def _run_notification_channel(
+    runtime: NotificationDeliveryRuntime,
+    channel: DeliveryChannel,
+    *,
+    stop: asyncio.Event,
+    poll_seconds: float,
+) -> None:
+    while not stop.is_set():
+        try:
+            worked = await runtime.process_once(channel)
+        except Exception:
+            logger.exception(
+                "notification_delivery_cycle_failed",
+                category="notifications",
+                channel=channel.value,
+            )
+            worked = False
+        if not worked:
+            with suppress(TimeoutError):
+                await asyncio.wait_for(stop.wait(), timeout=poll_seconds)
+
+
 async def run() -> None:
     settings = get_settings()
     database = Database(settings.database_url)
@@ -184,6 +208,17 @@ async def run() -> None:
         },
         worker_id=f"history-backfill:{socket.gethostname()}:{os.getpid()}",
     )
+    notification_runtimes = {
+        channel: NotificationDeliveryRuntime(
+            database,
+            settings,
+            worker_id=(
+                f"notification-{channel.value.lower()}:"
+                f"{socket.gethostname()}:{os.getpid()}"
+            ),
+        )
+        for channel in DeliveryChannel
+    }
     listener = PostgresNotificationListener(settings.database_url)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -198,6 +233,17 @@ async def run() -> None:
             asyncio.create_task(_heartbeat(scheduler, stop)),
             asyncio.create_task(runner.run_forever(stop)),
             asyncio.create_task(history_runner.run_forever(stop)),
+            *(
+                asyncio.create_task(
+                    _run_notification_channel(
+                        runtime,
+                        channel,
+                        stop=stop,
+                        poll_seconds=settings.notification_worker_poll_seconds,
+                    )
+                )
+                for channel, runtime in notification_runtimes.items()
+            ),
         ]
         await stop.wait()
     finally:

@@ -46,26 +46,7 @@ PROCESS_GROUPS: dict[str, tuple[ProcessSpec, ...]] = {
         _worker("worker-maintenance", "maintenance"),
         _worker("worker-qfq-refresh", "qfq-refresh"),
         ProcessSpec("signal-projector", "long_invest.entrypoints.signal_projector"),
-        ProcessSpec(
-            "notification-wecom",
-            "long_invest.entrypoints.notification_worker",
-            (("LONGINVEST_NOTIFICATION_CHANNEL", "WECOM"),),
-        ),
-        ProcessSpec(
-            "notification-email",
-            "long_invest.entrypoints.notification_worker",
-            (("LONGINVEST_NOTIFICATION_CHANNEL", "EMAIL"),),
-        ),
         _worker("worker-signals", "signals"),
-    ),
-    "strategy": (
-        _worker("worker-strategy", "strategy"),
-        _worker("worker-strategy-targets", "strategy-targets"),
-        _worker("worker-backtest-single", "backtest-single"),
-        ProcessSpec(
-            "worker-backtest-bulk",
-            "long_invest.entrypoints.bulk_backtest_worker",
-        ),
     ),
 }
 

@@ -222,60 +222,6 @@ services:
         max-size: 10m
         max-file: "7"
 
-  background-strategy:
-    <<: *backend-image
-    command:
-      - python
-      - -m
-      - long_invest.entrypoints.process_supervisor
-      - strategy
-    environment:
-      LONGINVEST_ENVIRONMENT: development
-      LONGINVEST_DATABASE_URL: postgresql+asyncpg://longinvest_app:${LONGINVEST_DATABASE_APP_PASSWORD:-longinvest-app-local-only}@postgres:5432/${LONGINVEST_POSTGRES_DB:-longinvest}
-      LONGINVEST_REDIS_URL: redis://redis:6379/0
-      LONGINVEST_LOG_FILE: /var/log/longinvest/background-strategy-supervisor.jsonl
-      LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST: ${LONGINVEST_STRATEGY_RUNNER_IMAGE_DIGEST:-}
-      LONGINVEST_BACKTEST_CONCURRENCY: ${LONGINVEST_BACKTEST_CONCURRENCY:-4}
-    depends_on:
-      migrate:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    volumes:
-      - application_logs:/var/log/longinvest
-      - strategy_git_data:/var/lib/long-invest/strategies
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./security/strategy-runner-seccomp.json:/etc/long-invest/seccomp.json:ro
-    group_add:
-      - ${LONGINVEST_DOCKER_GID:-999}
-    healthcheck:
-      test:
-        - CMD
-        - python
-        - -m
-        - long_invest.entrypoints.process_supervisor
-        - --healthcheck
-        - strategy
-      interval: 10s
-      timeout: 3s
-      retries: 6
-      start_period: 20s
-    restart: unless-stopped
-    read_only: true
-    tmpfs:
-      - /tmp:size=256m,mode=1777,nosuid,nodev
-    mem_limit: 1536m
-    pids_limit: 256
-    security_opt:
-      - no-new-privileges:true
-    logging:
-      driver: local
-      options:
-        max-size: 10m
-        max-file: "7"
-
   dispatcher:
     profiles: ["isolated-processes"]
     <<: *backend-image

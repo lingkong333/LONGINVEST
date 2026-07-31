@@ -8,30 +8,24 @@ from long_invest.entrypoints import process_supervisor
 
 def test_process_groups_keep_queue_and_permission_boundaries() -> None:
     core = process_supervisor.process_specs("core")
-    strategy = process_supervisor.process_specs("strategy")
 
-    assert len(core) == 9
-    assert len(strategy) == 4
-    assert {spec.name for spec in core}.isdisjoint(
-        {spec.name for spec in strategy}
-    )
-    assert {
-        dict(spec.environment).get("LONGINVEST_WORKER_QUEUES")
-        for spec in strategy
-    } == {"strategy", "strategy-targets", "backtest-single", None}
+    assert len(core) == 7
+    assert {spec.name for spec in core} == {
+        "dispatcher",
+        "watchdog",
+        "background",
+        "worker-maintenance",
+        "worker-qfq-refresh",
+        "signal-projector",
+        "worker-signals",
+    }
 
 
-def test_notification_channels_remain_separate_processes() -> None:
-    notifications = {
-        spec.name: dict(spec.environment)["LONGINVEST_NOTIFICATION_CHANNEL"]
+def test_notification_channels_do_not_require_separate_processes() -> None:
+    assert not any(
+        spec.name.startswith("notification-")
         for spec in process_supervisor.process_specs("core")
-        if spec.name.startswith("notification-")
-    }
-
-    assert notifications == {
-        "notification-wecom": "WECOM",
-        "notification-email": "EMAIL",
-    }
+    )
 
 
 def test_unknown_process_group_is_rejected() -> None:
@@ -57,7 +51,7 @@ def test_healthcheck_requires_fresh_complete_live_registry(
                 "processes": {
                     spec.name: index + 1
                     for index, spec in enumerate(
-                        process_supervisor.process_specs("strategy")
+                        process_supervisor.process_specs("core")
                     )
                 },
             }
@@ -65,9 +59,9 @@ def test_healthcheck_requires_fresh_complete_live_registry(
         encoding="utf-8",
     )
 
-    assert process_supervisor.is_healthy("strategy") is True
+    assert process_supervisor.is_healthy("core") is True
 
     registry.write_text(
         json.dumps({"updated_at": 95.0, "processes": {}}), encoding="utf-8"
     )
-    assert process_supervisor.is_healthy("strategy") is False
+    assert process_supervisor.is_healthy("core") is False

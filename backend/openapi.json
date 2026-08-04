@@ -2314,6 +2314,60 @@
         }
       }
     },
+    "/api/v1/quotes/market-snapshot": {
+      "post": {
+        "tags": [
+          "quotes"
+        ],
+        "summary": "Submit Market Snapshot",
+        "operationId": "submit_market_snapshot_api_v1_quotes_market_snapshot_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarketSnapshotRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarketSnapshotResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/quotes/diagnose": {
       "post": {
         "tags": [
@@ -19020,6 +19074,156 @@
         ],
         "title": "ManualTargetRequest"
       },
+      "MarketSnapshotData": {
+        "properties": {
+          "occurrence_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Occurrence Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "trigger_type": {
+            "type": "string",
+            "title": "Trigger Type"
+          },
+          "scheduled_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Scheduled At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "expected_count": {
+            "type": "integer",
+            "title": "Expected Count"
+          },
+          "fetched_count": {
+            "type": "integer",
+            "title": "Fetched Count"
+          },
+          "failed_count": {
+            "type": "integer",
+            "title": "Failed Count"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          }
+        },
+        "type": "object",
+        "required": [
+          "occurrence_id",
+          "status",
+          "trigger_type",
+          "scheduled_at",
+          "started_at",
+          "completed_at",
+          "expected_count",
+          "fetched_count",
+          "failed_count",
+          "error_code"
+        ],
+        "title": "MarketSnapshotData"
+      },
+      "MarketSnapshotRequest": {
+        "properties": {
+          "timeout_seconds": {
+            "type": "integer",
+            "maximum": 60.0,
+            "minimum": 10.0,
+            "title": "Timeout Seconds",
+            "default": 60
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason"
+        ],
+        "title": "MarketSnapshotRequest"
+      },
+      "MarketSnapshotResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "const": true,
+            "title": "Success"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "server_time": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Server Time"
+          },
+          "data": {
+            "$ref": "#/components/schemas/MarketSnapshotData"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "code",
+          "message",
+          "request_id",
+          "server_time",
+          "data"
+        ],
+        "title": "MarketSnapshotResponse"
+      },
       "MonitoringData": {
         "properties": {
           "active": {
@@ -22523,6 +22727,55 @@
             "maxLength": 32,
             "minLength": 1,
             "title": "Status"
+          },
+          "trigger_type": {
+            "type": "string",
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Trigger Type",
+            "default": "AUTOMATIC"
+          },
+          "expected_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Expected Count",
+            "default": 0
+          },
+          "fetched_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Fetched Count",
+            "default": 0
+          },
+          "failed_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Failed Count",
+            "default": 0
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
           },
           "job_id": {
             "anyOf": [

@@ -757,6 +757,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/quotes/market-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Market Snapshot */
+        post: operations["submit_market_snapshot_api_v1_quotes_market_snapshot_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/quotes/diagnose": {
         parameters: {
             query?: never;
@@ -5817,6 +5834,67 @@ export interface components {
              */
             switch_to_manual_confirmed: boolean;
         };
+        /** MarketSnapshotData */
+        MarketSnapshotData: {
+            /**
+             * Occurrence Id
+             * Format: uuid
+             */
+            occurrence_id: string;
+            /** Status */
+            status: string;
+            /** Trigger Type */
+            trigger_type: string;
+            /**
+             * Scheduled At
+             * Format: date-time
+             */
+            scheduled_at: string;
+            /** Started At */
+            started_at: string | null;
+            /** Completed At */
+            completed_at: string | null;
+            /** Expected Count */
+            expected_count: number;
+            /** Fetched Count */
+            fetched_count: number;
+            /** Failed Count */
+            failed_count: number;
+            /** Error Code */
+            error_code: string | null;
+        };
+        /** MarketSnapshotRequest */
+        MarketSnapshotRequest: {
+            /**
+             * Timeout Seconds
+             * @default 60
+             */
+            timeout_seconds: number;
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** MarketSnapshotResponse */
+        MarketSnapshotResponse: {
+            /**
+             * Success
+             * @constant
+             */
+            success: true;
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+            /** Request Id */
+            request_id: string;
+            /**
+             * Server Time
+             * Format: date-time
+             */
+            server_time: string;
+            data: components["schemas"]["MarketSnapshotData"];
+        };
         /** MonitoringData */
         MonitoringData: {
             /** Active */
@@ -7175,6 +7253,30 @@ export interface components {
             scheduled_at: string;
             /** Status */
             status: string;
+            /**
+             * Trigger Type
+             * @default AUTOMATIC
+             */
+            trigger_type: string;
+            /**
+             * Expected Count
+             * @default 0
+             */
+            expected_count: number;
+            /**
+             * Fetched Count
+             * @default 0
+             */
+            fetched_count: number;
+            /**
+             * Failed Count
+             * @default 0
+             */
+            failed_count: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
             /** Job Id */
             job_id?: string | null;
             /** Missed Reason */
@@ -10806,6 +10908,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RealtimeCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    submit_market_snapshot_api_v1_quotes_market_snapshot_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MarketSnapshotRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MarketSnapshotResponse"];
                 };
             };
             /** @description Validation Error */

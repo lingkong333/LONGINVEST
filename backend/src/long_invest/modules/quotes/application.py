@@ -162,6 +162,35 @@ class QuoteApplication:
         expected_subscription_versions: dict[str, int] | None = None,
         timeout_seconds: int = 60,
     ):
+        occurrence, symbols, definition_key = await self.start_market_snapshot(
+            scheduled_at=scheduled_at,
+            trigger_type=trigger_type,
+            idempotency_key=idempotency_key,
+            reason=reason,
+            created_by_user_id=created_by_user_id,
+        )
+        if occurrence.status is not OccurrenceStatus.RUNNING:
+            return occurrence
+        return await self.complete_market_snapshot(
+            occurrence_id=occurrence.id,
+            symbols=symbols,
+            definition_key=definition_key,
+            scheduled_at=scheduled_at,
+            trigger_type=trigger_type,
+            signal_symbols=signal_symbols,
+            expected_subscription_versions=expected_subscription_versions,
+            timeout_seconds=timeout_seconds,
+        )
+
+    async def start_market_snapshot(
+        self,
+        *,
+        scheduled_at: datetime,
+        trigger_type: str,
+        idempotency_key: str,
+        reason: str,
+        created_by_user_id: str | None = None,
+    ):
         _operation_reason(reason)
         symbols = await self._securities.market_data_symbols()
         if not symbols:
@@ -182,8 +211,20 @@ class QuoteApplication:
             trigger_type=trigger_type,
             expected_count=len(symbols),
         )
-        if occurrence.status is not OccurrenceStatus.RUNNING:
-            return occurrence
+        return occurrence, symbols, definition_key
+
+    async def complete_market_snapshot(
+        self,
+        *,
+        occurrence_id: UUID,
+        symbols: tuple[str, ...],
+        definition_key: str,
+        scheduled_at: datetime,
+        trigger_type: str,
+        signal_symbols: tuple[str, ...] = (),
+        expected_subscription_versions: dict[str, int] | None = None,
+        timeout_seconds: int = 60,
+    ):
         try:
             result = await self._runtime().run(
                 symbols=symbols,
@@ -201,7 +242,7 @@ class QuoteApplication:
             )
         except Exception as error:
             return await self._occurrences.finish_snapshot(
-                occurrence.id,
+                occurrence_id,
                 status=OccurrenceStatus.FAILED,
                 fetched_count=0,
                 failed_count=len(symbols),
@@ -215,7 +256,7 @@ class QuoteApplication:
             RealtimeBatchStatus.OVERLAP_SKIPPED: OccurrenceStatus.FAILED,
         }[result.status]
         return await self._occurrences.finish_snapshot(
-            occurrence.id,
+            occurrence_id,
             status=status,
             fetched_count=result.valid_count,
             failed_count=result.failed_count,

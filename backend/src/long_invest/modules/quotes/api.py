@@ -4,7 +4,7 @@ from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, Header, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from long_invest.modules.auth.dependencies import (
@@ -251,20 +251,30 @@ async def submit_manual_cycle(
 )
 async def submit_market_snapshot(
     body: MarketSnapshotRequest,
+    background_tasks: BackgroundTasks,
     application: ApplicationDependency,
     authenticated: WriteAuth,
     idempotency_key: IdempotencyKey,
 ) -> dict:
     _require_confirmation(body.confirm)
     now = datetime.now().astimezone()
-    result = await application.submit_market_snapshot(
+    result, symbols, definition_key = await application.start_market_snapshot(
         scheduled_at=now,
         trigger_type="MANUAL",
         idempotency_key=_idempotency_key(idempotency_key),
         reason=body.reason,
         created_by_user_id=str(authenticated.user.id),
-        timeout_seconds=body.timeout_seconds,
     )
+    if result.status == "RUNNING":
+        background_tasks.add_task(
+            application.complete_market_snapshot,
+            occurrence_id=result.id,
+            symbols=symbols,
+            definition_key=definition_key,
+            scheduled_at=now,
+            trigger_type="MANUAL",
+            timeout_seconds=body.timeout_seconds,
+        )
     return success_response(
         data={
             "occurrence_id": result.id,
@@ -278,7 +288,7 @@ async def submit_market_snapshot(
             "failed_count": result.failed_count,
             "error_code": result.error_code,
         },
-        code="QUOTE_MARKET_SNAPSHOT_COMPLETED",
+        code="QUOTE_MARKET_SNAPSHOT_STARTED",
     )
 
 

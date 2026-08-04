@@ -1,7 +1,8 @@
 import { lazy, Suspense, type ReactNode } from "react"
-import { createBrowserRouter } from "react-router-dom"
+import { createBrowserRouter, Navigate } from "react-router-dom"
 
 import { AppShell } from "@/app/app-shell"
+import { LegacyStockDetailRedirect } from "@/app/legacy-stock-detail-redirect"
 import { RouteErrorPage } from "@/app/route-error-page"
 import { LoginPage, ProtectedRoute } from "@/features/auth"
 import { DashboardPage } from "@/features/dashboard"
@@ -23,6 +24,11 @@ const SecurityDetailPage = lazy(async () => {
   const module = await import("@/features/market-data/security-detail-page")
   return { default: module.SecurityDetailPage }
 })
+const HistoryBackfillPage = lazy(async () => {
+  const module = await import("@/features/market-data/history-backfill-page")
+  return { default: module.HistoryBackfillPage }
+})
+
 const NotificationsPage = lazy(async () => {
   const module = await import("@/features/notifications")
   return { default: module.NotificationsPage }
@@ -42,6 +48,18 @@ const ProvidersPage = lazy(async () => {
 const AlertsPage = lazy(async () => {
   const module = await import("@/features/alerts")
   return { default: module.AlertsPage }
+})
+const StrategyScreeningPage = lazy(async () => {
+  const module = await import("@/features/strategies")
+  return { default: module.StrategyScreeningPage }
+})
+const CandidateBacktestsPage = lazy(async () => {
+  const module = await import("@/features/strategies")
+  return { default: module.CandidateBacktestsPage }
+})
+const CandidateBacktestDetailPage = lazy(async () => {
+  const module = await import("@/features/strategies")
+  return { default: module.CandidateBacktestDetailPage }
 })
 const CalendarPage = lazy(async () => {
   const module = await import("@/features/calendar")
@@ -108,20 +126,44 @@ export const appRouter = createBrowserRouter([
             element: deferredPage(<StrategyOperationsPage />),
           },
           {
+            path: "/screenings",
+            element: deferredPage(<StrategyScreeningPage />),
+          },
+          {
             path: "/backtests",
-            element: deferredPage(<StrategyOperationsPage initialView="backtest" />),
+            element: deferredPage(<CandidateBacktestsPage />),
+          },
+          {
+            path: "/backtests/:taskId",
+            element: deferredPage(<CandidateBacktestsPage />),
+          },
+          {
+            path: "/backtests/:taskId/items/:itemId",
+            element: deferredPage(<CandidateBacktestDetailPage />),
           },
           {
             path: "/market-data",
             element: deferredPage(<MarketDataPage />),
           },
           {
-            path: "/market-data/stocks",
+            path: "/stocks",
             element: deferredPage(<SecurityListPage />),
           },
           {
-            path: "/market-data/stocks/:symbol",
+            path: "/stocks/:symbol",
             element: deferredPage(<SecurityDetailPage />),
+          },
+          {
+            path: "/market-data/backfills/:jobId",
+            element: deferredPage(<HistoryBackfillPage />),
+          },
+          {
+            path: "/market-data/stocks",
+            element: <Navigate to="/stocks" replace />,
+          },
+          {
+            path: "/market-data/stocks/:symbol",
+            element: <LegacyStockDetailRedirect />,
           },
           {
             path: "/notifications",

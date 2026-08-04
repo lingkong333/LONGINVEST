@@ -83,7 +83,8 @@ function targetLine(values: TargetValuesDto): string {
 function ItemStatus({ result }: { result: HoldoutBacktestResult }) {
   if (!result.item) return null
   const label = isItemStatus(result.item.status) ? itemStatusLabels[result.item.status] : `未知单股状态：${result.item.status}`
-  return <p role="status" className="text-sm">{label}{result.item.failureMessage ? `：${result.item.failureMessage}` : ""}</p>
+  const detail = result.item.outcomeReason ?? result.item.failureMessage
+  return <p role="status" className="text-sm">{label}{detail ? `：${detail}` : ""}</p>
 }
 
 function ResultDetails({ result }: { result: HoldoutBacktestResult }) {
@@ -147,6 +148,7 @@ function TaskList({
       { key: "symbol", header: "股票" },
       { key: "range", header: "训练期 / 测试期" },
       { key: "status", header: "状态" },
+      { key: "reason", header: "结果说明" },
       { key: "attempts", header: "尝试次数" },
       { key: "updatedAt", header: "最近更新" },
       { key: "action", header: "查看", render: (row) => <Button type="button" size="sm" variant={row.id === selectedTaskId ? "secondary" : "outline"} onClick={() => onSelect(String(row.id))}>{row.id === selectedTaskId ? "当前任务" : "查看"}</Button> },
@@ -156,6 +158,7 @@ function TaskList({
       symbol: `${task.item.symbol} ${task.item.name}`,
       range: `${task.dateRange.trainingStartDate} 至 ${task.dateRange.trainingEndDate} / ${task.dateRange.testStartDate} 至 ${task.dateRange.testEndDate}`,
       status: taskStatusLabel(task.status),
+      reason: task.item.outcomeReason ?? task.item.failureCode ?? "-",
       attempts: task.item.attemptCount,
       updatedAt: formatTime(task.updatedAt),
       action: "",

@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from datetime import date
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -7,6 +7,10 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.exc import SQLAlchemyError
 
+from long_invest.modules.strategies.contracts import (
+    StrategyForecastResult,
+    TrainingDataSnapshot,
+)
 from long_invest.modules.targets.application import (
     CalculationSubmission,
     TargetApplication,
@@ -146,6 +150,78 @@ async def test_strategy_snapshot_failure_is_persisted_as_failed_run() -> None:
     assert application._strategy_write.await_args.args[:2] == (
         "fail",
         failed.run_id,
+    )
+
+
+@pytest.mark.anyio
+async def test_unmatched_strategy_does_not_create_or_replace_targets() -> None:
+    application = object.__new__(TargetApplication)
+    strategy_id = uuid4()
+    application._strategy_application = SimpleNamespace(
+        get_execution_snapshot=AsyncMock(return_value=SimpleNamespace(
+            strategy_id=strategy_id,
+            id=strategy_id,
+            source_code="source",
+            source_code_hash="a" * 64,
+            metadata={},
+            parameter_schema={},
+            environment_version="python-3.12",
+            runner_image_digest="sha256:" + "b" * 64,
+        ))
+    )
+    training = TrainingDataSnapshot(
+        security_id=uuid4(),
+        symbol="600000.SH",
+        start_date=date(2025, 1, 2),
+        end_date=date(2025, 1, 2),
+        data_version=1,
+        fetched_at=datetime(2026, 7, 21, tzinfo=UTC),
+        source="EASTMONEY",
+        price_basis="QFQ_AS_OF",
+        content_hash="c" * 64,
+        rows=({
+            "trade_date": date(2025, 1, 2),
+            "open": "10",
+            "high": "11",
+            "low": "9",
+            "close": "10",
+            "volume": "100",
+            "amount": "1000",
+        },),
+    )
+    application._training_data = SimpleNamespace(
+        get_training_data=AsyncMock(return_value=training)
+    )
+    application._forecast = SimpleNamespace(
+        forecast=AsyncMock(return_value=StrategyForecastResult(
+            matched=False,
+            reason="趋势条件不满足",
+        ))
+    )
+    expected = CalculationResult("TARGET_STRATEGY_NOT_MATCHED", uuid4())
+    application._strategy_write = AsyncMock(return_value=expected)
+    reservation = SimpleNamespace(
+        replayed=False,
+        status="PENDING",
+        run_id=expected.run_id,
+        strategy_version_id=strategy_id,
+        security_id=training.security_id,
+        symbol="600000.SH",
+        parameter_snapshot={},
+    )
+    command = SimpleNamespace(
+        target_date=date(2026, 7, 21),
+        training_start_date=date(2020, 1, 1),
+        training_end_date=date(2025, 12, 31),
+    )
+
+    result = await application._execute_reservation(command, reservation)
+
+    assert result is expected
+    application._strategy_write.assert_awaited_with(
+        "not_matched",
+        expected.run_id,
+        reason="趋势条件不满足",
     )
 
 

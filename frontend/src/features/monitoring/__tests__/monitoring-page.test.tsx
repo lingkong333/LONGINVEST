@@ -96,12 +96,23 @@ function renderPage(gateway: MonitoringGateway) {
   )
 }
 
+function createGateway(
+  overrides: Partial<MonitoringGateway> = {},
+): MonitoringGateway {
+  return {
+    loadOverview: vi.fn().mockResolvedValue(overview()),
+    loadSchedules: vi.fn().mockResolvedValue([]),
+    saveSchedule: vi.fn().mockResolvedValue(undefined),
+    runAction: vi.fn().mockResolvedValue(undefined),
+    ...overrides,
+  }
+}
+
 describe("监控列表页面", () => {
   it("展示中文监控信息，并支持持仓筛选和搜索", async () => {
-    renderPage({
+    renderPage(createGateway({
       loadOverview: vi.fn().mockResolvedValue(overview()),
-      runAction: vi.fn(),
-    })
+    }))
 
     expect(await screen.findByText("浦发银行")).toBeInTheDocument()
     expect(screen.getByText("¥ 10.25")).toBeInTheDocument()
@@ -141,10 +152,9 @@ describe("监控列表页面", () => {
         },
       ],
     })
-    renderPage({
+    renderPage(createGateway({
       loadOverview: vi.fn().mockResolvedValue(value),
-      runAction: vi.fn(),
-    })
+    }))
 
     expect(await screen.findByText("浦发银行")).toBeInTheDocument()
     expect(screen.getByText("部分辅助数据暂不可用，股票订阅仍可正常查看。"))
@@ -160,7 +170,7 @@ describe("监控列表页面", () => {
         status: 503,
       }))
       .mockResolvedValueOnce(overview({ items: [] }))
-    renderPage({ loadOverview, runAction: vi.fn() })
+    renderPage(createGateway({ loadOverview }))
 
     expect(await screen.findByText("监控列表暂时无法读取")).toBeInTheDocument()
     await userEvent.click(screen.getByRole("button", { name: "重新加载监控列表" }))
@@ -171,10 +181,10 @@ describe("监控列表页面", () => {
 
   it("只展示后端允许的操作，并携带版本和原因执行", async () => {
     const runAction = vi.fn().mockResolvedValue(undefined)
-    renderPage({
+    renderPage(createGateway({
       loadOverview: vi.fn().mockResolvedValue(overview()),
       runAction,
-    })
+    }))
 
     expect(await screen.findByRole("button", { name: "暂停监控" }))
       .toBeInTheDocument()
@@ -193,5 +203,30 @@ describe("监控列表页面", () => {
       3,
       "人工复核最新行情",
     )
+  })
+
+  it("可以修改盘中监控时间并保存原因", async () => {
+    const saveSchedule = vi.fn().mockResolvedValue(undefined)
+    renderPage(createGateway({
+      loadSchedules: vi.fn().mockResolvedValue([
+        { id: "schedule-1", name: "盘中监控", version: 2, times: ["09:45", "10:30"] },
+      ]),
+      saveSchedule,
+    }))
+
+    expect(await screen.findByDisplayValue("09:45")).toBeInTheDocument()
+    await userEvent.type(
+      screen.getByRole("textbox", { name: "修改原因" }),
+      "调整盘中检查频率",
+    )
+    await userEvent.click(screen.getByRole("button", { name: "保存监控时间" }))
+
+    expect(saveSchedule).toHaveBeenCalledWith({
+      id: "schedule-1",
+      name: "盘中监控",
+      version: 2,
+      times: ["09:45", "10:30"],
+      reason: "调整盘中检查频率",
+    })
   })
 })

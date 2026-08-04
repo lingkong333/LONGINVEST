@@ -1,13 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { Archive, CheckCircle2, Clipboard, FlaskConical, History, RotateCcw, Rocket, Save } from "lucide-react"
+import { Archive, CheckCircle2, Clipboard, Database, FlaskConical, History, Radar, RotateCcw, Rocket, Save, Target } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Controller, useWatch } from "react-hook-form"
 import { z } from "zod"
 
 import { useZodForm } from "@/shared/forms/use-zod-form"
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert"
+import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
-import { Card, CardContent } from "@/shared/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card"
 import { Checkbox } from "@/shared/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/shared/ui/dialog"
 import { Field, FieldLabel, FieldLegend, FieldSet } from "@/shared/ui/field"
@@ -16,6 +17,7 @@ import { Input } from "@/shared/ui/input"
 import { PageState } from "@/shared/ui/page-state"
 import { RadioGroup, RadioGroupItem } from "@/shared/ui/radio-group"
 import { Textarea } from "@/shared/ui/textarea"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/shared/ui/table"
 
 import {
   isSaveConflict,
@@ -29,6 +31,11 @@ import {
 } from "./types"
 
 const schemaTypes = new Set(["null", "boolean", "object", "array", "number", "string", "integer"])
+const generatedStrategyName = /^策略-[0-9a-f]{12,}$/i
+
+function strategyDisplayName(name: string): string {
+  return generatedStrategyName.test(name) ? "未命名策略" : name
+}
 
 function isSchemaNode(value: unknown): boolean {
   if (typeof value === "boolean") return true
@@ -79,6 +86,60 @@ function parseJsonRecord(value: string): Record<string, unknown> {
     : {}
 }
 
+interface ParameterDescription {
+  name: string
+  title: string
+  description: string
+  type: string
+  required: boolean
+  defaultValue: string
+  range: string
+}
+
+function displayJsonValue(value: unknown): string {
+  if (value === undefined) return "未设置"
+  if (typeof value === "string") return value
+  return JSON.stringify(value)
+}
+
+function parameterSummary(value: string): ParameterDescription[] {
+  try {
+    const schema = JSON.parse(value) as {
+      properties?: Record<string, unknown>
+      required?: string[]
+    }
+    const required = new Set(schema.required ?? [])
+    return Object.entries(schema.properties ?? {}).map(([name, rawDefinition]) => {
+      const definition = typeof rawDefinition === "object" && rawDefinition !== null
+        ? rawDefinition as Record<string, unknown>
+        : {}
+      return {
+        name,
+        title: typeof definition.title === "string" ? definition.title : name,
+        description: typeof definition.description === "string"
+          ? definition.description
+          : "尚未填写用途说明",
+        type: typeof definition.type === "string" ? definition.type : "未指定",
+        required: required.has(name),
+        defaultValue: displayJsonValue(definition.default),
+        range: parameterRange(definition),
+      }
+    })
+  } catch {
+    return []
+  }
+}
+
+function parameterRange(definition: Record<string, unknown>): string {
+  if (Array.isArray(definition.enum)) return definition.enum.map(displayJsonValue).join("、")
+  const minimum = definition.minimum ?? definition.exclusiveMinimum
+  const maximum = definition.maximum ?? definition.exclusiveMaximum
+  if (minimum !== undefined && maximum !== undefined) return `${minimum} ～ ${maximum}`
+  if (minimum !== undefined) return `大于等于 ${minimum}`
+  if (maximum !== undefined) return `小于等于 ${maximum}`
+  return "未限制"
+}
+
 function isJsonObject(value: string): boolean {
   try {
     const parsed: unknown = JSON.parse(value)
@@ -124,7 +185,7 @@ function toDraftInput(values: DraftForm, expectedVersion: number): DraftSaveInpu
 
 function draftDefaults(draft: StrategyDraft): DraftForm {
   return {
-    name: draft.name,
+    name: strategyDisplayName(draft.name),
     description: draft.description,
     sourceCode: draft.sourceCode,
     parameterSchema: draft.parameterSchema,
@@ -257,6 +318,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
     && (testResult ?? draftQuery.data?.testResult)?.sourceVersion === activeVersion
   const allowed = (action: StrategyAction) => draftQuery.data?.allowedActions.includes(action) === true
   const selectedVersion = versionsQuery.data?.find((version) => version.id === selectedVersionId)
+  const describedParameters = parameterSummary(watchedDraft.parameterSchema ?? "{}")
   const versionDiff = useMemo(() => {
     if (!selectedVersion?.sourceCode) return null
     return { current: form.getValues("sourceCode"), published: selectedVersion.sourceCode }
@@ -394,7 +456,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
     <section className="mx-auto grid w-full max-w-7xl gap-5 p-4 lg:grid-cols-[minmax(0,1fr)_18rem] lg:p-6">
       <form className="flex min-w-0 flex-col gap-4" onSubmit={saveNow}>
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
-          <div><p className="text-sm font-medium text-muted-foreground">策略工作台</p><h1 className="m-0 text-2xl font-semibold">{draftQuery.data.name}</h1></div>
+          <div className="min-w-0"><p className="text-sm font-medium text-muted-foreground">策略工作台</p><h1 className="m-0 truncate text-2xl font-semibold" title={strategyDisplayName(draftQuery.data.name)}>{strategyDisplayName(draftQuery.data.name)}</h1></div>
           <div className="flex flex-wrap gap-2">
             <OperationButton icon={<Save size={16} />} label={saveMutation.isPending ? "保存中" : "保存"} onClick={saveNow} disabled={!draftQuery.data.canSave || saveMutation.isPending || conflict !== null} />
             <OperationButton icon={<CheckCircle2 size={16} />} label="验证" onClick={() => openAction("validate")} disabled={!allowed("validate") || actionPending || conflict !== null} />
@@ -408,15 +470,32 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
           <FormField control={form.control} name="name" label="策略名称">{({ field }) => <Input {...field} />}</FormField>
           <FormField control={form.control} name="description" label="策略说明">{({ field }) => <Input {...field} />}</FormField>
         </div>
-        <Controller control={form.control} name="sourceCode" render={({ field }) => <div className="overflow-hidden border border-border bg-card"><label className="block border-b border-border px-3 py-2 text-sm font-medium">Python 策略源码</label><CodeEditor height="34rem" language="python" ariaLabel="Python 策略源码" value={field.value} onChange={field.onChange} /></div>} />
-        <FormField control={form.control} name="parameterSchema" label="参数 JSON Schema" description="这里只做基础结构预检，完整 JSON Schema 校验由服务端完成。">{({ field }) => <Textarea className="min-h-32 font-mono" {...field} />}</FormField>
+        <Card aria-label="策略输入输出说明">
+          <CardHeader>
+            <CardTitle>策略如何工作</CardTitle>
+            <CardDescription>数据读取在策略运行前完成。策略本身不能访问数据库、数据源或网络。</CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-3">
+            <section className="flex min-w-0 flex-col gap-2"><Database aria-hidden="true" /><strong>1. 输入日线</strong><p className="text-sm text-muted-foreground">按日期升序传入前复权日线：交易日、开盘、最高、最低、收盘、成交量、成交额。</p></section>
+            <section className="flex min-w-0 flex-col gap-2"><Radar aria-hidden="true" /><strong>2. 判断条件</strong><p className="text-sm text-muted-foreground">策略结合日线和下方参数判断股票是否符合条件；不符合时返回原因，不生成目标价。</p></section>
+            <section className="flex min-w-0 flex-col gap-2"><Target aria-hidden="true" /><strong>3. 输出四档价格</strong><p className="text-sm text-muted-foreground">符合时一次输出强低吸、低吸观察、高位观察、强高位四档监控价格。</p></section>
+          </CardContent>
+        </Card>
+        <Controller control={form.control} name="sourceCode" render={({ field }) => <div className="min-w-0 overflow-hidden rounded-md border border-border bg-card"><label className="block border-b border-border px-3 py-2 text-sm font-medium">Python 策略源码</label><CodeEditor height="34rem" language="python" ariaLabel="Python 策略源码" value={field.value} onChange={field.onChange} /></div>} />
+        <FormField control={form.control} name="parameterSchema" label="策略参数定义" description="每个参数必须填写中文名称和用途；这里编辑的是参数规则，不是股票日线。">{({ field }) => <Textarea aria-label="参数 JSON Schema" className="min-h-40 font-mono" {...field} />}</FormField>
+        <Card aria-labelledby="strategy-parameter-help">
+          <CardHeader><CardTitle id="strategy-parameter-help">参数说明</CardTitle><CardDescription>参数是调整策略判断方式的配置，不是数据库字段。验证、测试、发布和正式计算都使用冻结的参数值。</CardDescription></CardHeader>
+          <CardContent>
+            {describedParameters.length ? <Table aria-label="策略参数用途"><TableHeader><TableRow><TableHead>参数</TableHead><TableHead>用途</TableHead><TableHead>类型</TableHead><TableHead>要求</TableHead><TableHead>默认值</TableHead><TableHead>允许范围</TableHead></TableRow></TableHeader><TableBody>{describedParameters.map((parameter) => <TableRow key={parameter.name}><TableCell><strong>{parameter.title}</strong><code className="block text-xs text-muted-foreground">{parameter.name}</code></TableCell><TableCell className="min-w-56 whitespace-normal">{parameter.description}</TableCell><TableCell>{parameter.type}</TableCell><TableCell><Badge variant={parameter.required ? "default" : "secondary"}>{parameter.required ? "必填" : "可选"}</Badge></TableCell><TableCell>{parameter.defaultValue}</TableCell><TableCell>{parameter.range}</TableCell></TableRow>)}</TableBody></Table> : <p className="text-sm text-muted-foreground">当前策略没有可调整参数，运行时参数值保持为空对象。</p>}
+          </CardContent>
+        </Card>
         {saveMutation.isError && !conflict ? <Alert variant="destructive"><AlertDescription>保存失败，请检查网络后重试。</AlertDescription></Alert> : null}
         {actionMessage ? <p role="status" className="text-sm text-primary">{actionMessage}</p> : null}
         {lastActionResult ? <Alert variant={lastActionResult.result.status === "FAILED" || lastActionResult.result.status === "CANCELED" ? "destructive" : "default"} aria-label="最近操作结果"><AlertTitle>最近操作结果</AlertTitle><AlertDescription><p>{lastActionResult.result.summary ?? `状态：${lastActionResult.result.status}`}</p>{lastActionResult.result.details?.map((detail) => <p key={detail}>{detail}</p>)}</AlertDescription></Alert> : null}
         {(validationResult ?? draftQuery.data.validationResult) ? <Alert variant={(validationResult ?? draftQuery.data.validationResult)?.status === "FAILED" || (validationResult ?? draftQuery.data.validationResult)?.status === "CANCELED" ? "destructive" : "default"} aria-label="验证运行结果"><AlertTitle>验证运行结果</AlertTitle><AlertDescription><p>{(validationResult ?? draftQuery.data.validationResult)?.summary}</p>{(validationResult ?? draftQuery.data.validationResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</AlertDescription></Alert> : null}
         {(testResult ?? draftQuery.data.testResult) ? <Alert variant={(testResult ?? draftQuery.data.testResult)?.status === "FAILED" || (testResult ?? draftQuery.data.testResult)?.status === "CANCELED" ? "destructive" : "default"} aria-label="测试运行结果"><AlertTitle>测试运行结果</AlertTitle><AlertDescription><p>{(testResult ?? draftQuery.data.testResult)?.summary}</p>{(testResult ?? draftQuery.data.testResult)?.details?.map((detail) => <p key={detail}>{detail}</p>)}</AlertDescription></Alert> : null}
       </form>
-      <aside className="flex flex-col gap-5 border-l border-border pl-0 lg:pl-5">
+      <aside className="flex min-w-0 flex-col gap-5 border-l border-border pl-0 lg:pl-5">
         <section>
           <div className="flex items-center gap-2"><History size={16} /><h2 className="text-sm font-semibold">草稿历史</h2></div>
           {revisionsQuery.isPending ? <p className="text-sm text-muted-foreground">正在加载草稿历史……</p> : revisionsQuery.isError ? <Alert variant="destructive"><AlertDescription>草稿历史加载失败，请重试。</AlertDescription></Alert> : revisionsQuery.data?.length ? <ol className="flex flex-col gap-2">{revisionsQuery.data.map((revision) => <li key={revision.id}><Card className="gap-2 py-3"><CardContent className="flex items-center justify-between gap-2 px-3 text-sm"><span>修订 {revision.revisionNo}</span><Button type="button" variant="ghost" disabled={!draftQuery.data.canRestoreRevision} title={draftQuery.data.canRestoreRevision ? "应用此草稿修订" : "服务器当前不允许恢复草稿"} onClick={() => openAction("restore", revision.id)}><RotateCcw data-icon="inline-start" />应用回滚</Button></CardContent></Card></li>)}</ol> : <p className="text-sm text-muted-foreground">暂无历史草稿。</p>}
@@ -457,7 +536,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
           <Field><FieldLabel htmlFor="strategy-action-reason">操作原因</FieldLabel><Input id="strategy-action-reason" value={reason} onChange={(event) => setReason(event.target.value)} /></Field>
           {reasonAction === "validate" ? <>
             <Field><FieldLabel htmlFor="validation-backtest-id">完整单股回测任务号</FieldLabel><Input id="validation-backtest-id" value={backtestTaskId} onChange={(event) => setBacktestTaskId(event.target.value)} /></Field>
-            <Field><FieldLabel htmlFor="validation-parameters">验证参数</FieldLabel><Textarea id="validation-parameters" className="min-h-24 font-mono" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></Field>
+            <Field><FieldLabel htmlFor="validation-parameters">本次验证使用的参数</FieldLabel><p className="text-sm text-muted-foreground">按上方“策略参数定义”填写一组实际值；没有参数时保留 {}。</p><Textarea id="validation-parameters" className="min-h-24 font-mono" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></Field>
           </> : null}
           {reasonAction === "test" ? <div className="grid gap-3 sm:grid-cols-2">
             <Field className="sm:col-span-2"><FieldLabel htmlFor="test-symbol">股票代码</FieldLabel><Input id="test-symbol" placeholder="600000.SH" value={testSymbol} onChange={(event) => setTestSymbol(event.target.value)} /></Field>
@@ -466,7 +545,7 @@ export function StrategyWorkspace({ strategyId, api, editorComponents }: { strat
             <Field><FieldLabel htmlFor="test-start">测试开始</FieldLabel><Input id="test-start" type="date" value={testStartDate} onChange={(event) => setTestStartDate(event.target.value)} /></Field>
             <Field><FieldLabel htmlFor="test-end">测试结束</FieldLabel><Input id="test-end" type="date" value={testEndDate} onChange={(event) => setTestEndDate(event.target.value)} /></Field>
             <Field><FieldLabel htmlFor="initial-capital">初始资金</FieldLabel><Input id="initial-capital" inputMode="decimal" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} /></Field>
-            <Field className="sm:col-span-2"><FieldLabel htmlFor="test-parameters">参数快照</FieldLabel><Textarea id="test-parameters" className="min-h-24 font-mono" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></Field>
+            <Field className="sm:col-span-2"><FieldLabel htmlFor="test-parameters">本次测试使用的参数</FieldLabel><p className="text-sm text-muted-foreground">这些值只用于本次测试，并随测试结果保存；没有参数时保留 {}。</p><Textarea id="test-parameters" className="min-h-24 font-mono" value={parameterSnapshot} onChange={(event) => setParameterSnapshot(event.target.value)} /></Field>
           </div> : null}
           {reasonAction === "publish" ? <Field><FieldLabel htmlFor="validation-run-id">验证运行号</FieldLabel><Input id="validation-run-id" value={validationRunId} onChange={(event) => setValidationRunId(event.target.value)} /></Field> : null}
           {actionError ? <Alert variant="destructive"><AlertDescription>{actionError}</AlertDescription></Alert> : null}

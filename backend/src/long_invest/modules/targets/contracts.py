@@ -51,6 +51,7 @@ class TargetCalculationStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
     SUCCEEDED = "SUCCEEDED"
+    NOT_MATCHED = "NOT_MATCHED"
     FAILED = "FAILED"
 
 

@@ -129,6 +129,78 @@ export type BacktestItemStatus =
 
 export type BacktestAction = "PAUSE" | "RESUME" | "CANCEL" | "RETRY_FAILED" | "RERUN"
 
+export interface ScreeningPeriodDto {
+  sequenceNo: number
+  trainingStartDate: string
+  trainingEndDate: string
+  testStartDate: string
+  testEndDate: string
+}
+
+export interface ScreeningBatchDto {
+  id: string
+  strategyVersionId: string
+  status: string
+  periods: ScreeningPeriodDto[]
+  totalItems: number
+  matchedItems: number
+  notMatchedItems: number
+  failedItems: number
+  canceledItems: number
+  pendingItems: number
+  allowedActions: string[]
+  createdAt: string
+  updatedAt: string
+  completedAt: string | null
+}
+
+export interface ScreeningResultDto {
+  id: string
+  periodId: string
+  periodSequence: number
+  securityId: string
+  symbol: string
+  name: string
+  status: string
+  values: TargetValuesDto | null
+  reason: string | null
+  failureCode: string | null
+  attemptCount: number
+}
+
+export interface ScreeningBatchPageDto {
+  items: ScreeningBatchDto[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export interface ScreeningResultPageDto {
+  items: ScreeningResultDto[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export interface CandidateBacktestItemPageDto {
+  items: BacktestItemSummaryDto[]
+  page: number
+  pageSize: number
+  total: number
+}
+
+export interface PriceVersionDto {
+  id: string
+  versionNo: number
+  effectiveDate: string
+  values: TargetValuesDto
+  source: string
+  reason: string
+  actorUserId: string
+  sourceVersionId: string | null
+  createdAt: string
+}
+
 export interface BacktestDateRangeDto {
   trainingStartDate: string
   trainingEndDate: string
@@ -161,11 +233,15 @@ export interface StrategyPublishInput {
 
 export interface BacktestItemSummaryDto {
   itemId: string
+  screeningResultId?: string | null
+  screeningPeriodId?: string | null
+  periodSequence?: number | null
   securityId: string
   symbol: string
   name: string
   status: BacktestItemStatus | string
   failureCode: string | null
+  outcomeReason?: string | null
   attemptCount: number
   startedAt: string | null
   endedAt: string | null
@@ -173,6 +249,7 @@ export interface BacktestItemSummaryDto {
 
 export interface BacktestTaskListItemDto {
   taskId: string
+  screeningBatchId?: string | null
   rerunFromTaskId: string | null
   mode: "SINGLE" | "WATCHLIST" | "MARKET"
   status: BacktestTaskStatus | string
@@ -290,6 +367,8 @@ export interface BacktestMetricsDto {
   volatility: string
   sharpeRatio: string | null
   completedRoundTrips: number
+  buyCount?: number
+  sellCount?: number
   winningTrades: number
   losingTrades: number
   breakevenTrades: number
@@ -302,6 +381,10 @@ export interface BacktestMetricsDto {
   capitalExposureRatio: string
   openPositionAtEnd: boolean
   unfilledOrderCount: number
+  grossProfitAmount?: string
+  grossLossAmount?: string
+  netProfitAmount?: string
+  profitFactor?: string | null
 }
 
 export interface BacktestItemDto {
@@ -311,6 +394,7 @@ export interface BacktestItemDto {
   status: BacktestItemStatus | string
   failureCode?: string
   failureMessage?: string
+  outcomeReason?: string
 }
 
 export interface BacktestDailyResultDto {
@@ -362,6 +446,18 @@ export interface StrategyApi {
   getHoldoutBacktest(backtestId: string): Promise<HoldoutBacktestResult>
   getHoldoutBacktestSummary(backtestId: string): Promise<BacktestSummaryDto>
   controlHoldoutBacktest(backtestId: string, action: BacktestAction, reason: string): Promise<BacktestControlResultDto>
+  listScreenings(page?: number): Promise<ScreeningBatchPageDto>
+  getScreening(batchId: string): Promise<ScreeningBatchDto>
+  listScreeningResults(batchId: string, page: number, status?: string): Promise<ScreeningResultPageDto>
+  createScreening(input: { strategyVersionId: string; periods: ScreeningPeriodDto[]; concurrency: number }): Promise<ScreeningBatchDto>
+  controlScreening(batchId: string, action: string): Promise<ScreeningBatchDto>
+  createCandidateBacktest(screeningBatchId: string, initialCapital: string, concurrency: number): Promise<string>
+  listCandidateBacktests(page?: number): Promise<BacktestTaskPageDto>
+  listCandidateItems(taskId: string, page: number, filters?: { status?: string; search?: string; periodSequence?: number }): Promise<CandidateBacktestItemPageDto>
+  getCandidateItem(taskId: string, itemId: string): Promise<HoldoutBacktestResult>
+  listPriceVersions(taskId: string, itemId: string): Promise<PriceVersionDto[]>
+  changePriceVersion(taskId: string, itemId: string, input: { effectiveDate: string; values: TargetValuesDto; expectedVersion: number; reason: string }): Promise<PriceVersionDto>
+  rollbackPriceVersion(taskId: string, itemId: string, input: { sourceVersionId: string; effectiveDate: string; expectedVersion: number; reason: string }): Promise<PriceVersionDto>
 }
 
 export function isSaveConflict(error: unknown): error is SaveConflict {

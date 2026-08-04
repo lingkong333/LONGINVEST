@@ -29,7 +29,7 @@ STRATEGY_META = {
     },
     "parameter_schema": {
         "type": "object",
-        "properties": {"window": {"type": "integer", "minimum": 1}},
+        "properties": {"window": {"type": "integer", "minimum": 1, "title": "回看窗口", "description": "计算目标价格使用的历史交易日数量"}},
         "required": ["window"],
         "additionalProperties": False,
     },

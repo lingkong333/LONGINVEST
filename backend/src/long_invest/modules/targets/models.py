@@ -177,7 +177,7 @@ class TargetCalculationRun(Base):
     __tablename__ = "target_calculation_run"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('PENDING','RUNNING','SUCCEEDED','FAILED')",
+            "status IN ('PENDING','RUNNING','SUCCEEDED','NOT_MATCHED','FAILED')",
             name="status_valid",
         ),
         CheckConstraint(

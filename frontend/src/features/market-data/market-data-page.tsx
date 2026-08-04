@@ -835,6 +835,13 @@ export function MarketDataPage({ gateway = marketDataGateway }: MarketDataPagePr
                         <Badge variant="outline">已取消 {job.itemCounts.canceled}</Badge>
                       ) : null}
                     </div>
+                    <div className="mt-2">
+                      <Button asChild size="sm" variant="ghost">
+                        <Link to={`/market-data/backfills/${job.id}`}>
+                          查看逐股明细
+                        </Link>
+                      </Button>
+                    </div>
                     {job.allowedActions.length > 0 ? (
                       <div className="mt-2 flex flex-wrap justify-end gap-2 border-t pt-2">
                         {job.allowedActions.map((action) => (

@@ -2421,6 +2421,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/strategy-screenings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Screenings */
+        get: operations["list_screenings_api_v1_strategy_screenings_get"];
+        put?: never;
+        /** Create Screening */
+        post: operations["create_screening_api_v1_strategy_screenings_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategy-screenings/{batch_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Screening */
+        get: operations["get_screening_api_v1_strategy_screenings__batch_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategy-screenings/{batch_id}/results": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Screening Results */
+        get: operations["list_screening_results_api_v1_strategy_screenings__batch_id__results_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/strategy-screenings/{batch_id}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Control Screening */
+        post: operations["control_screening_api_v1_strategy_screenings__batch_id___action__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/backtests": {
         parameters: {
             query?: never;
@@ -2586,6 +2655,41 @@ export interface paths {
         get: operations["get_backtest_item_api_v1_backtests__task_id__items__item_id__get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/items/{item_id}/price-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Price Versions */
+        get: operations["list_price_versions_api_v1_backtests__task_id__items__item_id__price_versions_get"];
+        put?: never;
+        /** Change Price Version */
+        post: operations["change_price_version_api_v1_backtests__task_id__items__item_id__price_versions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/backtests/{task_id}/items/{item_id}/price-versions/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Rollback Price Version */
+        post: operations["rollback_price_version_api_v1_backtests__task_id__items__item_id__price_versions_rollback_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3103,6 +3207,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/market-history/backfills/{job_id}/items": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Backfill Items */
+        get: operations["list_backfill_items_api_v1_market_history_backfills__job_id__items_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/market-history/backfills/{job_id}/items/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Retry Backfill Items */
+        post: operations["retry_backfill_items_api_v1_market_history_backfills__job_id__items_retry_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/market-history/backfills/{job_id}/pause": {
         parameters: {
             query?: never;
@@ -3543,6 +3681,11 @@ export interface components {
             failed: number;
             /** Canceled */
             canceled: number;
+            /**
+             * Anomalous
+             * @default 0
+             */
+            anomalous: number;
         };
         /** BackfillPageData */
         BackfillPageData: {
@@ -3658,6 +3801,15 @@ export interface components {
             failure_details?: {
                 [key: string]: unknown;
             }[];
+            /**
+             * Anomalous
+             * @default 0
+             */
+            anomalous: number;
+            /** Anomaly Details */
+            anomaly_details?: {
+                [key: string]: unknown;
+            }[];
         };
         /** BackfillScopeItem */
         BackfillScopeItem: {
@@ -3711,6 +3863,9 @@ export interface components {
              * @default 0
              */
             item_count: number;
+            provider_code?: components["schemas"]["ProviderCode"] | null;
+            /** Source Job Id */
+            source_job_id?: string | null;
             /** Items */
             items?: components["schemas"]["BackfillScopeItem"][];
         };
@@ -3764,6 +3919,8 @@ export interface components {
             return_distribution?: components["schemas"]["BacktestReturnDistribution"] | null;
             /** Median Max Drawdown */
             median_max_drawdown?: string | null;
+            /** Median Win Rate */
+            median_win_rate?: string | null;
             trade_count_distribution?: components["schemas"]["BacktestTradeCountDistribution"] | null;
             /** Best Symbol */
             best_symbol?: string | null;
@@ -3869,6 +4026,12 @@ export interface components {
              * Format: uuid
              */
             item_id: string;
+            /** Screening Result Id */
+            screening_result_id?: string | null;
+            /** Screening Period Id */
+            screening_period_id?: string | null;
+            /** Period Sequence */
+            period_sequence?: number | null;
             /**
              * Security Id
              * Format: uuid
@@ -3881,6 +4044,8 @@ export interface components {
             status: components["schemas"]["BacktestItemStatus"];
             /** Failure Code */
             failure_code?: string | null;
+            /** Outcome Reason */
+            outcome_reason?: string | null;
             /** Attempt Count */
             attempt_count: number;
             /** Started At */
@@ -3911,6 +4076,16 @@ export interface components {
             sharpe_ratio: string | null;
             /** Completed Round Trips */
             completed_round_trips: number;
+            /**
+             * Buy Count
+             * @default 0
+             */
+            buy_count: number;
+            /**
+             * Sell Count
+             * @default 0
+             */
+            sell_count: number;
             /** Winning Trades */
             winning_trades: number;
             /** Losing Trades */
@@ -3935,12 +4110,63 @@ export interface components {
             open_position_at_end: boolean;
             /** Unfilled Order Count */
             unfilled_order_count: number;
+            /**
+             * Gross Profit Amount
+             * @default 0
+             */
+            gross_profit_amount: string;
+            /**
+             * Gross Loss Amount
+             * @default 0
+             */
+            gross_loss_amount: string;
+            /**
+             * Net Profit Amount
+             * @default 0
+             */
+            net_profit_amount: string;
+            /** Profit Factor */
+            profit_factor?: string | null;
         };
         /**
          * BacktestMode
          * @enum {string}
          */
         BacktestMode: "SINGLE" | "WATCHLIST" | "MARKET";
+        /** BacktestPriceChangeBody */
+        BacktestPriceChangeBody: {
+            /**
+             * Effective Date
+             * Format: date
+             */
+            effective_date: string;
+            values: components["schemas"]["TargetValues-Input"];
+            /** Expected Version */
+            expected_version: number;
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
+        /** BacktestPriceRollbackBody */
+        BacktestPriceRollbackBody: {
+            /**
+             * Source Version Id
+             * Format: uuid
+             */
+            source_version_id: string;
+            /**
+             * Effective Date
+             * Format: date
+             */
+            effective_date: string;
+            /** Expected Version */
+            expected_version: number;
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
         /** BacktestReturnDistribution */
         BacktestReturnDistribution: {
             /** Minimum */
@@ -4015,6 +4241,8 @@ export interface components {
              * Format: uuid
              */
             task_id: string;
+            /** Screening Batch Id */
+            screening_batch_id?: string | null;
             /** Rerun From Task Id */
             rerun_from_task_id?: string | null;
             mode: components["schemas"]["BacktestMode"];
@@ -4606,6 +4834,9 @@ export interface components {
             symbols?: string[];
             /** Watchlist Id */
             watchlist_id?: string | null;
+            provider_code?: components["schemas"]["ProviderCode"] | null;
+            /** Source Job Id */
+            source_job_id?: string | null;
             /** Confirm */
             confirm: boolean;
             /** Reason */
@@ -4613,33 +4844,18 @@ export interface components {
         };
         /** CreateBacktestBody */
         CreateBacktestBody: {
-            /** @default SINGLE */
-            mode: components["schemas"]["BacktestMode"];
-            /** Symbol */
-            symbol?: string | null;
-            /** Watchlist Id */
-            watchlist_id?: string | null;
-            date_range: components["schemas"]["BacktestDateRange"];
-            /** Strategy Version Id */
-            strategy_version_id?: string | null;
-            /** Draft Id */
-            draft_id?: string | null;
-            /** Draft Version */
-            draft_version?: number | null;
-            /** Strategy Metadata */
-            strategy_metadata?: {
-                [key: string]: unknown;
-            } | null;
-            /** Parameter Schema */
-            parameter_schema?: {
-                [key: string]: unknown;
-            } | null;
-            /** Parameter Snapshot */
-            parameter_snapshot: {
-                [key: string]: unknown;
-            };
+            /**
+             * Screening Batch Id
+             * Format: uuid
+             */
+            screening_batch_id: string;
             /** Initial Capital */
             initial_capital: number | string;
+            /**
+             * Concurrency
+             * @default 4
+             */
+            concurrency: number;
             /** Confirm */
             confirm: boolean;
             /** Reason */
@@ -4702,6 +4918,29 @@ export interface components {
             reason: string;
             /** Confirm */
             confirm: boolean;
+        };
+        /** CreateScreeningBody */
+        CreateScreeningBody: {
+            /**
+             * Strategy Version Id
+             * Format: uuid
+             */
+            strategy_version_id: string;
+            /** Parameter Snapshot */
+            parameter_snapshot?: {
+                [key: string]: unknown;
+            };
+            /** Periods */
+            periods: components["schemas"]["StrategyScreeningPeriod"][];
+            /**
+             * Concurrency
+             * @default 4
+             */
+            concurrency: number;
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
         };
         /** CreateStrategyRequest */
         CreateStrategyRequest: {
@@ -6672,6 +6911,21 @@ export interface components {
             server_time: string;
             data: components["schemas"]["ResultData"];
         };
+        /** RetryBackfillItemsBody */
+        RetryBackfillItemsBody: {
+            /** Symbols */
+            symbols: string[];
+            provider_code?: components["schemas"]["ProviderCode"] | null;
+            /**
+             * Concurrency
+             * @default 4
+             */
+            concurrency: number;
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
+        };
         /** RetryBatchRequest */
         RetryBatchRequest: {
             /** Reason */
@@ -7045,6 +7299,13 @@ export interface components {
              */
             server_time: string;
             data: components["schemas"]["SchedulerStatusData"];
+        };
+        /** ScreeningControlBody */
+        ScreeningControlBody: {
+            /** Confirm */
+            confirm: boolean;
+            /** Reason */
+            reason: string;
         };
         /** SecretCommandEnvelope */
         SecretCommandEnvelope: {
@@ -7855,6 +8116,41 @@ export interface components {
          * @enum {string}
          */
         StrategyOperationItemStatus: "ACCEPTED" | "REUSED" | "REJECTED" | "FAILED";
+        /**
+         * StrategyScreeningAction
+         * @enum {string}
+         */
+        StrategyScreeningAction: "PAUSE" | "RESUME" | "CANCEL" | "RETRY_FAILED";
+        /** StrategyScreeningPeriod */
+        StrategyScreeningPeriod: {
+            /** Sequence No */
+            sequence_no: number;
+            /**
+             * Training Start Date
+             * Format: date
+             */
+            training_start_date: string;
+            /**
+             * Training End Date
+             * Format: date
+             */
+            training_end_date: string;
+            /**
+             * Test Start Date
+             * Format: date
+             */
+            test_start_date: string;
+            /**
+             * Test End Date
+             * Format: date
+             */
+            test_end_date: string;
+        };
+        /**
+         * StrategyScreeningResultStatus
+         * @enum {string}
+         */
+        StrategyScreeningResultStatus: "PENDING" | "RUNNING" | "MATCHED" | "NOT_MATCHED" | "FAILED" | "CANCELED";
         /** StrategyStockTestData */
         StrategyStockTestData: {
             /**
@@ -8188,7 +8484,7 @@ export interface components {
          * TargetCalculationStatus
          * @enum {string}
          */
-        TargetCalculationStatus: "PENDING" | "RUNNING" | "SUCCEEDED" | "FAILED";
+        TargetCalculationStatus: "PENDING" | "RUNNING" | "SUCCEEDED" | "NOT_MATCHED" | "FAILED";
         /** TargetData */
         TargetData: {
             /** Total */
@@ -14389,6 +14685,189 @@ export interface operations {
             };
         };
     };
+    list_screenings_api_v1_strategy_screenings_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_screening_api_v1_strategy_screenings_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateScreeningBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_screening_api_v1_strategy_screenings__batch_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_screening_results_api_v1_strategy_screenings__batch_id__results_get: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+                symbol?: string | null;
+                period_id?: string | null;
+                status?: components["schemas"]["StrategyScreeningResultStatus"] | null;
+            };
+            header?: never;
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    control_screening_api_v1_strategy_screenings__batch_id___action__post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                batch_id: string;
+                action: components["schemas"]["StrategyScreeningAction"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScreeningControlBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_backtests_api_v1_backtests_get: {
         parameters: {
             query?: {
@@ -14527,6 +15006,9 @@ export interface operations {
             query?: {
                 page?: number;
                 page_size?: number;
+                status?: string | null;
+                search?: string | null;
+                period_sequence?: number | null;
             };
             header?: never;
             path: {
@@ -14755,6 +15237,120 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_price_versions_api_v1_backtests__task_id__items__item_id__price_versions_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_price_version_api_v1_backtests__task_id__items__item_id__price_versions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestPriceChangeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rollback_price_version_api_v1_backtests__task_id__items__item_id__price_versions_rollback_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                task_id: string;
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BacktestPriceRollbackBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15845,6 +16441,80 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackfillResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_backfill_items_api_v1_market_history_backfills__job_id__items_get: {
+        parameters: {
+            query?: {
+                status?: string | null;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    retry_backfill_items_api_v1_market_history_backfills__job_id__items_retry_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                job_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RetryBackfillItemsBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };

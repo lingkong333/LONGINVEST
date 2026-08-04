@@ -7,9 +7,16 @@ import type {
   BacktestMetricsDto,
   BacktestSummaryDto,
   BacktestTaskListItemDto,
+  CandidateBacktestItemPageDto,
   DraftRevision,
   HoldoutBacktestInput,
   HoldoutBacktestResult,
+  PriceVersionDto,
+  ScreeningBatchDto,
+  ScreeningBatchPageDto,
+  ScreeningPeriodDto,
+  ScreeningResultDto,
+  ScreeningResultPageDto,
   StrategyAction,
   StrategyApi,
   StrategyDraft,
@@ -166,17 +173,22 @@ function taskItem(value: unknown): BacktestTaskListItemDto {
   const item = record(source.item)
   return {
     taskId: text(source.task_id),
+    screeningBatchId: nullableText(source.screening_batch_id),
     rerunFromTaskId: nullableText(source.rerun_from_task_id),
     mode: text(source.mode, "SINGLE") as BacktestTaskListItemDto["mode"],
     status: text(source.status),
     dateRange: dateRange(source.date_range),
     item: {
       itemId: text(item.item_id),
+      screeningResultId: nullableText(item.screening_result_id),
+      screeningPeriodId: nullableText(item.screening_period_id),
+      periodSequence: typeof item.period_sequence === "number" ? item.period_sequence : null,
       securityId: text(item.security_id),
       symbol: text(item.symbol),
       name: text(item.name),
       status: text(item.status, text(item.item_status)),
       failureCode: nullableText(item.failure_code),
+      outcomeReason: nullableText(item.outcome_reason),
       attemptCount: integer(item.attempt_count),
       startedAt: nullableText(item.started_at),
       endedAt: nullableText(item.ended_at),
@@ -201,6 +213,8 @@ function metric(value: unknown): BacktestMetricsDto | null {
     volatility: text(source.volatility),
     sharpeRatio: nullableText(source.sharpe_ratio),
     completedRoundTrips: integer(source.completed_round_trips),
+    buyCount: integer(source.buy_count),
+    sellCount: integer(source.sell_count),
     winningTrades: integer(source.winning_trades),
     losingTrades: integer(source.losing_trades),
     breakevenTrades: integer(source.breakeven_trades),
@@ -213,6 +227,10 @@ function metric(value: unknown): BacktestMetricsDto | null {
     capitalExposureRatio: text(source.capital_exposure_ratio),
     openPositionAtEnd: source.open_position_at_end === true,
     unfilledOrderCount: integer(source.unfilled_order_count),
+    grossProfitAmount: text(source.gross_profit_amount),
+    grossLossAmount: text(source.gross_loss_amount),
+    netProfitAmount: text(source.net_profit_amount),
+    profitFactor: nullableText(source.profit_factor),
   }
 }
 
@@ -223,6 +241,69 @@ function targetValues(value: unknown) {
     lowWatch: text(source.low_watch),
     highWatch: text(source.high_watch),
     highStrong: text(source.high_strong),
+  }
+}
+
+function screeningPeriod(value: unknown): ScreeningPeriodDto {
+  const source = record(value)
+  return {
+    sequenceNo: integer(source.sequence_no),
+    trainingStartDate: text(source.training_start_date),
+    trainingEndDate: text(source.training_end_date),
+    testStartDate: text(source.test_start_date),
+    testEndDate: text(source.test_end_date),
+  }
+}
+
+function screeningBatch(value: unknown): ScreeningBatchDto {
+  const source = record(value)
+  return {
+    id: text(source.id),
+    strategyVersionId: text(source.strategy_version_id),
+    status: text(source.status),
+    periods: array(source.periods).map(screeningPeriod),
+    totalItems: integer(source.total_items),
+    matchedItems: integer(source.matched_items),
+    notMatchedItems: integer(source.not_matched_items),
+    failedItems: integer(source.failed_items),
+    canceledItems: integer(source.canceled_items),
+    pendingItems: integer(source.pending_items),
+    allowedActions: array(source.allowed_actions).map((item) => text(item)),
+    createdAt: text(source.created_at),
+    updatedAt: text(source.updated_at),
+    completedAt: nullableText(source.completed_at),
+  }
+}
+
+function screeningResult(value: unknown): ScreeningResultDto {
+  const source = record(value)
+  return {
+    id: text(source.id),
+    periodId: text(source.period_id),
+    periodSequence: integer(source.period_sequence),
+    securityId: text(source.security_id),
+    symbol: text(source.symbol),
+    name: text(source.name),
+    status: text(source.status),
+    values: source.values ? targetValues(source.values) : null,
+    reason: nullableText(source.reason),
+    failureCode: nullableText(source.failure_code),
+    attemptCount: integer(source.attempt_count),
+  }
+}
+
+function priceVersion(value: unknown): PriceVersionDto {
+  const source = record(value)
+  return {
+    id: text(source.id),
+    versionNo: integer(source.version_no),
+    effectiveDate: text(source.effective_date),
+    values: targetValues(source.values),
+    source: text(source.source),
+    reason: text(source.reason),
+    actorUserId: text(source.actor_user_id),
+    sourceVersionId: nullableText(source.source_version_id),
+    createdAt: text(source.created_at),
   }
 }
 
@@ -241,6 +322,7 @@ function result(value: unknown, taskId: string, fallbackStatus = "PENDING"): Hol
       status: text(item.status, text(item.item_status)),
       failureCode: text(item.failure_code) || undefined,
       failureMessage: text(item.failure_message) || undefined,
+      outcomeReason: text(item.outcome_reason) || undefined,
     } : undefined,
     forecast: forecast ? {
       itemId: text(forecast.item_id),
@@ -440,23 +522,10 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
       return array(value.items).map(version)
     },
     async createHoldoutBacktest(input: HoldoutBacktestInput) {
-      const current = await loadDraft(api, input.strategyId)
-      const value = record(await api.request(api.client.POST("/api/v1/backtests", {
-        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
-        body: {
-          mode: "SINGLE", symbol: input.securitySymbol,
-          date_range: {
-            training_start_date: input.trainingStartDate, training_end_date: input.trainingEndDate,
-            test_start_date: input.testStartDate, test_end_date: input.testEndDate,
-          },
-          draft_id: current.id, draft_version: current.version,
-          strategy_metadata: current.metadata, parameter_schema: parseJsonObject(current.parameterSchema),
-          parameter_snapshot: input.parameterSnapshot ?? {}, initial_capital: input.initialCapital ?? "100000",
-          confirm: true, reason: "创建单股样本外回测",
-        },
-      })))
-      const task = record(value.task)
-      return result(value, text(task.id, text(task.task_id)), text(value.item_status, "PENDING"))
+      throw new ApiError(`单股直接回测已停用：${input.securitySymbol}`, {
+        code: "BACKTEST_SCREENING_BATCH_REQUIRED",
+        status: 422,
+      })
     },
     async listHoldoutBacktests(strategyId) {
       const [draftValue, versionsValue, tasksValue] = await Promise.all([
@@ -543,6 +612,170 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
         status: text(source.status),
         allowedActions: backtestAllowedActions(source),
       } satisfies BacktestControlResultDto
+    },
+    async listScreenings(page = 1) {
+      const source = record(await api.request(api.client.GET("/api/v1/strategy-screenings", {
+        params: { query: { page, page_size: 50 } },
+      })))
+      return {
+        items: array(source.items).map(screeningBatch),
+        page: integer(source.page, page),
+        pageSize: integer(source.page_size, 50),
+        total: integer(source.total),
+      } satisfies ScreeningBatchPageDto
+    },
+    async getScreening(batchId) {
+      return screeningBatch(await api.request(api.client.GET("/api/v1/strategy-screenings/{batch_id}", {
+        params: { path: { batch_id: batchId } },
+      })))
+    },
+    async listScreeningResults(batchId, page, status) {
+      const source = record(await api.request(api.client.GET("/api/v1/strategy-screenings/{batch_id}/results", {
+        params: {
+          path: { batch_id: batchId },
+          query: {
+            page,
+            page_size: 100,
+            status: status as "PENDING" | "RUNNING" | "MATCHED" | "NOT_MATCHED" | "FAILED" | "CANCELED" | undefined,
+          },
+        },
+      })))
+      return {
+        items: array(source.items).map(screeningResult),
+        page: integer(source.page, page),
+        pageSize: integer(source.page_size, 100),
+        total: integer(source.total),
+      } satisfies ScreeningResultPageDto
+    },
+    async createScreening(input) {
+      const value = await api.request(api.client.POST("/api/v1/strategy-screenings", {
+        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
+        body: {
+          strategy_version_id: input.strategyVersionId,
+          parameter_snapshot: {},
+          periods: input.periods.map((period) => ({
+            sequence_no: period.sequenceNo,
+            training_start_date: period.trainingStartDate,
+            training_end_date: period.trainingEndDate,
+            test_start_date: period.testStartDate,
+            test_end_date: period.testEndDate,
+          })),
+          concurrency: input.concurrency,
+          confirm: true,
+          reason: "创建全市场多时段策略筛选",
+        },
+      }))
+      return screeningBatch(value)
+    },
+    async controlScreening(batchId, action) {
+      const value = await api.request(api.client.POST("/api/v1/strategy-screenings/{batch_id}/{action}", {
+        params: {
+          path: { batch_id: batchId, action: action as "PAUSE" | "RESUME" | "CANCEL" | "RETRY_FAILED" },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
+        },
+        body: { confirm: true, reason: "用户在策略筛选工作台执行控制操作" },
+      }))
+      return screeningBatch(value)
+    },
+    async createCandidateBacktest(screeningBatchId, initialCapital, concurrency) {
+      const source = record(await api.request(api.client.POST("/api/v1/backtests", {
+        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
+        body: {
+          screening_batch_id: screeningBatchId,
+          initial_capital: initialCapital,
+          concurrency,
+          confirm: true,
+          reason: "基于冻结候选批次创建多时段回测",
+        },
+      })))
+      return text(source.task_id)
+    },
+    async listCandidateBacktests(page = 1) {
+      const source = record(await api.request(api.client.GET("/api/v1/backtests", {
+        params: { query: { page, page_size: 50 } },
+      })))
+      const pagination = record(source.pagination)
+      return {
+        items: array(source.items).map(taskItem).filter((item) => Boolean(item.screeningBatchId)),
+        page: integer(pagination.page, page),
+        pageSize: integer(pagination.page_size, 50),
+        total: integer(pagination.total),
+      }
+    },
+    async listCandidateItems(taskId, page, filters = {}) {
+      const source = record(await api.request(api.client.GET("/api/v1/backtests/{task_id}/items", {
+        params: {
+          path: { task_id: taskId },
+          query: {
+            page,
+            page_size: 100,
+            status: filters.status,
+            search: filters.search,
+            period_sequence: filters.periodSequence,
+          },
+        },
+      })))
+      const pagination = record(source.pagination)
+      return {
+        items: array(source.items).map((value) => taskItem({ item: value, task_id: taskId }).item),
+        page: integer(pagination.page, page),
+        pageSize: integer(pagination.page_size, 100),
+        total: integer(pagination.total),
+      } satisfies CandidateBacktestItemPageDto
+    },
+    async getCandidateItem(taskId, itemId) {
+      const [value, summaryValue] = await Promise.all([
+        api.request(api.client.GET("/api/v1/backtests/{task_id}/items/{item_id}", {
+          params: { path: { task_id: taskId, item_id: itemId } },
+        })),
+        api.request(api.client.GET("/api/v1/backtests/{task_id}/summary", {
+          params: { path: { task_id: taskId } },
+        })),
+      ])
+      return result(value, taskId, text(record(summaryValue).status, "PENDING"))
+    },
+    async listPriceVersions(taskId, itemId) {
+      const source = await api.request(api.client.GET("/api/v1/backtests/{task_id}/items/{item_id}/price-versions", {
+        params: { path: { task_id: taskId, item_id: itemId } },
+      }))
+      return array(source).map(priceVersion)
+    },
+    async changePriceVersion(taskId, itemId, input) {
+      const value = await api.request(api.client.POST("/api/v1/backtests/{task_id}/items/{item_id}/price-versions", {
+        params: {
+          path: { task_id: taskId, item_id: itemId },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
+        },
+        body: {
+          effective_date: input.effectiveDate,
+          values: {
+            low_strong: input.values.lowStrong,
+            low_watch: input.values.lowWatch,
+            high_watch: input.values.highWatch,
+            high_strong: input.values.highStrong,
+          },
+          expected_version: input.expectedVersion,
+          confirm: true,
+          reason: input.reason,
+        },
+      }))
+      return priceVersion(value)
+    },
+    async rollbackPriceVersion(taskId, itemId, input) {
+      const value = await api.request(api.client.POST("/api/v1/backtests/{task_id}/items/{item_id}/price-versions/rollback", {
+        params: {
+          path: { task_id: taskId, item_id: itemId },
+          header: { "Idempotency-Key": createClientIdempotencyKey() },
+        },
+        body: {
+          source_version_id: input.sourceVersionId,
+          effective_date: input.effectiveDate,
+          expected_version: input.expectedVersion,
+          confirm: true,
+          reason: input.reason,
+        },
+      }))
+      return priceVersion(value)
     },
   }
 }

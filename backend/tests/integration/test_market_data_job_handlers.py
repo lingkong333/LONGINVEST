@@ -10,6 +10,7 @@ from long_invest.bootstrap.backtest_postgres_jobs import (
     backtest_batch,
     backtest_single,
 )
+from long_invest.bootstrap.candidate_backtests import candidate_backtest_batch
 from long_invest.bootstrap.jobs import (
     DatabaseQuoteCycles,
     _corporate_action_scope,
@@ -29,6 +30,7 @@ from long_invest.bootstrap.jobs import (
     signal_evaluate_batch,
     signal_reevaluate,
 )
+from long_invest.bootstrap.strategy_screening import strategy_screening_batch
 from long_invest.entrypoints.job_worker import HANDLERS
 from long_invest.entrypoints.monitor_scheduler import build_market_data_handlers
 from long_invest.modules.daily_data.contracts import DailyMissingReason
@@ -65,6 +67,8 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
     assert handlers["STRATEGY_PUBLISH"] is strategy_publish
     assert handlers["BACKTEST_SINGLE"] is backtest_single
     assert handlers["BACKTEST_BATCH"] is backtest_batch
+    assert handlers["BACKTEST_CANDIDATE_BATCH"] is candidate_backtest_batch
+    assert handlers["STRATEGY_SCREENING_BATCH"] is strategy_screening_batch
     assert set(handlers) == {
         "DAILY_MARKET_DATA",
         "DAILY_MARKET_RECOVERY",
@@ -77,6 +81,8 @@ def test_v4_market_data_handlers_are_registered_on_the_postgres_worker() -> None
         "STRATEGY_PUBLISH",
         "BACKTEST_SINGLE",
         "BACKTEST_BATCH",
+        "BACKTEST_CANDIDATE_BATCH",
+        "STRATEGY_SCREENING_BATCH",
     }
 
 

@@ -149,10 +149,31 @@ def hash_training_data_snapshot(training_data: object) -> str:
 def normalize_runner_result(raw_result: object) -> StrategyForecastResult:
     if not isinstance(raw_result, Mapping):
         raise _invalid_result()
-    allowed = {"low_strong", "low_watch", "high_watch", "high_strong", "diagnostics"}
-    if set(raw_result) - allowed or not allowed.difference({"diagnostics"}) <= set(
-        raw_result
-    ):
+    matched = raw_result.get("matched")
+    if type(matched) is not bool:
+        raise _invalid_result()
+    target_keys = {"low_strong", "low_watch", "high_watch", "high_strong"}
+    allowed = {"matched", "reason", "diagnostics", *target_keys}
+    if set(raw_result) - allowed:
+        raise _invalid_result()
+    diagnostics = _normalized_diagnostics(raw_result.get("diagnostics", {}))
+    if not matched:
+        reason = raw_result.get("reason")
+        if (
+            target_keys & set(raw_result)
+            or not isinstance(reason, str)
+            or not reason.strip()
+        ):
+            raise _invalid_result()
+        try:
+            return StrategyForecastResult(
+                matched=False,
+                reason=reason.strip(),
+                diagnostics=diagnostics,
+            )
+        except ValidationError as exc:
+            raise _invalid_result() from exc
+    if "reason" in raw_result or not target_keys <= set(raw_result):
         raise _invalid_result()
     try:
         values = TargetValues(
@@ -163,7 +184,14 @@ def normalize_runner_result(raw_result: object) -> StrategyForecastResult:
         )
     except (DecimalException, KeyError, TypeError, ValueError, ValidationError) as exc:
         raise _invalid_result() from exc
-    diagnostics = raw_result.get("diagnostics", {})
+    return StrategyForecastResult(
+        matched=True,
+        values=values,
+        diagnostics=diagnostics,
+    )
+
+
+def _normalized_diagnostics(diagnostics: object) -> dict[str, Any]:
     if not isinstance(diagnostics, Mapping):
         raise _invalid_result()
     try:
@@ -178,7 +206,7 @@ def normalize_runner_result(raw_result: object) -> StrategyForecastResult:
         raise _invalid_result() from exc
     if len(encoded) > MAX_DIAGNOSTICS_BYTES:
         raise _invalid_result()
-    return StrategyForecastResult(values=values, diagnostics=normalized_diagnostics)
+    return normalized_diagnostics
 
 
 def _normalize_context(

@@ -17,6 +17,7 @@ from long_invest.modules.auth.application import (
 )
 from long_invest.modules.backtests.api import (
     configure_backtest_application,
+    configure_candidate_backtest_application,
 )
 from long_invest.modules.backtests.api import (
     router as backtests_router,
@@ -47,6 +48,9 @@ from long_invest.modules.securities.api import router as securities_router
 from long_invest.modules.settings.api import router as settings_router
 from long_invest.modules.signals.api import router as signals_router
 from long_invest.modules.strategies.api import router as strategies_router
+from long_invest.modules.strategies.screening_api import (
+    router as strategy_screenings_router,
+)
 from long_invest.modules.system_status.api import (
     configure_system_status_application,
 )
@@ -83,6 +87,9 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app() -> FastAPI:
+    from long_invest.bootstrap.candidate_backtests import (
+        build_candidate_backtest_application,
+    )
     from long_invest.bootstrap.dashboard import build_dashboard_application
     from long_invest.bootstrap.history_backfills import (
         build_history_backfill_application,
@@ -91,6 +98,9 @@ def create_app() -> FastAPI:
     from long_invest.bootstrap.strategy_operations import (
         build_strategy_operation_ports,
     )
+    from long_invest.bootstrap.strategy_screening import (
+        build_strategy_screening_application,
+    )
     from long_invest.bootstrap.system_status import build_system_status_application
     from long_invest.modules.history_backfills.application import (
         configure_history_backfill_application,
@@ -98,10 +108,15 @@ def create_app() -> FastAPI:
     from long_invest.modules.strategies.application import (
         configure_strategy_operation_ports,
     )
+    from long_invest.modules.strategies.screening_api import (
+        configure_strategy_screening_application,
+    )
 
     settings = get_settings()
     configure_backtest_application(build_backtest_application)
+    configure_candidate_backtest_application(build_candidate_backtest_application)
     configure_strategy_operation_ports(build_strategy_operation_ports)
+    configure_strategy_screening_application(build_strategy_screening_application)
     configure_history_backfill_application(build_history_backfill_application)
     configure_job_admin_application(lambda: JobAdminApplication(get_database()))
     configure_system_status_application(build_system_status_application)
@@ -133,6 +148,7 @@ def create_app() -> FastAPI:
     app.include_router(targets_router)
     app.include_router(signals_router)
     app.include_router(strategies_router)
+    app.include_router(strategy_screenings_router)
     app.include_router(backtests_router)
     app.include_router(jobs_router)
     app.include_router(audit_router)

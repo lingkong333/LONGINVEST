@@ -43,6 +43,10 @@ function createApi(overrides: Partial<StrategyApi> = {}): StrategyApi {
     getHoldoutBacktest: vi.fn(),
     getHoldoutBacktestSummary: vi.fn(),
     controlHoldoutBacktest: vi.fn(),
+    listScreenings: vi.fn().mockResolvedValue({ items: [], page: 1, pageSize: 50, total: 0 }),
+    getScreening: vi.fn(), listScreeningResults: vi.fn(), createScreening: vi.fn(), controlScreening: vi.fn(),
+    createCandidateBacktest: vi.fn(), listCandidateBacktests: vi.fn(), listCandidateItems: vi.fn(), getCandidateItem: vi.fn(),
+    listPriceVersions: vi.fn(), changePriceVersion: vi.fn(), rollbackPriceVersion: vi.fn(),
     ...overrides,
   }
 }
@@ -90,5 +94,17 @@ describe("策略总览", () => {
     await user.click(screen.getByRole("tab", { name: "回测" }))
 
     expect(await screen.findByRole("heading", { name: "样本外回测" })).toBeInTheDocument()
+  })
+
+  it("隐藏系统生成的随机策略名称", async () => {
+    renderPage(createApi({
+      listStrategies: vi.fn().mockResolvedValue({
+        items: [{ id: "strategy-1", name: "策略-1dbc2dded84d4691b0c9c522bb6f75ea", status: "DRAFT" }],
+        canCreate: false,
+      }),
+    }))
+
+    expect(await screen.findByText("未命名策略")).toBeInTheDocument()
+    expect(screen.queryByText(/1dbc2dded84d/)).not.toBeInTheDocument()
   })
 })

@@ -5,6 +5,7 @@ import type {
   MonitoringGateway,
   MonitoringOverview,
   MonitoringOverviewItem,
+  MonitorSchedule,
 } from "@/features/monitoring/types"
 import { ApiError, createApiClient, createClientIdempotencyKey } from "@/shared/api/client"
 import type { paths } from "@/shared/api/generated/schema"
@@ -61,7 +62,17 @@ const scheduleListSchema = z.object({
   items: z.array(z.object({
     id: z.string().min(1),
     name: z.string().min(1),
+    version: z.number().int().positive().default(1),
   })),
+})
+
+const scheduleDetailSchema = z.object({
+  schedule: z.object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    version: z.number().int().positive(),
+  }),
+  revision: z.object({ times: z.array(z.string().regex(/^\d{2}:\d{2}$/)) }),
 })
 
 const targetListSchema = z.object({
@@ -127,6 +138,50 @@ export function createMonitoringGateway(baseUrl = ""): MonitoringGateway {
   const api = createApiClient<paths>({ baseUrl })
 
   return {
+    async loadSchedules() {
+      const schedules = parse(
+        scheduleListSchema,
+        await api.request<unknown>(api.client.GET("/api/v1/monitor-schedules")),
+        "INVALID_MONITOR_SCHEDULES_RESPONSE",
+      )
+      const details = await Promise.all(schedules.items.map(async (schedule) => (
+        parse(
+          scheduleDetailSchema,
+          await api.request<unknown>(api.client.GET("/api/v1/monitor-schedules/{schedule_id}", {
+            params: { path: { schedule_id: schedule.id } },
+          })),
+          "INVALID_MONITOR_SCHEDULE_RESPONSE",
+        )
+      )))
+      return details.map(({ schedule, revision }) => ({
+        id: schedule.id,
+        name: schedule.name,
+        version: schedule.version,
+        times: revision.times,
+      })) satisfies MonitorSchedule[]
+    },
+    async saveSchedule(input) {
+      const body = {
+        name: input.name,
+        times: input.times,
+        reason: input.reason,
+        confirm: true as const,
+      }
+      if (input.id) {
+        await api.request(api.client.PATCH("/api/v1/monitor-schedules/{schedule_id}", {
+          params: {
+            path: { schedule_id: input.id },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
+          },
+          body: { ...body, expected_version: input.version ?? 1 },
+        }))
+        return
+      }
+      await api.request(api.client.POST("/api/v1/monitor-schedules", {
+        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
+        body,
+      }))
+    },
     async loadOverview() {
       const subscriptions = parse(
         subscriptionListSchema,

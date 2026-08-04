@@ -5,6 +5,10 @@ from long_invest.modules.strategies.models import (
     StrategyDraft,
     StrategyDraftRevision,
     StrategyRun,
+    StrategyScreeningBatch,
+    StrategyScreeningPeriod,
+    StrategyScreeningResult,
+    StrategyScreeningScopeItem,
     StrategyValidationRun,
     StrategyVersion,
 )
@@ -18,6 +22,10 @@ def test_strategy_module_owns_all_lifecycle_records() -> None:
         StrategyVersion.__tablename__,
         StrategyValidationRun.__tablename__,
         StrategyRun.__tablename__,
+        StrategyScreeningBatch.__tablename__,
+        StrategyScreeningPeriod.__tablename__,
+        StrategyScreeningScopeItem.__tablename__,
+        StrategyScreeningResult.__tablename__,
     } == {
         "strategy",
         "strategy_draft",
@@ -25,6 +33,10 @@ def test_strategy_module_owns_all_lifecycle_records() -> None:
         "strategy_version",
         "strategy_validation_run",
         "strategy_run",
+        "strategy_screening_batch",
+        "strategy_screening_period",
+        "strategy_screening_scope_item",
+        "strategy_screening_result",
     }
     assert {
         "source_code",
@@ -114,3 +126,45 @@ def test_strategy_models_enforce_lifecycle_and_immutable_version_invariants() ->
         if item.name == "ck_strategy_version_source_code_hash_sha256"
     )
     assert "source_code_hash ~ '^[0-9a-f]{64}$'" in str(source_hash_constraint.sqltext)
+
+
+def test_strategy_screening_models_enforce_frozen_scope_and_result_invariants() -> None:
+    constraints = (
+        _constraint_names(StrategyScreeningBatch)
+        | _constraint_names(StrategyScreeningPeriod)
+        | _constraint_names(StrategyScreeningScopeItem)
+        | _constraint_names(StrategyScreeningResult)
+    )
+    assert {
+        "uq_strategy_screening_batch_idempotency_key",
+        "ck_strategy_screening_batch_status_valid",
+        "ck_strategy_screening_period_date_range_valid",
+        "ck_strategy_screening_scope_item_qfq_snapshot_consistent",
+        "ck_strategy_screening_result_outcome_consistent",
+        "ck_strategy_screening_result_completion_consistent",
+    } <= constraints
+    assert {
+        "strategy_version.id",
+        "security_universe_snapshot.id",
+        "job.id",
+    } <= _foreign_key_targets(StrategyScreeningBatch)
+    assert "qfq_dataset.id" in _foreign_key_targets(StrategyScreeningScopeItem)
+    assert {
+        "strategy_screening_period.batch_id",
+        "strategy_screening_period.id",
+        "strategy_screening_scope_item.batch_id",
+        "strategy_screening_scope_item.id",
+    } <= _foreign_key_targets(StrategyScreeningResult)
+    outcome = next(
+        item
+        for item in StrategyScreeningResult.__table__.constraints
+        if item.name == "ck_strategy_screening_result_outcome_consistent"
+    )
+    sql = str(outcome.sqltext)
+    assert "status = 'MATCHED'" in sql
+    assert "low_strong IS NOT NULL" in sql
+    assert "low_watch IS NOT NULL" in sql
+    assert "high_watch IS NOT NULL" in sql
+    assert "high_strong IS NOT NULL" in sql
+    assert "status = 'NOT_MATCHED'" in sql
+    assert "status = 'FAILED'" in sql

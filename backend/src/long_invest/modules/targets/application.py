@@ -215,6 +215,14 @@ class TargetApplication:
                     requested_at=datetime.now(UTC),
                 )
             )
+            if not forecast.matched:
+                return await self._strategy_write(
+                    "not_matched",
+                    reservation.run_id,
+                    reason=forecast.reason or "策略条件不匹配",
+                )
+            if forecast.values is None:
+                raise RuntimeError("matched strategy result has no target values")
             current_training = await self._training_data.get_training_data(
                 security_id=reservation.security_id,
                 start_date=command.training_start_date,

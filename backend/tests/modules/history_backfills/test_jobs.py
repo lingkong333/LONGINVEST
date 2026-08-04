@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 from types import MappingProxyType, SimpleNamespace
@@ -311,6 +312,44 @@ async def test_invalid_stock_data_fails_without_blocking_valid_stock(
     assert result.data["succeeded"] == 1
     assert result.data["failed_items"] == ["600000.SH"]
     assert [call[0] for call in store.calls] == ["000001.SZ"]
+
+
+@pytest.mark.anyio
+async def test_invalid_day_is_skipped_and_stock_is_marked_anomalous(
+    monkeypatch,
+) -> None:
+    snapshot_id = install_frozen_scope(monkeypatch, ("600000.SH",))
+    provider = Provider()
+
+    async def fetch_with_one_bad_day(item, **_values):
+        valid = bar(item.symbol)
+        invalid = replace(
+            valid,
+            trade_date=date(2020, 1, 3),
+            high=Decimal("8"),
+        )
+        return HistoryBarsBundle(
+            unadjusted=(valid, invalid),
+            qfq=(valid, invalid),
+            provider_contract_version="SINA:config-v2",
+        )
+
+    provider.fetch = fetch_with_one_bad_day
+    store = Store()
+
+    result = await PostgresSubject(provider, store)(
+        context(postgres_config(snapshot_id))
+    )
+
+    assert result.success is True
+    assert result.data["failed"] == 0
+    assert result.data["anomalous"] == 1
+    assert result.data["anomaly_details"][0]["symbol"] == "600000.SH"
+    stored_bundle = store.calls[0][1]
+    assert [item.trade_date for item in stored_bundle.unadjusted] == [
+        date(2020, 1, 2)
+    ]
+    assert [item.trade_date for item in stored_bundle.qfq] == [date(2020, 1, 2)]
 
 
 @pytest.mark.anyio

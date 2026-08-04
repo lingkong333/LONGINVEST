@@ -36,6 +36,7 @@ from long_invest.modules.market_data.service import QualityIssueService
 from long_invest.modules.providers.contracts import (
     DailyBarRequest,
     ProviderCapability,
+    ProviderCode,
 )
 from long_invest.modules.providers.resilience import ProviderCallError
 from long_invest.modules.providers.retry import ProviderHttpError
@@ -104,6 +105,7 @@ class DatabaseHistoryBarsProvider:
                     ),
                     deadline=deadline,
                     concurrency=concurrency,
+                    provider_code=item.provider_code,
                 )
                 qfq = await _wait_for_history_capacity(
                     provider,
@@ -115,6 +117,7 @@ class DatabaseHistoryBarsProvider:
                     ),
                     deadline=deadline,
                     concurrency=concurrency,
+                    provider_code=item.provider_code,
                 )
         except ProviderHttpError as error:
             raise HistoryBackfillItemError(
@@ -129,6 +132,22 @@ class DatabaseHistoryBarsProvider:
             qfq=_history_inputs(qfq.items),
             provider_contract_version=_provider_contract_version(
                 unadjusted.items, qfq.items
+            ),
+            anomalies=tuple(
+                {
+                    "trade_date": anomaly.trading_date.isoformat(),
+                    "error_code": anomaly.code,
+                    "price_mode": "UNADJUSTED",
+                }
+                for anomaly in unadjusted.anomalies
+            )
+            + tuple(
+                {
+                    "trade_date": anomaly.trading_date.isoformat(),
+                    "error_code": anomaly.code,
+                    "price_mode": "QFQ",
+                }
+                for anomaly in qfq.anomalies
             ),
         )
 
@@ -146,14 +165,20 @@ async def _wait_for_history_capacity(
     *,
     deadline: datetime,
     concurrency: int,
+    provider_code: str | None = None,
 ):
     failed_attempts = 0
     while True:
         try:
+            if provider_code is None:
+                return await provider.daily_bars(
+                    request, deadline, concurrency=concurrency
+                )
             return await provider.daily_bars(
                 request,
                 deadline,
                 concurrency=concurrency,
+                fixed_provider=ProviderCode(provider_code),
             )
         except ProviderCallError as error:
             if error.code not in {

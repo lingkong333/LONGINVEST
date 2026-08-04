@@ -132,6 +132,7 @@ class ProviderRouter:
         deadline: datetime,
         *,
         concurrency: int | None = None,
+        fixed_provider: ProviderCode | None = None,
     ) -> ProviderBatchResult[DailyBar]:
         if concurrency is not None and (
             concurrency < 1
@@ -147,6 +148,7 @@ class ProviderRouter:
             deadline,
             request,
             concurrency_override=concurrency,
+            fixed_provider=fixed_provider,
         )
 
     async def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
@@ -303,8 +305,19 @@ class ProviderRouter:
         request: DailyBarRequest,
         *,
         concurrency_override: int | None,
+        fixed_provider: ProviderCode | None = None,
     ) -> ProviderBatchResult[DailyBar]:
         plan = await self._route_plan(capability)
+        if fixed_provider is not None:
+            plan = ProviderRoutePlan(
+                capability,
+                tuple(
+                    replace(setting, auto_switch=False)
+                    for setting in plan.routes
+                    if setting.provider is fixed_provider
+                ),
+                fixed_provider=fixed_provider,
+            )
         chosen: dict[object, DailyBar] = {}
         conflicts: dict[object, ProviderItemFailure] = {}
         last_error: str | None = None
@@ -413,6 +426,7 @@ class ProviderRouter:
                 result.failures,
                 result.batch_error_code,
                 result.missing_ranges,
+                result.anomalies,
             )
         if isinstance(result, tuple):
             return tuple(

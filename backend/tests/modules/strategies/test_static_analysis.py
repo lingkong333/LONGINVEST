@@ -7,6 +7,11 @@ from long_invest.modules.strategies.static_analysis import (
     analyze_strategy_source,
 )
 
+WINDOW_PROPERTY = (
+    '"window": {"type": "integer", "title": "观察周期", '
+    '"description": "用于判断价格区间的交易日数量", "minimum": 1}'
+)
+
 VALID_SOURCE = """
 import math
 import numpy as np
@@ -23,7 +28,7 @@ STRATEGY_META = {
     },
     "parameter_schema": {
         "type": "object",
-        "properties": {"window": {"type": "integer", "minimum": 1}},
+        "properties": {__WINDOW_PROPERTY__},
         "required": ["window"],
         "additionalProperties": False,
     },
@@ -37,7 +42,7 @@ def calculate_targets(history, params, context):
         "high_watch": close * Decimal("1.1"),
         "high_strong": close * Decimal("1.2"),
     }
-"""
+""".replace("__WINDOW_PROPERTY__", WINDOW_PROPERTY)
 
 
 def test_static_analysis_accepts_fixed_contract_and_safe_imports() -> None:
@@ -80,8 +85,8 @@ def test_static_analysis_rejects_invalid_or_dangerous_source(
 
 def test_static_analysis_rejects_invalid_metadata_schema() -> None:
     source = VALID_SOURCE.replace(
-        '"properties": {"window": {"type": "integer", "minimum": 1}},',
-        '"properties": {"window": {"type": "not-a-json-type"}},',
+        WINDOW_PROPERTY,
+        '"window": {"type": "not-a-json-type"}',
     )
 
     with pytest.raises(StrategyStaticAnalysisError) as error:
@@ -124,14 +129,23 @@ def test_static_analysis_rejects_all_schema_references(
     reference: dict[str, str],
 ) -> None:
     source = VALID_SOURCE.replace(
-        '"properties": {"window": {"type": "integer", "minimum": 1}},',
-        f'"properties": {{"window": {reference!r}}},',
+        WINDOW_PROPERTY,
+        f'"window": {reference!r}',
     )
 
     with pytest.raises(StrategyStaticAnalysisError) as error:
         analyze_strategy_source(source)
 
     assert error.value.code == "PARAMETER_SCHEMA_REFERENCE_FORBIDDEN"
+
+
+def test_static_analysis_requires_parameter_business_description() -> None:
+    source = VALID_SOURCE.replace('"description": "用于判断价格区间的交易日数量", ', "")
+
+    with pytest.raises(StrategyStaticAnalysisError) as error:
+        analyze_strategy_source(source)
+
+    assert error.value.code == "PARAMETER_DESCRIPTION_REQUIRED"
 
 
 @pytest.mark.parametrize(

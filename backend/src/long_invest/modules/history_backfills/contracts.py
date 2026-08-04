@@ -9,7 +9,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from long_invest.modules.providers.contracts import validate_symbol
+from long_invest.modules.providers.contracts import ProviderCode, validate_symbol
 
 
 class HistoryBackfillScope(StrEnum):
@@ -35,9 +35,13 @@ class CreateHistoryBackfill:
     concurrency: int
     symbols: tuple[str, ...] = ()
     watchlist_id: UUID | None = None
+    provider_code: ProviderCode | None = None
+    source_job_id: UUID | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "scope", HistoryBackfillScope(self.scope))
+        if self.provider_code is not None:
+            object.__setattr__(self, "provider_code", ProviderCode(self.provider_code))
         normalized = tuple(sorted(set(self.symbols)))
         for symbol in normalized:
             validate_symbol(symbol)
@@ -128,6 +132,7 @@ class HistoryBackfillWorkItem:
     security_id: UUID
     symbol: str
     attempt_count: int = 0
+    provider_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,10 +155,12 @@ class HistoryBarsBundle:
     unadjusted: tuple[HistoryBarInput, ...]
     qfq: tuple[HistoryBarInput, ...]
     provider_contract_version: str
+    anomalies: tuple[dict[str, str], ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "unadjusted", tuple(self.unadjusted))
         object.__setattr__(self, "qfq", tuple(self.qfq))
+        object.__setattr__(self, "anomalies", tuple(self.anomalies))
         if not self.provider_contract_version.strip():
             raise ValueError("history provider contract version is required")
 

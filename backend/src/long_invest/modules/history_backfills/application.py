@@ -13,6 +13,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryScopeSnapshotPort,
 )
 from long_invest.modules.history_backfills.service import HistoryBackfillService
+from long_invest.modules.securities.application import SecurityApplication
 from long_invest.platform.audit.service import AuditService
 from long_invest.platform.database.engine import Database
 from long_invest.platform.errors import AppError
@@ -114,6 +115,73 @@ class HistoryBackfillApplication:
             raise
         except (SQLAlchemyError, TimeoutError) as exc:
             raise _backend_unavailable() from exc
+
+    async def items(
+        self,
+        job_id: UUID,
+        *,
+        status: str | None,
+        page: int,
+        page_size: int,
+    ) -> dict[str, Any]:
+        job = await self.get(job_id)
+        snapshot_id = UUID(str(job.config_snapshot["universe_snapshot_id"]))
+        frozen = await SecurityApplication(self._database).frozen_universe(snapshot_id)
+        checkpoint = job.checkpoint or {}
+        failures = {
+            str(item.get("symbol")): item
+            for item in checkpoint.get("failures", ())
+        }
+        anomalies = {
+            str(item.get("symbol")): item
+            for item in checkpoint.get("anomalies", ())
+        }
+        selected_symbols = tuple(
+            str(item) for item in checkpoint.get("retry_items", ())
+        )
+        selected = (
+            tuple(item for item in frozen.items if item.symbol in selected_symbols)
+            if selected_symbols
+            else frozen.items
+        )
+        cursor = int(checkpoint.get("cursor", 0))
+        concurrency = int(job.config_snapshot.get("concurrency", 1))
+        rows: list[dict[str, Any]] = []
+        for index, item in enumerate(selected):
+            error = failures.get(item.symbol)
+            anomaly = anomalies.get(item.symbol)
+            if error is not None:
+                item_status = "FAILED"
+            elif anomaly is not None:
+                item_status = "ANOMALY"
+            elif index < cursor:
+                item_status = "SUCCEEDED"
+            elif str(job.status) == "RUNNING" and index < cursor + concurrency:
+                item_status = "RUNNING"
+            elif str(job.status) == "CANCELED":
+                item_status = "CANCELED"
+            else:
+                item_status = "PENDING"
+            rows.append(
+                {
+                    "security_id": str(item.security_id),
+                    "symbol": item.symbol,
+                    "status": item_status,
+                    "error_code": error.get("error_code") if error else None,
+                    "retryable": bool(error.get("retryable")) if error else True,
+                    "anomaly_rows": anomaly.get("rows", []) if anomaly else [],
+                }
+            )
+        if status:
+            rows = [item for item in rows if item["status"] == status]
+        total = len(rows)
+        start = (page - 1) * page_size
+        return {
+            "items": rows[start : start + page_size],
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+        }
 
     def _service(self, session: Any) -> HistoryBackfillService:
         return HistoryBackfillService(

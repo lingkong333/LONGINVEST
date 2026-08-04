@@ -31,6 +31,26 @@ class QfqStrategyDataPort:
             security_id=security_id, start_date=start_date, end_date=end_date
         )
 
+    async def get_training_data_from_dataset(
+        self,
+        *,
+        dataset_id: UUID,
+        security_id: UUID,
+        start_date: date,
+        end_date: date,
+    ) -> TrainingDataSnapshot | None:
+        try:
+            window = await self._qfq.get_dataset_window(
+                dataset_id, start=start_date, end=end_date
+            )
+        except AppError as exc:
+            if exc.code == "QFQ_DATA_NOT_FOUND":
+                return None
+            raise
+        if window.dataset.security_id != security_id:
+            return None
+        return self._snapshot(window, start_date=start_date, end_date=end_date)
+
     async def _get_data(
         self, *, security_id: UUID, start_date: date, end_date: date
     ) -> TrainingDataSnapshot | None:
@@ -45,6 +65,11 @@ class QfqStrategyDataPort:
         dataset = window.dataset
         if dataset.freshness is not QfqFreshness.FRESH:
             return None
+        return self._snapshot(window, start_date=start_date, end_date=end_date)
+
+    @staticmethod
+    def _snapshot(window, *, start_date: date, end_date: date):
+        dataset = window.dataset
         rows = tuple(
             {
                 "trade_date": bar.trade_date,

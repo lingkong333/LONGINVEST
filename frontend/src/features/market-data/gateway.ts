@@ -1,6 +1,7 @@
 import { z } from "zod"
 
 import type {
+  BackfillItemSummary,
   BackfillSummary,
   DailyBatchSummary,
   DailyPriceBar,
@@ -187,6 +188,7 @@ const backfillPageSchema = z.object({
       succeeded: z.number().int().nonnegative(),
       failed: z.number().int().nonnegative(),
       canceled: z.number().int().nonnegative(),
+      anomalous: z.number().int().nonnegative().default(0),
     }),
     version: z.number().int().positive(),
     updated_at: z.string().min(1),
@@ -199,6 +201,24 @@ const backfillPageSchema = z.object({
   allowed_actions: z.array(
     z.enum(["CREATE", "PAUSE", "RESUME", "CANCEL", "RETRY_FAILED"]),
   ).default([]),
+})
+
+const backfillItemsSchema = z.object({
+  items: z.array(z.object({
+    security_id: z.string().min(1),
+    symbol: z.string().min(1),
+    status: z.enum([
+      "PENDING", "RUNNING", "SUCCEEDED", "ANOMALY", "FAILED", "CANCELED",
+    ]),
+    error_code: z.string().nullable(),
+    retryable: z.boolean(),
+    anomaly_rows: z.array(z.object({
+      trade_date: z.string().min(1),
+      error_code: z.string().min(1),
+      price_mode: z.string().min(1),
+    })),
+  })),
+  pagination: paginationSchema,
 })
 
 function parse<T>(schema: z.ZodType<T>, value: unknown, code: string): T {
@@ -712,6 +732,53 @@ export function createMarketDataGateway(baseUrl = ""): MarketDataGateway {
           expected_version: command.job.version,
         },
       }))
+    },
+
+    async loadBackfillItems(command) {
+      const value = await api.request<unknown>(api.client.GET(
+        "/api/v1/market-history/backfills/{job_id}/items",
+        {
+          params: {
+            path: { job_id: command.jobId },
+            query: {
+              status: command.status ?? null,
+              page: command.page,
+              page_size: command.pageSize,
+            },
+          },
+        },
+      ))
+      const page = parse(backfillItemsSchema, value, "BACKFILL_ITEMS_INVALID")
+      return {
+        items: page.items.map((item): BackfillItemSummary => ({
+          securityId: item.security_id,
+          symbol: item.symbol,
+          status: item.status,
+          errorCode: item.error_code,
+          retryable: item.retryable,
+          anomalyRows: item.anomaly_rows,
+        })),
+        pagination: pageInfo(page.pagination),
+      }
+    },
+
+    async retryBackfillItems(command) {
+      await api.request(api.client.POST(
+        "/api/v1/market-history/backfills/{job_id}/items/retry",
+        {
+          params: {
+            path: { job_id: command.jobId },
+            header: { "Idempotency-Key": createClientIdempotencyKey() },
+          },
+          body: {
+            symbols: command.symbols,
+            provider_code: command.providerCode ?? null,
+            concurrency: command.concurrency,
+            confirm: true,
+            reason: command.reason,
+          },
+        },
+      ))
     },
   }
 }

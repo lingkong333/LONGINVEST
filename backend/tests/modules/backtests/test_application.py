@@ -109,6 +109,13 @@ class FakeService:
         )
         return self.forecast
 
+    async def skip_not_matched(self, _task_id, reason, **_kwargs):
+        self.calls.append("skip_not_matched")
+        return SimpleNamespace(
+            item_status=BacktestItemStatus.SKIPPED,
+            outcome_reason=reason,
+        )
+
     async def claim_simulation(self, _task_id, _test_data, **_kwargs):
         self.calls.append("claim_simulation")
 
@@ -135,6 +142,7 @@ class ForecastRecorder:
         self.order.append("forecast")
         self.requests.append(request)
         return StrategyForecastResult(
+            matched=True,
             values=TargetValues(
                 low_strong="8", low_watch="9", high_watch="11", high_strong="12"
             )
@@ -168,6 +176,51 @@ class AdjustmentRecorder:
 
 def test_holdout_workflow_freezes_forecast_before_loading_test_data() -> None:
     asyncio.run(_run_holdout_workflow())
+
+
+def test_unmatched_strategy_skips_simulation_with_reason() -> None:
+    async def scenario() -> None:
+        security_id = uuid4()
+        task = _task(security_id)
+        training = _data(
+            security_id,
+            start=date(2024, 1, 1),
+            end=date(2024, 12, 31),
+            marker="train",
+        )
+        service = FakeService(task)
+        forecasts = SimpleNamespace(
+            forecast=_async_value(
+                StrategyForecastResult(
+                    matched=False,
+                    reason="历史波动区间不足",
+                )
+            )
+        )
+        application = BacktestApplication(
+            FakeDatabase(),
+            creation_snapshots=SimpleNamespace(),
+            strategy_executions=SimpleNamespace(
+                resolve_execution=_async_value(
+                    SimpleNamespace(strategy_id=uuid4(), source_code="source")
+                )
+            ),
+            training_data=DataPort(training, "load_training", []),
+            test_data=SimpleNamespace(),
+            forecasts=forecasts,
+            adjustments=SimpleNamespace(),
+            engine=SimpleNamespace(rule_version=task.rule_version),
+            repository_factory=lambda session: session,
+            service_factory=lambda _repository, **_kwargs: service,
+        )
+
+        result = await application.run(task.id, execution_token=uuid4())
+
+        assert result.item_status is BacktestItemStatus.SKIPPED
+        assert result.outcome_reason == "历史波动区间不足"
+        assert service.calls == ["start", "claim_forecast", "skip_not_matched"]
+
+    asyncio.run(scenario())
 
 
 def test_run_item_claims_the_explicit_bulk_item() -> None:

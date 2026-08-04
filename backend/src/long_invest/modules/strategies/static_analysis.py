@@ -181,6 +181,7 @@ def analyze_strategy_source(source: str) -> StrategyStaticAnalysis:
         raise StrategyStaticAnalysisError(
             "PARAMETER_SCHEMA_INVALID", "parameter_schema is not valid JSON Schema"
         ) from exc
+    _validate_parameter_descriptions(schema)
     frozen_metadata = freeze_json_mapping(metadata)
     frozen_schema = frozen_metadata["parameter_schema"]
     assert isinstance(frozen_schema, MappingProxyType)
@@ -474,6 +475,28 @@ def _validate_metadata(metadata: dict[str, Any]) -> None:
         raise StrategyStaticAnalysisError(
             "PARAMETER_SCHEMA_INVALID", "parameter_schema must be an object"
         )
+
+
+def _validate_parameter_descriptions(schema: dict[str, Any]) -> None:
+    properties = schema.get("properties", {})
+    if not isinstance(properties, dict):
+        return
+    for name, definition in properties.items():
+        if not isinstance(definition, dict):
+            continue
+        title = definition.get("title")
+        description = definition.get("description")
+        if (
+            not isinstance(title, str)
+            or not title.strip()
+            or not any("\u4e00" <= char <= "\u9fff" for char in title)
+            or not isinstance(description, str)
+            or not description.strip()
+        ):
+            raise StrategyStaticAnalysisError(
+                "PARAMETER_DESCRIPTION_REQUIRED",
+                f"parameter {name} requires Chinese title and description",
+            )
 
 
 def _reject_schema_references(value: object) -> None:

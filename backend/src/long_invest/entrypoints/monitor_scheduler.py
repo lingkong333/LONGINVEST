@@ -14,6 +14,7 @@ from long_invest.bootstrap.backtest_postgres_jobs import (
     backtest_batch,
     backtest_single,
 )
+from long_invest.bootstrap.candidate_backtests import candidate_backtest_batch
 from long_invest.bootstrap.history_backfills import (
     build_history_backfill_job_handler,
 )
@@ -31,6 +32,7 @@ from long_invest.bootstrap.realtime_quotes import get_realtime_quote_runtime
 from long_invest.bootstrap.stage4_runtime import (
     build_strategy_validation_executor,
 )
+from long_invest.bootstrap.strategy_screening import strategy_screening_batch
 from long_invest.modules.calendar.application import CalendarApplication
 from long_invest.modules.daily_data.jobs import (
     DailyMarketRecoveryJob,
@@ -86,6 +88,8 @@ def build_market_data_handlers(database: Database):
         "STRATEGY_PUBLISH": strategy_publish,
         "BACKTEST_SINGLE": backtest_single,
         "BACKTEST_BATCH": backtest_batch,
+        "BACKTEST_CANDIDATE_BATCH": candidate_backtest_batch,
+        "STRATEGY_SCREENING_BATCH": strategy_screening_batch,
     }
 
 

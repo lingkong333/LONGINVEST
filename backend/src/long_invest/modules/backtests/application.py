@@ -119,6 +119,9 @@ class BacktestApplication:
     async def list_items(self, task_id: UUID):
         return await self._read("list_items", task_id)
 
+    async def list_items_page(self, task_id: UUID, **kwargs):
+        return await self._read("list_items_page", task_id, **kwargs)
+
     async def pause(self, task_id: UUID, context: BacktestCommandContext):
         return await self._write("pause", task_id, context)
 
@@ -219,6 +222,14 @@ class BacktestApplication:
                         requested_at=self._clock(),
                     )
                     result = await self._forecasts.forecast(request)
+                    if not result.matched:
+                        return await self._write(
+                            "skip_not_matched",
+                            task_id,
+                            result.reason or "策略条件不匹配",
+                            execution_token=execution_token,
+                            item_id=state.item_id,
+                        )
                     forecast = await self._write(
                         "freeze_forecast",
                         task_id,

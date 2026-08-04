@@ -51,6 +51,10 @@ function createApi(overrides: Partial<StrategyApi> = {}): StrategyApi {
     getHoldoutBacktest: vi.fn(),
     getHoldoutBacktestSummary: vi.fn().mockImplementation(async (taskId) => ({ taskId, status: "SUCCEEDED", totalItems: 1, completedItems: 1, succeededItems: 1, failedItems: 0, canceledItems: 0, pendingItems: 0, failureCodes: {}, allowedActions: ["RERUN"], metric: null })),
     controlHoldoutBacktest: vi.fn().mockImplementation(async (taskId) => ({ taskId, status: "SUCCEEDED", allowedActions: ["RERUN"] })),
+    listScreenings: vi.fn().mockResolvedValue({ items: [], page: 1, pageSize: 50, total: 0 }),
+    getScreening: vi.fn(), listScreeningResults: vi.fn(), createScreening: vi.fn(), controlScreening: vi.fn(),
+    createCandidateBacktest: vi.fn(), listCandidateBacktests: vi.fn(), listCandidateItems: vi.fn(), getCandidateItem: vi.fn(),
+    listPriceVersions: vi.fn(), changePriceVersion: vi.fn(), rollbackPriceVersion: vi.fn(),
     ...overrides,
   }
 }
@@ -113,7 +117,7 @@ describe("策略工作台", () => {
     const user = userEvent.setup()
     renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={api} />)
     const schema = await screen.findByRole("textbox", { name: "参数 JSON Schema" })
-    expect(screen.getByText("这里只做基础结构预检，完整 JSON Schema 校验由服务端完成。")).toBeInTheDocument()
+    expect(screen.getByText("每个参数必须填写中文名称和用途；这里编辑的是参数规则，不是股票日线。")).toBeInTheDocument()
     fireEvent.change(schema, { target: { value: "true" } })
     await user.click(screen.getByRole("button", { name: "保存" }))
     expect(await screen.findByText("未通过 JSON Schema 基础结构预检")).toBeInTheDocument()
@@ -481,6 +485,39 @@ describe("样本外回测", () => {
     expect(screen.getByText("回测正在运行")).toBeInTheDocument()
   })
 
+  it("说明日线输入、筛选结果和每个参数的业务用途", async () => {
+    const parameterSchema = JSON.stringify({
+      type: "object",
+      properties: {
+        lookback: {
+          type: "integer",
+          title: "观察周期",
+          description: "使用最近多少个交易日判断价格区间",
+          default: 250,
+          minimum: 20,
+          maximum: 1000,
+        },
+      },
+      required: ["lookback"],
+      additionalProperties: false,
+    })
+    renderWorkspace(<StrategyWorkspace strategyId="strategy-1" api={createApi({
+      getDraft: vi.fn().mockResolvedValue({ ...draft, parameterSchema }),
+    })} />)
+
+    expect(await screen.findByText("策略如何工作")).toBeInTheDocument()
+    expect(screen.getByText("1. 输入日线")).toBeInTheDocument()
+    expect(screen.getByText("2. 判断条件")).toBeInTheDocument()
+    expect(screen.getByText("3. 输出四档价格")).toBeInTheDocument()
+    const table = screen.getByRole("table", { name: "策略参数用途" })
+    expect(table).toHaveTextContent("观察周期")
+    expect(table).toHaveTextContent("使用最近多少个交易日判断价格区间")
+    expect(table).toHaveTextContent("integer")
+    expect(table).toHaveTextContent("必填")
+    expect(table).toHaveTextContent("250")
+    expect(table).toHaveTextContent("20 ～ 1000")
+  })
+
   it("未知任务和单股状态会安全降级", async () => {
     const unknown = { ...result("NEW_SERVER_STATE"), item: { status: "NEW_ITEM_STATE" } }
     const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(unknown), getHoldoutBacktest: vi.fn().mockResolvedValue(unknown) })
@@ -531,6 +568,16 @@ describe("样本外回测", () => {
     expect(screen.getByText("已成交")).toBeInTheDocument()
     expect(screen.getAllByText("买入")).toHaveLength(2)
     expect(screen.getAllByText("0.12").length).toBeGreaterThanOrEqual(2)
+  })
+
+  it("策略未命中时展示原因且不伪造四档价格", async () => {
+    const skipped = { ...result("SUCCEEDED"), item: { status: "SKIPPED", outcomeReason: "历史波动区间不足" } }
+    const api = createApi({ createHoldoutBacktest: vi.fn().mockResolvedValue(skipped), getHoldoutBacktest: vi.fn().mockResolvedValue(skipped) })
+    renderWorkspace(<StrategyBacktestWorkspace strategyId="strategy-1" api={api} />)
+    for (const [name, value] of [["股票代码", "600000.SH"], ["训练开始日期", "2020-01-01"], ["训练结束日期", "2020-12-31"], ["测试开始日期", "2021-01-01"], ["测试结束日期", "2021-12-31"]]) fireEvent.change(screen.getByLabelText(name), { target: { value } })
+    fireEvent.click(screen.getByRole("button", { name: "开始样本外回测" }))
+    expect(await screen.findByText("单股回测已跳过：历史波动区间不足")).toBeInTheDocument()
+    expect(screen.getByText("暂无冻结目标价格")).toBeInTheDocument()
   })
 
   it("展示最近任务和汇总，并只启用服务器允许的操作", async () => {

@@ -28,6 +28,12 @@ const strategyStatusLabels: Record<string, string> = {
   ARCHIVED: "已归档",
 }
 
+const generatedStrategyName = /^策略-[0-9a-f]{12,}$/i
+
+function strategyDisplayName(name: string): string {
+  return generatedStrategyName.test(name) ? "未命名策略" : name
+}
+
 export function StrategyOperationsPage({
   api = createStrategyApi(),
   editorComponents = strategyEditorComponents,
@@ -69,8 +75,8 @@ export function StrategyOperationsPage({
     ? selectedStrategyId
     : strategiesQuery.data.items[0]?.id ?? null
 
-  return <section className="mx-auto grid w-full max-w-[96rem] gap-4 p-4 lg:grid-cols-[16rem_minmax(0,1fr)] lg:p-6">
-    <aside className="border-r border-border pr-0 lg:pr-4">
+  return <section className="mx-auto grid w-full min-w-0 max-w-[96rem] gap-4 p-4 lg:grid-cols-[16rem_minmax(0,1fr)] lg:p-6">
+    <aside className="min-w-0 border-r border-border pr-0 lg:pr-4">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h1 className="m-0 text-lg font-semibold">策略</h1>
         <div className="flex gap-1">
@@ -79,8 +85,8 @@ export function StrategyOperationsPage({
         </div>
       </div>
       {strategiesQuery.data.items.length ? <nav aria-label="策略列表" className="grid gap-1">
-        {strategiesQuery.data.items.map((strategy) => <Button key={strategy.id} type="button" variant={strategy.id === selectedId ? "secondary" : "ghost"} className="h-auto justify-start px-3 py-2 text-left" onClick={() => setSelectedStrategyId(strategy.id)}>
-          <span className="min-w-0"><span className="block truncate">{strategy.name}</span><span className="block text-xs text-muted-foreground">{strategyStatusLabels[strategy.status] ?? strategy.status}</span></span>
+        {strategiesQuery.data.items.map((strategy) => <Button key={strategy.id} type="button" variant={strategy.id === selectedId ? "secondary" : "ghost"} className="h-auto w-full min-w-0 justify-start overflow-hidden px-3 py-2 text-left" title={strategyDisplayName(strategy.name)} onClick={() => setSelectedStrategyId(strategy.id)}>
+          <span className="w-full min-w-0 overflow-hidden"><span className="block truncate">{strategyDisplayName(strategy.name)}</span><span className="block truncate text-xs text-muted-foreground">{strategyStatusLabels[strategy.status] ?? strategy.status}</span></span>
         </Button>)}
       </nav> : <p className="text-sm text-muted-foreground">暂无策略。</p>}
     </aside>

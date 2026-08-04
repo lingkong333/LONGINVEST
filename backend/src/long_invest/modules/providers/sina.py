@@ -21,6 +21,7 @@ from long_invest.modules.providers.contracts import (
     ProviderBatchResult,
     ProviderCapability,
     ProviderCode,
+    ProviderDataAnomaly,
     ProviderItemFailure,
     ProviderSourceIdentity,
     RealtimeQuote,
@@ -437,9 +438,10 @@ class SinaRealtimeProvider:
                 raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
             raw_rows = raw_rows[first_positive:]
         bars: list[DailyBar] = []
+        anomalies: list[ProviderDataAnomaly] = []
         seen: set[date] = set()
-        try:
-            for trading_date, row in raw_rows:
+        for trading_date, row in raw_rows:
+            try:
                 if trading_date in seen:
                     raise ValueError("duplicate date")
                 seen.add(trading_date)
@@ -457,9 +459,18 @@ class SinaRealtimeProvider:
                         capability=request.capability,
                     )
                 )
-        except (InvalidOperation, KeyError, TypeError, ValueError) as error:
-            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE") from error
-        return ProviderBatchResult(tuple(bars))
+            except (InvalidOperation, KeyError, TypeError, ValueError):
+                anomalies.append(
+                    ProviderDataAnomaly(
+                        request.symbol,
+                        trading_date,
+                        "PROVIDER_DAILY_BAR_INVALID",
+                        ProviderCode.SINA,
+                    )
+                )
+        if not bars:
+            raise ProviderHttpError("PROVIDER_SCHEMA_INCOMPATIBLE")
+        return ProviderBatchResult(tuple(bars), anomalies=tuple(anomalies))
 
     @staticmethod
     def parse_security_master_page(

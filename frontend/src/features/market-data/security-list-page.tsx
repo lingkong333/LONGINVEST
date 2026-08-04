@@ -209,7 +209,7 @@ export function SecurityListPage({
                     <TableCell className="text-right">
                       <Button asChild size="icon-sm" variant="ghost">
                         <Link
-                          to={`/market-data/stocks/${encodeURIComponent(
+                          to={`/stocks/${encodeURIComponent(
                             security.symbol,
                           )}`}
                           aria-label={`查看 ${security.name} 日线详情`}

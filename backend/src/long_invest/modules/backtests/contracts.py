@@ -68,6 +68,13 @@ class BacktestAction(StrEnum):
     RERUN = "RERUN"
 
 
+class BacktestPriceVersionSource(StrEnum):
+    SCREENING = "SCREENING"
+    USER = "USER"
+    ROLLBACK = "ROLLBACK"
+    CORPORATE_ACTION = "CORPORATE_ACTION"
+
+
 class BacktestErrorCode(StrEnum):
     BACKTEST_DATE_RANGE_INVALID = "BACKTEST_DATE_RANGE_INVALID"
     INSUFFICIENT_HISTORY = "INSUFFICIENT_HISTORY"
@@ -230,6 +237,13 @@ class BacktestCreateRequest(StrictContract):
         return self
 
 
+class CandidateBacktestCreateRequest(StrictContract):
+    screening_batch_id: UUID
+    initial_capital: Decimal = Field(gt=0)
+    concurrency: int = Field(default=4, ge=1, le=64)
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
 class BacktestCreationSnapshotPort(Protocol):
     async def resolve_creation_snapshot(
         self,
@@ -253,6 +267,7 @@ class BacktestStrategyExecutionPort(Protocol):
 
 class BacktestTaskSnapshot(StrictContract):
     id: UUID
+    screening_batch_id: UUID | None = None
     mode: BacktestMode
     universe_snapshot: tuple[BacktestUniverseEntry, ...]
     universe_hash: Sha256Hex
@@ -476,6 +491,8 @@ class BacktestMetricView(StrictContract):
     volatility: Decimal = Field(ge=0)
     sharpe_ratio: Decimal | None
     completed_round_trips: int = Field(ge=0)
+    buy_count: int = Field(default=0, ge=0)
+    sell_count: int = Field(default=0, ge=0)
     winning_trades: int = Field(ge=0)
     losing_trades: int = Field(ge=0)
     breakeven_trades: int = Field(ge=0)
@@ -488,6 +505,10 @@ class BacktestMetricView(StrictContract):
     capital_exposure_ratio: Decimal = Field(ge=0, le=1)
     open_position_at_end: bool
     unfilled_order_count: int = Field(ge=0)
+    gross_profit_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    gross_loss_amount: Decimal = Field(default=Decimal("0"), ge=0)
+    net_profit_amount: Decimal = Decimal("0")
+    profit_factor: Decimal | None = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def validate_trade_counts(self) -> BacktestMetricView:
@@ -502,6 +523,14 @@ class BacktestMetricView(StrictContract):
             raise ValueError("win rate is unavailable when there are no trades")
         if self.completed_round_trips > 0 and self.win_rate is None:
             raise ValueError("win rate is required when trades exist")
+        if self.net_profit_amount != (
+            self.gross_profit_amount - self.gross_loss_amount
+        ):
+            raise ValueError("net profit must equal profit less loss")
+        if self.gross_loss_amount == 0 and self.profit_factor is not None:
+            raise ValueError("profit factor is unavailable without losses")
+        if self.gross_loss_amount > 0 and self.profit_factor is None:
+            raise ValueError("profit factor is required when losses exist")
         return self
 
 
@@ -541,11 +570,15 @@ class BacktestResultView(StrictContract):
 
 class BacktestItemSummaryView(StrictContract):
     item_id: UUID
+    screening_result_id: UUID | None = None
+    screening_period_id: UUID | None = None
+    period_sequence: int | None = Field(default=None, ge=1)
     security_id: UUID
     symbol: str
     name: str
     status: BacktestItemStatus
     failure_code: str | None = None
+    outcome_reason: str | None = None
     attempt_count: int = Field(ge=0)
     started_at: AwareDatetime | None = None
     ended_at: AwareDatetime | None = None
@@ -553,6 +586,7 @@ class BacktestItemSummaryView(StrictContract):
 
 class BacktestTaskListItemView(StrictContract):
     task_id: UUID
+    screening_batch_id: UUID | None = None
     rerun_from_task_id: UUID | None = None
     mode: BacktestMode
     status: BacktestTaskStatus
@@ -625,6 +659,7 @@ class BacktestBatchSummary(StrictContract):
     positive_return_ratio: Decimal | None = Field(default=None, ge=0, le=1)
     return_distribution: BacktestReturnDistribution | None = None
     median_max_drawdown: Decimal | None = Field(default=None, ge=0)
+    median_win_rate: Decimal | None = Field(default=None, ge=0, le=1)
     trade_count_distribution: BacktestTradeCountDistribution | None = None
     best_symbol: str | None = None
     worst_symbol: str | None = None
@@ -637,6 +672,7 @@ class BacktestBatchSummary(StrictContract):
             self.positive_return_ratio,
             self.return_distribution,
             self.median_max_drawdown,
+            self.median_win_rate,
             self.trade_count_distribution,
             self.best_symbol,
             self.worst_symbol,
@@ -646,3 +682,32 @@ class BacktestBatchSummary(StrictContract):
         if self.succeeded_items > 0 and any(value is None for value in metrics):
             raise ValueError("successful batch requires metric distribution")
         return self
+
+
+class BacktestPriceVersionView(StrictContract):
+    id: UUID
+    item_id: UUID
+    version_no: int = Field(ge=1)
+    effective_date: date
+    values: TargetValues
+    source: BacktestPriceVersionSource
+    reason: str = Field(min_length=1, max_length=500)
+    actor_user_id: str = Field(min_length=1, max_length=64)
+    source_version_id: UUID | None = None
+    created_at: AwareDatetime
+
+
+class BacktestPriceChangeRequest(StrictContract):
+    effective_date: date
+    values: TargetValues
+    reason: str = Field(min_length=1, max_length=500)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=160)
+
+
+class BacktestPriceRollbackRequest(StrictContract):
+    source_version_id: UUID
+    effective_date: date
+    reason: str = Field(min_length=1, max_length=500)
+    expected_version: int = Field(ge=1)
+    idempotency_key: str = Field(min_length=1, max_length=160)

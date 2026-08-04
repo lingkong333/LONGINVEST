@@ -263,7 +263,7 @@ def test_recovery_reuses_first_frozen_test_snapshot() -> None:
         await service.freeze_forecast(
             snapshot.id,
             training,
-            StrategyForecastResult(values=_targets()),
+            StrategyForecastResult(matched=True, values=_targets()),
             execution_token=first_token,
             frozen_at=datetime(2026, 7, 21, tzinfo=UTC),
         )
@@ -307,7 +307,7 @@ def test_adjustment_snapshot_freezes_empty_coverage_for_recovery() -> None:
         await service.freeze_forecast(
             snapshot.id,
             training,
-            StrategyForecastResult(values=_targets()),
+            StrategyForecastResult(matched=True, values=_targets()),
             execution_token=token,
             frozen_at=datetime(2026, 7, 21, tzinfo=UTC),
         )
@@ -567,7 +567,7 @@ def test_retry_failed_reuses_forecast_and_rejects_unknown_forecast_result() -> N
         await service.freeze_forecast(
             snapshot.id,
             training,
-            StrategyForecastResult(values=_targets()),
+            StrategyForecastResult(matched=True, values=_targets()),
             execution_token=token,
             frozen_at=datetime(2026, 7, 21, tzinfo=UTC),
         )

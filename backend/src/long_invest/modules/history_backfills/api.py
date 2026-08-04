@@ -28,6 +28,7 @@ from long_invest.modules.history_backfills.contracts import (
     HistoryBackfillAuditContext,
     HistoryBackfillScope,
 )
+from long_invest.modules.providers.contracts import ProviderCode
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import Pagination, SuccessEnvelope
@@ -69,6 +70,8 @@ class CreateBackfillBody(BaseModel):
     concurrency: int = Field(default=4, ge=1)
     symbols: list[str] = Field(default_factory=list)
     watchlist_id: UUID | None = None
+    provider_code: ProviderCode | None = None
+    source_job_id: UUID | None = None
     confirm: StrictBool
     reason: Annotated[
         str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
@@ -90,6 +93,8 @@ class CreateBackfillBody(BaseModel):
             concurrency=self.concurrency,
             symbols=tuple(self.symbols),
             watchlist_id=self.watchlist_id,
+            provider_code=self.provider_code,
+            source_job_id=self.source_job_id,
         )
 
 
@@ -122,6 +127,8 @@ class BackfillResultCounts(BaseModel):
     qfq_rows: int = Field(default=0, ge=0)
     failed_items: list[str] = Field(default_factory=list)
     failure_details: list[dict[str, Any]] = Field(default_factory=list)
+    anomalous: int = Field(default=0, ge=0)
+    anomaly_details: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class BackfillResult(BaseModel):
@@ -141,6 +148,7 @@ class BackfillItemCounts(BaseModel):
     succeeded: int = Field(ge=0)
     failed: int = Field(ge=0)
     canceled: int = Field(ge=0)
+    anomalous: int = Field(default=0, ge=0)
 
 
 class BackfillScopeItem(BaseModel):
@@ -162,6 +170,8 @@ class BackfillScopeSnapshot(BaseModel):
     concurrency: int = Field(ge=1)
     reason: str
     item_count: int = Field(default=0, ge=0)
+    provider_code: ProviderCode | None = None
+    source_job_id: UUID | None = None
     items: list[BackfillScopeItem] = Field(default_factory=list)
 
 
@@ -191,6 +201,18 @@ class BackfillPageResponse(SuccessEnvelope):
 
 class BackfillResponse(SuccessEnvelope):
     data: BackfillView
+
+
+class RetryBackfillItemsBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    symbols: list[str] = Field(min_length=1, max_length=6000)
+    provider_code: ProviderCode | None = None
+    concurrency: int = Field(default=4, ge=1)
+    confirm: StrictBool
+    reason: Annotated[
+        str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)
+    ]
 
 
 @router.post("", status_code=202, response_model=BackfillResponse)
@@ -283,6 +305,90 @@ async def get_backfill(
             allowed_actions=actions,
             item_counts=counts[job_id],
         )
+    )
+
+
+@router.get("/{job_id}/items")
+async def list_backfill_items(
+    job_id: UUID,
+    application: Application,
+    _identity: ReadIdentity,
+    status: Annotated[
+        str | None,
+        Query(pattern="^(PENDING|RUNNING|SUCCEEDED|ANOMALY|FAILED|CANCELED)$"),
+    ] = None,
+    page: Annotated[int, Query(ge=1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+) -> dict[str, object]:
+    result = await application.items(
+        job_id, status=status, page=page, page_size=page_size
+    )
+    return success_response(
+        data={
+            "items": result["items"],
+            "pagination": {
+                "page": result["page"],
+                "page_size": result["page_size"],
+                "total": result["total"],
+            },
+        }
+    )
+
+
+@router.post("/{job_id}/items/retry", status_code=202, response_model=BackfillResponse)
+async def retry_backfill_items(
+    job_id: UUID,
+    body: RetryBackfillItemsBody,
+    application: Application,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, object]:
+    if not body.confirm:
+        raise AppError(
+            code="AUTH_CONFIRMATION_REQUIRED",
+            message="请确认本次历史补全重试操作",
+            status_code=422,
+        )
+    source = await application.get(job_id)
+    item_page = await application.items(
+        job_id, status=None, page=1, page_size=6000
+    )
+    known = {item["symbol"] for item in item_page["items"]}
+    requested = tuple(sorted(set(body.symbols)))
+    if any(symbol not in known for symbol in requested):
+        raise AppError(
+            code="HISTORY_BACKFILL_RETRY_SCOPE_INVALID",
+            message="重试股票不属于来源任务",
+            status_code=422,
+        )
+    audit = identity.audit_context
+    session = getattr(identity, "session", None)
+    job = await application.create(
+        CreateHistoryBackfill(
+            scope=HistoryBackfillScope.SELECTED,
+            start_date=date.fromisoformat(source.config_snapshot["start_date"]),
+            end_date=date.fromisoformat(source.config_snapshot["end_date"]),
+            concurrency=body.concurrency,
+            symbols=requested,
+            provider_code=body.provider_code,
+            source_job_id=job_id,
+        ),
+        HistoryBackfillAuditContext(
+            request_id=audit.request_id,
+            idempotency_key=key,
+            actor_user_id=str(identity.user.id),
+            session_id=str(session.id) if session is not None else None,
+            trusted_ip=getattr(audit, "trusted_ip", None),
+            reason=body.reason,
+        ),
+        owner_user_id=identity.user.id,
+    )
+    actions = await application.allowed_actions(job.id)
+    counts = await application.item_status_counts_many((job.id,))
+    return success_response(
+        data=_job(job, allowed_actions=actions, item_counts=counts[job.id]),
+        code="HISTORY_BACKFILL_RETRY_ACCEPTED",
+        message="所选股票已创建重试任务",
     )
 
 
@@ -382,4 +488,5 @@ def _item_counts(values: dict[str, int]) -> dict[str, int]:
         + values.get("SKIPPED", 0),
         "failed": values.get("FAILED", 0),
         "canceled": values.get("CANCELED", 0),
+        "anomalous": values.get("ANOMALY", 0),
     }

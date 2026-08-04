@@ -16,7 +16,7 @@ from long_invest.modules.strategies.runner_client import (
 
 IMAGE = "long-invest-strategy-runner@sha256:" + "a" * 64
 SUCCESS_OUTPUT = (
-    b'{"low_strong":"1","low_watch":"2","high_watch":"3","high_strong":"4"}'
+    b'{"matched":true,"low_strong":"1","low_watch":"2","high_watch":"3","high_strong":"4"}'
 )
 SECCOMP_FIXTURE = Path(__file__).parent / "fixtures" / "seccomp.json"
 

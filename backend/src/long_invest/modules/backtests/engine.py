@@ -55,6 +55,12 @@ class BacktestEngineResult:
     metric: BacktestMetricView
 
 
+@dataclass(frozen=True, slots=True)
+class BacktestPricePoint:
+    effective_date: date
+    values: TargetValues
+
+
 @dataclass(slots=True)
 class _Position:
     cash: Decimal
@@ -94,6 +100,7 @@ class FixedTargetBacktestEngine:
         initial_capital: Decimal,
         hysteresis_ratio: Decimal,
         minimum_hysteresis: Decimal,
+        price_versions: tuple[BacktestPricePoint, ...] = (),
     ) -> BacktestEngineResult:
         _validate_inputs(bars, initial_capital, adjustments)
         position = _Position(cash=_money(initial_capital))
@@ -115,6 +122,14 @@ class FixedTargetBacktestEngine:
             ),
         )
         adjustment_index = 0
+        ordered_price_versions = sorted(
+            price_versions, key=lambda item: item.effective_date
+        )
+        if len({item.effective_date for item in ordered_price_versions}) != len(
+            ordered_price_versions
+        ):
+            raise ValueError("price version dates must be unique")
+        price_version_index = 0
         peak_equity = position.cash
 
         for index, bar in enumerate(bars):
@@ -130,6 +145,14 @@ class FixedTargetBacktestEngine:
                 pending = _adjust_open_position(position, pending, entry)
                 recorded_adjustments.append(recorded)
                 adjustment_index += 1
+
+            while (
+                price_version_index < len(ordered_price_versions)
+                and ordered_price_versions[price_version_index].effective_date
+                <= bar.trade_date
+            ):
+                current_targets = ordered_price_versions[price_version_index].values
+                price_version_index += 1
 
             if pending is not None:
                 pending, trade = _fill_order(pending, bar, index, position)
@@ -387,6 +410,28 @@ def _metrics(
     negative = sum(value < 0 for value in returns if value is not None)
     breakeven = len(sell_trades) - positive - negative
     holding_days = [trade.holding_trade_days or 0 for trade in sell_trades]
+    gross_profit = _money(
+        sum(
+            (
+                trade.realized_return_amount
+                for trade in sell_trades
+                if trade.realized_return_amount is not None
+                and trade.realized_return_amount > 0
+            ),
+            Decimal("0"),
+        )
+    )
+    gross_loss = _money(
+        -sum(
+            (
+                trade.realized_return_amount
+                for trade in sell_trades
+                if trade.realized_return_amount is not None
+                and trade.realized_return_amount < 0
+            ),
+            Decimal("0"),
+        )
+    )
     return BacktestMetricView(
         item_id=item_id,
         ending_equity=ending_equity,
@@ -397,6 +442,10 @@ def _metrics(
         volatility=volatility,
         sharpe_ratio=sharpe,
         completed_round_trips=len(sell_trades),
+        buy_count=sum(
+            trade.direction is BacktestOrderDirection.BUY for trade in trades
+        ),
+        sell_count=len(sell_trades),
         winning_trades=positive,
         losing_trades=negative,
         breakeven_trades=breakeven,
@@ -430,6 +479,12 @@ def _metrics(
         open_position_at_end=position.status is BacktestPositionStatus.HOLDING,
         unfilled_order_count=sum(
             order.status is BacktestOrderStatus.UNFILLED_AT_END for order in orders
+        ),
+        gross_profit_amount=gross_profit,
+        gross_loss_amount=gross_loss,
+        net_profit_amount=_money(gross_profit - gross_loss),
+        profit_factor=(
+            _ratio(gross_profit / gross_loss) if gross_loss > 0 else None
         ),
     )
 

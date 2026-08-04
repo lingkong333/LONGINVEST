@@ -17,6 +17,8 @@ from long_invest.modules.strategies.contracts import (
     StrategyReadinessStatus,
     StrategyRunStatus,
     StrategyRunView,
+    StrategyScreeningPeriod,
+    StrategyScreeningPlan,
     StrategyValidationRunView,
     StrategyVersionView,
     TrainingDataSnapshot,
@@ -26,6 +28,22 @@ from long_invest.modules.targets.contracts import TargetValues
 
 FROZEN_AT = datetime(2026, 7, 21, tzinfo=UTC)
 SOURCE = "def calculate_targets(history, params, context): return {}"
+
+
+def _screening_period(
+    sequence_no: int,
+    training_start: date,
+    training_end: date,
+    test_start: date,
+    test_end: date,
+) -> StrategyScreeningPeriod:
+    return StrategyScreeningPeriod(
+        sequence_no=sequence_no,
+        training_start_date=training_start,
+        training_end_date=training_end,
+        test_start_date=test_start,
+        test_end_date=test_end,
+    )
 
 
 def _strategy_fields() -> dict[str, object]:
@@ -84,8 +102,99 @@ def test_strategy_forecast_contract_freezes_training_only_input() -> None:
         request.training_data = snapshot
 
 
+def test_screening_plan_accepts_overlapping_periods_that_move_forward() -> None:
+    plan = StrategyScreeningPlan(
+        strategy_version_id=uuid4(),
+        security_universe_snapshot_id=uuid4(),
+        parameter_snapshot={"window": 120},
+        parameter_hash="a" * 64,
+        request_hash="b" * 64,
+        idempotency_key="screening-1",
+        periods=(
+            _screening_period(
+                1,
+                date(2010, 1, 1),
+                date(2015, 12, 31),
+                date(2016, 1, 1),
+                date(2018, 12, 31),
+            ),
+            _screening_period(
+                2,
+                date(2012, 1, 1),
+                date(2016, 12, 31),
+                date(2017, 1, 1),
+                date(2019, 12, 31),
+            ),
+        ),
+    )
+
+    assert len(plan.periods) == 2
+    assert plan.parameter_snapshot["window"] == 120
+
+
+def test_screening_period_rejects_training_and_test_overlap() -> None:
+    with pytest.raises(ValidationError, match="dates are out of order"):
+        _screening_period(
+            1,
+            date(2020, 1, 1),
+            date(2021, 1, 1),
+            date(2021, 1, 1),
+            date(2022, 1, 1),
+        )
+
+
+def test_screening_plan_rejects_backward_period_boundary() -> None:
+    with pytest.raises(ValidationError, match="must not move backward"):
+        StrategyScreeningPlan(
+            strategy_version_id=uuid4(),
+            security_universe_snapshot_id=uuid4(),
+            parameter_snapshot={},
+            parameter_hash="a" * 64,
+            request_hash="b" * 64,
+            idempotency_key="screening-2",
+            periods=(
+                _screening_period(
+                    1,
+                    date(2010, 1, 1),
+                    date(2015, 12, 31),
+                    date(2016, 1, 1),
+                    date(2018, 12, 31),
+                ),
+                _screening_period(
+                    2,
+                    date(2009, 1, 1),
+                    date(2016, 12, 31),
+                    date(2017, 1, 1),
+                    date(2019, 12, 31),
+                ),
+            ),
+        )
+
+
+def test_screening_plan_requires_contiguous_period_sequence() -> None:
+    with pytest.raises(ValidationError, match="sequence must be contiguous"):
+        StrategyScreeningPlan(
+            strategy_version_id=uuid4(),
+            security_universe_snapshot_id=uuid4(),
+            parameter_snapshot={},
+            parameter_hash="a" * 64,
+            request_hash="b" * 64,
+            idempotency_key="screening-3",
+            periods=(
+                _screening_period(
+                    2,
+                    date(2010, 1, 1),
+                    date(2015, 12, 31),
+                    date(2016, 1, 1),
+                    date(2018, 12, 31),
+                ),
+            ),
+        )
+
+
 def test_strategy_forecast_result_requires_valid_target_values() -> None:
     result = StrategyForecastResult(
+        matched=True,
         values=TargetValues(
             low_strong=Decimal("8"),
             low_watch=Decimal("9"),
@@ -305,6 +414,7 @@ def test_strategy_nested_frozen_values_dump_as_json() -> None:
         requested_at=datetime(2026, 7, 21, tzinfo=UTC),
     )
     result = StrategyForecastResult(
+        matched=True,
         values=TargetValues(
             low_strong="1", low_watch="2", high_watch="3", high_strong="4"
         ),
@@ -325,6 +435,7 @@ def test_strategy_nested_frozen_values_dump_as_json() -> None:
 def test_strategy_json_snapshots_reject_unsupported_values(value: object) -> None:
     with pytest.raises(ValidationError):
         StrategyForecastResult(
+            matched=True,
             values=TargetValues(
                 low_strong="1", low_watch="2", high_watch="3", high_strong="4"
             ),

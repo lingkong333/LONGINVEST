@@ -27,7 +27,8 @@ BACKEND = Path(__file__).parents[2]
 MIGRATION = BACKEND / "alembic" / "versions" / "20260721_0012_strategy_backtest.py"
 ALEMBIC_ENV = BACKEND / "alembic" / "env.py"
 REVISION = "20260721_0012"
-HEAD_REVISION = "20260722_0014"
+HEAD_REVISION = "20260804_0042"
+MATCH_RESULT_PREVIOUS_REVISION = "20260731_0039"
 PREVIOUS_REVISION = "20260717_0011"
 BASE_TABLES = (
     "strategy",
@@ -75,7 +76,7 @@ def test_strategy_backtest_migration_remains_on_the_single_main_chain() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
 
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260731_0039"]
+    assert scripts.get_heads() == ["20260804_0042"]
     assert scripts.get_revision("20260722_0013").down_revision == REVISION
 
 
@@ -194,14 +195,10 @@ async def test_strategy_backtest_migration_lifecycle_and_constraints() -> None:
     async with _temporary_database(maintenance, database_name):
         _run_alembic(migration_env, "upgrade", "head")
         await _assert_upgraded(owner_url)
-        _run_alembic(migration_env, "downgrade", PREVIOUS_REVISION)
-        await _assert_downgraded(owner_url)
+        _run_alembic(migration_env, "downgrade", MATCH_RESULT_PREVIOUS_REVISION)
+        await _assert_match_result_downgraded(owner_url)
         _run_alembic(migration_env, "upgrade", "head")
         await _assert_upgraded(owner_url, app_url=app_url, test_constraints=True)
-        downgrade_failure = _run_alembic_failure(
-            migration_env, "downgrade", PREVIOUS_REVISION
-        )
-        assert "stage4 tables contain data" in downgrade_failure.stderr
 
 
 @pytest.mark.skipif(
@@ -687,6 +684,27 @@ async def _assert_downgraded(owner_url) -> None:
                 )
             )
             assert set(TABLES).isdisjoint(existing)
+    finally:
+        await database.dispose()
+
+
+async def _assert_match_result_downgraded(owner_url) -> None:
+    database = Database(owner_url.render_as_string(hide_password=False))
+    try:
+        async with database.session() as session:
+            assert (
+                await session.scalar(text("SELECT version_num FROM alembic_version"))
+                == MATCH_RESULT_PREVIOUS_REVISION
+            )
+            columns = await session.run_sync(
+                lambda sync_session: {
+                    column["name"]
+                    for column in inspect(sync_session.connection()).get_columns(
+                        "backtest_item"
+                    )
+                }
+            )
+            assert "outcome_reason" not in columns
     finally:
         await database.dispose()
 

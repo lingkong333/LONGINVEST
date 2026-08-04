@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
+import { MemoryRouter } from "react-router-dom"
 
 import {
   AuthProvider,
@@ -57,11 +58,18 @@ function summary(): DashboardSummary {
     generated_at: "2026-07-23T02:00:00Z",
     sections: {
       system: section({ open_alerts: 2, critical_alerts: 1 }),
-      quote_batches: section({ valid_count: 88 }),
-      monitoring: section({ active: 12 }),
+      quote_batches: section({ valid_count: 88, expected_count: 100 }),
+      monitoring: section({ active: 12, with_current_state: 10, missing_state: 2 }),
       positions: section({ held: 4 }),
-      signals: section({ today: 3 }),
-      daily_data: section({ committed_count: 5100 }),
+      signals: section({ today: 3, low_zone: 4, high_zone: 2 }),
+      daily_data: section({
+        trading_date: "2026-07-22",
+        status: "SUCCEEDED",
+        expected_count: 5529,
+        committed_count: 5529,
+        missing_count: 0,
+        failed_count: 0,
+      }),
       targets: section({ attention: 2 }),
       jobs: section({ active: 5 }),
       notifications: section({ pending: 6 }),
@@ -79,7 +87,9 @@ function renderDashboard(gateway: DashboardGateway) {
   render(
     <QueryClientProvider client={queryClient}>
       <AuthProvider gateway={authGateway}>
-        <DashboardPage gateway={gateway} />
+        <MemoryRouter>
+          <DashboardPage gateway={gateway} />
+        </MemoryRouter>
       </AuthProvider>
     </QueryClientProvider>,
   )
@@ -91,8 +101,17 @@ describe("真实仪表盘", () => {
 
     expect(await screen.findByText("运行正常")).toBeInTheDocument()
     expect(screen.getByLabelText("启用监控：12，状态正常")).toHaveTextContent("12启用监控")
-    expect(screen.getByLabelText("日线提交：5100，状态正常")).toHaveTextContent("5100日线提交")
+    expect(screen.getByLabelText("日线提交：5529，状态正常")).toHaveTextContent("5529日线提交")
     expect(screen.getByLabelText("严重告警：1，状态正常")).toHaveTextContent("1严重告警")
+    expect(screen.getByRole("link", { name: /启用监控.*查看详情/ }))
+      .toHaveAttribute("href", "/monitoring")
+    expect(screen.getByRole("link", { name: /今日信号.*查看详情/ }))
+      .toHaveAttribute("href", "/signals")
+    expect(screen.getByText("监控覆盖情况")).toBeInTheDocument()
+    expect(screen.getByText("信号区间分布")).toBeInTheDocument()
+    expect(screen.getByText("最近交易日日线")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "查看日线批次" }))
+      .toHaveAttribute("href", "/market-data")
   })
 
   it("单个分区超时只降级对应卡片，不阻断其他指标", async () => {

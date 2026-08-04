@@ -35,6 +35,7 @@ class Runner:
     def run(self, payload):
         self.payload = payload
         return {
+            "matched": True,
             "low_strong": "8",
             "low_watch": "9",
             "high_watch": "11",

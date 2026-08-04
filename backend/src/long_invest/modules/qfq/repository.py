@@ -139,6 +139,21 @@ class QfqRepository:
             )
         return await self.session.scalar(statement)
 
+    async def current_datasets(
+        self, security_ids: Sequence[UUID]
+    ) -> list[QfqDataset]:
+        if not security_ids:
+            return []
+        rows = await self.session.scalars(
+            select(QfqDataset)
+            .where(
+                QfqDataset.security_id.in_(tuple(security_ids)),
+                QfqDataset.lifecycle == "CURRENT",
+            )
+            .order_by(QfqDataset.security_id)
+        )
+        return list(rows)
+
     async def get_dataset(self, dataset_id: UUID) -> QfqDataset | None:
         return await self.session.get(QfqDataset, dataset_id)
 

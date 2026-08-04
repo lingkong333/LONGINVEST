@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import date
+from decimal import Decimal
 from typing import Annotated, Any
 from uuid import UUID, uuid5
 
@@ -13,24 +15,30 @@ from long_invest.modules.auth.dependencies import (
     require_verified_write_request,
 )
 from long_invest.modules.backtests.application import BacktestApplication
+from long_invest.modules.backtests.candidate_application import (
+    CandidateBacktestApplication,
+)
 from long_invest.modules.backtests.contracts import (
     BacktestAction,
-    BacktestCreateRequest,
     BacktestItemSummaryView,
+    BacktestPriceChangeRequest,
+    BacktestPriceRollbackRequest,
     BacktestResultView,
     BacktestSummaryView,
     BacktestTaskListItemView,
     BacktestTaskStatus,
+    CandidateBacktestCreateRequest,
 )
 from long_invest.modules.backtests.service import BacktestCommandContext
+from long_invest.modules.targets.contracts import TargetValues
 from long_invest.platform.errors import AppError
 from long_invest.platform.http.responses import success_response
 from long_invest.platform.http.schemas import Pagination, SuccessEnvelope
-from long_invest.platform.json_snapshot import thaw_json_value
 
 router = APIRouter(prefix="/api/v1/backtests", tags=["backtests"])
 _TASK_NAMESPACE = UUID("f204bc8f-9228-5d92-a923-c2c46dd775e4")
 _application_factory: Callable[[], BacktestApplication] | None = None
+_candidate_application_factory: Callable[[], CandidateBacktestApplication] | None = None
 
 
 def configure_backtest_application(
@@ -38,6 +46,23 @@ def configure_backtest_application(
 ) -> None:
     global _application_factory
     _application_factory = factory
+
+
+def configure_candidate_backtest_application(
+    factory: Callable[[], CandidateBacktestApplication],
+) -> None:
+    global _candidate_application_factory
+    _candidate_application_factory = factory
+
+
+def get_candidate_backtest_application() -> CandidateBacktestApplication:
+    if _candidate_application_factory is None:
+        raise AppError(
+            code="BACKTEST_NOT_CONFIGURED",
+            message="候选批次回测服务尚未完成生产装配",
+            status_code=503,
+        )
+    return _candidate_application_factory()
 
 
 def get_backtest_application() -> BacktestApplication:
@@ -51,13 +76,19 @@ def get_backtest_application() -> BacktestApplication:
 
 
 Application = Annotated[BacktestApplication, Depends(get_backtest_application)]
+CandidateApplication = Annotated[
+    CandidateBacktestApplication, Depends(get_candidate_backtest_application)
+]
 ReadIdentity = Annotated[AuthenticatedRequest, Depends(require_authenticated_request)]
 WriteIdentity = Annotated[
     AuthenticatedRequest, Depends(require_verified_write_request)
 ]
 
 
-class CreateBacktestBody(BacktestCreateRequest):
+class CreateBacktestBody(BaseModel):
+    screening_batch_id: UUID
+    initial_capital: Decimal = Field(gt=0)
+    concurrency: int = Field(default=4, ge=1, le=64)
     confirm: StrictBool
     reason: str = Field(min_length=1, max_length=200)
 
@@ -65,6 +96,22 @@ class CreateBacktestBody(BacktestCreateRequest):
 class BacktestCommandBody(BaseModel):
     confirm: StrictBool
     reason: str = Field(min_length=1, max_length=200)
+
+
+class BacktestPriceChangeBody(BaseModel):
+    effective_date: date
+    values: TargetValues
+    expected_version: int = Field(ge=1)
+    confirm: StrictBool
+    reason: str = Field(min_length=1, max_length=500)
+
+
+class BacktestPriceRollbackBody(BaseModel):
+    source_version_id: UUID
+    effective_date: date
+    expected_version: int = Field(ge=1)
+    confirm: StrictBool
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class BacktestTaskPageData(BaseModel):
@@ -121,7 +168,7 @@ IdempotencyKey = Annotated[str, Depends(idempotency_key)]
 @router.post("", status_code=202)
 async def create_backtest(
     body: CreateBacktestBody,
-    application: Application,
+    application: CandidateApplication,
     identity: WriteIdentity,
     key: IdempotencyKey,
 ) -> dict[str, Any]:
@@ -137,41 +184,20 @@ async def create_backtest(
             message="操作原因不能为空",
             status_code=422,
         )
-    request = BacktestCreateRequest(
-        mode=body.mode,
-        symbol=body.symbol,
-        watchlist_id=body.watchlist_id,
-        date_range=body.date_range,
-        strategy_version_id=body.strategy_version_id,
-        draft_id=body.draft_id,
-        draft_version=body.draft_version,
-        strategy_metadata=(
-            thaw_json_value(body.strategy_metadata)
-            if body.strategy_metadata is not None
-            else None
-        ),
-        parameter_schema=(
-            thaw_json_value(body.parameter_schema)
-            if body.parameter_schema is not None
-            else None
-        ),
-        parameter_snapshot=thaw_json_value(body.parameter_snapshot),
-        initial_capital=body.initial_capital,
-    )
-    state = await application.create(
-        task_id=uuid5(_TASK_NAMESPACE, key),
-        request=request,
-        context=BacktestCommandContext(
-            request_id=identity.audit_context.request_id,
+    task_id = await application.create(
+        CandidateBacktestCreateRequest(
+            screening_batch_id=body.screening_batch_id,
+            initial_capital=body.initial_capital,
+            concurrency=body.concurrency,
             idempotency_key=key,
-            actor_user_id=str(identity.user.id),
-            reason=body.reason.strip(),
         ),
+        request_id=identity.audit_context.request_id,
+        actor_user_id=str(identity.user.id),
     )
     return success_response(
-        data=_execution(state),
+        data={"task_id": str(task_id), "status": BacktestTaskStatus.PENDING.value},
         code="JOB_ACCEPTED",
-        message="回测任务已受理",
+        message="候选批次回测任务已受理",
     )
 
 
@@ -216,13 +242,22 @@ async def list_backtest_items(
     _identity: ReadIdentity,
     page: Annotated[int, Query(ge=1)] = 1,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
+    status: Annotated[str | None, Query(max_length=32)] = None,
+    search: Annotated[str | None, Query(max_length=100)] = None,
+    period_sequence: Annotated[int | None, Query(ge=1)] = None,
 ) -> dict[str, Any]:
-    values = await application.list_items(task_id)
-    start = (page - 1) * page_size
+    values, total = await application.list_items_page(
+        task_id,
+        page=page,
+        page_size=page_size,
+        status=status,
+        search=search,
+        period_sequence=period_sequence,
+    )
     return success_response(
         data={
-            "items": [_model(item) for item in values[start : start + page_size]],
-            "pagination": {"page": page, "page_size": page_size, "total": len(values)},
+            "items": [_model(item) for item in values],
+            "pagination": {"page": page, "page_size": page_size, "total": total},
         }
     )
 
@@ -234,11 +269,17 @@ async def pause_backtest(
     task_id: UUID,
     body: BacktestCommandBody,
     application: Application,
+    candidate_application: CandidateApplication,
     identity: WriteIdentity,
     key: IdempotencyKey,
 ) -> dict[str, Any]:
     context = _command_context(body, identity, key, "暂停")
-    await application.pause(task_id, context)
+    await candidate_application.control(
+        task_id,
+        BacktestAction.PAUSE,
+        idempotency_key=context.idempotency_key,
+        reason=context.reason,
+    )
     return await _command_response(task_id, application, "回测暂停请求已受理")
 
 
@@ -249,11 +290,17 @@ async def resume_backtest(
     task_id: UUID,
     body: BacktestCommandBody,
     application: Application,
+    candidate_application: CandidateApplication,
     identity: WriteIdentity,
     key: IdempotencyKey,
 ) -> dict[str, Any]:
     context = _command_context(body, identity, key, "继续")
-    await application.resume(task_id, context)
+    await candidate_application.control(
+        task_id,
+        BacktestAction.RESUME,
+        idempotency_key=context.idempotency_key,
+        reason=context.reason,
+    )
     return await _command_response(task_id, application, "回测继续请求已受理")
 
 
@@ -264,11 +311,17 @@ async def cancel_backtest(
     task_id: UUID,
     body: BacktestCommandBody,
     application: Application,
+    candidate_application: CandidateApplication,
     identity: WriteIdentity,
     key: IdempotencyKey,
 ) -> dict[str, Any]:
     context = _command_context(body, identity, key, "取消")
-    await application.cancel(task_id, context)
+    await candidate_application.control(
+        task_id,
+        BacktestAction.CANCEL,
+        idempotency_key=context.idempotency_key,
+        reason=context.reason,
+    )
     return await _command_response(task_id, application, "回测取消请求已受理")
 
 
@@ -281,11 +334,17 @@ async def retry_failed_backtest(
     task_id: UUID,
     body: BacktestCommandBody,
     application: Application,
+    candidate_application: CandidateApplication,
     identity: WriteIdentity,
     key: IdempotencyKey,
 ) -> dict[str, Any]:
     context = _command_context(body, identity, key, "重试失败项")
-    await application.retry_failed(task_id, context)
+    await candidate_application.control(
+        task_id,
+        BacktestAction.RETRY_FAILED,
+        idempotency_key=context.idempotency_key,
+        reason=context.reason,
+    )
     return await _command_response(task_id, application, "失败项重试请求已受理")
 
 
@@ -314,6 +373,83 @@ async def get_backtest_item(
 ) -> dict[str, Any]:
     result = await application.get_result(task_id, item_id)
     return success_response(data=_result(result))
+
+
+@router.get("/{task_id}/items/{item_id}/price-versions")
+async def list_price_versions(
+    task_id: UUID,
+    item_id: UUID,
+    application: Application,
+    candidate_application: CandidateApplication,
+    _identity: ReadIdentity,
+) -> dict[str, Any]:
+    await application.get_result(task_id, item_id)
+    values = await candidate_application.list_price_versions(item_id)
+    return success_response(data=_models(values))
+
+
+@router.post("/{task_id}/items/{item_id}/price-versions", status_code=202)
+async def change_price_version(
+    task_id: UUID,
+    item_id: UUID,
+    body: BacktestPriceChangeBody,
+    application: Application,
+    candidate_application: CandidateApplication,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    _require_confirmed(body.confirm)
+    await application.get_result(task_id, item_id)
+    value = await candidate_application.change_prices(
+        item_id,
+        BacktestPriceChangeRequest(
+            effective_date=body.effective_date,
+            values=body.values,
+            reason=body.reason.strip(),
+            expected_version=body.expected_version,
+            idempotency_key=key,
+        ),
+        actor_user_id=str(identity.user.id),
+        request_id=identity.audit_context.request_id,
+    )
+    return success_response(
+        data=value.model_dump(mode="json"),
+        code="JOB_ACCEPTED",
+        message="价格版本已保存，受影响区间正在重算",
+    )
+
+
+@router.post(
+    "/{task_id}/items/{item_id}/price-versions/rollback", status_code=202
+)
+async def rollback_price_version(
+    task_id: UUID,
+    item_id: UUID,
+    body: BacktestPriceRollbackBody,
+    application: Application,
+    candidate_application: CandidateApplication,
+    identity: WriteIdentity,
+    key: IdempotencyKey,
+) -> dict[str, Any]:
+    _require_confirmed(body.confirm)
+    await application.get_result(task_id, item_id)
+    value = await candidate_application.rollback_prices(
+        item_id,
+        BacktestPriceRollbackRequest(
+            source_version_id=body.source_version_id,
+            effective_date=body.effective_date,
+            reason=body.reason.strip(),
+            expected_version=body.expected_version,
+            idempotency_key=key,
+        ),
+        actor_user_id=str(identity.user.id),
+        request_id=identity.audit_context.request_id,
+    )
+    return success_response(
+        data=value.model_dump(mode="json"),
+        code="JOB_ACCEPTED",
+        message="价格回滚版本已创建，受影响区间正在重算",
+    )
 
 
 @router.get("/{task_id}/items/{item_id}/target-adjustments")
@@ -379,6 +515,7 @@ def _execution(state) -> dict[str, Any]:
         "task": state.task.model_dump(mode="json"),
         "item_id": str(state.item_id),
         "item_status": state.item_status.value,
+        "outcome_reason": getattr(state, "outcome_reason", None),
         "forecast": (
             state.forecast.model_dump(mode="json")
             if state.forecast is not None
@@ -428,6 +565,15 @@ def _command_context(
         session_id=str(session.id) if session is not None else None,
         trusted_ip=getattr(audit_context, "trusted_ip", None),
     )
+
+
+def _require_confirmed(value: bool) -> None:
+    if not value:
+        raise AppError(
+            code="AUTH_CONFIRMATION_REQUIRED",
+            message="请确认本次价格版本操作",
+            status_code=422,
+        )
 
 
 async def _command_response(

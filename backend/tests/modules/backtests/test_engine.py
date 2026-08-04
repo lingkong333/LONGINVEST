@@ -8,6 +8,7 @@ from long_invest.modules.backtests.contracts import (
 )
 from long_invest.modules.backtests.engine import (
     BacktestBar,
+    BacktestPricePoint,
     FixedTargetBacktestEngine,
     _annualized_return,
 )
@@ -155,6 +156,33 @@ def test_company_action_without_bar_applies_before_next_available_bar():
     assert result.daily_results[0].target_values.low_strong == Decimal("8.00")
     assert result.daily_results[1].target_values.low_strong == Decimal("4.00")
     assert result.adjustments[0].event_date == date(2025, 1, 3)
+
+
+def test_user_price_version_applies_exact_values_from_effective_day():
+    changed = TargetValues(
+        low_strong=Decimal("10"),
+        low_watch=Decimal("11"),
+        high_watch=Decimal("14"),
+        high_strong=Decimal("15"),
+    )
+    result = FixedTargetBacktestEngine(
+        ProductionRuleFake(), rule_version="rules-1"
+    ).run(
+        item_id=uuid4(),
+        security_id=uuid4(),
+        bars=(_bar(2, "10", "10"), _bar(4, "10", "10")),
+        targets=_targets(),
+        adjustments=(),
+        initial_capital=Decimal("100"),
+        hysteresis_ratio=Decimal("0.02"),
+        minimum_hysteresis=Decimal("0.02"),
+        price_versions=(
+            BacktestPricePoint(effective_date=date(2025, 1, 3), values=changed),
+        ),
+    )
+
+    assert result.daily_results[0].target_values == _targets()
+    assert result.daily_results[1].target_values == changed
 
 
 def test_company_action_adjusts_open_position_cost_and_quantity():

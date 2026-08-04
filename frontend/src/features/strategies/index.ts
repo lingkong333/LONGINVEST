@@ -1,6 +1,8 @@
 export { StrategyBacktestWorkspace } from "./backtest-workspace"
 export { createStrategyApi } from "./gateway"
 export { StrategyOperationsPage } from "./operations-page"
+export { StrategyScreeningPage } from "./screening-page"
+export { CandidateBacktestsPage, CandidateBacktestDetailPage } from "./candidate-backtest-pages"
 export {
   StrategyCodeEditor,
   StrategyDiffViewer,

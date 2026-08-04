@@ -98,6 +98,45 @@ class StrategyRunStatus(StrEnum):
     CANCELED = "CANCELED"
 
 
+class StrategyScreeningBatchStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    PAUSING = "PAUSING"
+    PAUSED = "PAUSED"
+    SUCCEEDED = "SUCCEEDED"
+    PARTIAL = "PARTIAL"
+    FAILED = "FAILED"
+    CANCELING = "CANCELING"
+    CANCELED = "CANCELED"
+
+
+class StrategyScreeningResultStatus(StrEnum):
+    PENDING = "PENDING"
+    RUNNING = "RUNNING"
+    MATCHED = "MATCHED"
+    NOT_MATCHED = "NOT_MATCHED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
+class StrategyScreeningAction(StrEnum):
+    PAUSE = "PAUSE"
+    RESUME = "RESUME"
+    CANCEL = "CANCEL"
+    RETRY_FAILED = "RETRY_FAILED"
+
+
+class StrategyScreeningErrorCode(StrEnum):
+    NOT_FOUND = "STRATEGY_SCREENING_NOT_FOUND"
+    VERSION_NOT_PUBLISHED = "STRATEGY_SCREENING_VERSION_NOT_PUBLISHED"
+    STATE_CONFLICT = "STRATEGY_SCREENING_STATE_CONFLICT"
+    IDEMPOTENCY_CONFLICT = "STRATEGY_SCREENING_IDEMPOTENCY_CONFLICT"
+    SCOPE_EMPTY = "STRATEGY_SCREENING_SCOPE_EMPTY"
+    TRAINING_DATA_UNAVAILABLE = "STRATEGY_SCREENING_TRAINING_DATA_UNAVAILABLE"
+    STRATEGY_TIMEOUT = "STRATEGY_SCREENING_STRATEGY_TIMEOUT"
+    STRATEGY_FAILED = "STRATEGY_SCREENING_STRATEGY_FAILED"
+
+
 class StrategyVersionOperation(StrEnum):
     APPLY = "APPLY"
     ROLLBACK = "ROLLBACK"
@@ -137,6 +176,192 @@ class FrozenMappingContract(StrictContract):
     @field_serializer("parameter_snapshot")
     def serialize_parameter_snapshot(self, value: Mapping[str, Any]) -> dict[str, Any]:
         return thaw_json_value(value)
+
+
+class StrategyScreeningPeriod(StrictContract):
+    sequence_no: int = Field(ge=1)
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> StrategyScreeningPeriod:
+        if not (
+            self.training_start_date
+            <= self.training_end_date
+            < self.test_start_date
+            <= self.test_end_date
+        ):
+            raise ValueError("screening period dates are out of order")
+        return self
+
+
+class StrategyScreeningPlan(FrozenMappingContract):
+    strategy_version_id: UUID
+    security_universe_snapshot_id: UUID
+    parameter_hash: Sha256Hex
+    request_hash: Sha256Hex
+    idempotency_key: str = Field(min_length=1, max_length=160)
+    periods: tuple[StrategyScreeningPeriod, ...] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_period_order(self) -> StrategyScreeningPlan:
+        if tuple(period.sequence_no for period in self.periods) != tuple(
+            range(1, len(self.periods) + 1)
+        ):
+            raise ValueError("screening period sequence must be contiguous")
+        for previous, current in zip(self.periods, self.periods[1:], strict=False):
+            previous_dates = (
+                previous.training_start_date,
+                previous.training_end_date,
+                previous.test_start_date,
+                previous.test_end_date,
+            )
+            current_dates = (
+                current.training_start_date,
+                current.training_end_date,
+                current.test_start_date,
+                current.test_end_date,
+            )
+            if any(
+                current_date < previous_date
+                for previous_date, current_date in zip(
+                    previous_dates, current_dates, strict=True
+                )
+            ):
+                raise ValueError("screening period boundaries must not move backward")
+        return self
+
+
+class StrategyScreeningCreateRequest(StrategyScreeningPlan):
+    strategy_version_id: UUID
+    idempotency_key: str = Field(min_length=1, max_length=160)
+    concurrency: int = Field(default=4, ge=1, le=64)
+
+
+class StrategyScreeningBatchView(StrictContract):
+    id: UUID
+    strategy_version_id: UUID
+    security_universe_snapshot_id: UUID
+    parameter_snapshot: Mapping[str, Any]
+    parameter_hash: Sha256Hex
+    status: StrategyScreeningBatchStatus
+    periods: tuple[StrategyScreeningPeriod, ...]
+    total_items: int = Field(ge=0)
+    matched_items: int = Field(ge=0)
+    not_matched_items: int = Field(ge=0)
+    failed_items: int = Field(ge=0)
+    canceled_items: int = Field(ge=0)
+    pending_items: int = Field(ge=0)
+    allowed_actions: tuple[StrategyScreeningAction, ...]
+    created_at: AwareDatetime
+    updated_at: AwareDatetime
+    completed_at: AwareDatetime | None = None
+
+    @field_validator("parameter_snapshot")
+    @classmethod
+    def freeze_batch_parameters(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return freeze_json_mapping(value)
+
+    @field_serializer("parameter_snapshot")
+    def serialize_batch_parameters(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return thaw_json_value(value)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> StrategyScreeningBatchView:
+        terminal = (
+            self.matched_items
+            + self.not_matched_items
+            + self.failed_items
+            + self.canceled_items
+        )
+        if terminal + self.pending_items != self.total_items:
+            raise ValueError("screening result counts must equal total")
+        return self
+
+
+class StrategyScreeningResultView(StrictContract):
+    id: UUID
+    batch_id: UUID
+    period_id: UUID
+    period_sequence: int = Field(ge=1)
+    scope_item_id: UUID
+    security_id: UUID
+    symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    name: str = Field(min_length=1, max_length=100)
+    status: StrategyScreeningResultStatus
+    values: TargetValues | None = None
+    reason: str | None = None
+    failure_code: str | None = None
+    diagnostics: Mapping[str, Any]
+    training_data_hash: Sha256Hex | None = None
+    training_row_count: int | None = Field(default=None, gt=0)
+    attempt_count: int = Field(ge=0)
+    started_at: AwareDatetime | None = None
+    ended_at: AwareDatetime | None = None
+
+    @field_validator("diagnostics")
+    @classmethod
+    def freeze_result_diagnostics(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return freeze_json_mapping(value)
+
+    @field_serializer("diagnostics")
+    def serialize_result_diagnostics(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return thaw_json_value(value)
+
+
+class StrategyScreeningBatchPage(StrictContract):
+    items: tuple[StrategyScreeningBatchView, ...]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=200)
+    total: int = Field(ge=0)
+
+
+class StrategyScreeningResultPage(StrictContract):
+    items: tuple[StrategyScreeningResultView, ...]
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=200)
+    total: int = Field(ge=0)
+
+
+class StrategyCandidateItem(StrictContract):
+    screening_result_id: UUID
+    screening_period_id: UUID
+    period_sequence: int = Field(ge=1)
+    security_id: UUID
+    symbol: str = Field(pattern=r"^[0-9]{6}\.(SH|SZ|BJ)$")
+    name: str = Field(min_length=1, max_length=100)
+    training_start_date: date
+    training_end_date: date
+    test_start_date: date
+    test_end_date: date
+    qfq_dataset_id: UUID
+    qfq_data_version: int = Field(ge=1)
+    qfq_data_hash: Sha256Hex
+    training_data_hash: Sha256Hex
+    training_row_count: int = Field(gt=0)
+    values: TargetValues
+
+
+class StrategyCandidateBatchSnapshot(FrozenMappingContract):
+    batch_id: UUID
+    strategy_version_id: UUID
+    parameter_snapshot: Mapping[str, Any]
+    parameter_hash: Sha256Hex
+    items: tuple[StrategyCandidateItem, ...]
+
+    @model_validator(mode="after")
+    def validate_candidates(self) -> StrategyCandidateBatchSnapshot:
+        if not self.items:
+            raise ValueError("candidate batch must contain matched securities")
+        keys = [
+            (item.screening_result_id, item.screening_period_id)
+            for item in self.items
+        ]
+        if len(keys) != len(set(keys)):
+            raise ValueError("candidate batch must not contain duplicates")
+        return self
 
 
 class TrainingDataSnapshot(StrictContract):
@@ -229,7 +454,9 @@ class StrategyForecastRequest(FrozenMappingContract):
 
 
 class StrategyForecastResult(StrictContract):
-    values: TargetValues
+    matched: bool
+    values: TargetValues | None = None
+    reason: str | None = Field(default=None, max_length=500)
     diagnostics: Mapping[str, Any] = Field(default_factory=dict)
 
     @field_validator("diagnostics")
@@ -240,6 +467,15 @@ class StrategyForecastResult(StrictContract):
     @field_serializer("diagnostics")
     def serialize_diagnostics(self, value: Mapping[str, Any]) -> dict[str, Any]:
         return thaw_json_value(value)
+
+    @model_validator(mode="after")
+    def validate_match_result(self) -> StrategyForecastResult:
+        if self.matched:
+            if self.values is None or self.reason is not None:
+                raise ValueError("matched strategy result requires only target values")
+        elif self.values is not None or self.reason is None or not self.reason.strip():
+            raise ValueError("unmatched strategy result requires only a reason")
+        return self
 
 
 class StrategyReadiness(StrictContract):

@@ -31,8 +31,25 @@ export interface MonitoringOverview {
   warningCodes: string[]
 }
 
+export interface MonitorSchedule {
+  id: string
+  name: string
+  version: number
+  times: string[]
+}
+
+export interface MonitorScheduleInput {
+  id?: string
+  name: string
+  version?: number
+  times: string[]
+  reason: string
+}
+
 export interface MonitoringGateway {
   loadOverview(): Promise<MonitoringOverview>
+  loadSchedules(): Promise<MonitorSchedule[]>
+  saveSchedule(input: MonitorScheduleInput): Promise<void>
   runAction(
     subscriptionId: string,
     action: MonitoringAction,

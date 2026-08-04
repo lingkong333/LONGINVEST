@@ -5,7 +5,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from uuid import UUID
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import Integer, cast, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from long_invest.modules.backtests.contracts import (
@@ -216,6 +216,53 @@ class BacktestRepository:
             statement = statement.with_for_update()
         rows = await self._session.scalars(statement)
         return list(rows.all())
+
+    async def list_items_page(
+        self,
+        task_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        status: str | None = None,
+        search: str | None = None,
+        period_sequence: int | None = None,
+    ):
+        symbol = BacktestForecastSnapshot.diagnostics["symbol"].astext
+        name = BacktestForecastSnapshot.diagnostics["name"].astext
+        sequence = cast(
+            BacktestForecastSnapshot.diagnostics["period_sequence"].astext,
+            Integer,
+        )
+        conditions = [BacktestItem.task_id == task_id]
+        if status:
+            conditions.append(BacktestItem.status == status)
+        if search:
+            pattern = f"%{search.strip()}%"
+            conditions.append(or_(symbol.ilike(pattern), name.ilike(pattern)))
+        if period_sequence is not None:
+            conditions.append(sequence == period_sequence)
+        base = (
+            select(BacktestItem, BacktestForecastSnapshot)
+            .join(
+                BacktestForecastSnapshot,
+                BacktestForecastSnapshot.item_id == BacktestItem.id,
+                isouter=True,
+            )
+            .where(*conditions)
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(base.subquery())
+        )
+        rows = await self._session.execute(
+            base.order_by(
+                symbol.asc().nullslast(),
+                sequence.asc().nullslast(),
+                BacktestItem.id,
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+        return list(rows.all()), int(total or 0)
 
     async def list_orders(self, item_id: UUID):
         rows = await self._session.scalars(

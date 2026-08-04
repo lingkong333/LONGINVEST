@@ -27,6 +27,11 @@ from long_invest.modules.strategies.runner_execution import (
 )
 from long_invest.modules.strategies.static_analysis import StrategyStaticAnalysisError
 
+SPREAD_PROPERTY = (
+    '"spread": {"type": "number", "title": "价格间距", '
+    '"description": "四档价格相对收盘价的间距", "exclusiveMinimum": 0}'
+)
+
 SOURCE = """
 import numpy as np
 import pandas as pd
@@ -41,7 +46,7 @@ STRATEGY_META = {
     },
     "parameter_schema": {
         "type": "object",
-        "properties": {"spread": {"type": "number", "exclusiveMinimum": 0}},
+        "properties": {__SPREAD_PROPERTY__},
         "required": ["spread"],
         "additionalProperties": False,
     },
@@ -56,6 +61,7 @@ def calculate_targets(history, params, context):
     close = float(history["close"].iloc[-1])
     spread = params["spread"]
     return {
+        "matched": True,
         "low_strong": np.float64(close * (1 - spread * 2)),
         "low_watch": np.float64(close * (1 - spread)),
         "high_watch": np.float64(close * (1 + spread)),
@@ -65,10 +71,17 @@ def calculate_targets(history, params, context):
             "as_of_date": context["as_of_date"],
         },
     }
-"""
+""".replace("__SPREAD_PROPERTY__", SPREAD_PROPERTY)
 PARAMETER_SCHEMA = {
     "type": "object",
-    "properties": {"spread": {"type": "number", "exclusiveMinimum": 0}},
+    "properties": {
+        "spread": {
+            "type": "number",
+            "title": "价格间距",
+            "description": "四档价格相对收盘价的间距",
+            "exclusiveMinimum": 0,
+        }
+    },
     "required": ["spread"],
     "additionalProperties": False,
 }
@@ -151,7 +164,7 @@ def test_runner_payload_executes_with_training_dataframe_and_normalizes_targets(
         context=_context(request),
         schema={
             "type": "object",
-            "properties": {"spread": {"type": "number", "exclusiveMinimum": 0}},
+            "properties": PARAMETER_SCHEMA["properties"],
             "required": ["spread"],
             "additionalProperties": False,
         },
@@ -204,14 +217,16 @@ def test_runner_payload_rejects_any_test_data_context_field() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        {"low_strong": 1, "low_watch": 2, "high_watch": 3},
+        {"matched": True, "low_strong": 1, "low_watch": 2, "high_watch": 3},
         {
+            "matched": True,
             "low_strong": 1,
             "low_watch": 2,
             "high_watch": 3,
             "high_strong": float("nan"),
         },
         {
+            "matched": True,
             "low_strong": 2,
             "low_watch": 1,
             "high_watch": 3,
@@ -242,6 +257,7 @@ def test_runner_result_rejects_non_json_or_oversized_diagnostics(
     with pytest.raises(StrategyForecastFailure) as error:
         normalize_runner_result(
             {
+                "matched": True,
                 "low_strong": 1,
                 "low_watch": 2,
                 "high_watch": 3,
@@ -251,6 +267,29 @@ def test_runner_result_rejects_non_json_or_oversized_diagnostics(
         )
 
     assert error.value.code is StrategyForecastErrorCode.STRATEGY_TARGET_INVALID
+
+
+def test_runner_result_accepts_explicit_not_matched_reason() -> None:
+    result = normalize_runner_result(
+        {"matched": False, "reason": "历史波动区间不足", "diagnostics": {"rows": 20}}
+    )
+
+    assert result.matched is False
+    assert result.values is None
+    assert result.reason == "历史波动区间不足"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"matched": False},
+        {"matched": False, "reason": "不匹配", "low_strong": 1},
+        {"matched": True, "reason": "不应出现"},
+    ],
+)
+def test_runner_result_rejects_inconsistent_match_shape(raw: dict[str, object]) -> None:
+    with pytest.raises(StrategyForecastFailure):
+        normalize_runner_result(raw)
 
 
 def test_runner_payload_reports_missing_required_market_field() -> None:
@@ -272,7 +311,7 @@ def test_runner_payload_reports_missing_required_market_field() -> None:
             context=_context(request),
             schema={
                 "type": "object",
-                "properties": {"spread": {"type": "number", "exclusiveMinimum": 0}},
+                "properties": PARAMETER_SCHEMA["properties"],
                 "required": ["spread"],
                 "additionalProperties": False,
             },

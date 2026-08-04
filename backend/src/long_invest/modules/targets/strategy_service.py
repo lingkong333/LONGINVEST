@@ -302,7 +302,7 @@ class StrategyTargetService:
 
     async def execution_plan(self, run_id: UUID) -> CalculationExecutionPlan:
         run = await self._required_run(run_id, lock=False)
-        if run.status in {"SUCCEEDED", "FAILED"}:
+        if run.status in {"SUCCEEDED", "NOT_MATCHED", "FAILED"}:
             return CalculationExecutionPlan(
                 reservation=None,
                 target_date=None,
@@ -435,9 +435,28 @@ class StrategyTargetService:
         await self._repository.flush()
         return CalculationResult("TARGET_CALCULATION_SUCCEEDED", run.id, revision.id)
 
+    async def not_matched(self, run_id: UUID, *, reason: str) -> CalculationResult:
+        run = await self._required_run(run_id, lock=True)
+        if run.status in {"SUCCEEDED", "NOT_MATCHED", "FAILED"}:
+            return await self.result(run.id, replayed=True)
+        binding = await self._repository.lock_binding(run.subscription_id)
+        run.status = TargetCalculationStatus.NOT_MATCHED.value
+        run.error_summary = reason.strip()[:500]
+        run.failure_code = None
+        _set_result(run, "TARGET_STRATEGY_NOT_MATCHED", None, None)
+        if binding is not None:
+            binding.status = (
+                TargetStatus.READY.value
+                if binding.current_revision_id is not None
+                else TargetStatus.MISSING.value
+            )
+            binding.stale_reason = "STRATEGY_NOT_MATCHED"
+        await self._repository.flush()
+        return CalculationResult("TARGET_STRATEGY_NOT_MATCHED", run.id)
+
     async def fail(self, run_id: UUID, *, code: str, summary: str) -> CalculationResult:
         run = await self._required_run(run_id, lock=True)
-        if run.status in {"SUCCEEDED", "FAILED"}:
+        if run.status in {"SUCCEEDED", "NOT_MATCHED", "FAILED"}:
             return await self.result(run.id, replayed=True)
         binding = await self._repository.lock_binding(run.subscription_id)
         return await self._fail_locked(run, binding, code, summary)

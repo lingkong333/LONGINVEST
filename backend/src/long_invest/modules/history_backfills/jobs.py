@@ -43,6 +43,7 @@ class HistoryItemOutcome:
     revised: int = 0
     review_required: int = 0
     qfq_rows: int = 0
+    anomalies: tuple[dict[str, str], ...] = ()
 
 
 class PostgresHistoryBackfillJob:
@@ -73,7 +74,15 @@ class PostgresHistoryBackfillJob:
                 message="历史回填任务缺少有效的冻结范围或日期",
                 retryable=False,
             )
-        snapshot_id, start_date, end_date, concurrency, reason, complete_mode = config
+        (
+            snapshot_id,
+            start_date,
+            end_date,
+            concurrency,
+            reason,
+            complete_mode,
+            provider_code,
+        ) = config
         try:
             frozen = await SecurityApplication(self._database).frozen_universe(
                 snapshot_id
@@ -110,7 +119,7 @@ class PostgresHistoryBackfillJob:
         state = _restore_history_state(checkpoint, total=len(selected))
         if state is None:
             return _checkpoint_invalid()
-        cursor, succeeded, failures, counts = state
+        cursor, succeeded, failures, anomalies, counts = state
 
         while cursor < len(selected):
             status = await self._report(
@@ -118,6 +127,7 @@ class PostgresHistoryBackfillJob:
                 cursor=cursor,
                 succeeded=succeeded,
                 failures=failures,
+                anomalies=anomalies,
                 counts=counts,
                 retry_items=retry_items,
                 base_succeeded=base_succeeded,
@@ -140,6 +150,7 @@ class PostgresHistoryBackfillJob:
                     cursor=cursor,
                     succeeded=succeeded,
                     failures=failures,
+                    anomalies=anomalies,
                     counts=counts,
                     retry_items=retry_items,
                     base_succeeded=base_succeeded,
@@ -159,7 +170,11 @@ class PostgresHistoryBackfillJob:
                 *(
                     self._process_item(
                         context,
-                        HistoryBackfillWorkItem(item.security_id, item.symbol),
+                        HistoryBackfillWorkItem(
+                            item.security_id,
+                            item.symbol,
+                            provider_code=provider_code,
+                        ),
                         start_date=(
                             max(start_date, item.listed_on)
                             if complete_mode and item.listed_on is not None
@@ -179,6 +194,14 @@ class PostgresHistoryBackfillJob:
             for outcome in outcomes:
                 if outcome.success:
                     succeeded += 1
+                    if outcome.anomalies:
+                        anomalies.append(
+                            {
+                                "security_id": str(outcome.security_id),
+                                "symbol": outcome.symbol,
+                                "rows": list(outcome.anomalies),
+                            }
+                        )
                     for name in counts:
                         counts[name] += int(getattr(outcome, name))
                 else:
@@ -197,6 +220,7 @@ class PostgresHistoryBackfillJob:
                 cursor=cursor,
                 succeeded=succeeded,
                 failures=failures,
+                anomalies=anomalies,
                 counts=counts,
                 retry_items=retry_items,
                 base_succeeded=base_succeeded,
@@ -224,6 +248,8 @@ class PostgresHistoryBackfillJob:
             "qfq_rows": counts["qfq_rows"],
             "failed_items": [item["symbol"] for item in failures],
             "failure_details": failures,
+            "anomalous": len(anomalies),
+            "anomaly_details": anomalies,
         }
         if not failures:
             return JobResult.success_result(data=data, message="历史回填完成")
@@ -285,6 +311,7 @@ class PostgresHistoryBackfillJob:
                 revised=stored.revised,
                 review_required=stored.review_required,
                 qfq_rows=stored.qfq_rows,
+                anomalies=bundle.anomalies,
             )
         except TimeoutError:
             return _failed_outcome(item, "HISTORY_PROVIDER_TIMEOUT", True)
@@ -310,6 +337,7 @@ class PostgresHistoryBackfillJob:
         cursor: int,
         succeeded: int,
         failures: list[dict[str, object]],
+        anomalies: list[dict[str, object]],
         counts: dict[str, int],
         retry_items: tuple[str, ...],
         base_succeeded: int,
@@ -321,6 +349,7 @@ class PostgresHistoryBackfillJob:
             "cursor": cursor,
             "succeeded": succeeded,
             "failures": failures,
+            "anomalies": anomalies,
             "counts": counts,
         }
         if retry_items:
@@ -362,7 +391,7 @@ def build_postgres_history_backfill_handler(
 
 def _history_config(
     config: Any,
-) -> tuple[UUID, date, date, int, str, bool] | None:
+) -> tuple[UUID, date, date, int, str, bool, str | None] | None:
     try:
         snapshot_id = UUID(str(config["universe_snapshot_id"]))
         start_date = date.fromisoformat(str(config["start_date"]))
@@ -370,20 +399,38 @@ def _history_config(
         concurrency = int(config["concurrency"])
         reason = str(config["reason"]).strip()
         complete_mode = str(config.get("date_mode", "ADVANCED")) == "COMPLETE"
+        provider_code = config.get("provider_code")
+        if provider_code is not None:
+            provider_code = str(provider_code).strip().upper() or None
         if start_date > end_date or concurrency < 1 or not reason:
             return None
-        return snapshot_id, start_date, end_date, concurrency, reason, complete_mode
+        return (
+            snapshot_id,
+            start_date,
+            end_date,
+            concurrency,
+            reason,
+            complete_mode,
+            provider_code,
+        )
     except (KeyError, TypeError, ValueError):
         return None
 
 
 def _restore_history_state(
     checkpoint: dict[str, Any], *, total: int
-) -> tuple[int, int, list[dict[str, object]], dict[str, int]] | None:
+) -> tuple[
+    int,
+    int,
+    list[dict[str, object]],
+    list[dict[str, object]],
+    dict[str, int],
+] | None:
     try:
         cursor = int(checkpoint.get("cursor", 0))
         succeeded = int(checkpoint.get("succeeded", 0))
         failures = [dict(item) for item in checkpoint.get("failures", ())]
+        anomalies = [dict(item) for item in checkpoint.get("anomalies", ())]
         raw_counts = dict(checkpoint.get("counts", {}))
         counts = {
             key: int(raw_counts.get(key, 0))
@@ -410,7 +457,7 @@ def _restore_history_state(
         )
     ):
         return None
-    return cursor, succeeded, failures, counts
+    return cursor, succeeded, failures, anomalies, counts
 
 
 def _failed_outcome(
@@ -466,6 +513,8 @@ def _validate_bars(
     if not rows:
         raise HistoryBackfillItemError("HISTORY_BARS_EMPTY", retryable=True)
     seen: set[date] = set()
+    valid = []
+    anomalies: list[dict[str, str]] = []
     for bar in rows:
         prices = (bar.open, bar.high, bar.low, bar.close)
         if (
@@ -479,9 +528,18 @@ def _validate_bars(
             or not _nonnegative_finite(bar.amount)
             or not bar.source.strip()
         ):
-            raise ValueError("invalid historical daily bar")
+            anomalies.append(
+                {
+                    "trade_date": bar.trade_date.isoformat(),
+                    "error_code": "HISTORY_BAR_OHLC_INVALID",
+                }
+            )
+            continue
         seen.add(bar.trade_date)
-    return tuple(sorted(rows, key=lambda item: item.trade_date))
+        valid.append(bar)
+    if not valid:
+        raise HistoryBackfillItemError("HISTORY_BARS_ALL_INVALID", retryable=False)
+    return tuple(sorted(valid, key=lambda item: item.trade_date)), tuple(anomalies)
 
 
 def _validate_bundle(
@@ -491,18 +549,34 @@ def _validate_bundle(
     start_date: date,
     end_date: date,
 ) -> HistoryBarsBundle:
-    unadjusted = _validate_bars(
+    unadjusted, raw_anomalies = _validate_bars(
         bundle.unadjusted,
         symbol=symbol,
         start_date=start_date,
         end_date=end_date,
     )
-    qfq = _validate_bars(
+    qfq, qfq_anomalies = _validate_bars(
         bundle.qfq,
         symbol=symbol,
         start_date=start_date,
         end_date=end_date,
     )
+    invalid_dates = {
+        item["trade_date"] for item in (*raw_anomalies, *qfq_anomalies)
+    }
+    invalid_dates.update(
+        item["trade_date"]
+        for item in bundle.anomalies
+        if item.get("trade_date")
+    )
+    unadjusted = tuple(
+        item for item in unadjusted if item.trade_date.isoformat() not in invalid_dates
+    )
+    qfq = tuple(
+        item for item in qfq if item.trade_date.isoformat() not in invalid_dates
+    )
+    if not unadjusted or not qfq:
+        raise HistoryBackfillItemError("HISTORY_BARS_ALL_INVALID", retryable=False)
     raw_by_date = {item.trade_date: item for item in unadjusted}
     qfq_dates = tuple(item.trade_date for item in qfq)
     raw_suffix = tuple(
@@ -517,6 +591,11 @@ def _validate_bundle(
         unadjusted=unadjusted,
         qfq=qfq,
         provider_contract_version=bundle.provider_contract_version,
+        anomalies=bundle.anomalies
+        + tuple(
+            {**item, "price_mode": "UNADJUSTED"} for item in raw_anomalies
+        )
+        + tuple({**item, "price_mode": "QFQ"} for item in qfq_anomalies),
     )
 
 

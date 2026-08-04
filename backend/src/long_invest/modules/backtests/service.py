@@ -94,6 +94,7 @@ class BacktestExecutionState:
     item_id: UUID
     item_status: BacktestItemStatus
     forecast: BacktestForecastSnapshotView | None
+    outcome_reason: str | None = None
     adjustment_snapshot: AdjustmentTimelineSnapshot | None = None
     job_id: UUID | None = None
 
@@ -299,6 +300,48 @@ class BacktestService:
         entries = _universe_entries(universe)
         rows = await self._repository.list_items(task_id)
         return tuple(_item_summary(row, entries[row.security_id]) for row in rows)
+
+    async def list_items_page(
+        self,
+        task_id: UUID,
+        *,
+        page: int,
+        page_size: int,
+        status: str | None = None,
+        search: str | None = None,
+        period_sequence: int | None = None,
+    ) -> tuple[tuple[BacktestItemSummaryView, ...], int]:
+        task = await self._repository.get_task(task_id)
+        universe = await self._repository.get_universe(task_id)
+        if task is None or universe is None:
+            raise _not_found()
+        entries = _universe_entries(universe)
+        rows, total = await self._repository.list_items_page(
+            task_id,
+            page=page,
+            page_size=page_size,
+            status=status,
+            search=search,
+            period_sequence=period_sequence,
+        )
+        values = []
+        for item, forecast in rows:
+            value = _item_summary(item, entries[item.security_id])
+            raw_sequence = (
+                forecast.diagnostics.get("period_sequence")
+                if forecast is not None
+                else None
+            )
+            values.append(
+                value.model_copy(
+                    update={
+                        "period_sequence": (
+                            int(raw_sequence) if raw_sequence is not None else None
+                        )
+                    }
+                )
+            )
+        return tuple(values), total
 
     async def get_summary(self, task_id: UUID) -> BacktestSummaryView:
         task = await self._repository.get_task(task_id)
@@ -737,6 +780,11 @@ class BacktestService:
             raise _state_conflict()
         _validate_data_snapshot(task, item, training, training_period=True)
         values = result.values
+        if not result.matched or values is None:
+            raise _error(
+                "STRATEGY_MATCH_RESULT_INVALID",
+                "策略匹配结果与目标价格不一致",
+            )
         row = BacktestForecastSnapshot(
             item_id=item.id,
             training_start_date=training.start_date,
@@ -769,6 +817,42 @@ class BacktestService:
             f"backtest-forecast-frozen:{item.id}",
         )
         return forecast_view(row)
+
+    async def skip_not_matched(
+        self,
+        task_id: UUID,
+        reason: str,
+        *,
+        execution_token: UUID,
+        item_id: UUID | None = None,
+    ) -> BacktestExecutionState:
+        task, item, universe = await self._locked(task_id, item_id)
+        _require_execution_owner(item, execution_token)
+        if item.status in _TERMINAL_ITEM_STATUSES:
+            return await self._state(task, item, universe)
+        if item.status != BacktestItemStatus.FORECASTING.value:
+            raise _state_conflict()
+        item.status = BacktestItemStatus.SKIPPED.value
+        item.failure_code = None
+        item.outcome_reason = reason.strip()[:500]
+        item.execution_token = None
+        item.ended_at = self._clock()
+        await self._refresh_parent_status(task)
+        await self._emit(
+            "backtest.item_not_matched",
+            task_id,
+            {"item_id": str(item.id), "reason": item.outcome_reason},
+            f"backtest-item-not-matched:{item.id}",
+        )
+        return BacktestExecutionState(
+            task=_task_snapshot(task, universe),
+            task_status=BacktestTaskStatus(task.status),
+            execution_generation=task.execution_generation,
+            item_id=item.id,
+            item_status=BacktestItemStatus.SKIPPED,
+            forecast=None,
+            outcome_reason=item.outcome_reason,
+        )
 
     async def claim_simulation(
         self,
@@ -1200,18 +1284,23 @@ class BacktestService:
             task.status = BacktestTaskStatus.RUNNING.value
             task.terminal_at = None
             return
-        succeeded = BacktestItemStatus.SUCCEEDED in statuses
+        completed = bool(
+            statuses
+            & {
+                BacktestItemStatus.SUCCEEDED,
+                BacktestItemStatus.SKIPPED,
+            }
+        )
         failed = bool(
             statuses
             & {
                 BacktestItemStatus.FAILED,
-                BacktestItemStatus.SKIPPED,
                 BacktestItemStatus.CANCELED,
             }
         )
-        if succeeded and failed:
+        if completed and failed:
             task.status = BacktestTaskStatus.PARTIAL.value
-        elif succeeded:
+        elif completed:
             task.status = BacktestTaskStatus.SUCCEEDED.value
         else:
             task.status = BacktestTaskStatus.FAILED.value
@@ -1272,6 +1361,7 @@ def _task_snapshot(task, universe) -> BacktestTaskSnapshot:
 
     return BacktestTaskSnapshot(
         id=task.id,
+        screening_batch_id=task.screening_batch_id,
         mode=task.mode,
         universe_snapshot=tuple(
             BacktestUniverseEntry.model_validate(value)
@@ -1314,6 +1404,7 @@ def _execution_state(task, item, universe, forecast) -> BacktestExecutionState:
         item_id=item.id,
         item_status=BacktestItemStatus(item.status),
         forecast=forecast_view(forecast) if forecast is not None else None,
+        outcome_reason=item.outcome_reason,
     )
 
 
@@ -1323,6 +1414,7 @@ def _task_list_item(
     entries = _universe_entries(universe)
     return BacktestTaskListItemView(
         task_id=task.id,
+        screening_batch_id=task.screening_batch_id,
         rerun_from_task_id=task.rerun_from_task_id,
         mode=task.mode,
         status=task.status,
@@ -1346,11 +1438,14 @@ def _task_list_item(
 def _item_summary(item, entry: BacktestUniverseEntry) -> BacktestItemSummaryView:
     return BacktestItemSummaryView(
         item_id=item.id,
+        screening_result_id=item.screening_result_id,
+        screening_period_id=item.screening_period_id,
         security_id=item.security_id,
         symbol=entry.symbol,
         name=entry.name,
         status=item.status,
         failure_code=item.failure_code,
+        outcome_reason=item.outcome_reason,
         attempt_count=item.attempt_count,
         started_at=item.started_at,
         ended_at=item.ended_at,
@@ -1368,6 +1463,7 @@ def _allowed_actions(
     task, items, forecast_item_ids: set[UUID]
 ) -> tuple[BacktestAction, ...]:
     status = BacktestTaskStatus(task.status)
+    candidate_task = task.screening_batch_id is not None
     if status is BacktestTaskStatus.PENDING:
         return (BacktestAction.PAUSE, BacktestAction.CANCEL)
     if status is BacktestTaskStatus.RUNNING:
@@ -1384,6 +1480,8 @@ def _allowed_actions(
             item.id in forecast_item_ids or item.training_data_hash is None
             for item in failed
         )
+        if candidate_task:
+            return (BacktestAction.RETRY_FAILED,) if retryable else ()
         return (
             (BacktestAction.RETRY_FAILED, BacktestAction.RERUN)
             if retryable
@@ -1393,7 +1491,7 @@ def _allowed_actions(
         BacktestTaskStatus.SUCCEEDED,
         BacktestTaskStatus.CANCELED,
     }:
-        return (BacktestAction.RERUN,)
+        return () if candidate_task else (BacktestAction.RERUN,)
     return ()
 
 

@@ -338,11 +338,25 @@ class ProviderMissingRange:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderDataAnomaly:
+    symbol: str
+    trading_date: date
+    code: str
+    provider: ProviderCode
+
+    def __post_init__(self) -> None:
+        validate_symbol(self.symbol)
+        if not self.code.strip():
+            raise ValueError("provider anomaly code is required")
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderBatchResult[T]:
     items: tuple[T, ...] = ()
     failures: tuple[ProviderItemFailure, ...] = ()
     batch_error_code: str | None = None
     missing_ranges: tuple[ProviderMissingRange, ...] = ()
+    anomalies: tuple[ProviderDataAnomaly, ...] = ()
 
 
 class MarketDataProvider(Protocol):

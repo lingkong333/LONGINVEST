@@ -8850,6 +8850,355 @@
         }
       }
     },
+    "/api/v1/strategy-screenings": {
+      "get": {
+        "tags": [
+          "strategy-screenings"
+        ],
+        "summary": "List Screenings",
+        "operationId": "list_screenings_api_v1_strategy_screenings_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Screenings Api V1 Strategy Screenings Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "strategy-screenings"
+        ],
+        "summary": "Create Screening",
+        "operationId": "create_screening_api_v1_strategy_screenings_post",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScreeningBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Create Screening Api V1 Strategy Screenings Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategy-screenings/{batch_id}": {
+      "get": {
+        "tags": [
+          "strategy-screenings"
+        ],
+        "summary": "Get Screening",
+        "operationId": "get_screening_api_v1_strategy_screenings__batch_id__get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Batch Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Screening Api V1 Strategy Screenings  Batch Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategy-screenings/{batch_id}/results": {
+      "get": {
+        "tags": [
+          "strategy-screenings"
+        ],
+        "summary": "List Screening Results",
+        "operationId": "list_screening_results_api_v1_strategy_screenings__batch_id__results_get",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          },
+          {
+            "name": "symbol",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^[0-9]{6}\\.(SH|SZ|BJ)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Symbol"
+            }
+          },
+          {
+            "name": "period_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/StrategyScreeningResultStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Screening Results Api V1 Strategy Screenings  Batch Id  Results Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/strategy-screenings/{batch_id}/{action}": {
+      "post": {
+        "tags": [
+          "strategy-screenings"
+        ],
+        "summary": "Control Screening",
+        "operationId": "control_screening_api_v1_strategy_screenings__batch_id___action__post",
+        "parameters": [
+          {
+            "name": "batch_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Batch Id"
+            }
+          },
+          {
+            "name": "action",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/StrategyScreeningAction"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScreeningControlBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Control Screening Api V1 Strategy Screenings  Batch Id   Action  Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/backtests": {
       "post": {
         "tags": [
@@ -9087,6 +9436,57 @@
               "minimum": 1,
               "default": 50,
               "title": "Page Size"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 32
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 100
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Search"
+            }
+          },
+          {
+            "name": "period_sequence",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period Sequence"
             }
           }
         ],
@@ -9472,6 +9872,211 @@
                   "type": "object",
                   "additionalProperties": true,
                   "title": "Response Get Backtest Item Api V1 Backtests  Task Id  Items  Item Id  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/items/{item_id}/price-versions": {
+      "get": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "List Price Versions",
+        "operationId": "list_price_versions_api_v1_backtests__task_id__items__item_id__price_versions_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Price Versions Api V1 Backtests  Task Id  Items  Item Id  Price Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Change Price Version",
+        "operationId": "change_price_version_api_v1_backtests__task_id__items__item_id__price_versions_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestPriceChangeBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Change Price Version Api V1 Backtests  Task Id  Items  Item Id  Price Versions Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/backtests/{task_id}/items/{item_id}/price-versions/rollback": {
+      "post": {
+        "tags": [
+          "backtests"
+        ],
+        "summary": "Rollback Price Version",
+        "operationId": "rollback_price_version_api_v1_backtests__task_id__items__item_id__price_versions_rollback_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Task Id"
+            }
+          },
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BacktestPriceRollbackBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Rollback Price Version Api V1 Backtests  Task Id  Items  Item Id  Price Versions Rollback Post"
                 }
               }
             }
@@ -11638,6 +12243,155 @@
         }
       }
     },
+    "/api/v1/market-history/backfills/{job_id}/items": {
+      "get": {
+        "tags": [
+          "market-history"
+        ],
+        "summary": "List Backfill Items",
+        "operationId": "list_backfill_items_api_v1_market_history_backfills__job_id__items_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(PENDING|RUNNING|SUCCEEDED|ANOMALY|FAILED|CANCELED)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Page Size"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Backfill Items Api V1 Market History Backfills  Job Id  Items Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/market-history/backfills/{job_id}/items/retry": {
+      "post": {
+        "tags": [
+          "market-history"
+        ],
+        "summary": "Retry Backfill Items",
+        "operationId": "retry_backfill_items_api_v1_market_history_backfills__job_id__items_retry_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 160,
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryBackfillItemsBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackfillResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/market-history/backfills/{job_id}/pause": {
       "post": {
         "tags": [
@@ -12795,6 +13549,12 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Canceled"
+          },
+          "anomalous": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Anomalous",
+            "default": 0
           }
         },
         "type": "object",
@@ -13062,6 +13822,20 @@
             },
             "type": "array",
             "title": "Failure Details"
+          },
+          "anomalous": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Anomalous",
+            "default": 0
+          },
+          "anomaly_details": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Anomaly Details"
           }
         },
         "type": "object",
@@ -13180,6 +13954,28 @@
             "minimum": 0.0,
             "title": "Item Count",
             "default": 0
+          },
+          "provider_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Job Id"
           },
           "items": {
             "items": {
@@ -13363,6 +14159,18 @@
               }
             ],
             "title": "Median Max Drawdown"
+          },
+          "median_win_rate": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Win Rate"
           },
           "trade_count_distribution": {
             "anyOf": [
@@ -13608,6 +14416,42 @@
             "format": "uuid",
             "title": "Item Id"
           },
+          "screening_result_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screening Result Id"
+          },
+          "screening_period_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screening Period Id"
+          },
+          "period_sequence": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Sequence"
+          },
           "security_id": {
             "type": "string",
             "format": "uuid",
@@ -13634,6 +14478,17 @@
               }
             ],
             "title": "Failure Code"
+          },
+          "outcome_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Outcome Reason"
           },
           "attempt_count": {
             "type": "integer",
@@ -13731,6 +14586,18 @@
             "minimum": 0.0,
             "title": "Completed Round Trips"
           },
+          "buy_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Buy Count",
+            "default": 0
+          },
+          "sell_count": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Sell Count",
+            "default": 0
+          },
           "winning_trades": {
             "type": "integer",
             "minimum": 0.0,
@@ -13824,6 +14691,36 @@
             "type": "integer",
             "minimum": 0.0,
             "title": "Unfilled Order Count"
+          },
+          "gross_profit_amount": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Gross Profit Amount",
+            "default": "0"
+          },
+          "gross_loss_amount": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Gross Loss Amount",
+            "default": "0"
+          },
+          "net_profit_amount": {
+            "type": "string",
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Net Profit Amount",
+            "default": "0"
+          },
+          "profit_factor": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Profit Factor"
           }
         },
         "additionalProperties": false,
@@ -13859,6 +14756,80 @@
           "MARKET"
         ],
         "title": "BacktestMode"
+      },
+      "BacktestPriceChangeBody": {
+        "properties": {
+          "effective_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Effective Date"
+          },
+          "values": {
+            "$ref": "#/components/schemas/TargetValues-Input"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "effective_date",
+          "values",
+          "expected_version",
+          "confirm",
+          "reason"
+        ],
+        "title": "BacktestPriceChangeBody"
+      },
+      "BacktestPriceRollbackBody": {
+        "properties": {
+          "source_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Source Version Id"
+          },
+          "effective_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Effective Date"
+          },
+          "expected_version": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Expected Version"
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_version_id",
+          "effective_date",
+          "expected_version",
+          "confirm",
+          "reason"
+        ],
+        "title": "BacktestPriceRollbackBody"
       },
       "BacktestReturnDistribution": {
         "properties": {
@@ -14040,6 +15011,18 @@
             "type": "string",
             "format": "uuid",
             "title": "Task Id"
+          },
+          "screening_batch_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Screening Batch Id"
           },
           "rerun_from_task_id": {
             "anyOf": [
@@ -15563,6 +16546,28 @@
             ],
             "title": "Watchlist Id"
           },
+          "provider_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source_job_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Job Id"
+          },
           "confirm": {
             "type": "boolean",
             "title": "Confirm"
@@ -15585,101 +16590,10 @@
       },
       "CreateBacktestBody": {
         "properties": {
-          "mode": {
-            "$ref": "#/components/schemas/BacktestMode",
-            "default": "SINGLE"
-          },
-          "symbol": {
-            "anyOf": [
-              {
-                "type": "string",
-                "pattern": "^[0-9]{6}\\.(SH|SZ|BJ)$"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Symbol"
-          },
-          "watchlist_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Watchlist Id"
-          },
-          "date_range": {
-            "$ref": "#/components/schemas/BacktestDateRange"
-          },
-          "strategy_version_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strategy Version Id"
-          },
-          "draft_id": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "uuid"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Draft Id"
-          },
-          "draft_version": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Draft Version"
-          },
-          "strategy_metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Strategy Metadata"
-          },
-          "parameter_schema": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Parameter Schema"
-          },
-          "parameter_snapshot": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Parameter Snapshot"
+          "screening_batch_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Screening Batch Id"
           },
           "initial_capital": {
             "anyOf": [
@@ -15694,6 +16608,13 @@
             ],
             "title": "Initial Capital"
           },
+          "concurrency": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "default": 4
+          },
           "confirm": {
             "type": "boolean",
             "title": "Confirm"
@@ -15705,11 +16626,9 @@
             "title": "Reason"
           }
         },
-        "additionalProperties": false,
         "type": "object",
         "required": [
-          "date_range",
-          "parameter_snapshot",
+          "screening_batch_id",
           "initial_capital",
           "confirm",
           "reason"
@@ -15868,6 +16787,55 @@
           "confirm"
         ],
         "title": "CreateScheduleRequest"
+      },
+      "CreateScreeningBody": {
+        "properties": {
+          "strategy_version_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Strategy Version Id"
+          },
+          "parameter_snapshot": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Parameter Snapshot"
+          },
+          "periods": {
+            "items": {
+              "$ref": "#/components/schemas/StrategyScreeningPeriod"
+            },
+            "type": "array",
+            "maxItems": 20,
+            "minItems": 1,
+            "title": "Periods"
+          },
+          "concurrency": {
+            "type": "integer",
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "default": 4
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "strategy_version_id",
+          "periods",
+          "confirm",
+          "reason"
+        ],
+        "title": "CreateScreeningBody"
       },
       "CreateStrategyRequest": {
         "properties": {
@@ -20915,6 +21883,53 @@
         ],
         "title": "ResultResponse"
       },
+      "RetryBackfillItemsBody": {
+        "properties": {
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 6000,
+            "minItems": 1,
+            "title": "Symbols"
+          },
+          "provider_code": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProviderCode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "concurrency": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Concurrency",
+            "default": 4
+          },
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "symbols",
+          "confirm",
+          "reason"
+        ],
+        "title": "RetryBackfillItemsBody"
+      },
       "RetryBatchRequest": {
         "properties": {
           "reason": {
@@ -21835,6 +22850,27 @@
           "data"
         ],
         "title": "SchedulerStatusEnvelope"
+      },
+      "ScreeningControlBody": {
+        "properties": {
+          "confirm": {
+            "type": "boolean",
+            "title": "Confirm"
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "confirm",
+          "reason"
+        ],
+        "title": "ScreeningControlBody"
       },
       "SecretCommandEnvelope": {
         "properties": {
@@ -24104,6 +25140,67 @@
         ],
         "title": "StrategyOperationItemStatus"
       },
+      "StrategyScreeningAction": {
+        "type": "string",
+        "enum": [
+          "PAUSE",
+          "RESUME",
+          "CANCEL",
+          "RETRY_FAILED"
+        ],
+        "title": "StrategyScreeningAction"
+      },
+      "StrategyScreeningPeriod": {
+        "properties": {
+          "sequence_no": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Sequence No"
+          },
+          "training_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training Start Date"
+          },
+          "training_end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Training End Date"
+          },
+          "test_start_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Test Start Date"
+          },
+          "test_end_date": {
+            "type": "string",
+            "format": "date",
+            "title": "Test End Date"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "sequence_no",
+          "training_start_date",
+          "training_end_date",
+          "test_start_date",
+          "test_end_date"
+        ],
+        "title": "StrategyScreeningPeriod"
+      },
+      "StrategyScreeningResultStatus": {
+        "type": "string",
+        "enum": [
+          "PENDING",
+          "RUNNING",
+          "MATCHED",
+          "NOT_MATCHED",
+          "FAILED",
+          "CANCELED"
+        ],
+        "title": "StrategyScreeningResultStatus"
+      },
       "StrategyStockTestData": {
         "properties": {
           "task_id": {
@@ -24885,6 +25982,7 @@
           "PENDING",
           "RUNNING",
           "SUCCEEDED",
+          "NOT_MATCHED",
           "FAILED"
         ],
         "title": "TargetCalculationStatus"

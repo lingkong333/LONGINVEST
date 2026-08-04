@@ -169,10 +169,35 @@ export interface BackfillSummary {
     succeeded: number
     failed: number
     canceled: number
+    anomalous?: number
   }
   updatedAt: string
   terminalAt: string | null
   allowedActions: Exclude<BackfillAction, "CREATE">[]
+}
+
+export type BackfillItemStatus =
+  | "PENDING"
+  | "RUNNING"
+  | "SUCCEEDED"
+  | "ANOMALY"
+  | "FAILED"
+  | "CANCELED"
+
+export type HistoryProviderCode =
+  | "EASTMONEY"
+  | "SINA"
+  | "TUSHARE"
+  | "BAOSTOCK"
+  | "TENCENT"
+
+export interface BackfillItemSummary {
+  securityId: string
+  symbol: string
+  status: BackfillItemStatus
+  errorCode: string | null
+  retryable: boolean
+  anomalyRows: { trade_date: string; error_code: string; price_mode: string }[]
 }
 
 export interface PagedResult<Item> {
@@ -225,6 +250,19 @@ export interface MarketDataGateway {
   runBackfillAction(command: {
     job: BackfillSummary
     action: Exclude<BackfillAction, "CREATE">
+    reason: string
+  }): Promise<void>
+  loadBackfillItems?(command: {
+    jobId: string
+    status?: BackfillItemStatus
+    page: number
+    pageSize: number
+  }): Promise<PagedResult<BackfillItemSummary>>
+  retryBackfillItems?(command: {
+    jobId: string
+    symbols: string[]
+    providerCode?: HistoryProviderCode
+    concurrency: number
     reason: string
   }): Promise<void>
 }

@@ -15,6 +15,7 @@ import { useEffect, useMemo, useState } from "react"
 
 import { useAuth } from "@/features/auth"
 import { monitoringGateway } from "@/features/monitoring/gateway"
+import { MonitorSchedulePanel } from "@/features/monitoring/monitor-schedule-panel"
 import type {
   MonitoringAction,
   MonitoringGateway,
@@ -339,6 +340,8 @@ export function MonitoringPage({
           <CardContent className="py-4"><strong className="block text-2xl">{attentionCount}</strong><span className="text-sm text-muted-foreground">需要关注</span></CardContent>
         </Card>
       </section>
+
+      <MonitorSchedulePanel gateway={gateway} />
 
       {overview.warningCodes.length > 0 ? (
         <Alert>

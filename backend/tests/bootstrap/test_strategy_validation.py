@@ -24,7 +24,7 @@ STRATEGY_META = {
     "data_requirements": {"adjustment": "qfq", "min_bars": 2, "max_bars": 100},
     "parameter_schema": {
         "type": "object",
-        "properties": {"window": {"type": "integer"}},
+        "properties": {"window": {"type": "integer", "title": "回看窗口", "description": "计算目标价格使用的历史交易日数量"}},
         "required": ["window"],
         "additionalProperties": False,
     },
@@ -61,7 +61,7 @@ def fixture():
         },
         "parameter_schema": {
             "type": "object",
-            "properties": {"window": {"type": "integer"}},
+            "properties": {"window": {"type": "integer", "title": "回看窗口", "description": "计算目标价格使用的历史交易日数量"}},
             "required": ["window"],
             "additionalProperties": False,
         },

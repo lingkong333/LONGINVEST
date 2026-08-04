@@ -185,6 +185,64 @@ class QfqApplication:
             bars=tuple(_bar_view(item) for item in bars),
         )
 
+    async def current_dataset_snapshots(
+        self, security_ids: tuple[UUID, ...]
+    ) -> tuple[QfqDatasetView, ...]:
+        """Return immutable metadata for the current datasets in one query."""
+        try:
+            async with self._database.session() as session:
+                rows = await self._repository_factory(session).current_datasets(
+                    security_ids
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return tuple(_dataset_view(row) for row in rows)
+
+    async def get_dataset_window(
+        self,
+        dataset_id: UUID,
+        *,
+        start: date,
+        end: date,
+    ) -> QfqDataWindow:
+        """Read a window from a specific immutable dataset version."""
+        if start > end:
+            raise _window_invalid("requested window is invalid")
+        try:
+            async with self._database.session() as session:
+                repository = self._repository_factory(session)
+                dataset = await repository.get_dataset(dataset_id)
+                if dataset is None:
+                    raise AppError(
+                        code="QFQ_DATA_NOT_FOUND",
+                        message="adjusted dataset is unavailable",
+                        status_code=404,
+                    )
+                total = await repository.count_current_bars(
+                    dataset.id, start=start, end=end
+                )
+                if total == 0:
+                    raise AppError(
+                        code="QFQ_DATA_NOT_FOUND",
+                        message="adjusted data is unavailable for the requested window",
+                        status_code=404,
+                    )
+                bars = await repository.list_current_bars(
+                    dataset.id,
+                    start=start,
+                    end=end,
+                    page=1,
+                    page_size=total,
+                )
+        except AppError:
+            raise
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return QfqDataWindow(
+            dataset=_dataset_view(dataset),
+            bars=tuple(_bar_view(item) for item in bars),
+        )
+
     async def store_history(
         self,
         *,

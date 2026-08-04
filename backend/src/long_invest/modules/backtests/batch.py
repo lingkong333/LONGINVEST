@@ -99,6 +99,9 @@ def summarize_batch(
     drawdowns = sorted(
         metric.max_drawdown for metric in metrics
     )
+    win_rates = sorted(
+        metric.win_rate for metric in metrics if metric.win_rate is not None
+    )
     trade_counts = sorted(
         metric.completed_round_trips for metric in metrics
     )
@@ -120,6 +123,9 @@ def summarize_batch(
             maximum=returns[-1],
         ),
         median_max_drawdown=_percentile(drawdowns, Decimal("0.5")),
+        median_win_rate=(
+            _percentile(win_rates, Decimal("0.5")) if win_rates else Decimal(0)
+        ),
         trade_count_distribution=BacktestTradeCountDistribution(
             minimum=trade_counts[0],
             median=_percentile(

@@ -117,7 +117,7 @@ describe("全部 A 股列表", () => {
     })
     expect(screen.getByRole("link", {
       name: "查看 贵州茅台 日线详情",
-    })).toHaveAttribute("href", "/market-data/stocks/600519.SH")
+    })).toHaveAttribute("href", "/stocks/600519.SH")
     expect(screen.getByRole("button", { name: "上一页" })).toBeEnabled()
     expect(screen.getByRole("button", { name: "下一页" })).toBeDisabled()
   })
@@ -182,6 +182,10 @@ describe("股票日线详情", () => {
     expect(screen.getByDisplayValue("13.00")).toBeInTheDocument()
     expect(screen.getByText("实线")).toBeInTheDocument()
     expect(screen.getByText("虚线")).toBeInTheDocument()
+    expect(screen.getByRole("radio", { name: "全部" })).toBeChecked()
+    expect(loadDailyPrices).toHaveBeenCalledWith(expect.objectContaining({
+      startDate: "1990-01-01",
+    }))
 
     await userEvent.click(screen.getByRole("button", {
       name: "支撑位增加 0.01 元",

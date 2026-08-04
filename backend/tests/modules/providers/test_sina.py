@@ -310,7 +310,7 @@ def test_sina_qfq_discards_only_the_nonpositive_prefix() -> None:
     ]
 
 
-def test_sina_rejects_nonpositive_qfq_inside_the_valid_suffix() -> None:
+def test_sina_skips_nonpositive_qfq_inside_the_valid_suffix() -> None:
     request = DailyBarRequest(
         "000001.SZ",
         date(1991, 1, 1),
@@ -340,5 +340,9 @@ def test_sina_rejects_nonpositive_qfq_inside_the_valid_suffix() -> None:
         ]
     )
 
-    with pytest.raises(ProviderHttpError, match="PROVIDER_SCHEMA_INCOMPATIBLE"):
-        SinaRealtimeProvider.parse_daily_bars(frame, request=request)
+    result = SinaRealtimeProvider.parse_daily_bars(frame, request=request)
+
+    assert [item.trading_date for item in result.items] == [date(1991, 1, 1)]
+    assert len(result.anomalies) == 1
+    assert result.anomalies[0].trading_date == date(1991, 1, 2)
+    assert result.anomalies[0].code == "PROVIDER_DAILY_BAR_INVALID"

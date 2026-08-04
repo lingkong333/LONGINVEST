@@ -15,6 +15,8 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useEffect } from "react"
+import { Link } from "react-router-dom"
+import { Bar, BarChart, CartesianGrid, LabelList, XAxis } from "recharts"
 
 import { useAuth } from "@/features/auth"
 import { dashboardGateway } from "@/features/dashboard/gateway"
@@ -34,6 +36,8 @@ import {
   CardTitle,
 } from "@/shared/ui/card"
 import { PageState } from "@/shared/ui/page-state"
+import { ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig } from "@/shared/ui/chart"
+import { Progress } from "@/shared/ui/progress"
 import { Skeleton } from "@/shared/ui/skeleton"
 
 interface MetricDefinition {
@@ -41,22 +45,40 @@ interface MetricDefinition {
   field: string
   label: string
   icon: LucideIcon
+  href: string
 }
 
 const metrics: MetricDefinition[] = [
-  { section: "monitoring", field: "active", label: "启用监控", icon: Radar },
-  { section: "positions", field: "held", label: "当前持仓", icon: BriefcaseBusiness },
-  { section: "signals", field: "today", label: "今日信号", icon: Crosshair },
-  { section: "targets", field: "attention", label: "目标关注", icon: Target },
-  { section: "jobs", field: "active", label: "活动任务", icon: Activity },
-  { section: "notifications", field: "pending", label: "待发通知", icon: Bell },
-  { section: "providers", field: "healthy", label: "健康数据源", icon: Server },
-  { section: "alerts", field: "unresolved", label: "未解决告警", icon: ShieldAlert },
-  { section: "daily_data", field: "committed_count", label: "日线提交", icon: Database },
-  { section: "infrastructure", field: "active_workers", label: "活动进程", icon: HeartPulse },
-  { section: "system", field: "critical_alerts", label: "严重告警", icon: CircleAlert },
-  { section: "quote_batches", field: "valid_count", label: "有效行情", icon: Activity },
+  { section: "monitoring", field: "active", label: "启用监控", icon: Radar, href: "/monitoring" },
+  { section: "positions", field: "held", label: "当前持仓", icon: BriefcaseBusiness, href: "/positions" },
+  { section: "signals", field: "today", label: "今日信号", icon: Crosshair, href: "/signals" },
+  { section: "targets", field: "attention", label: "目标关注", icon: Target, href: "/targets" },
+  { section: "jobs", field: "active", label: "活动任务", icon: Activity, href: "/jobs" },
+  { section: "notifications", field: "pending", label: "待发通知", icon: Bell, href: "/notifications" },
+  { section: "providers", field: "healthy", label: "健康数据源", icon: Server, href: "/providers" },
+  { section: "alerts", field: "unresolved", label: "未解决告警", icon: ShieldAlert, href: "/alerts" },
+  { section: "daily_data", field: "committed_count", label: "日线提交", icon: Database, href: "/market-data" },
+  { section: "infrastructure", field: "active_workers", label: "活动进程", icon: HeartPulse, href: "/system-status" },
+  { section: "system", field: "critical_alerts", label: "严重告警", icon: CircleAlert, href: "/alerts?severity=CRITICAL" },
+  { section: "quote_batches", field: "valid_count", label: "有效行情", icon: Activity, href: "/market-data" },
 ]
+
+const monitoringChartConfig = {
+  value: { label: "股票数", color: "var(--chart-1)" },
+} satisfies ChartConfig
+
+const signalChartConfig = {
+  value: { label: "信号数", color: "var(--chart-2)" },
+} satisfies ChartConfig
+
+function numberValue(section: DashboardSection, field: string): number {
+  return metricValue(section, field) ?? 0
+}
+
+function textValue(section: DashboardSection, field: string): string | null {
+  const value = section.data[field]
+  return typeof value === "string" && value ? value : null
+}
 
 const healthLabels: Record<DashboardSummary["status"], string> = {
   HEALTHY: "运行正常",
@@ -183,20 +205,20 @@ export function DashboardPage({
       </header>
 
       <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="系统实时指标">
-        {metrics.map(({ section, field, label, icon: Icon }) => {
+        {metrics.map(({ section, field, label, icon: Icon, href }) => {
           const snapshot = summary.sections[section]
           const value = metricValue(snapshot, field)
           const tone = statusTone(snapshot.status)
           return (
+            <Link key={`${section}-${field}`} to={href} className="rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`${label}：${value ?? "无数据"}，状态${sectionStatusLabels[snapshot.status]}，查看详情`}>
             <Card
               className={
                 tone === "danger"
-                  ? "border-destructive/60"
+                  ? "h-full border-destructive/60 transition-colors hover:bg-muted/40"
                   : tone === "warning"
-                    ? "border-primary/60"
-                    : undefined
+                    ? "h-full border-primary/60 transition-colors hover:bg-muted/40"
+                    : "h-full transition-colors hover:bg-muted/40"
               }
-              key={`${section}-${field}`}
               aria-label={`${label}：${value ?? "无数据"}，状态${sectionStatusLabels[snapshot.status]}`}
               title={snapshot.error ?? label}
             >
@@ -213,9 +235,63 @@ export function DashboardPage({
                 <CardDescription className="mt-1">{label}</CardDescription>
               </CardContent>
             </Card>
+            </Link>
           )
         })}
       </section>
+
+      <section className="grid gap-4 lg:grid-cols-2" aria-label="监控和信号图表">
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle>监控覆盖情况</CardTitle><CardDescription>已启用股票中有多少已经产生当前状态</CardDescription></div><Button asChild variant="ghost"><Link to="/monitoring">查看监控</Link></Button></CardHeader>
+          <CardContent>
+            <ChartContainer config={monitoringChartConfig} className="h-64 w-full aspect-auto">
+              <BarChart accessibilityLayer data={[
+                { label: "启用", value: numberValue(summary.sections.monitoring, "active") },
+                { label: "已有状态", value: numberValue(summary.sections.monitoring, "with_current_state") },
+                { label: "缺少状态", value: numberValue(summary.sections.monitoring, "missing_state") },
+              ]} margin={{ top: 24, right: 12, left: 12, bottom: 4 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                <Bar dataKey="value" fill="var(--color-value)" radius={4}><LabelList dataKey="value" position="top" /></Bar>
+              </BarChart>
+            </ChartContainer>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle>信号区间分布</CardTitle><CardDescription>当前监控股票所处的高低价格区间</CardDescription></div><Button asChild variant="ghost"><Link to="/signals">查看信号</Link></Button></CardHeader>
+          <CardContent>
+            <ChartContainer config={signalChartConfig} className="h-64 w-full aspect-auto">
+              <BarChart accessibilityLayer data={[
+                { label: "低位", value: numberValue(summary.sections.signals, "low_zone") },
+                { label: "高位", value: numberValue(summary.sections.signals, "high_zone") },
+                { label: "今日变化", value: numberValue(summary.sections.signals, "today") },
+              ]} margin={{ top: 24, right: 12, left: 12, bottom: 4 }}>
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="label" tickLine={false} axisLine={false} />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent hideLabel />} />
+                <Bar dataKey="value" fill="var(--color-value)" radius={4}><LabelList dataKey="value" position="top" /></Bar>
+              </BarChart>
+            </ChartContainer>
+          </CardContent>
+        </Card>
+      </section>
+
+      <Card aria-label="最近交易日日线完成情况">
+        <CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle>最近交易日日线</CardTitle><CardDescription>系统在确认交易日 17:00 自动创建全市场任务，停机缺口会在后台恢复后补齐。</CardDescription></div><Button asChild variant="outline"><Link to="/market-data">查看日线批次</Link></Button></CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {(() => {
+            const daily = summary.sections.daily_data
+            const committed = numberValue(daily, "committed_count")
+            const expected = numberValue(daily, "expected_count")
+            const missing = numberValue(daily, "missing_count")
+            const failed = numberValue(daily, "failed_count")
+            const status = textValue(daily, "status") ?? sectionStatusLabels[daily.status]
+            const progress = expected > 0 ? Math.min(100, Math.round(committed / expected * 100)) : 0
+            return <><div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm text-muted-foreground">交易日</p><p className="text-xl font-semibold">{textValue(daily, "trading_date") ?? "暂无批次"}</p></div><Badge variant={failed || missing ? "destructive" : "secondary"}>{status}</Badge></div><Progress value={progress} aria-label={`日线完成进度 ${progress}%`} /><div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4"><p><span className="block text-muted-foreground">已提交</span><strong>{committed} / {expected || "—"}</strong></p><p><span className="block text-muted-foreground">完成度</span><strong>{progress}%</strong></p><p><span className="block text-muted-foreground">缺失</span><strong>{missing}</strong></p><p><span className="block text-muted-foreground">失败</span><strong>{failed}</strong></p></div></>
+          })()}
+        </CardContent>
+      </Card>
     </main>
   )
 }

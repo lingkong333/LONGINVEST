@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -32,18 +31,10 @@ class Application:
         self.created = None
         self.paused = None
 
-    async def create(self, **kwargs):
-        self.created = kwargs
-        job_id = uuid4()
-        self.job_id = job_id
-        return SimpleNamespace(
-            job_id=job_id,
-            task=TaskValue(),
-            item_id=uuid4(),
-            item_status=BacktestItemStatus.PENDING,
-            forecast=None,
-            test_data_snapshot=None,
-        )
+    async def create(self, request, **kwargs):
+        self.created = {"request": request, **kwargs}
+        self.task_id = uuid4()
+        return self.task_id
 
     async def get_result(self, task_id, item_id):
         return BacktestResultView(
@@ -59,8 +50,8 @@ class Application:
             metric=None,
         )
 
-    async def pause(self, task_id, context):
-        self.paused = (task_id, context)
+    async def control(self, task_id, action, **context):
+        self.paused = (task_id, action, context)
 
     async def get_summary(self, task_id):
         return SimpleNamespace(
@@ -78,15 +69,7 @@ def test_create_api_uses_stable_task_id_and_command_context() -> None:
             user=SimpleNamespace(id=uuid4()),
         )
         body = CreateBacktestBody(
-            symbol="600000.SH",
-            date_range={
-                "training_start_date": date(2024, 1, 1),
-                "training_end_date": date(2024, 12, 31),
-                "test_start_date": date(2025, 1, 1),
-                "test_end_date": date(2025, 12, 31),
-            },
-            strategy_version_id=uuid4(),
-            parameter_snapshot={},
+            screening_batch_id=uuid4(),
             initial_capital=Decimal("100000"),
             confirm=True,
             reason="验证样本外效果",
@@ -95,11 +78,10 @@ def test_create_api_uses_stable_task_id_and_command_context() -> None:
         response = await create_backtest(body, application, identity, "key-1")
 
         assert response["code"] == "JOB_ACCEPTED"
-        assert response["data"]["job_id"] == str(application.job_id)
-        assert application.created["context"].idempotency_key == "key-1"
-        first_id = application.created["task_id"]
+        assert response["data"]["task_id"] == str(application.task_id)
+        assert application.created["request"].idempotency_key == "key-1"
         await create_backtest(body, application, identity, "key-1")
-        assert application.created["task_id"] == first_id
+        assert application.created["request"].idempotency_key == "key-1"
 
     asyncio.run(scenario())
 
@@ -132,6 +114,7 @@ def test_pause_api_requires_command_context_and_returns_allowed_actions() -> Non
             task_id,
             BacktestCommandBody(confirm=True, reason=" 暂停检查 "),
             application,
+            application,
             identity,
             "pause-key",
         )
@@ -142,8 +125,8 @@ def test_pause_api_requires_command_context_and_returns_allowed_actions() -> Non
             "status": "PAUSED",
             "allowed_actions": ["RESUME", "CANCEL"],
         }
-        assert application.paused[1].reason == "暂停检查"
-        assert application.paused[1].session_id == str(identity.session.id)
+        assert application.paused[1] is BacktestAction.PAUSE
+        assert application.paused[2]["reason"] == "暂停检查"
 
     asyncio.run(scenario())
 
@@ -161,6 +144,8 @@ def test_router_exposes_current_single_backtest_read_surface() -> None:
         "/api/v1/backtests/{task_id}/retry-failed",
         "/api/v1/backtests/{task_id}/rerun",
         "/api/v1/backtests/{task_id}/items/{item_id}",
+        "/api/v1/backtests/{task_id}/items/{item_id}/price-versions",
+        "/api/v1/backtests/{task_id}/items/{item_id}/price-versions/rollback",
         "/api/v1/backtests/{task_id}/items/{item_id}/target-adjustments",
         "/api/v1/backtests/{task_id}/items/{item_id}/orders",
         "/api/v1/backtests/{task_id}/items/{item_id}/trades",

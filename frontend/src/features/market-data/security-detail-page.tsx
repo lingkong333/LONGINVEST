@@ -101,9 +101,9 @@ export function SecurityDetailPage({
 }: SecurityDetailPageProps) {
   const route = useParams<{ symbol: string }>()
   const symbol = (symbolProperty ?? route.symbol ?? "").trim().toUpperCase()
-  const initialRange = useMemo(() => presetRange("1Y"), [])
+  const initialRange = useMemo(() => presetRange("ALL"), [])
   const [mode, setMode] = useState<DailyPriceMode>("UNADJUSTED")
-  const [selectedRange, setSelectedRange] = useState("1Y")
+  const [selectedRange, setSelectedRange] = useState("ALL")
   const [rangeDraft, setRangeDraft] = useState(initialRange)
   const [range, setRange] = useState(initialRange)
   const [rangeError, setRangeError] = useState("")
@@ -220,7 +220,7 @@ export function SecurityDetailPage({
       <header className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div>
           <Button asChild variant="ghost" className="mb-2 px-0">
-            <Link to="/market-data/stocks">
+            <Link to="/stocks">
               <ArrowLeftIcon data-icon="inline-start" />
               返回股票列表
             </Link>
@@ -398,6 +398,8 @@ export function SecurityDetailPage({
               items={prices.data.items}
               support={support}
               resistance={resistance}
+              onSupportChange={(value) => setSupportInput(value.toFixed(2))}
+              onResistanceChange={(value) => setResistanceInput(value.toFixed(2))}
             />
           </>
         ) : (

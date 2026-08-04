@@ -93,6 +93,7 @@ class BacktestTask(Base):
         ),
         Index("ix_backtest_task_status_created", "status", "created_at"),
         Index("ix_backtest_task_strategy_version", "strategy_version_id"),
+        Index("ix_backtest_task_screening_batch", "screening_batch_id"),
         UniqueConstraint("idempotency_key", name="uq_backtest_task_idempotency_key"),
     )
 
@@ -107,6 +108,13 @@ class BacktestTask(Base):
     rerun_from_task_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True),
         ForeignKey("backtest_task.id", ondelete="RESTRICT"),
+    )
+    screening_batch_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_screening_batch.id", ondelete="RESTRICT"),
+    )
+    job_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("job.id", ondelete="RESTRICT"), unique=True
     )
     idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
     request_digest: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -179,7 +187,8 @@ class BacktestItem(Base):
         UniqueConstraint(
             "task_id",
             "security_id",
-            name="uq_backtest_item_task_id_security_id",
+            "screening_period_id",
+            name="uq_backtest_item_task_security_period",
         ),
         CheckConstraint(
             "status IN ('PENDING','FETCHING_DATA','VALIDATING_DATA','FORECASTING',"
@@ -234,8 +243,22 @@ class BacktestItem(Base):
         ForeignKey("security.id", ondelete="RESTRICT"),
         nullable=False,
     )
+    screening_result_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_screening_result.id", ondelete="RESTRICT"),
+        unique=True,
+    )
+    screening_period_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("strategy_screening_period.id", ondelete="RESTRICT"),
+    )
+    recompute_from_date: Mapped[date | None] = mapped_column(Date)
+    price_version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     failure_code: Mapped[str | None] = mapped_column(String(100))
+    outcome_reason: Mapped[str | None] = mapped_column(String(500))
     execution_token: Mapped[UUID | None] = mapped_column(PG_UUID(as_uuid=True))
     attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, default=0, server_default=text("0")
@@ -647,6 +670,7 @@ class BacktestMetric(Base):
         CheckConstraint(
             "completed_round_trips >= 0 AND winning_trades >= 0 "
             "AND losing_trades >= 0 AND breakeven_trades >= 0 "
+            "AND buy_count >= 0 AND sell_count >= 0 "
             "AND winning_trades + losing_trades + breakeven_trades "
             "= completed_round_trips "
             "AND longest_holding_trade_days >= 0 AND unfilled_order_count >= 0",
@@ -655,7 +679,8 @@ class BacktestMetric(Base):
         CheckConstraint(
             "ending_equity >= 0 AND max_drawdown >= 0 AND max_drawdown <= 1 "
             "AND volatility >= 0 AND capital_exposure_ratio >= 0 "
-            "AND capital_exposure_ratio <= 1",
+            "AND capital_exposure_ratio <= 1 "
+            "AND gross_profit_amount >= 0 AND gross_loss_amount >= 0",
             name="values_valid",
         ),
         CheckConstraint(
@@ -678,6 +703,10 @@ class BacktestMetric(Base):
                 "maximum_trade_loss",
                 "average_holding_trade_days",
                 "capital_exposure_ratio",
+                "gross_profit_amount",
+                "gross_loss_amount",
+                "net_profit_amount",
+                "profit_factor",
             ),
             name="numeric_finite",
         ),
@@ -700,6 +729,12 @@ class BacktestMetric(Base):
     volatility: Mapped[Decimal] = mapped_column(Numeric(20, 8), nullable=False)
     sharpe_ratio: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
     completed_round_trips: Mapped[int] = mapped_column(Integer, nullable=False)
+    buy_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
+    sell_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0")
+    )
     winning_trades: Mapped[int] = mapped_column(Integer, nullable=False)
     losing_trades: Mapped[int] = mapped_column(Integer, nullable=False)
     breakeven_trades: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -714,6 +749,78 @@ class BacktestMetric(Base):
     )
     open_position_at_end: Mapped[bool] = mapped_column(Boolean, nullable=False)
     unfilled_order_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    gross_profit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(20, 2), nullable=False, default=0, server_default=text("0")
+    )
+    gross_loss_amount: Mapped[Decimal] = mapped_column(
+        Numeric(20, 2), nullable=False, default=0, server_default=text("0")
+    )
+    net_profit_amount: Mapped[Decimal] = mapped_column(
+        Numeric(20, 2), nullable=False, default=0, server_default=text("0")
+    )
+    profit_factor: Mapped[Decimal | None] = mapped_column(Numeric(20, 8))
+
+
+class BacktestPriceVersion(Base):
+    __tablename__ = "backtest_price_version"
+    __table_args__ = (
+        UniqueConstraint(
+            "item_id", "version_no", name="uq_backtest_price_version_item_version"
+        ),
+        UniqueConstraint(
+            "item_id",
+            "idempotency_key",
+            name="uq_backtest_price_version_item_idempotency",
+        ),
+        CheckConstraint("version_no > 0", name="version_positive"),
+        CheckConstraint(
+            "source IN ('SCREENING','USER','ROLLBACK','CORPORATE_ACTION')",
+            name="source_valid",
+        ),
+        CheckConstraint(
+            "low_strong > 0 AND low_strong < low_watch "
+            "AND low_watch < high_watch AND high_watch < high_strong",
+            name="prices_ordered",
+        ),
+        CheckConstraint(
+            _finite_numeric(
+                "low_strong", "low_watch", "high_watch", "high_strong"
+            ),
+            name="prices_finite",
+        ),
+        Index(
+            "ix_backtest_price_version_item_effective",
+            "item_id",
+            "effective_date",
+            "version_no",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    item_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_item.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    version_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_date: Mapped[date] = mapped_column(Date, nullable=False)
+    low_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    low_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    high_watch: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    high_strong: Mapped[Decimal] = mapped_column(Numeric(20, 2), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    reason: Mapped[str] = mapped_column(String(500), nullable=False)
+    actor_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_version_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("backtest_price_version.id", ondelete="RESTRICT"),
+    )
+    idempotency_key: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
 
 
 class BacktestDailyResult(Base):

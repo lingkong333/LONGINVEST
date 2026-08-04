@@ -104,6 +104,12 @@ class HistoryBackfillService:
             "concurrency": command.concurrency,
             "reason": context.reason,
             "item_count": len(frozen.items),
+            "provider_code": (
+                command.provider_code.value if command.provider_code else None
+            ),
+            "source_job_id": (
+                str(command.source_job_id) if command.source_job_id else None
+            ),
         }
         job = await self._jobs.submit(_submit_command(snapshot, context))
         await self._audit.append(
@@ -230,11 +236,13 @@ class HistoryBackfillService:
                     checkpoint.get("succeeded", max(0, completed - failed))
                 )
             )
+            anomalous = len(checkpoint.get("anomalies", ()))
             pending = max(0, total - completed)
             result[job_id] = {
                 "PENDING": pending,
                 "RUNNING": 0,
-                "SUCCEEDED": succeeded,
+                "SUCCEEDED": max(0, succeeded - anomalous),
+                "ANOMALY": anomalous,
                 "FAILED": failed,
                 "CANCELED": 0,
             }
@@ -291,6 +299,8 @@ def _require_same_request(
             command.end_date.isoformat() if command.end_date else None
         ),
         "concurrency": command.concurrency,
+        "provider_code": command.provider_code.value if command.provider_code else None,
+        "source_job_id": str(command.source_job_id) if command.source_job_id else None,
         "reason": context.reason,
     }
     if any(snapshot.get(key) != value for key, value in expected.items()):

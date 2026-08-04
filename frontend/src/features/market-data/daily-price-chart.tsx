@@ -6,6 +6,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { DailyPriceBar } from "@/features/market-data/types"
 import {
@@ -18,6 +19,8 @@ interface DailyPriceChartProps {
   items: DailyPriceBar[]
   support: number
   resistance: number
+  onSupportChange: (value: number) => void
+  onResistanceChange: (value: number) => void
 }
 
 interface ChartPoint extends DailyPriceBar {
@@ -83,7 +86,11 @@ export function DailyPriceChart({
   items,
   support,
   resistance,
+  onSupportChange,
+  onResistanceChange,
 }: DailyPriceChartProps) {
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState<"support" | "resistance" | null>(null)
   const step = Math.max(1, Math.ceil(items.length / MAX_RENDERED_POINTS))
   const renderedItems = items.filter(
     (_item, index) => index === 0 || index === items.length - 1 || index % step === 0,
@@ -93,13 +100,45 @@ export function DailyPriceChart({
     openValue: Number(item.open),
     closeValue: Number(item.close),
   }))
+  const domain = useMemo(() => {
+    const values = items.flatMap((item) => [Number(item.low), Number(item.high)])
+    values.push(support, resistance)
+    const minimum = Math.min(...values)
+    const maximum = Math.max(...values)
+    const padding = Math.max((maximum - minimum) * 0.05, 0.01)
+    return [Math.max(0.01, minimum - padding), maximum + padding] as const
+  }, [items, resistance, support])
+
+  useEffect(() => {
+    if (!dragging) return
+    function move(event: PointerEvent) {
+      const bounds = containerRef.current?.getBoundingClientRect()
+      if (!bounds) return
+      const top = bounds.top + 24
+      const bottom = bounds.bottom - 40
+      const ratio = Math.min(1, Math.max(0, (event.clientY - top) / (bottom - top)))
+      const value = Math.round((domain[1] - ratio * (domain[1] - domain[0])) * 100) / 100
+      if (dragging === "support") onSupportChange(Math.min(value, resistance - 0.01))
+      else onResistanceChange(Math.max(value, support + 0.01))
+    }
+    function stop() {
+      setDragging(null)
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", stop, { once: true })
+    return () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", stop)
+    }
+  }, [domain, dragging, onResistanceChange, onSupportChange, resistance, support])
 
   return (
-    <ChartContainer
-      config={chartConfig}
-      className="h-[420px] w-full aspect-auto"
-      aria-label="股票开盘价和收盘价日线图"
-    >
+    <div ref={containerRef} className={dragging ? "cursor-ns-resize select-none" : ""}>
+      <ChartContainer
+        config={chartConfig}
+        className="h-[420px] w-full aspect-auto"
+        aria-label="股票开盘价和收盘价日线图"
+      >
       <LineChart
         accessibilityLayer
         data={points}
@@ -114,7 +153,7 @@ export function DailyPriceChart({
           tickFormatter={(value: string) => value.slice(2)}
         />
         <YAxis
-          domain={["auto", "auto"]}
+          domain={[domain[0], domain[1]]}
           width={68}
           tickLine={false}
           axisLine={false}
@@ -128,6 +167,8 @@ export function DailyPriceChart({
           y={support}
           stroke="var(--chart-3)"
           strokeWidth={2}
+          className="cursor-ns-resize"
+          onPointerDown={() => setDragging("support")}
           label={{
             value: `支撑位 ${support.toFixed(2)}`,
             position: "insideBottomLeft",
@@ -139,6 +180,8 @@ export function DailyPriceChart({
           stroke="var(--chart-4)"
           strokeDasharray="7 5"
           strokeWidth={2}
+          className="cursor-ns-resize"
+          onPointerDown={() => setDragging("resistance")}
           label={{
             value: `压力位 ${resistance.toFixed(2)}`,
             position: "insideTopLeft",
@@ -164,6 +207,10 @@ export function DailyPriceChart({
           isAnimationActive={false}
         />
       </LineChart>
-    </ChartContainer>
+      </ChartContainer>
+      <p className="mt-2 text-xs text-muted-foreground">
+        可直接上下拖动支撑位和压力位。
+      </p>
+    </div>
   )
 }

@@ -10,20 +10,20 @@ from long_invest.modules.calendar.application import CalendarApplication
 from long_invest.modules.monitoring.contracts import OccurrenceStatus
 from long_invest.modules.monitoring.scheduler import MonitorOccurrenceApplication
 from long_invest.modules.quotes.contracts import (
-    RealtimeBatchStatus,
     QuoteCycleStatus,
     QuoteItemStatus,
     QuoteOperationAction,
     RealtimeBatchResult,
+    RealtimeBatchStatus,
     RealtimeCheckMode,
     SignalQuoteSnapshot,
 )
-from long_invest.modules.securities.application import SecurityApplication
 from long_invest.modules.quotes.repository import QuoteCycleRepository
 from long_invest.modules.quotes.service import (
     _item_view,
     _summary,
 )
+from long_invest.modules.securities.application import SecurityApplication
 from long_invest.platform.database.engine import Database, get_database
 from long_invest.platform.errors import AppError
 

@@ -236,7 +236,7 @@ export function MonitoringPage({
   const snapshotMutation = useMutation({
     mutationFn: () => gateway.triggerMarketSnapshot(),
     onSuccess: async () => {
-      toast.success("全市场快照执行完成")
+      toast.success("全市场快照已开始执行")
       await queryClient.invalidateQueries({
         queryKey: ["monitoring", "today-snapshot-status"],
       })

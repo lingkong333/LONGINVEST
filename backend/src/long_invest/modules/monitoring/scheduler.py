@@ -294,6 +294,7 @@ class MonitorOccurrenceApplication:
             occurrence.error_code = error_code
             await self.event_factory(session).append(occurrence, "completed")
             await session.flush()
+            await session.refresh(occurrence)
             return _occurrence_view(occurrence)
 
     async def list(

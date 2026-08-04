@@ -12,7 +12,7 @@ def test_full_market_daily_migration_is_the_single_head() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
     scripts = ScriptDirectory.from_config(config)
 
-    assert scripts.get_heads() == ["20260804_0042"]
+    assert scripts.get_heads() == ["20260804_0043"]
     assert scripts.get_revision("20260730_0034").down_revision == "20260730_0033"
 
 

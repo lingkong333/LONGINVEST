@@ -46,9 +46,29 @@ export interface MonitorScheduleInput {
   reason: string
 }
 
+export interface SnapshotExecutionItem {
+  scheduledTime: string
+  status: "PENDING" | "NOT_EXECUTED" | "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED"
+  expectedCount: number
+  fetchedCount: number
+  failedCount: number
+  startedAt: string | null
+  completedAt: string | null
+  durationSeconds: number | null
+}
+
+export interface MonitoringExecutionOverview {
+  overallStatus: "NOT_CONFIGURED" | "PENDING" | "RUNNING" | "NORMAL" | "ATTENTION"
+  plannedCount: number
+  executedCount: number
+  fetchedCount: number
+  items: SnapshotExecutionItem[]
+}
+
 export interface MonitoringGateway {
   loadOverview(): Promise<MonitoringOverview>
   loadSchedules(): Promise<MonitorSchedule[]>
+  loadTodaySnapshotStatus(): Promise<MonitoringExecutionOverview>
   saveSchedule(input: MonitorScheduleInput): Promise<void>
   runAction(
     subscriptionId: string,

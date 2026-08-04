@@ -25,7 +25,7 @@ import { ApiError } from "@/shared/api/client"
 import { Alert, AlertDescription } from "@/shared/ui/alert"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
-import { Card, CardContent } from "@/shared/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/shared/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -50,6 +50,7 @@ import {
   SelectValue,
 } from "@/shared/ui/select"
 import { Skeleton } from "@/shared/ui/skeleton"
+import { DataTable } from "@/shared/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group"
 
 type MonitorFilter = "全部" | "已启用" | "持仓" | "需关注"
@@ -61,6 +62,18 @@ const subscriptionLabels: Record<string, string> = {
   ARCHIVED: "已归档",
 }
 const ALL_FILTER_VALUE = "__all__"
+
+const executionStatusLabels: Record<string, string> = {
+  NOT_CONFIGURED: "未配置",
+  PENDING: "待执行",
+  RUNNING: "执行中",
+  NORMAL: "正常",
+  ATTENTION: "需关注",
+  NOT_EXECUTED: "未执行",
+  SUCCEEDED: "已完成",
+  PARTIAL: "部分完成",
+  FAILED: "失败",
+}
 
 const targetLabels: Record<string, string> = {
   READY: "正常",
@@ -162,6 +175,17 @@ function formatShanghaiTime(value: string | null) {
   }).format(new Date(value))
 }
 
+function formatExecutionTime(value: string | null) {
+  if (!value) return "-"
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(new Date(value))
+}
+
 function MonitoringSkeleton() {
   return (
     <main className="mx-auto w-full max-w-7xl space-y-4 p-4 sm:p-6" aria-label="监控列表加载中">
@@ -199,6 +223,11 @@ export function MonitoringPage({
   const overviewQuery = useQuery({
     queryKey: ["monitoring", "overview"],
     queryFn: () => gateway.loadOverview(),
+    refetchInterval: 15_000,
+  })
+  const executionQuery = useQuery({
+    queryKey: ["monitoring", "today-snapshot-status"],
+    queryFn: () => gateway.loadTodaySnapshotStatus(),
     refetchInterval: 15_000,
   })
   const actionMutation = useMutation({
@@ -332,6 +361,21 @@ export function MonitoringPage({
         </Button>
       </header>
 
+      <Card aria-label="今日监控执行状态">
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div><CardTitle>今日监控执行状态</CardTitle><CardDescription>每个配置时间的真实调度与快照抓取结果。</CardDescription></div>
+            <Badge variant={executionQuery.data?.overallStatus === "ATTENTION" ? "destructive" : "secondary"}>{executionStatusLabels[executionQuery.data?.overallStatus ?? "PENDING"]}</Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {executionQuery.isPending ? <div className="grid gap-3 sm:grid-cols-3"><Skeleton className="h-16" /><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : executionQuery.isError ? <Alert variant="destructive"><AlertDescription>当天快照执行记录暂时无法读取，股票监控列表不受影响。</AlertDescription></Alert> : <>
+            <div className="grid gap-3 sm:grid-cols-3"><div><strong className="block text-2xl">{executionQuery.data.plannedCount}</strong><span className="text-sm text-muted-foreground">计划次数</span></div><div><strong className="block text-2xl">{executionQuery.data.executedCount}</strong><span className="text-sm text-muted-foreground">已执行次数</span></div><div><strong className="block text-2xl">{executionQuery.data.fetchedCount}</strong><span className="text-sm text-muted-foreground">成功抓取股票数</span></div></div>
+            {executionQuery.data.items.length ? <DataTable caption="今日每个监控时间的快照执行状态" columns={[{ key: "time", header: "计划时间" }, { key: "status", header: "状态" }, { key: "count", header: "抓取数量" }, { key: "failed", header: "失败" }, { key: "started", header: "开始" }, { key: "completed", header: "完成" }, { key: "duration", header: "耗时" }]} rows={executionQuery.data.items.map((item) => ({ id: item.scheduledTime, time: item.scheduledTime, status: executionStatusLabels[item.status] ?? item.status, count: item.expectedCount ? `${item.fetchedCount} / ${item.expectedCount}` : "-", failed: item.failedCount || "-", started: formatExecutionTime(item.startedAt), completed: formatExecutionTime(item.completedAt), duration: item.durationSeconds === null ? "-" : `${item.durationSeconds} 秒` }))} /> : <PageState state="empty" title="尚未配置盘中监控时间" description="可在页面下方添加监控时间。" />}
+          </>}
+        </CardContent>
+      </Card>
+
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="监控概况">
         <Card><CardContent className="py-4"><strong className="block text-2xl">{overview.items.length}</strong><span className="text-sm text-muted-foreground">全部股票</span></CardContent></Card>
         <Card><CardContent className="py-4"><strong className="block text-2xl">{enabledCount}</strong><span className="text-sm text-muted-foreground">已启用</span></CardContent></Card>
@@ -340,8 +384,6 @@ export function MonitoringPage({
           <CardContent className="py-4"><strong className="block text-2xl">{attentionCount}</strong><span className="text-sm text-muted-foreground">需要关注</span></CardContent>
         </Card>
       </section>
-
-      <MonitorSchedulePanel gateway={gateway} />
 
       {overview.warningCodes.length > 0 ? (
         <Alert>
@@ -510,6 +552,7 @@ export function MonitoringPage({
           ))}
         </section>
       )}
+      <MonitorSchedulePanel gateway={gateway} />
       <Dialog
         open={pendingAction !== null}
         onOpenChange={(open) => {

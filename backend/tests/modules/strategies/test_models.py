@@ -138,7 +138,7 @@ def test_strategy_screening_models_enforce_frozen_scope_and_result_invariants() 
     assert {
         "uq_strategy_screening_batch_idempotency_key",
         "ck_strategy_screening_batch_status_valid",
-        "ck_strategy_screening_period_date_range_valid",
+        "ck_strategy_screening_period_training_range_valid",
         "ck_strategy_screening_scope_item_qfq_snapshot_consistent",
         "ck_strategy_screening_result_outcome_consistent",
         "ck_strategy_screening_result_completion_consistent",

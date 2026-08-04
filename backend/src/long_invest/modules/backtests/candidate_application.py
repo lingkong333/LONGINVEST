@@ -108,6 +108,22 @@ class CandidateBacktestApplication:
                 "候选批次使用的策略版本已不可用",
                 422,
             )
+        requested_periods = {period.sequence_no: period for period in request.periods}
+        candidate_sequences = {item.period_sequence for item in candidate.items}
+        if set(requested_periods) != candidate_sequences:
+            raise _error(
+                "BACKTEST_PERIODS_INVALID",
+                "回测时间必须与筛选训练时段一一对应",
+                422,
+            )
+        for item in candidate.items:
+            period = requested_periods[item.period_sequence]
+            if period.backtest_start_date <= item.training_end_date:
+                raise _error(
+                    "BACKTEST_PERIODS_INVALID",
+                    "回测开始日期必须晚于对应训练结束日期",
+                    422,
+                )
         task_id = uuid5(
             UUID("36276874-9d76-52ba-9495-132c3c982f77"),
             request.idempotency_key,
@@ -153,8 +169,12 @@ class CandidateBacktestApplication:
                 universe_hash=universe_hash,
                 training_start_date=representative_period.training_start_date,
                 training_end_date=representative_period.training_end_date,
-                test_start_date=representative_period.test_start_date,
-                test_end_date=representative_period.test_end_date,
+                test_start_date=min(
+                    period.backtest_start_date for period in request.periods
+                ),
+                test_end_date=max(
+                    period.backtest_end_date for period in request.periods
+                ),
                 strategy_version_id=candidate.strategy_version_id,
                 source_code_hash=strategy.source_code_hash,
                 strategy_metadata=dict(strategy.metadata),
@@ -182,6 +202,7 @@ class CandidateBacktestApplication:
             forecasts = []
             prices = []
             for entry in candidate.items:
+                backtest_period = requested_periods[entry.period_sequence]
                 item_id = uuid5(task.id, f"candidate:{entry.screening_result_id}")
                 items.append(
                     BacktestItem(
@@ -213,8 +234,12 @@ class CandidateBacktestApplication:
                             "screening_result_id": str(entry.screening_result_id),
                             "screening_period_id": str(entry.screening_period_id),
                             "period_sequence": entry.period_sequence,
-                            "test_start_date": entry.test_start_date.isoformat(),
-                            "test_end_date": entry.test_end_date.isoformat(),
+                            "test_start_date": (
+                                backtest_period.backtest_start_date.isoformat()
+                            ),
+                            "test_end_date": (
+                                backtest_period.backtest_end_date.isoformat()
+                            ),
                             "qfq_dataset_id": str(entry.qfq_dataset_id),
                             "qfq_data_version": entry.qfq_data_version,
                             "qfq_data_hash": entry.qfq_data_hash,
@@ -232,7 +257,7 @@ class CandidateBacktestApplication:
                         id=uuid5(item_id, "price:1"),
                         item_id=item_id,
                         version_no=1,
-                        effective_date=entry.test_start_date,
+                        effective_date=backtest_period.backtest_start_date,
                         low_strong=entry.values.low_strong,
                         low_watch=entry.values.low_watch,
                         high_watch=entry.values.high_watch,
@@ -697,11 +722,12 @@ class CandidateBacktestApplication:
         if claimed is None:
             return
         try:
+            test_start, test_end = await self._backtest_range(item.id)
             data = await self._data.get_training_data_from_dataset(
                 dataset_id=candidate.qfq_dataset_id,
                 security_id=candidate.security_id,
-                start_date=candidate.test_start_date,
-                end_date=candidate.test_end_date,
+                start_date=test_start,
+                end_date=test_end,
             )
             if data is None:
                 raise ValueError("test data unavailable")
@@ -755,6 +781,20 @@ class CandidateBacktestApplication:
             locked.test_price_basis = data.price_basis
             locked.recompute_from_date = None
             locked.ended_at = self._clock()
+
+    async def _backtest_range(self, item_id: UUID) -> tuple[date, date]:
+        async with self._database.session() as session:
+            diagnostics = await session.scalar(
+                select(BacktestForecastSnapshot.diagnostics).where(
+                    BacktestForecastSnapshot.item_id == item_id
+                )
+            )
+        if not diagnostics:
+            raise ValueError("backtest period unavailable")
+        return (
+            date.fromisoformat(str(diagnostics["test_start_date"])),
+            date.fromisoformat(str(diagnostics["test_end_date"])),
+        )
 
     async def _price_points(self, item_id: UUID) -> tuple[BacktestPricePoint, ...]:
         async with self._database.session() as session:

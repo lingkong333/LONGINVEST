@@ -5,6 +5,7 @@ import type {
   MonitoringGateway,
   MonitoringOverview,
   MonitoringOverviewItem,
+  MonitoringExecutionOverview,
   MonitorSchedule,
 } from "@/features/monitoring/types"
 import { ApiError, createApiClient, createClientIdempotencyKey } from "@/shared/api/client"
@@ -96,6 +97,51 @@ const securitySchema = z.object({
   name: z.string().min(1),
 })
 
+const occurrencePageSchema = z.object({
+  items: z.array(z.object({
+    occurrence_id: z.string().min(1),
+    scheduled_at: z.string().min(1),
+    status: z.string().min(1),
+  })),
+})
+
+const quoteCyclePageSchema = z.object({
+  items: z.array(z.object({
+    schedule_occurrence_id: z.string().nullable(),
+    status: z.string().min(1),
+    expected_count: z.number().int().nonnegative(),
+    valid_count: z.number().int().nonnegative(),
+    failed_count: z.number().int().nonnegative(),
+    started_at: z.string().nullable(),
+    finalized_at: z.string().nullable(),
+  })),
+})
+
+function shanghaiDate(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(value)
+}
+
+function shanghaiTime(value: string) {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(new Date(value))
+}
+
+function cycleStatus(value: string) {
+  if (value === "READY") return "SUCCEEDED" as const
+  if (value === "PARTIAL") return "PARTIAL" as const
+  if (["FAILED", "MISSED", "CANCELED"].includes(value)) return "FAILED" as const
+  return "RUNNING" as const
+}
+
 function failureCode(error: unknown, fallback: string) {
   return error instanceof ApiError ? error.code : fallback
 }
@@ -138,6 +184,47 @@ export function createMonitoringGateway(baseUrl = ""): MonitoringGateway {
   const api = createApiClient<paths>({ baseUrl })
 
   return {
+    async loadTodaySnapshotStatus() {
+      const today = shanghaiDate()
+      const [schedules, occurrenceValue, cycleValue] = await Promise.all([
+        this.loadSchedules(),
+        api.request<unknown>(api.client.GET("/api/v1/schedule-occurrences", {
+          params: { query: { page: 1, page_size: 200, occurrence_type: "REALTIME_QUOTE", from_date: today, through_date: today } },
+        })),
+        api.request<unknown>(api.client.GET("/api/v1/quote-cycles", {
+          params: { query: { page: 1, page_size: 200 } },
+        })),
+      ])
+      const occurrences = parse(occurrencePageSchema, occurrenceValue, "INVALID_MONITOR_OCCURRENCES_RESPONSE").items
+      const cycles = parse(quoteCyclePageSchema, cycleValue, "INVALID_QUOTE_CYCLES_RESPONSE").items
+      const cycleByOccurrence = new Map(cycles.filter((cycle) => cycle.schedule_occurrence_id).map((cycle) => [cycle.schedule_occurrence_id, cycle]))
+      const occurrenceByTime = new Map(occurrences.map((occurrence) => [shanghaiTime(occurrence.scheduled_at), occurrence]))
+      const nowTime = shanghaiTime(new Date().toISOString())
+      const times = [...new Set(schedules.flatMap((schedule) => schedule.times))].sort()
+      const items = times.map((scheduledTime) => {
+        const occurrence = occurrenceByTime.get(scheduledTime)
+        const cycle = occurrence ? cycleByOccurrence.get(occurrence.occurrence_id) : undefined
+        if (cycle) {
+          const durationSeconds = cycle.started_at && cycle.finalized_at
+            ? Math.max(0, Math.round((new Date(cycle.finalized_at).getTime() - new Date(cycle.started_at).getTime()) / 1000))
+            : null
+          return { scheduledTime, status: cycleStatus(cycle.status), expectedCount: cycle.expected_count, fetchedCount: cycle.valid_count, failedCount: cycle.failed_count, startedAt: cycle.started_at, completedAt: cycle.finalized_at, durationSeconds }
+        }
+        const failed = occurrence && ["MISSED", "FAILED"].includes(occurrence.status)
+        const running = occurrence && ["CLAIMED", "DISPATCHED"].includes(occurrence.status)
+        return { scheduledTime, status: failed ? "FAILED" as const : running ? "RUNNING" as const : scheduledTime > nowTime ? "PENDING" as const : "NOT_EXECUTED" as const, expectedCount: 0, fetchedCount: 0, failedCount: 0, startedAt: null, completedAt: null, durationSeconds: null }
+      })
+      const hasAttention = items.some((item) => ["NOT_EXECUTED", "PARTIAL", "FAILED"].includes(item.status))
+      const hasRunning = items.some((item) => item.status === "RUNNING")
+      const hasSuccess = items.some((item) => item.status === "SUCCEEDED")
+      return {
+        overallStatus: times.length === 0 ? "NOT_CONFIGURED" : hasAttention ? "ATTENTION" : hasRunning ? "RUNNING" : hasSuccess ? "NORMAL" : "PENDING",
+        plannedCount: items.length,
+        executedCount: items.filter((item) => ["SUCCEEDED", "PARTIAL", "FAILED"].includes(item.status)).length,
+        fetchedCount: items.reduce((total, item) => total + item.fetchedCount, 0),
+        items,
+      } satisfies MonitoringExecutionOverview
+    },
     async loadSchedules() {
       const schedules = parse(
         scheduleListSchema,

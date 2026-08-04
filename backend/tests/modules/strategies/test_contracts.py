@@ -41,8 +41,6 @@ def _screening_period(
         sequence_no=sequence_no,
         training_start_date=training_start,
         training_end_date=training_end,
-        test_start_date=test_start,
-        test_end_date=test_end,
     )
 
 
@@ -132,13 +130,13 @@ def test_screening_plan_accepts_overlapping_periods_that_move_forward() -> None:
     assert plan.parameter_snapshot["window"] == 120
 
 
-def test_screening_period_rejects_training_and_test_overlap() -> None:
-    with pytest.raises(ValidationError, match="dates are out of order"):
+def test_screening_period_rejects_reversed_training_range() -> None:
+    with pytest.raises(ValidationError, match="training dates are out of order"):
         _screening_period(
             1,
+            date(2021, 1, 1),
             date(2020, 1, 1),
-            date(2021, 1, 1),
-            date(2021, 1, 1),
+            date(2021, 1, 2),
             date(2022, 1, 1),
         )
 

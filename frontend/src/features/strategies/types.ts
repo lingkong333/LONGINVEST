@@ -133,8 +133,12 @@ export interface ScreeningPeriodDto {
   sequenceNo: number
   trainingStartDate: string
   trainingEndDate: string
-  testStartDate: string
-  testEndDate: string
+}
+
+export interface CandidateBacktestPeriodDto {
+  sequenceNo: number
+  backtestStartDate: string
+  backtestEndDate: string
 }
 
 export interface ScreeningBatchDto {
@@ -451,7 +455,7 @@ export interface StrategyApi {
   listScreeningResults(batchId: string, page: number, status?: string): Promise<ScreeningResultPageDto>
   createScreening(input: { strategyVersionId: string; periods: ScreeningPeriodDto[]; concurrency: number }): Promise<ScreeningBatchDto>
   controlScreening(batchId: string, action: string): Promise<ScreeningBatchDto>
-  createCandidateBacktest(screeningBatchId: string, initialCapital: string, concurrency: number): Promise<string>
+  createCandidateBacktest(screeningBatchId: string, periods: CandidateBacktestPeriodDto[], initialCapital: string, concurrency: number): Promise<string>
   listCandidateBacktests(page?: number): Promise<BacktestTaskPageDto>
   listCandidateItems(taskId: string, page: number, filters?: { status?: string; search?: string; periodSequence?: number }): Promise<CandidateBacktestItemPageDto>
   getCandidateItem(taskId: string, itemId: string): Promise<HoldoutBacktestResult>

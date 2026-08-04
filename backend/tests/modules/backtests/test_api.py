@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -18,6 +19,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestItemStatus,
     BacktestResultView,
     BacktestTaskStatus,
+    CandidateBacktestPeriod,
 )
 
 
@@ -70,6 +72,11 @@ def test_create_api_uses_stable_task_id_and_command_context() -> None:
         )
         body = CreateBacktestBody(
             screening_batch_id=uuid4(),
+            periods=(CandidateBacktestPeriod(
+                sequence_no=1,
+                backtest_start_date=date(2021, 1, 1),
+                backtest_end_date=date(2022, 12, 31),
+            ),),
             initial_capital=Decimal("100000"),
             confirm=True,
             reason="验证样本外效果",

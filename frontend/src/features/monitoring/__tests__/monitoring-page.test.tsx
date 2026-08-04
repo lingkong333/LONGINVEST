@@ -102,6 +102,31 @@ function createGateway(
   return {
     loadOverview: vi.fn().mockResolvedValue(overview()),
     loadSchedules: vi.fn().mockResolvedValue([]),
+    loadTodaySnapshotStatus: vi.fn().mockResolvedValue({
+      overallStatus: "NORMAL",
+      plannedCount: 2,
+      executedCount: 1,
+      fetchedCount: 2,
+      items: [{
+        scheduledTime: "09:45",
+        status: "SUCCEEDED",
+        expectedCount: 2,
+        fetchedCount: 2,
+        failedCount: 0,
+        startedAt: "2026-07-23T01:45:00Z",
+        completedAt: "2026-07-23T01:45:03Z",
+        durationSeconds: 3,
+      }, {
+        scheduledTime: "10:30",
+        status: "PENDING",
+        expectedCount: 0,
+        fetchedCount: 0,
+        failedCount: 0,
+        startedAt: null,
+        completedAt: null,
+        durationSeconds: null,
+      }],
+    }),
     saveSchedule: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue(undefined),
     ...overrides,
@@ -109,6 +134,15 @@ function createGateway(
 }
 
 describe("监控列表页面", () => {
+  it("在顶部展示当天每个监控时间的执行状态", async () => {
+    renderPage(createGateway())
+
+    expect(await screen.findByText("今日监控执行状态")).toBeInTheDocument()
+    expect(screen.getByText("09:45")).toBeInTheDocument()
+    expect(screen.getByText("2 / 2")).toBeInTheDocument()
+    expect(screen.getByText("3 秒")).toBeInTheDocument()
+  })
+
   it("展示中文监控信息，并支持持仓筛选和搜索", async () => {
     renderPage(createGateway({
       loadOverview: vi.fn().mockResolvedValue(overview()),

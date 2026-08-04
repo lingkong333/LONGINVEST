@@ -250,8 +250,6 @@ function screeningPeriod(value: unknown): ScreeningPeriodDto {
     sequenceNo: integer(source.sequence_no),
     trainingStartDate: text(source.training_start_date),
     trainingEndDate: text(source.training_end_date),
-    testStartDate: text(source.test_start_date),
-    testEndDate: text(source.test_end_date),
   }
 }
 
@@ -657,8 +655,6 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
             sequence_no: period.sequenceNo,
             training_start_date: period.trainingStartDate,
             training_end_date: period.trainingEndDate,
-            test_start_date: period.testStartDate,
-            test_end_date: period.testEndDate,
           })),
           concurrency: input.concurrency,
           confirm: true,
@@ -677,11 +673,16 @@ export function createStrategyApi(api = createApiClient<paths>()): StrategyApi {
       }))
       return screeningBatch(value)
     },
-    async createCandidateBacktest(screeningBatchId, initialCapital, concurrency) {
+    async createCandidateBacktest(screeningBatchId, periods, initialCapital, concurrency) {
       const source = record(await api.request(api.client.POST("/api/v1/backtests", {
         params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
         body: {
           screening_batch_id: screeningBatchId,
+          periods: periods.map((period) => ({
+            sequence_no: period.sequenceNo,
+            backtest_start_date: period.backtestStartDate,
+            backtest_end_date: period.backtestEndDate,
+          })),
           initial_capital: initialCapital,
           concurrency,
           confirm: true,

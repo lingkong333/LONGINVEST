@@ -333,10 +333,8 @@ class StrategyScreeningPeriod(Base):
         ),
         CheckConstraint("sequence_no > 0", name="sequence_positive"),
         CheckConstraint(
-            "training_start_date <= training_end_date "
-            "AND training_end_date < test_start_date "
-            "AND test_start_date <= test_end_date",
-            name="date_range_valid",
+            "training_start_date <= training_end_date",
+            name="training_range_valid",
         ),
     )
 
@@ -351,8 +349,8 @@ class StrategyScreeningPeriod(Base):
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
     training_start_date: Mapped[date] = mapped_column(Date, nullable=False)
     training_end_date: Mapped[date] = mapped_column(Date, nullable=False)
-    test_start_date: Mapped[date] = mapped_column(Date, nullable=False)
-    test_end_date: Mapped[date] = mapped_column(Date, nullable=False)
+    test_start_date: Mapped[date | None] = mapped_column(Date)
+    test_end_date: Mapped[date | None] = mapped_column(Date)
 
 
 class StrategyScreeningScopeItem(Base):

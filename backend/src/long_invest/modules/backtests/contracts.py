@@ -237,11 +237,38 @@ class BacktestCreateRequest(StrictContract):
         return self
 
 
+class CandidateBacktestPeriod(StrictContract):
+    sequence_no: int = Field(ge=1)
+    backtest_start_date: date
+    backtest_end_date: date
+
+    @model_validator(mode="after")
+    def validate_date_range(self) -> CandidateBacktestPeriod:
+        if self.backtest_start_date > self.backtest_end_date:
+            raise ValueError("backtest period dates are out of order")
+        return self
+
+
 class CandidateBacktestCreateRequest(StrictContract):
     screening_batch_id: UUID
+    periods: tuple[CandidateBacktestPeriod, ...] = Field(min_length=1)
     initial_capital: Decimal = Field(gt=0)
     concurrency: int = Field(default=4, ge=1, le=64)
     idempotency_key: str = Field(min_length=1, max_length=160)
+
+    @model_validator(mode="after")
+    def validate_period_order(self) -> CandidateBacktestCreateRequest:
+        if tuple(period.sequence_no for period in self.periods) != tuple(
+            range(1, len(self.periods) + 1)
+        ):
+            raise ValueError("backtest period sequence must be contiguous")
+        for previous, current in zip(self.periods, self.periods[1:], strict=False):
+            if (
+                current.backtest_start_date < previous.backtest_start_date
+                or current.backtest_end_date < previous.backtest_end_date
+            ):
+                raise ValueError("backtest period boundaries must not move backward")
+        return self
 
 
 class BacktestCreationSnapshotPort(Protocol):

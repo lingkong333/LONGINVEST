@@ -329,8 +329,6 @@ class StrategyScreeningApplication:
                         sequence_no=period.sequence_no,
                         training_start_date=period.training_start_date,
                         training_end_date=period.training_end_date,
-                        test_start_date=period.test_start_date,
-                        test_end_date=period.test_end_date,
                     )
                     for period in request.periods
                 ]
@@ -500,8 +498,6 @@ class StrategyScreeningApplication:
                         name=scope.name,
                         training_start_date=period.training_start_date,
                         training_end_date=period.training_end_date,
-                        test_start_date=period.test_start_date,
-                        test_end_date=period.test_end_date,
                         qfq_dataset_id=scope.qfq_dataset_id,
                         qfq_data_version=scope.qfq_data_version,
                         qfq_data_hash=scope.qfq_data_hash,
@@ -988,8 +984,6 @@ async def _batch_view(
                 sequence_no=period.sequence_no,
                 training_start_date=period.training_start_date,
                 training_end_date=period.training_end_date,
-                test_start_date=period.test_start_date,
-                test_end_date=period.test_end_date,
             )
             for period in periods
         ),

@@ -28,9 +28,54 @@ from long_invest.modules.backtests.contracts import (
     BacktestTestDataSnapshotView,
     BacktestTradeView,
     BacktestUniverseEntry,
+    CandidateBacktestCreateRequest,
+    CandidateBacktestPeriod,
 )
 from long_invest.modules.signals.contracts import SignalZone
 from long_invest.modules.targets.contracts import TargetValues
+
+
+def test_candidate_backtest_periods_are_owned_by_backtest_request() -> None:
+    request = CandidateBacktestCreateRequest(
+        screening_batch_id=uuid4(),
+        periods=(
+            CandidateBacktestPeriod(
+                sequence_no=1,
+                backtest_start_date=date(2021, 1, 1),
+                backtest_end_date=date(2022, 12, 31),
+            ),
+            CandidateBacktestPeriod(
+                sequence_no=2,
+                backtest_start_date=date(2022, 1, 1),
+                backtest_end_date=date(2023, 12, 31),
+            ),
+        ),
+        initial_capital=Decimal("100000"),
+        idempotency_key="candidate-periods-1",
+    )
+
+    assert request.periods[0].backtest_start_date == date(2021, 1, 1)
+
+
+def test_candidate_backtest_periods_reject_backward_boundaries() -> None:
+    with pytest.raises(ValidationError, match="must not move backward"):
+        CandidateBacktestCreateRequest(
+            screening_batch_id=uuid4(),
+            periods=(
+                CandidateBacktestPeriod(
+                    sequence_no=1,
+                    backtest_start_date=date(2022, 1, 1),
+                    backtest_end_date=date(2023, 12, 31),
+                ),
+                CandidateBacktestPeriod(
+                    sequence_no=2,
+                    backtest_start_date=date(2021, 1, 1),
+                    backtest_end_date=date(2024, 12, 31),
+                ),
+            ),
+            initial_capital=Decimal("100000"),
+            idempotency_key="candidate-periods-2",
+        )
 
 
 def test_backtest_date_range_requires_non_overlapping_training_and_test_dates() -> None:

@@ -182,18 +182,11 @@ class StrategyScreeningPeriod(StrictContract):
     sequence_no: int = Field(ge=1)
     training_start_date: date
     training_end_date: date
-    test_start_date: date
-    test_end_date: date
 
     @model_validator(mode="after")
     def validate_date_range(self) -> StrategyScreeningPeriod:
-        if not (
-            self.training_start_date
-            <= self.training_end_date
-            < self.test_start_date
-            <= self.test_end_date
-        ):
-            raise ValueError("screening period dates are out of order")
+        if self.training_start_date > self.training_end_date:
+            raise ValueError("screening training dates are out of order")
         return self
 
 
@@ -215,14 +208,10 @@ class StrategyScreeningPlan(FrozenMappingContract):
             previous_dates = (
                 previous.training_start_date,
                 previous.training_end_date,
-                previous.test_start_date,
-                previous.test_end_date,
             )
             current_dates = (
                 current.training_start_date,
                 current.training_end_date,
-                current.test_start_date,
-                current.test_end_date,
             )
             if any(
                 current_date < previous_date
@@ -334,8 +323,6 @@ class StrategyCandidateItem(StrictContract):
     name: str = Field(min_length=1, max_length=100)
     training_start_date: date
     training_end_date: date
-    test_start_date: date
-    test_end_date: date
     qfq_dataset_id: UUID
     qfq_data_version: int = Field(ge=1)
     qfq_data_hash: Sha256Hex

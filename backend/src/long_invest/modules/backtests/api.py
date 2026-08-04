@@ -28,6 +28,7 @@ from long_invest.modules.backtests.contracts import (
     BacktestTaskListItemView,
     BacktestTaskStatus,
     CandidateBacktestCreateRequest,
+    CandidateBacktestPeriod,
 )
 from long_invest.modules.backtests.service import BacktestCommandContext
 from long_invest.modules.targets.contracts import TargetValues
@@ -87,6 +88,7 @@ WriteIdentity = Annotated[
 
 class CreateBacktestBody(BaseModel):
     screening_batch_id: UUID
+    periods: tuple[CandidateBacktestPeriod, ...] = Field(min_length=1)
     initial_capital: Decimal = Field(gt=0)
     concurrency: int = Field(default=4, ge=1, le=64)
     confirm: StrictBool
@@ -187,6 +189,7 @@ async def create_backtest(
     task_id = await application.create(
         CandidateBacktestCreateRequest(
             screening_batch_id=body.screening_batch_id,
+            periods=body.periods,
             initial_capital=body.initial_capital,
             concurrency=body.concurrency,
             idempotency_key=key,

@@ -25,7 +25,7 @@ from long_invest.platform.database.base import Base
 from long_invest.platform.database.engine import Database
 
 BACKEND = Path(__file__).parents[2]
-HEAD_REVISION = "20260804_0042"
+HEAD_REVISION = "20260804_0043"
 PREVIOUS_REVISION = "20260803_0040"
 TABLES = {
     "strategy_screening_batch",
@@ -41,7 +41,7 @@ def test_strategy_screening_migration_is_the_single_head() -> None:
     scripts = ScriptDirectory.from_config(config)
 
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260804_0041"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260804_0042"
 
 
 def test_strategy_screening_models_are_registered() -> None:

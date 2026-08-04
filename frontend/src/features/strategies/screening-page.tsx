@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { DataTable } from "@/shared/ui/table"
 
 import { createStrategyApi } from "./gateway"
-import type { ScreeningBatchDto, ScreeningPeriodDto, StrategyApi } from "./types"
+import type { CandidateBacktestPeriodDto, ScreeningBatchDto, ScreeningPeriodDto, StrategyApi } from "./types"
 
 const statusText: Record<string, string> = {
   PENDING: "等待中", RUNNING: "运行中", PAUSING: "暂停中", PAUSED: "已暂停",
@@ -25,19 +25,38 @@ const statusText: Record<string, string> = {
 }
 
 function emptyPeriod(sequenceNo: number): ScreeningPeriodDto {
-  return { sequenceNo, trainingStartDate: "", trainingEndDate: "", testStartDate: "", testEndDate: "" }
+  return { sequenceNo, trainingStartDate: "", trainingEndDate: "" }
 }
 
 function validPeriods(periods: ScreeningPeriodDto[]) {
   return periods.every((period, index) => {
-    if (!period.trainingStartDate || !period.trainingEndDate || !period.testStartDate || !period.testEndDate) return false
-    if (!(period.trainingStartDate <= period.trainingEndDate && period.trainingEndDate < period.testStartDate && period.testStartDate <= period.testEndDate)) return false
+    if (!period.trainingStartDate || !period.trainingEndDate) return false
+    if (period.trainingStartDate > period.trainingEndDate) return false
     if (index === 0) return true
     const previous = periods[index - 1]
     return period.trainingStartDate >= previous.trainingStartDate
       && period.trainingEndDate >= previous.trainingEndDate
-      && period.testStartDate >= previous.testStartDate
-      && period.testEndDate >= previous.testEndDate
+  })
+}
+
+function emptyBacktestPeriods(batch: ScreeningBatchDto | null): CandidateBacktestPeriodDto[] {
+  return batch?.periods.map((period) => ({
+    sequenceNo: period.sequenceNo,
+    backtestStartDate: "",
+    backtestEndDate: "",
+  })) ?? []
+}
+
+function validBacktestPeriods(batch: ScreeningBatchDto | null, periods: CandidateBacktestPeriodDto[]) {
+  if (!batch || periods.length !== batch.periods.length) return false
+  return periods.every((period, index) => {
+    const training = batch.periods[index]
+    if (!period.backtestStartDate || !period.backtestEndDate) return false
+    if (!(training.trainingEndDate < period.backtestStartDate && period.backtestStartDate <= period.backtestEndDate)) return false
+    if (index === 0) return true
+    const previous = periods[index - 1]
+    return period.backtestStartDate >= previous.backtestStartDate
+      && period.backtestEndDate >= previous.backtestEndDate
   })
 }
 
@@ -54,6 +73,10 @@ export function StrategyScreeningPage({ api = createStrategyApi() }: { api?: Str
   const [versionId, setVersionId] = useState("")
   const [concurrency, setConcurrency] = useState("4")
   const [periods, setPeriods] = useState<ScreeningPeriodDto[]>([emptyPeriod(1)])
+  const [backtestOpen, setBacktestOpen] = useState(false)
+  const [backtestPeriods, setBacktestPeriods] = useState<CandidateBacktestPeriodDto[]>([])
+  const [initialCapital, setInitialCapital] = useState("100000")
+  const [backtestConcurrency, setBacktestConcurrency] = useState("4")
   const [resultPage, setResultPage] = useState(1)
   const [resultStatus, setResultStatus] = useState("ALL")
 
@@ -91,8 +114,8 @@ export function StrategyScreeningPage({ api = createStrategyApi() }: { api?: Str
     onSuccess: async () => { toast.success("操作已受理"); await refresh() },
   })
   const backtest = useMutation({
-    mutationFn: () => api.createCandidateBacktest(selected?.id ?? "", "100000", 4),
-    onSuccess: (taskId) => { toast.success("回测任务已创建"); navigate(`/backtests/${taskId}`) },
+    mutationFn: () => api.createCandidateBacktest(selected?.id ?? "", backtestPeriods, initialCapital, Number(backtestConcurrency)),
+    onSuccess: (taskId) => { setBacktestOpen(false); toast.success("回测任务已创建"); navigate(`/backtests/${taskId}`) },
   })
   const versionOptions = useMemo(() => versions.data ?? [], [versions.data])
 
@@ -114,7 +137,7 @@ export function StrategyScreeningPage({ api = createStrategyApi() }: { api?: Str
           {selected.allowedActions.includes("RESUME") ? <Button variant="outline" size="sm" onClick={() => control.mutate("RESUME")}><Play data-icon="inline-start" />继续</Button> : null}
           {selected.allowedActions.includes("CANCEL") ? <Button variant="destructive" size="sm" onClick={() => control.mutate("CANCEL")}><Square data-icon="inline-start" />停止</Button> : null}
           {selected.allowedActions.includes("RETRY_FAILED") ? <Button variant="outline" size="sm" onClick={() => control.mutate("RETRY_FAILED")}><RotateCcw data-icon="inline-start" />重试失败项</Button> : null}
-          {selected.status === "SUCCEEDED" && selected.matchedItems > 0 ? <Button size="sm" disabled={backtest.isPending} onClick={() => backtest.mutate()}><Play data-icon="inline-start" />回测候选股票</Button> : null}
+          {selected.status === "SUCCEEDED" && selected.matchedItems > 0 ? <Button size="sm" onClick={() => { setBacktestPeriods(emptyBacktestPeriods(selected)); setBacktestOpen(true) }}><Play data-icon="inline-start" />回测候选股票</Button> : null}
         </div></CardContent></Card>
         <Card><CardHeader><div className="flex flex-wrap items-center justify-between gap-3"><div><CardTitle>筛选结果</CardTitle><CardDescription>按股票代码和时段稳定排序。</CardDescription></div><Select value={resultStatus} onValueChange={(value) => { setResultStatus(value); setResultPage(1) }}><SelectTrigger className="w-36"><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{["ALL", "MATCHED", "NOT_MATCHED", "FAILED"].map((value) => <SelectItem key={value} value={value}>{value === "ALL" ? "全部结果" : statusText[value]}</SelectItem>)}</SelectGroup></SelectContent></Select></div></CardHeader><CardContent className="flex flex-col gap-3">
           {results.isPending ? <PageState state="loading" title="正在加载结果" description="请稍候。" /> : results.data?.items.length ? <DataTable caption="策略筛选结果" columns={[{ key: "symbol", header: "股票" }, { key: "period", header: "时段" }, { key: "status", header: "结果" }, { key: "prices", header: "四档价格" }, { key: "reason", header: "说明" }]} rows={results.data.items.map((item) => ({ id: item.id, symbol: `${item.symbol} ${item.name}`, period: `第 ${item.periodSequence} 时段`, status: statusText[item.status] ?? item.status, prices: item.values ? `${item.values.lowStrong} / ${item.values.lowWatch} / ${item.values.highWatch} / ${item.values.highStrong}` : "-", reason: item.reason ?? item.failureCode ?? "-" }))} /> : <PageState state="empty" title="暂无结果" description="任务运行后会逐步显示结果。" />}
@@ -122,10 +145,14 @@ export function StrategyScreeningPage({ api = createStrategyApi() }: { api?: Str
         </CardContent></Card>
       </div> : null}
     </div>
-    <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"><DialogTitle>新建全市场筛选</DialogTitle><DialogDescription>每个时段都先用训练期计算四档价格，再判断该股票是否进入候选。日期边界只能向后移动。</DialogDescription><FieldGroup><Field><FieldLabel>已发布策略版本</FieldLabel><Select value={versionId} onValueChange={setVersionId}><SelectTrigger><SelectValue placeholder="选择策略版本" /></SelectTrigger><SelectContent><SelectGroup>{versionOptions.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectGroup></SelectContent></Select></Field><Field><FieldLabel htmlFor="screening-concurrency">并发数</FieldLabel><Input id="screening-concurrency" type="number" min="1" max="64" value={concurrency} onChange={(event) => setConcurrency(event.target.value)} /></Field></FieldGroup>
-      <div className="flex flex-col gap-3">{periods.map((period, index) => <Card key={period.sequenceNo}><CardHeader><div className="flex items-center justify-between"><CardTitle>第 {index + 1} 时段</CardTitle>{periods.length > 1 ? <Button size="icon-sm" variant="ghost" title="删除时段" onClick={() => setPeriods((values) => values.filter((_, valueIndex) => valueIndex !== index).map((value, valueIndex) => ({ ...value, sequenceNo: valueIndex + 1 })))}><Trash2 /></Button> : null}</div></CardHeader><CardContent><FieldGroup className="grid md:grid-cols-2"><Field><FieldLabel>训练开始</FieldLabel><Input type="date" value={period.trainingStartDate} onChange={(event) => setPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, trainingStartDate: event.target.value } : value))} /></Field><Field><FieldLabel>训练结束</FieldLabel><Input type="date" value={period.trainingEndDate} onChange={(event) => setPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, trainingEndDate: event.target.value } : value))} /></Field><Field><FieldLabel>测试开始</FieldLabel><Input type="date" value={period.testStartDate} onChange={(event) => setPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, testStartDate: event.target.value } : value))} /></Field><Field><FieldLabel>测试结束</FieldLabel><Input type="date" value={period.testEndDate} onChange={(event) => setPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, testEndDate: event.target.value } : value))} /></Field></FieldGroup></CardContent></Card>)}</div>
+    <Dialog open={createOpen} onOpenChange={setCreateOpen}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"><DialogTitle>新建全市场筛选</DialogTitle><DialogDescription>策略只读取训练期日线，判断股票是否符合条件并输出四档价格。训练日期边界只能向后移动。</DialogDescription><FieldGroup><Field><FieldLabel>已发布策略版本</FieldLabel><Select value={versionId} onValueChange={setVersionId}><SelectTrigger><SelectValue placeholder="选择策略版本" /></SelectTrigger><SelectContent><SelectGroup>{versionOptions.map((item) => <SelectItem key={item.id} value={item.id}>{item.label}</SelectItem>)}</SelectGroup></SelectContent></Select></Field><Field><FieldLabel htmlFor="screening-concurrency">并发数</FieldLabel><Input id="screening-concurrency" type="number" min="1" max="64" value={concurrency} onChange={(event) => setConcurrency(event.target.value)} /></Field></FieldGroup>
+      <div className="flex flex-col gap-3">{periods.map((period, index) => <Card key={period.sequenceNo}><CardHeader><div className="flex items-center justify-between"><CardTitle>第 {index + 1} 组训练</CardTitle>{periods.length > 1 ? <Button size="icon-sm" variant="ghost" title="删除训练区间" onClick={() => setPeriods((values) => values.filter((_, valueIndex) => valueIndex !== index).map((value, valueIndex) => ({ ...value, sequenceNo: valueIndex + 1 })))}><Trash2 /></Button> : null}</div></CardHeader><CardContent><FieldGroup className="grid md:grid-cols-2"><Field><FieldLabel>训练开始</FieldLabel><Input type="date" value={period.trainingStartDate} onChange={(event) => setPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, trainingStartDate: event.target.value } : value))} /></Field><Field><FieldLabel>训练结束</FieldLabel><Input type="date" value={period.trainingEndDate} onChange={(event) => setPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, trainingEndDate: event.target.value } : value))} /></Field></FieldGroup></CardContent></Card>)}</div>
       <Button variant="outline" disabled={periods.length >= 20} onClick={() => setPeriods((values) => [...values, emptyPeriod(values.length + 1)])}><Plus data-icon="inline-start" />增加时段</Button>
       <DialogFooter><Button variant="outline" onClick={() => setCreateOpen(false)}>取消</Button><Button disabled={!versionId || !validPeriods(periods) || Number(concurrency) < 1 || Number(concurrency) > 64 || create.isPending} onClick={() => create.mutate()}>确认创建</Button></DialogFooter>
+    </DialogContent></Dialog>
+    <Dialog open={backtestOpen} onOpenChange={setBacktestOpen}><DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl"><DialogTitle>创建候选股票回测</DialogTitle><DialogDescription>四档价格直接使用筛选结果。这里只设置回测时间，不会重新训练策略。</DialogDescription><FieldGroup className="grid md:grid-cols-2"><Field><FieldLabel>每只股票初始资金</FieldLabel><Input type="number" min="0.01" step="0.01" value={initialCapital} onChange={(event) => setInitialCapital(event.target.value)} /></Field><Field><FieldLabel>并发数</FieldLabel><Input type="number" min="1" max="64" value={backtestConcurrency} onChange={(event) => setBacktestConcurrency(event.target.value)} /></Field></FieldGroup>
+      <div className="flex flex-col gap-3">{backtestPeriods.map((period, index) => <Card key={period.sequenceNo}><CardHeader><CardTitle>第 {index + 1} 组回测</CardTitle><CardDescription>对应训练结束日：{selected?.periods[index]?.trainingEndDate}</CardDescription></CardHeader><CardContent><FieldGroup className="grid md:grid-cols-2"><Field><FieldLabel>回测开始</FieldLabel><Input type="date" value={period.backtestStartDate} onChange={(event) => setBacktestPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, backtestStartDate: event.target.value } : value))} /></Field><Field><FieldLabel>回测结束</FieldLabel><Input type="date" value={period.backtestEndDate} onChange={(event) => setBacktestPeriods((values) => values.map((value, valueIndex) => valueIndex === index ? { ...value, backtestEndDate: event.target.value } : value))} /></Field></FieldGroup></CardContent></Card>)}</div>
+      <DialogFooter><Button variant="outline" onClick={() => setBacktestOpen(false)}>取消</Button><Button disabled={!validBacktestPeriods(selected, backtestPeriods) || Number(initialCapital) <= 0 || Number(backtestConcurrency) < 1 || Number(backtestConcurrency) > 64 || backtest.isPending} onClick={() => backtest.mutate()}>开始回测</Button></DialogFooter>
     </DialogContent></Dialog>
   </main>
 }

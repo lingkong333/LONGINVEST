@@ -4505,6 +4505,21 @@ export interface components {
          * @enum {string}
          */
         CalendarDayStatus: "CONFIRMED" | "PROVISIONAL" | "OVERRIDDEN" | "MISSING";
+        /** CandidateBacktestPeriod */
+        CandidateBacktestPeriod: {
+            /** Sequence No */
+            sequence_no: number;
+            /**
+             * Backtest Start Date
+             * Format: date
+             */
+            backtest_start_date: string;
+            /**
+             * Backtest End Date
+             * Format: date
+             */
+            backtest_end_date: string;
+        };
         /** CapabilityResponse */
         CapabilityResponse: {
             /**
@@ -4849,6 +4864,8 @@ export interface components {
              * Format: uuid
              */
             screening_batch_id: string;
+            /** Periods */
+            periods: components["schemas"]["CandidateBacktestPeriod"][];
             /** Initial Capital */
             initial_capital: number | string;
             /**
@@ -8135,16 +8152,6 @@ export interface components {
              * Format: date
              */
             training_end_date: string;
-            /**
-             * Test Start Date
-             * Format: date
-             */
-            test_start_date: string;
-            /**
-             * Test End Date
-             * Format: date
-             */
-            test_end_date: string;
         };
         /**
          * StrategyScreeningResultStatus

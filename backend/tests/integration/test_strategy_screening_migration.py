@@ -41,7 +41,7 @@ def test_strategy_screening_migration_is_the_single_head() -> None:
     scripts = ScriptDirectory.from_config(config)
 
     assert scripts.get_heads() == [HEAD_REVISION]
-    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260804_0042"
+    assert scripts.get_revision(HEAD_REVISION).down_revision == "20260804_0044"
 
 
 def test_strategy_screening_models_are_registered() -> None:

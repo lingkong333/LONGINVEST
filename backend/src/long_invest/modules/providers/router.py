@@ -9,6 +9,7 @@ from long_invest.modules.providers.contracts import (
     CorporateActionRequest,
     DailyBar,
     DailyBarRequest,
+    DailyCollectionMode,
     DailyCollectionPlan,
     MarketDailyGroupRequest,
     MarketDataProvider,
@@ -171,23 +172,47 @@ class ProviderRouter:
         deadline: datetime,
     ) -> ProviderBatchResult[DailyBar]:
         route_plan = await self._route_plan(ProviderCapability.DAILY_BAR_UNADJUSTED)
-        setting = next(
-            (
-                item
-                for item in route_plan.routes
-                if item.provider is plan.provider and item.enabled
-            ),
-            None,
+        routes = tuple(
+            sorted(
+                route_plan.routes,
+                key=lambda item: item.provider is not plan.provider,
+            )
         )
-        provider = self._providers.get(plan.provider)
-        if setting is None or provider is None:
-            raise ProviderRoutingError("PROVIDER_UNAVAILABLE")
-        result = await self._pipeline.call(
-            setting,
-            lambda: provider.market_daily_bars(request, deadline),
-            deadline=deadline,
-        )
-        return self._enrich_result(result, provider, setting)
+        last_error: Exception | None = None
+        for setting in routes:
+            provider = self._providers.get(setting.provider)
+            if not setting.enabled or provider is None:
+                continue
+            candidate = provider.daily_collection_plan(plan.total_symbols)
+            if (
+                candidate.mode is DailyCollectionMode.SINGLE_SYMBOL
+                and len(request.symbols) != 1
+            ):
+                continue
+            try:
+                result = await self._pipeline.call(
+                    setting,
+                    lambda p=provider: p.market_daily_bars(request, deadline),
+                    deadline=deadline,
+                    switched=setting.provider is not plan.provider,
+                )
+            except Exception as error:
+                last_error = error
+                if not setting.auto_switch or route_plan.fixed_provider is not None:
+                    break
+                continue
+            enriched = self._enrich_result(result, provider, setting)
+            if (
+                enriched.items
+                or not enriched.batch_error_code
+                or not setting.auto_switch
+                or route_plan.fixed_provider is not None
+            ):
+                return enriched
+            last_error = ProviderRoutingError(enriched.batch_error_code)
+        if last_error is not None:
+            raise last_error
+        raise ProviderRoutingError("PROVIDER_UNAVAILABLE")
 
     async def corporate_actions(
         self, request: CorporateActionRequest, deadline: datetime

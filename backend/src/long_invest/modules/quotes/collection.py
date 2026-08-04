@@ -27,6 +27,8 @@ from long_invest.modules.quotes.service import fallback_symbols
 
 logger = structlog.get_logger(__name__)
 DEFAULT_CLEANUP_TIMEOUT_SECONDS = 5.0
+REALTIME_GROUP_SIZE = 100
+REALTIME_GROUP_CONCURRENCY = 4
 TERMINAL_CYCLE_STATUSES = frozenset(
     {
         QuoteCycleStatus.READY,
@@ -73,10 +75,31 @@ class InMemoryQuoteCollector:
 
         started_at = self._now()
         deadline = started_at + timedelta(seconds=timeout_seconds)
+        groups = tuple(
+            symbols[index : index + REALTIME_GROUP_SIZE]
+            for index in range(0, len(symbols), REALTIME_GROUP_SIZE)
+        )
+        semaphore = asyncio.Semaphore(REALTIME_GROUP_CONCURRENCY)
+
+        async def fetch_group(group: tuple[str, ...]):
+            async with semaphore:
+                try:
+                    result = await self._provider.realtime_quotes(group, deadline)
+                except Exception as exc:
+                    return (), {
+                        symbol: str(getattr(exc, "code", "QUOTE_ALL_PROVIDERS_FAILED"))
+                        for symbol in group
+                    }, None
+                return (
+                    result.items,
+                    {item.symbol: item.code for item in result.failures},
+                    result.batch_error_code,
+                )
+
         try:
             remaining = max(0.001, (deadline - self._now()).total_seconds())
-            batch = await asyncio.wait_for(
-                self._provider.realtime_quotes(symbols, deadline),
+            group_results = await asyncio.wait_for(
+                asyncio.gather(*(fetch_group(group) for group in groups)),
                 timeout=remaining,
             )
         except TimeoutError:
@@ -91,24 +114,21 @@ class InMemoryQuoteCollector:
                     for symbol in symbols
                 ),
             )
-        except Exception as exc:
-            code = str(getattr(exc, "code", "QUOTE_ALL_PROVIDERS_FAILED"))
-            return self._result(
-                symbols=symbols,
-                scheduled_at=scheduled_at,
-                started_at=started_at,
-                mode=mode,
-                quotes=(),
-                failures=tuple(
-                    RealtimeQuoteFailure(symbol, code) for symbol in symbols
-                ),
-            )
 
         grouped: dict[str, list[RealtimeQuote]] = defaultdict(list)
-        for quote in batch.items:
+        for quote in (
+            quote for items, _, _ in group_results for quote in items
+        ):
             if quote.symbol in symbols:
                 grouped[quote.symbol].append(quote)
-        provider_failures = {item.symbol: item.code for item in batch.failures}
+        provider_failures = {
+            symbol: code
+            for _, failures, _ in group_results
+            for symbol, code in failures.items()
+        }
+        batch_error_codes = tuple(
+            code for _, _, code in group_results if code is not None
+        )
         valid_quotes: list[RealtimeQuote] = []
         failures: list[RealtimeQuoteFailure] = []
         checked_at = self._now()
@@ -142,7 +162,7 @@ class InMemoryQuoteCollector:
                     symbol,
                     invalid_code
                     or provider_failures.get(symbol)
-                    or batch.batch_error_code
+                    or (batch_error_codes[0] if batch_error_codes else None)
                     or "PROVIDER_ITEM_MISSING",
                 )
             )

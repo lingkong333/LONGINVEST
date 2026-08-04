@@ -69,6 +69,16 @@ class OccurrenceStore:
         self.session.add_all(occurrences)
         await self.session.flush()
 
+    async def get_by_definition_key(self, definition_key: str):
+        return await self.session.scalar(
+            select(ScheduleOccurrence)
+            .where(ScheduleOccurrence.definition_key == definition_key)
+            .limit(1)
+        )
+
+    async def get(self, occurrence_id: UUID):
+        return await self.session.get(ScheduleOccurrence, occurrence_id)
+
     async def system_occurrence_exists(
         self,
         *,
@@ -209,6 +219,83 @@ class MonitorOccurrenceApplication:
                 await events.append(occurrence, "missed")
             return len(occurrences)
 
+    async def start_snapshot(
+        self,
+        *,
+        definition_key: str,
+        scheduled_at: datetime,
+        started_at: datetime,
+        trigger_type: str,
+        expected_count: int,
+    ) -> ScheduleOccurrenceView:
+        if trigger_type not in {"AUTOMATIC", "MANUAL"}:
+            raise ValueError("invalid snapshot trigger type")
+        if expected_count < 1:
+            raise ValueError("snapshot scope cannot be empty")
+        async with self.database.transaction() as session:
+            store = self.store_factory(session)
+            existing = await store.get_by_definition_key(definition_key)
+            if existing is not None:
+                return _occurrence_view(existing)
+            occurrence = ScheduleOccurrence(
+                id=uuid4(),
+                occurrence_type="REALTIME_QUOTE",
+                definition_key=definition_key,
+                scheduled_at=scheduled_at,
+                scheduled_trade_date=(scheduled_at + timedelta(hours=8)).date(),
+                subscription_snapshot=[],
+                status=OccurrenceStatus.RUNNING,
+                trigger_type=trigger_type,
+                expected_count=expected_count,
+                fetched_count=0,
+                failed_count=0,
+                claimed_at=started_at,
+                started_at=started_at,
+            )
+            try:
+                async with session.begin_nested():
+                    await store.add_many((occurrence,))
+            except IntegrityError:
+                existing = await store.get_by_definition_key(definition_key)
+                if existing is None:
+                    raise
+                return _occurrence_view(existing)
+            await self.event_factory(session).append(occurrence, "started")
+            return _occurrence_view(occurrence)
+
+    async def finish_snapshot(
+        self,
+        occurrence_id: UUID,
+        *,
+        status: OccurrenceStatus,
+        fetched_count: int,
+        failed_count: int,
+        completed_at: datetime,
+        error_code: str | None = None,
+    ) -> ScheduleOccurrenceView:
+        if status not in {
+            OccurrenceStatus.SUCCEEDED,
+            OccurrenceStatus.PARTIAL,
+            OccurrenceStatus.FAILED,
+        }:
+            raise ValueError("invalid terminal snapshot status")
+        async with self.database.transaction() as session:
+            occurrence = await self.store_factory(session).get(occurrence_id)
+            if occurrence is None:
+                raise LookupError("snapshot occurrence not found")
+            if fetched_count < 0 or failed_count < 0:
+                raise ValueError("snapshot counts cannot be negative")
+            if fetched_count + failed_count > occurrence.expected_count:
+                raise ValueError("snapshot result exceeds expected scope")
+            occurrence.status = status
+            occurrence.fetched_count = fetched_count
+            occurrence.failed_count = failed_count
+            occurrence.completed_at = completed_at
+            occurrence.error_code = error_code
+            await self.event_factory(session).append(occurrence, "completed")
+            await session.flush()
+            return _occurrence_view(occurrence)
+
     async def list(
         self,
         *,
@@ -269,6 +356,12 @@ def _occurrence_view(row) -> ScheduleOccurrenceView:
         calendar_version_id=row.calendar_version_id,
         scheduled_at=row.scheduled_at,
         status=OccurrenceStatus(row.status),
+        trigger_type=row.trigger_type,
+        expected_count=row.expected_count,
+        fetched_count=row.fetched_count,
+        failed_count=row.failed_count,
+        started_at=row.started_at,
+        completed_at=row.completed_at,
         subscriptions=(),
         job_id=row.job_id,
         error_code=row.error_code,

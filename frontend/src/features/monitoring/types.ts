@@ -47,7 +47,9 @@ export interface MonitorScheduleInput {
 }
 
 export interface SnapshotExecutionItem {
+  executionId: string
   scheduledTime: string
+  triggerType: "AUTOMATIC" | "MANUAL"
   status: "PENDING" | "NOT_EXECUTED" | "RUNNING" | "SUCCEEDED" | "PARTIAL" | "FAILED"
   expectedCount: number
   fetchedCount: number
@@ -69,6 +71,7 @@ export interface MonitoringGateway {
   loadOverview(): Promise<MonitoringOverview>
   loadSchedules(): Promise<MonitorSchedule[]>
   loadTodaySnapshotStatus(): Promise<MonitoringExecutionOverview>
+  triggerMarketSnapshot(): Promise<void>
   saveSchedule(input: MonitorScheduleInput): Promise<void>
   runAction(
     subscriptionId: string,

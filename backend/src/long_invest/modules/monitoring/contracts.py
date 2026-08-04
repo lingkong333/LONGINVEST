@@ -45,6 +45,9 @@ class OccurrenceStatus(StrEnum):
     PENDING = "PENDING"
     CLAIMED = "CLAIMED"
     DISPATCHED = "DISPATCHED"
+    RUNNING = "RUNNING"
+    SUCCEEDED = "SUCCEEDED"
+    PARTIAL = "PARTIAL"
     MISSED = "MISSED"
     FAILED = "FAILED"
 
@@ -148,6 +151,12 @@ class ScheduleOccurrenceView(StrictContract):
     calendar_version_id: UUID | None = None
     scheduled_at: datetime
     status: OccurrenceStatus
+    trigger_type: str = "AUTOMATIC"
+    expected_count: int = Field(default=0, ge=0)
+    fetched_count: int = Field(default=0, ge=0)
+    failed_count: int = Field(default=0, ge=0)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     subscriptions: tuple[FrozenSubscription, ...]
     job_id: UUID | None = None
     error_code: str | None = None

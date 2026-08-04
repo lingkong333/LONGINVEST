@@ -88,6 +88,12 @@ class ScheduleOccurrence(StrictContract):
     scheduled_trade_date: date
     scheduled_at: datetime
     status: str = Field(min_length=1, max_length=32)
+    trigger_type: str = Field(default="AUTOMATIC", min_length=1, max_length=16)
+    expected_count: int = Field(default=0, ge=0)
+    fetched_count: int = Field(default=0, ge=0)
+    failed_count: int = Field(default=0, ge=0)
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
     job_id: UUID | None = None
     missed_reason: str | None = Field(default=None, max_length=300)
     created_at: datetime

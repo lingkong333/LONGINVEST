@@ -59,6 +59,12 @@ class DiagnoseQuoteRequest(StrictRequest):
         return _validate_symbols(value)
 
 
+class MarketSnapshotRequest(StrictRequest):
+    timeout_seconds: int = Field(default=60, ge=10, le=60)
+    confirm: bool
+    reason: str = Field(min_length=1, max_length=500)
+
+
 class QuoteCycleRecord(BaseModel):
     id: UUID
     status: QuoteCycleStatus
@@ -157,6 +163,23 @@ class RealtimeCheckResponse(SuccessEnvelope):
     data: RealtimeCheckData
 
 
+class MarketSnapshotData(BaseModel):
+    occurrence_id: UUID
+    status: str
+    trigger_type: str
+    scheduled_at: datetime
+    started_at: datetime | None
+    completed_at: datetime | None
+    expected_count: int
+    fetched_count: int
+    failed_count: int
+    error_code: str | None
+
+
+class MarketSnapshotResponse(SuccessEnvelope):
+    data: MarketSnapshotData
+
+
 @router.get(
     "/api/v1/quote-cycles",
     response_model=QuoteCyclePageResponse,
@@ -220,6 +243,43 @@ async def submit_manual_cycle(
         reason=body.reason,
     )
     return success_response(data=_realtime_data(result), code="QUOTE_CHECK_COMPLETED")
+
+
+@router.post(
+    "/api/v1/quotes/market-snapshot",
+    response_model=MarketSnapshotResponse,
+)
+async def submit_market_snapshot(
+    body: MarketSnapshotRequest,
+    application: ApplicationDependency,
+    authenticated: WriteAuth,
+    idempotency_key: IdempotencyKey,
+) -> dict:
+    _require_confirmation(body.confirm)
+    now = datetime.now().astimezone()
+    result = await application.submit_market_snapshot(
+        scheduled_at=now,
+        trigger_type="MANUAL",
+        idempotency_key=_idempotency_key(idempotency_key),
+        reason=body.reason,
+        created_by_user_id=str(authenticated.user.id),
+        timeout_seconds=body.timeout_seconds,
+    )
+    return success_response(
+        data={
+            "occurrence_id": result.id,
+            "status": result.status,
+            "trigger_type": result.trigger_type,
+            "scheduled_at": result.scheduled_at,
+            "started_at": result.started_at,
+            "completed_at": result.completed_at,
+            "expected_count": result.expected_count,
+            "fetched_count": result.fetched_count,
+            "failed_count": result.failed_count,
+            "error_code": result.error_code,
+        },
+        code="QUOTE_MARKET_SNAPSHOT_COMPLETED",
+    )
 
 
 @router.post(

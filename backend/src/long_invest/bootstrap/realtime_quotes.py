@@ -80,6 +80,7 @@ class RealtimeQuoteRuntime:
         scheduled_at: datetime,
         mode: RealtimeCheckMode,
         evaluate_signals: bool,
+        signal_symbols: tuple[str, ...] | None = None,
         expected_subscription_versions: dict[str, int] | None = None,
         timeout_seconds: int = 30,
         operation_key: str,
@@ -107,9 +108,14 @@ class RealtimeQuoteRuntime:
             )
 
         async with self._lock:
+            evaluation_symbols = (
+                tuple(dict.fromkeys(signal_symbols))
+                if signal_symbols is not None
+                else unique_symbols
+            )
             prepared = (
                 await self._signals.prepare_realtime(
-                    unique_symbols,
+                    evaluation_symbols,
                     expected_subscription_versions=expected_subscription_versions,
                 )
                 if evaluate_signals

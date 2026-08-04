@@ -1,4 +1,4 @@
-import ast
+﻿import ast
 import os
 import re
 import subprocess
@@ -27,7 +27,7 @@ BACKEND = Path(__file__).parents[2]
 MIGRATION = BACKEND / "alembic" / "versions" / "20260721_0012_strategy_backtest.py"
 ALEMBIC_ENV = BACKEND / "alembic" / "env.py"
 REVISION = "20260721_0012"
-HEAD_REVISION = "20260804_0043"
+HEAD_REVISION = "20260804_0044"
 MATCH_RESULT_PREVIOUS_REVISION = "20260731_0039"
 PREVIOUS_REVISION = "20260717_0011"
 BASE_TABLES = (
@@ -76,7 +76,7 @@ def test_strategy_backtest_migration_remains_on_the_single_main_chain() -> None:
     config.set_main_option("script_location", str(BACKEND / "alembic"))
 
     scripts = ScriptDirectory.from_config(config)
-    assert scripts.get_heads() == ["20260804_0043"]
+    assert scripts.get_heads() == ["20260804_0044"]
     assert scripts.get_revision("20260722_0013").down_revision == REVISION
 
 

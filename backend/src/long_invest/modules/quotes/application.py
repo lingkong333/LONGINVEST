@@ -1,12 +1,16 @@
 from collections.abc import Callable
 from datetime import UTC, datetime
+from hashlib import sha256
 from typing import Any
 from uuid import UUID
 
 from sqlalchemy.exc import SQLAlchemyError
 
 from long_invest.modules.calendar.application import CalendarApplication
+from long_invest.modules.monitoring.contracts import OccurrenceStatus
+from long_invest.modules.monitoring.scheduler import MonitorOccurrenceApplication
 from long_invest.modules.quotes.contracts import (
+    RealtimeBatchStatus,
     QuoteCycleStatus,
     QuoteItemStatus,
     QuoteOperationAction,
@@ -14,6 +18,7 @@ from long_invest.modules.quotes.contracts import (
     RealtimeCheckMode,
     SignalQuoteSnapshot,
 )
+from long_invest.modules.securities.application import SecurityApplication
 from long_invest.modules.quotes.repository import QuoteCycleRepository
 from long_invest.modules.quotes.service import (
     _item_view,
@@ -30,11 +35,15 @@ class QuoteApplication:
         *,
         runtime_factory: Callable[[], Any] | None = None,
         calendar: CalendarApplication | None = None,
+        securities: SecurityApplication | None = None,
+        occurrences: MonitorOccurrenceApplication | None = None,
         **_legacy_factories: Any,
     ) -> None:
         self._database = database
         self._runtime_factory = runtime_factory
         self._calendar = calendar or CalendarApplication(database)
+        self._securities = securities or SecurityApplication(database)
+        self._occurrences = occurrences or MonitorOccurrenceApplication(database)
 
     async def list_cycles(
         self,
@@ -138,6 +147,83 @@ class QuoteApplication:
             operation_key=(
                 f"diagnose:{created_by_user_id}:{session_id}:{trusted_ip}:"
                 f"{idempotency_key}:{request_id}"
+            ),
+        )
+
+    async def submit_market_snapshot(
+        self,
+        *,
+        scheduled_at: datetime,
+        trigger_type: str,
+        idempotency_key: str,
+        reason: str,
+        created_by_user_id: str | None = None,
+        signal_symbols: tuple[str, ...] = (),
+        expected_subscription_versions: dict[str, int] | None = None,
+        timeout_seconds: int = 60,
+    ):
+        _operation_reason(reason)
+        symbols = await self._securities.market_data_symbols()
+        if not symbols:
+            raise AppError(
+                code="QUOTE_MARKET_SCOPE_EMPTY",
+                message="全市场股票范围为空，无法执行快照",
+                status_code=409,
+            )
+        digest = sha256(
+            f"{created_by_user_id or 'system'}:{idempotency_key}".encode()
+        ).hexdigest()[:32]
+        definition_key = f"intraday-snapshot:{trigger_type.lower()}:{digest}"
+        started_at = datetime.now(UTC)
+        occurrence = await self._occurrences.start_snapshot(
+            definition_key=definition_key,
+            scheduled_at=scheduled_at,
+            started_at=started_at,
+            trigger_type=trigger_type,
+            expected_count=len(symbols),
+        )
+        if occurrence.status is not OccurrenceStatus.RUNNING:
+            return occurrence
+        try:
+            result = await self._runtime().run(
+                symbols=symbols,
+                scheduled_at=scheduled_at,
+                mode=(
+                    RealtimeCheckMode.SCHEDULED
+                    if trigger_type == "AUTOMATIC"
+                    else RealtimeCheckMode.MANUAL
+                ),
+                evaluate_signals=bool(signal_symbols),
+                signal_symbols=signal_symbols,
+                expected_subscription_versions=expected_subscription_versions,
+                timeout_seconds=timeout_seconds,
+                operation_key=definition_key,
+            )
+        except Exception as error:
+            return await self._occurrences.finish_snapshot(
+                occurrence.id,
+                status=OccurrenceStatus.FAILED,
+                fetched_count=0,
+                failed_count=len(symbols),
+                completed_at=datetime.now(UTC),
+                error_code=str(getattr(error, "code", "QUOTE_SNAPSHOT_FAILED")),
+            )
+        status = {
+            RealtimeBatchStatus.COMPLETE: OccurrenceStatus.SUCCEEDED,
+            RealtimeBatchStatus.PARTIAL: OccurrenceStatus.PARTIAL,
+            RealtimeBatchStatus.FAILED: OccurrenceStatus.FAILED,
+            RealtimeBatchStatus.OVERLAP_SKIPPED: OccurrenceStatus.FAILED,
+        }[result.status]
+        return await self._occurrences.finish_snapshot(
+            occurrence.id,
+            status=status,
+            fetched_count=result.valid_count,
+            failed_count=result.failed_count,
+            completed_at=result.completed_at,
+            error_code=(
+                "QUOTE_BATCH_OVERLAP_SKIPPED"
+                if result.status is RealtimeBatchStatus.OVERLAP_SKIPPED
+                else None
             ),
         )
 

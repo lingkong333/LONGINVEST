@@ -168,8 +168,23 @@ class ScheduleOccurrence(Base):
             name="uq_schedule_occurrence_scope",
         ),
         CheckConstraint(
-            "status IN ('PENDING','CLAIMED','DISPATCHED','MISSED','FAILED')",
+            "status IN ('PENDING','CLAIMED','DISPATCHED','RUNNING','SUCCEEDED',"
+            "'PARTIAL','MISSED','FAILED')",
             name="status_valid",
+        ),
+        CheckConstraint(
+            "trigger_type IN ('AUTOMATIC','MANUAL')",
+            name="trigger_type_valid",
+        ),
+        CheckConstraint(
+            "expected_count >= 0 AND fetched_count >= 0 AND failed_count >= 0 "
+            "AND fetched_count + failed_count <= expected_count",
+            name="counts_valid",
+        ),
+        CheckConstraint(
+            "completed_at IS NULL OR "
+            "(started_at IS NOT NULL AND completed_at >= started_at)",
+            name="execution_times_valid",
         ),
         CheckConstraint(
             "(schedule_id IS NOT NULL AND schedule_revision_id IS NOT NULL "
@@ -185,6 +200,14 @@ class ScheduleOccurrence(Base):
             "scheduled_at",
             unique=True,
             postgresql_where=text("definition_key IS NOT NULL"),
+        ),
+        Index(
+            "uq_schedule_occurrence_manual_key",
+            "definition_key",
+            unique=True,
+            postgresql_where=text(
+                "occurrence_type = 'REALTIME_QUOTE' AND trigger_type = 'MANUAL'"
+            ),
         ),
     )
 
@@ -213,8 +236,16 @@ class ScheduleOccurrence(Base):
         JSONB, nullable=False
     )
     status: Mapped[str] = mapped_column(String(16), nullable=False)
+    trigger_type: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="AUTOMATIC"
+    )
+    expected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    fetched_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    failed_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     job_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("job.id", ondelete="RESTRICT")
     )

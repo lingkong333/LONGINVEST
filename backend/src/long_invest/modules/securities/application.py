@@ -238,6 +238,16 @@ class SecurityApplication:
             UniverseQuery(listing_statuses=MARKET_DATA_LISTING_STATUSES),
         )
 
+    async def market_data_symbols(self) -> tuple[str, ...]:
+        try:
+            async with self._database.session() as session:
+                rows = await SecurityRepository(session).list_for_universe(
+                    UniverseQuery(listing_statuses=MARKET_DATA_LISTING_STATUSES)
+                )
+        except (SQLAlchemyError, TimeoutError) as exc:
+            raise _backend_unavailable() from exc
+        return tuple(row.symbol for row in rows)
+
     @staticmethod
     async def _freeze_universe_in_transaction(session, query: UniverseQuery):
         repository = SecurityRepository(session)

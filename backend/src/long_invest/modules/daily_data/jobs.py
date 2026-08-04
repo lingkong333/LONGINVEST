@@ -38,6 +38,8 @@ from long_invest.platform.jobs.contracts import (
 )
 from long_invest.platform.jobs.postgres_service import PostgresJobService
 
+MAX_INDIVIDUAL_DAILY_RETRIES = 200
+
 
 class FullMarketDailyJob:
     def __init__(
@@ -359,6 +361,16 @@ class FullMarketDailyJob:
         )
         if status in {JobStatus.CANCELED, JobStatus.PAUSED}:
             return status
+
+        retry_symbols = tuple(
+            symbol
+            for symbol in symbols
+            if staged.get(symbol) is None
+            or DailyStageStatus(staged[symbol].status)
+            in {DailyStageStatus.FAILED, DailyStageStatus.INVALID}
+        )
+        if len(retry_symbols) > MAX_INDIVIDUAL_DAILY_RETRIES:
+            return None
 
         pending: list[StageDailyBar] = []
         requested_count = int(getattr(batch, "requested_count", 0))
@@ -845,7 +857,10 @@ def _groups(
     if plan.mode is DailyCollectionMode.SNAPSHOT:
         return (symbols,)
     if plan.mode is DailyCollectionMode.PAGED:
-        return tuple(symbols for _ in range(plan.estimated_requests))
+        return tuple(
+            symbols[index : index + plan.group_size]
+            for index in range(0, len(symbols), plan.group_size)
+        )
     return tuple(
         symbols[index : index + plan.group_size]
         for index in range(0, len(symbols), plan.group_size)

@@ -102,18 +102,12 @@ const occurrencePageSchema = z.object({
     occurrence_id: z.string().min(1),
     scheduled_at: z.string().min(1),
     status: z.string().min(1),
-  })),
-})
-
-const quoteCyclePageSchema = z.object({
-  items: z.array(z.object({
-    schedule_occurrence_id: z.string().nullable(),
-    status: z.string().min(1),
+    trigger_type: z.enum(["AUTOMATIC", "MANUAL"]),
     expected_count: z.number().int().nonnegative(),
-    valid_count: z.number().int().nonnegative(),
+    fetched_count: z.number().int().nonnegative(),
     failed_count: z.number().int().nonnegative(),
     started_at: z.string().nullable(),
-    finalized_at: z.string().nullable(),
+    completed_at: z.string().nullable(),
   })),
 })
 
@@ -135,8 +129,8 @@ function shanghaiTime(value: string) {
   }).format(new Date(value))
 }
 
-function cycleStatus(value: string) {
-  if (value === "READY") return "SUCCEEDED" as const
+function executionStatus(value: string) {
+  if (value === "SUCCEEDED") return "SUCCEEDED" as const
   if (value === "PARTIAL") return "PARTIAL" as const
   if (["FAILED", "MISSED", "CANCELED"].includes(value)) return "FAILED" as const
   return "RUNNING" as const
@@ -186,44 +180,58 @@ export function createMonitoringGateway(baseUrl = ""): MonitoringGateway {
   return {
     async loadTodaySnapshotStatus() {
       const today = shanghaiDate()
-      const [schedules, occurrenceValue, cycleValue] = await Promise.all([
+      const [schedules, occurrenceValue] = await Promise.all([
         this.loadSchedules(),
         api.request<unknown>(api.client.GET("/api/v1/schedule-occurrences", {
           params: { query: { page: 1, page_size: 200, occurrence_type: "REALTIME_QUOTE", from_date: today, through_date: today } },
         })),
-        api.request<unknown>(api.client.GET("/api/v1/quote-cycles", {
-          params: { query: { page: 1, page_size: 200 } },
-        })),
       ])
       const occurrences = parse(occurrencePageSchema, occurrenceValue, "INVALID_MONITOR_OCCURRENCES_RESPONSE").items
-      const cycles = parse(quoteCyclePageSchema, cycleValue, "INVALID_QUOTE_CYCLES_RESPONSE").items
-      const cycleByOccurrence = new Map(cycles.filter((cycle) => cycle.schedule_occurrence_id).map((cycle) => [cycle.schedule_occurrence_id, cycle]))
-      const occurrenceByTime = new Map(occurrences.map((occurrence) => [shanghaiTime(occurrence.scheduled_at), occurrence]))
+      const automaticByTime = new Map(
+        occurrences
+          .filter((occurrence) => occurrence.trigger_type === "AUTOMATIC")
+          .map((occurrence) => [shanghaiTime(occurrence.scheduled_at), occurrence]),
+      )
       const nowTime = shanghaiTime(new Date().toISOString())
       const times = [...new Set(schedules.flatMap((schedule) => schedule.times))].sort()
-      const items = times.map((scheduledTime) => {
-        const occurrence = occurrenceByTime.get(scheduledTime)
-        const cycle = occurrence ? cycleByOccurrence.get(occurrence.occurrence_id) : undefined
-        if (cycle) {
-          const durationSeconds = cycle.started_at && cycle.finalized_at
-            ? Math.max(0, Math.round((new Date(cycle.finalized_at).getTime() - new Date(cycle.started_at).getTime()) / 1000))
+      const itemFromOccurrence = (occurrence: z.infer<typeof occurrencePageSchema>["items"][number]) => {
+        const durationSeconds = occurrence.started_at && occurrence.completed_at
+          ? Math.max(0, Math.round((new Date(occurrence.completed_at).getTime() - new Date(occurrence.started_at).getTime()) / 1000))
             : null
-          return { scheduledTime, status: cycleStatus(cycle.status), expectedCount: cycle.expected_count, fetchedCount: cycle.valid_count, failedCount: cycle.failed_count, startedAt: cycle.started_at, completedAt: cycle.finalized_at, durationSeconds }
-        }
-        const failed = occurrence && ["MISSED", "FAILED"].includes(occurrence.status)
-        const running = occurrence && ["CLAIMED", "DISPATCHED"].includes(occurrence.status)
-        return { scheduledTime, status: failed ? "FAILED" as const : running ? "RUNNING" as const : scheduledTime > nowTime ? "PENDING" as const : "NOT_EXECUTED" as const, expectedCount: 0, fetchedCount: 0, failedCount: 0, startedAt: null, completedAt: null, durationSeconds: null }
+        return { executionId: occurrence.occurrence_id, scheduledTime: shanghaiTime(occurrence.scheduled_at), triggerType: occurrence.trigger_type, status: executionStatus(occurrence.status), expectedCount: occurrence.expected_count, fetchedCount: occurrence.fetched_count, failedCount: occurrence.failed_count, startedAt: occurrence.started_at, completedAt: occurrence.completed_at, durationSeconds }
+      }
+      const plannedItems = times.map((scheduledTime) => {
+        const occurrence = automaticByTime.get(scheduledTime)
+        if (occurrence) return itemFromOccurrence(occurrence)
+        return { executionId: `planned:${scheduledTime}`, scheduledTime, triggerType: "AUTOMATIC" as const, status: scheduledTime > nowTime ? "PENDING" as const : "NOT_EXECUTED" as const, expectedCount: 0, fetchedCount: 0, failedCount: 0, startedAt: null, completedAt: null, durationSeconds: null }
       })
+      const manualItems = occurrences
+        .filter((occurrence) => occurrence.trigger_type === "MANUAL")
+        .map(itemFromOccurrence)
+      const items = [...plannedItems, ...manualItems].sort((left, right) => (
+        left.scheduledTime.localeCompare(right.scheduledTime)
+        || left.triggerType.localeCompare(right.triggerType)
+      ))
       const hasAttention = items.some((item) => ["NOT_EXECUTED", "PARTIAL", "FAILED"].includes(item.status))
       const hasRunning = items.some((item) => item.status === "RUNNING")
       const hasSuccess = items.some((item) => item.status === "SUCCEEDED")
       return {
         overallStatus: times.length === 0 ? "NOT_CONFIGURED" : hasAttention ? "ATTENTION" : hasRunning ? "RUNNING" : hasSuccess ? "NORMAL" : "PENDING",
-        plannedCount: items.length,
+        plannedCount: times.length,
         executedCount: items.filter((item) => ["SUCCEEDED", "PARTIAL", "FAILED"].includes(item.status)).length,
         fetchedCount: items.reduce((total, item) => total + item.fetchedCount, 0),
         items,
       } satisfies MonitoringExecutionOverview
+    },
+    async triggerMarketSnapshot() {
+      await api.request(api.client.POST("/api/v1/quotes/market-snapshot", {
+        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
+        body: {
+          timeout_seconds: 60,
+          confirm: true,
+          reason: "从监控页面手动验证全市场盘中快照",
+        },
+      }))
     },
     async loadSchedules() {
       const schedules = parse(

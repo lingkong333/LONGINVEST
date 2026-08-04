@@ -145,24 +145,28 @@ function useHappyPathHandlers() {
 }
 
 describe("监控列表请求边界", () => {
-  it("合并当天调度记录与行情批次并计算执行耗时", async () => {
+  it("读取当天自动和手动快照记录并计算执行耗时", async () => {
     server.use(
       http.get("http://localhost/api/v1/monitor-schedules", () => HttpResponse.json(envelope({ items: [{ id: "schedule-1", name: "盘中监控", version: 1 }] }))),
       http.get("http://localhost/api/v1/monitor-schedules/schedule-1", () => HttpResponse.json(envelope({ schedule: { id: "schedule-1", name: "盘中监控", version: 1 }, revision: { times: ["09:45", "10:30"] } }))),
-      http.get("http://localhost/api/v1/schedule-occurrences", () => HttpResponse.json(envelope({ items: [{ occurrence_id: "occurrence-1", scheduled_at: "2026-07-23T01:45:00Z", status: "DISPATCHED" }], pagination: { page: 1, page_size: 200, total: 1 }, allowed_actions: [] }))),
-      http.get("http://localhost/api/v1/quote-cycles", () => HttpResponse.json(envelope({ items: [{ schedule_occurrence_id: "occurrence-1", status: "READY", expected_count: 2, valid_count: 2, failed_count: 0, started_at: "2026-07-23T01:45:00Z", finalized_at: "2026-07-23T01:45:03Z" }], total: 1, page: 1, page_size: 200, allowed_actions: [] }))),
+      http.get("http://localhost/api/v1/schedule-occurrences", () => HttpResponse.json(envelope({ items: [{ occurrence_id: "occurrence-1", scheduled_at: "2026-07-23T01:45:00Z", status: "SUCCEEDED", trigger_type: "AUTOMATIC", expected_count: 2, fetched_count: 2, failed_count: 0, started_at: "2026-07-23T01:45:00Z", completed_at: "2026-07-23T01:45:03Z" }, { occurrence_id: "manual-1", scheduled_at: "2026-07-23T02:00:00Z", status: "PARTIAL", trigger_type: "MANUAL", expected_count: 2, fetched_count: 1, failed_count: 1, started_at: "2026-07-23T02:00:00Z", completed_at: "2026-07-23T02:00:04Z" }], pagination: { page: 1, page_size: 200, total: 2 }, allowed_actions: [] }))),
     )
     const gateway = createMonitoringGateway("http://localhost")
 
     const result = await gateway.loadTodaySnapshotStatus()
 
     expect(result.plannedCount).toBe(2)
-    expect(result.executedCount).toBe(1)
-    expect(result.fetchedCount).toBe(2)
+    expect(result.executedCount).toBe(2)
+    expect(result.fetchedCount).toBe(3)
     expect(result.items[0]).toEqual(expect.objectContaining({
       scheduledTime: "09:45",
       status: "SUCCEEDED",
       durationSeconds: 3,
+    }))
+    expect(result.items[1]).toEqual(expect.objectContaining({
+      triggerType: "MANUAL",
+      status: "PARTIAL",
+      durationSeconds: 4,
     }))
   })
 

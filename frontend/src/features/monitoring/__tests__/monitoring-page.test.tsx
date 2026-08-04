@@ -108,7 +108,9 @@ function createGateway(
       executedCount: 1,
       fetchedCount: 2,
       items: [{
+        executionId: "occurrence-1",
         scheduledTime: "09:45",
+        triggerType: "AUTOMATIC",
         status: "SUCCEEDED",
         expectedCount: 2,
         fetchedCount: 2,
@@ -117,7 +119,9 @@ function createGateway(
         completedAt: "2026-07-23T01:45:03Z",
         durationSeconds: 3,
       }, {
+        executionId: "planned:10:30",
         scheduledTime: "10:30",
+        triggerType: "AUTOMATIC",
         status: "PENDING",
         expectedCount: 0,
         fetchedCount: 0,
@@ -128,6 +132,7 @@ function createGateway(
       }],
     }),
     saveSchedule: vi.fn().mockResolvedValue(undefined),
+    triggerMarketSnapshot: vi.fn().mockResolvedValue(undefined),
     runAction: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   }
@@ -141,6 +146,36 @@ describe("监控列表页面", () => {
     expect(screen.getByText("09:45")).toBeInTheDocument()
     expect(screen.getByText("2 / 2")).toBeInTheDocument()
     expect(screen.getByText("3 秒")).toBeInTheDocument()
+  })
+
+  it("可以手动抓取全市场快照并刷新执行记录", async () => {
+    const triggerMarketSnapshot = vi.fn().mockResolvedValue(undefined)
+    const loadTodaySnapshotStatus = vi.fn().mockResolvedValue({
+      overallStatus: "NORMAL",
+      plannedCount: 0,
+      executedCount: 1,
+      fetchedCount: 5529,
+      items: [{
+        executionId: "manual-1",
+        scheduledTime: "10:18",
+        triggerType: "MANUAL",
+        status: "SUCCEEDED",
+        expectedCount: 5529,
+        fetchedCount: 5529,
+        failedCount: 0,
+        startedAt: "2026-07-23T02:18:00Z",
+        completedAt: "2026-07-23T02:18:03Z",
+        durationSeconds: 3,
+      }],
+    })
+    renderPage(createGateway({ triggerMarketSnapshot, loadTodaySnapshotStatus }))
+
+    await screen.findByText("今日监控执行状态")
+    await userEvent.click(screen.getByRole("button", { name: "手动抓取快照" }))
+
+    expect(triggerMarketSnapshot).toHaveBeenCalledTimes(1)
+    expect(await screen.findByText("手动")).toBeInTheDocument()
+    expect(loadTodaySnapshotStatus).toHaveBeenCalledTimes(2)
   })
 
   it("展示中文监控信息，并支持持仓筛选和搜索", async () => {

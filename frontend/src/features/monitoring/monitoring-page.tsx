@@ -3,6 +3,7 @@ import {
   Activity,
   Archive,
   BriefcaseBusiness,
+  Camera,
   FlaskConical,
   Power,
   PowerOff,
@@ -12,6 +13,7 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 
 import { useAuth } from "@/features/auth"
 import { monitoringGateway } from "@/features/monitoring/gateway"
@@ -50,6 +52,7 @@ import {
   SelectValue,
 } from "@/shared/ui/select"
 import { Skeleton } from "@/shared/ui/skeleton"
+import { Spinner } from "@/shared/ui/spinner"
 import { DataTable } from "@/shared/ui/table"
 import { ToggleGroup, ToggleGroupItem } from "@/shared/ui/toggle-group"
 
@@ -230,6 +233,15 @@ export function MonitoringPage({
     queryFn: () => gateway.loadTodaySnapshotStatus(),
     refetchInterval: 15_000,
   })
+  const snapshotMutation = useMutation({
+    mutationFn: () => gateway.triggerMarketSnapshot(),
+    onSuccess: async () => {
+      toast.success("全市场快照执行完成")
+      await queryClient.invalidateQueries({
+        queryKey: ["monitoring", "today-snapshot-status"],
+      })
+    },
+  })
   const actionMutation = useMutation({
     mutationFn: async () => {
       if (!pendingAction) {
@@ -365,13 +377,28 @@ export function MonitoringPage({
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><CardTitle>今日监控执行状态</CardTitle><CardDescription>每个配置时间的真实调度与快照抓取结果。</CardDescription></div>
-            <Badge variant={executionQuery.data?.overallStatus === "ATTENTION" ? "destructive" : "secondary"}>{executionStatusLabels[executionQuery.data?.overallStatus ?? "PENDING"]}</Badge>
+            <div className="flex items-center gap-2">
+              <Badge variant={executionQuery.data?.overallStatus === "ATTENTION" ? "destructive" : "secondary"}>{executionStatusLabels[executionQuery.data?.overallStatus ?? "PENDING"]}</Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={snapshotMutation.isPending}
+                onClick={() => snapshotMutation.mutate()}
+              >
+                {snapshotMutation.isPending
+                  ? <Spinner data-icon="inline-start" />
+                  : <Camera data-icon="inline-start" aria-hidden="true" />}
+                手动抓取快照
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           {executionQuery.isPending ? <div className="grid gap-3 sm:grid-cols-3"><Skeleton className="h-16" /><Skeleton className="h-16" /><Skeleton className="h-16" /></div> : executionQuery.isError ? <Alert variant="destructive"><AlertDescription>当天快照执行记录暂时无法读取，股票监控列表不受影响。</AlertDescription></Alert> : <>
             <div className="grid gap-3 sm:grid-cols-3"><div><strong className="block text-2xl">{executionQuery.data.plannedCount}</strong><span className="text-sm text-muted-foreground">计划次数</span></div><div><strong className="block text-2xl">{executionQuery.data.executedCount}</strong><span className="text-sm text-muted-foreground">已执行次数</span></div><div><strong className="block text-2xl">{executionQuery.data.fetchedCount}</strong><span className="text-sm text-muted-foreground">成功抓取股票数</span></div></div>
-            {executionQuery.data.items.length ? <DataTable caption="今日每个监控时间的快照执行状态" columns={[{ key: "time", header: "计划时间" }, { key: "status", header: "状态" }, { key: "count", header: "抓取数量" }, { key: "failed", header: "失败" }, { key: "started", header: "开始" }, { key: "completed", header: "完成" }, { key: "duration", header: "耗时" }]} rows={executionQuery.data.items.map((item) => ({ id: item.scheduledTime, time: item.scheduledTime, status: executionStatusLabels[item.status] ?? item.status, count: item.expectedCount ? `${item.fetchedCount} / ${item.expectedCount}` : "-", failed: item.failedCount || "-", started: formatExecutionTime(item.startedAt), completed: formatExecutionTime(item.completedAt), duration: item.durationSeconds === null ? "-" : `${item.durationSeconds} 秒` }))} /> : <PageState state="empty" title="尚未配置盘中监控时间" description="可在页面下方添加监控时间。" />}
+            {snapshotMutation.isError ? <Alert variant="destructive"><AlertDescription>手动快照执行失败，请查看本行状态后重试。</AlertDescription></Alert> : null}
+            {executionQuery.data.items.length ? <DataTable caption="今日每个监控时间的快照执行状态" columns={[{ key: "time", header: "时间" }, { key: "trigger", header: "触发方式" }, { key: "status", header: "状态" }, { key: "count", header: "抓取数量" }, { key: "failed", header: "失败" }, { key: "started", header: "开始" }, { key: "completed", header: "完成" }, { key: "duration", header: "耗时" }]} rows={executionQuery.data.items.map((item) => ({ id: item.executionId, time: item.scheduledTime, trigger: item.triggerType === "MANUAL" ? "手动" : "自动", status: executionStatusLabels[item.status] ?? item.status, count: item.expectedCount ? `${item.fetchedCount} / ${item.expectedCount}` : "-", failed: item.failedCount || "-", started: formatExecutionTime(item.startedAt), completed: formatExecutionTime(item.completedAt), duration: item.durationSeconds === null ? "-" : `${item.durationSeconds} 秒` }))} /> : <PageState state="empty" title="尚未配置盘中监控时间" description="可在页面下方添加监控时间。" />}
           </>}
         </CardContent>
       </Card>

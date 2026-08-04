@@ -36,6 +36,15 @@ class RoutedProvider:
         return self.result
 
 
+class RecordingRoutedProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, ...]] = []
+
+    async def realtime_quotes(self, symbols, _deadline):
+        self.calls.append(symbols)
+        return ProviderBatchResult(items=tuple(quote(symbol) for symbol in symbols))
+
+
 @pytest.mark.anyio
 async def test_in_memory_collection_waits_for_whole_scope_and_marks_missing() -> None:
     collector = InMemoryQuoteCollector(
@@ -53,6 +62,19 @@ async def test_in_memory_collection_waits_for_whole_scope_and_marks_missing() ->
     assert result.valid_count == 1
     assert result.failures[0].symbol == "000001.SZ"
     assert result.failures[0].code == "PROVIDER_ITEM_MISSING"
+
+
+@pytest.mark.anyio
+async def test_in_memory_collection_fetches_full_market_in_batches() -> None:
+    provider = RecordingRoutedProvider()
+    symbols = tuple(f"{index:06d}.SZ" for index in range(250))
+    collector = InMemoryQuoteCollector(provider, now=lambda: NOW)
+
+    result = await collector.collect(symbols=symbols, scheduled_at=NOW)
+
+    assert result.status is RealtimeBatchStatus.COMPLETE
+    assert result.valid_count == 250
+    assert sorted(len(call) for call in provider.calls) == [50, 100, 100]
 
 
 @pytest.mark.anyio

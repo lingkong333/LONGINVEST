@@ -28,7 +28,6 @@ from long_invest.bootstrap.providers import (
     build_provider_service,
     close_provider_resources,
 )
-from long_invest.bootstrap.realtime_quotes import get_realtime_quote_runtime
 from long_invest.bootstrap.stage4_runtime import (
     build_strategy_validation_executor,
 )
@@ -42,7 +41,7 @@ from long_invest.modules.monitor_schedules.application import MonitorScheduleApp
 from long_invest.modules.monitoring.application import MonitorSubscriptionApplication
 from long_invest.modules.notifications.contracts import DeliveryChannel
 from long_invest.modules.notifications.runtime import NotificationDeliveryRuntime
-from long_invest.modules.quotes.contracts import RealtimeCheckMode
+from long_invest.modules.quotes.application import QuoteApplication
 from long_invest.modules.scheduling.runtime import (
     DailyGapPlanner,
     DualPathScheduler,
@@ -98,6 +97,7 @@ async def _run_intraday(
     *,
     schedules: MonitorScheduleApplication,
     subscriptions: MonitorSubscriptionApplication,
+    quotes: QuoteApplication,
 ) -> None:
     local_time = scheduled_at.astimezone(SHANGHAI).time().replace(tzinfo=None)
     grouped = {
@@ -122,23 +122,16 @@ async def _run_intraday(
             continue
         for subscription in current:
             selected[subscription.symbol] = subscription
-    if not selected:
-        logger.info(
-            "intraday_schedule_scope_empty",
-            category="scheduler",
-            scheduled_at=scheduled_at.isoformat(),
-        )
-        return
     ordered = tuple(selected[symbol] for symbol in sorted(selected))
-    await get_realtime_quote_runtime().run(
-        symbols=tuple(item.symbol for item in ordered),
+    await quotes.submit_market_snapshot(
         scheduled_at=scheduled_at,
-        mode=RealtimeCheckMode.SCHEDULED,
-        evaluate_signals=True,
+        trigger_type="AUTOMATIC",
+        idempotency_key=scheduled_at.isoformat(),
+        reason="系统按盘中监控时间自动抓取全市场快照",
+        signal_symbols=tuple(item.symbol for item in ordered),
         expected_subscription_versions={
             item.symbol: item.version for item in ordered
         },
-        operation_key=f"scheduled:{scheduled_at.isoformat()}",
     )
 
 
@@ -209,6 +202,7 @@ async def run() -> None:
         security_application=SecurityApplication(database),
         schedule_application=schedule_application,
     )
+    quote_application = QuoteApplication(database)
     scheduler = DualPathScheduler(
         calendar=CalendarApplication(database),
         schedules=schedule_application,
@@ -218,6 +212,7 @@ async def run() -> None:
             _run_intraday,
             schedules=schedule_application,
             subscriptions=subscription_application,
+            quotes=quote_application,
         ),
         instance_id=f"{socket.gethostname()}:{os.getpid()}",
         daily_gap_planner=DailyGapPlanner(

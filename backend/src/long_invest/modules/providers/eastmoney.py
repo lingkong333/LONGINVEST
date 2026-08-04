@@ -183,15 +183,12 @@ class EastmoneyProvider:
             rows = data.get("diff") if isinstance(data, dict) else None
             if payload.get("rc") != 0 or not isinstance(rows, list):
                 raise ValueError
-            allowed = set(request.symbols)
             items = []
             failures = []
             for row in rows:
                 try:
                     symbol = _symbol(str(row["f12"]))
                 except (KeyError, TypeError, ValueError, ProviderHttpError):
-                    continue
-                if symbol not in allowed:
                     continue
                 try:
                     items.append(

@@ -25,7 +25,7 @@ from long_invest.platform.database.base import Base
 from long_invest.platform.database.engine import Database
 
 BACKEND = Path(__file__).parents[2]
-HEAD_REVISION = "20260804_0044"
+HEAD_REVISION = "20260804_0045"
 PREVIOUS_REVISION = "20260803_0040"
 TABLES = {
     "strategy_screening_batch",

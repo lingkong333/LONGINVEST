@@ -18,6 +18,7 @@ from long_invest.modules.providers.contracts import (
 from long_invest.modules.providers.eastmoney import EastmoneyProvider
 from long_invest.modules.providers.retry import ProviderHttpError
 from long_invest.modules.providers.sina import SinaRealtimeProvider
+from long_invest.modules.providers.tencent import TencentRealtimeProvider
 from long_invest.modules.providers.tushare import TushareProvider
 
 
@@ -32,16 +33,18 @@ def test_adapters_declare_all_supported_daily_collection_modes() -> None:
     plans = (
         EastmoneyProvider(None).daily_collection_plan(5500),
         SinaRealtimeProvider(None).daily_collection_plan(5500),
+        TencentRealtimeProvider(None).daily_collection_plan(5500),
         TushareProvider(token_resolver=token).daily_collection_plan(5500),
         BaoStockProvider().daily_collection_plan(5500),
     )
     assert [item.mode for item in plans] == [
         DailyCollectionMode.PAGED,
         DailyCollectionMode.BATCHED_SYMBOLS,
+        DailyCollectionMode.BATCHED_SYMBOLS,
         DailyCollectionMode.SNAPSHOT,
         DailyCollectionMode.SINGLE_SYMBOL,
     ]
-    assert [item.estimated_requests for item in plans] == [55, 55, 1, 5500]
+    assert [item.estimated_requests for item in plans] == [55, 55, 55, 1, 5500]
 
 
 def test_daily_collection_plan_rejects_invalid_estimates() -> None:

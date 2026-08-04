@@ -1,8 +1,12 @@
 import asyncio
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
-from long_invest.modules.providers.contracts import ProviderCode
+from long_invest.modules.providers.contracts import (
+    MarketDailyGroupRequest,
+    ProviderCapability,
+    ProviderCode,
+)
 from long_invest.modules.providers.tencent import TencentRealtimeProvider
 
 
@@ -70,3 +74,64 @@ def test_tencent_requests_all_symbols_in_one_call() -> None:
     assert len(result.items) == 1
     assert client.request.url.endswith("q=sh600000")
     assert client.request.headers["Referer"] == "https://gu.qq.com/"
+
+
+def test_tencent_builds_current_day_daily_bar_from_batch_quote() -> None:
+    class Client:
+        async def request_text(self, request, **kwargs):
+            del request, kwargs
+            fields = [""] * 38
+            for index, value in {
+                3: "9.51",
+                4: "9.71",
+                5: "9.59",
+                6: "1382638",
+                30: "20260731161454",
+                33: "9.59",
+                34: "9.28",
+                35: "9.51/1382638/1299502653",
+                37: "129950.2653",
+            }.items():
+                fields[index] = value
+            return f'v_sh600000="{"~".join(fields)}";'
+
+    result = asyncio.run(
+        TencentRealtimeProvider(Client()).market_daily_bars(
+            MarketDailyGroupRequest(date(2026, 7, 31), ("600000.SH",), 0),
+            datetime.now(UTC) + timedelta(seconds=5),
+        )
+    )
+
+    assert len(result.items) == 1
+    assert result.items[0].capability is ProviderCapability.DAILY_BAR_UNADJUSTED
+    assert result.items[0].close == Decimal("9.51")
+    assert result.items[0].source is ProviderCode.TENCENT
+
+
+def test_tencent_rejects_quote_from_a_different_trading_day() -> None:
+    class Client:
+        async def request_text(self, request, **kwargs):
+            del request, kwargs
+            fields = [""] * 38
+            for index, value in {
+                3: "9.51",
+                4: "9.71",
+                5: "9.59",
+                6: "1",
+                30: "20260730161454",
+                33: "9.59",
+                34: "9.28",
+                37: "0.1",
+            }.items():
+                fields[index] = value
+            return f'v_sh600000="{"~".join(fields)}";'
+
+    result = asyncio.run(
+        TencentRealtimeProvider(Client()).market_daily_bars(
+            MarketDailyGroupRequest(date(2026, 7, 31), ("600000.SH",), 0),
+            datetime.now(UTC) + timedelta(seconds=5),
+        )
+    )
+
+    assert not result.items
+    assert result.failures[0].code == "PROVIDER_ITEM_STALE"

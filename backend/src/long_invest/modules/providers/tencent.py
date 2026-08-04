@@ -6,6 +6,10 @@ from decimal import Decimal, InvalidOperation
 from time import monotonic
 
 from long_invest.modules.providers.contracts import (
+    DailyBar,
+    DailyCollectionMode,
+    DailyCollectionPlan,
+    MarketDailyGroupRequest,
     ProbeResult,
     ProviderAdapterCode,
     ProviderBatchResult,
@@ -27,7 +31,12 @@ CHINA_TIMEZONE = timezone(timedelta(hours=8), name="Asia/Shanghai")
 
 class TencentRealtimeProvider:
     code = ProviderCode.TENCENT
-    capabilities = frozenset({ProviderCapability.REALTIME_QUOTE_BATCH})
+    capabilities = frozenset(
+        {
+            ProviderCapability.REALTIME_QUOTE_BATCH,
+            ProviderCapability.DAILY_BAR_UNADJUSTED,
+        }
+    )
     REALTIME_URL = "https://qt.gtimg.cn/q="
     REFERER = "https://gu.qq.com/"
 
@@ -121,7 +130,7 @@ class TencentRealtimeProvider:
     ) -> ProbeResult:
         started = monotonic()
         try:
-            if capability is not ProviderCapability.REALTIME_QUOTE_BATCH:
+            if capability not in self.capabilities:
                 raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
             await self.realtime_quotes(("600000.SH",), deadline)
             healthy, error_code = True, None
@@ -144,13 +153,51 @@ class TencentRealtimeProvider:
         del request, deadline
         raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
 
-    def daily_collection_plan(self, total_symbols):
-        del total_symbols
-        raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
+    def daily_collection_plan(self, total_symbols: int) -> DailyCollectionPlan:
+        return DailyCollectionPlan(
+            self.code,
+            DailyCollectionMode.BATCHED_SYMBOLS,
+            total_symbols,
+            100,
+            0.5,
+        )
 
-    async def market_daily_bars(self, request, deadline):
-        del request, deadline
-        raise ProviderHttpError("PROVIDER_CAPABILITY_UNSUPPORTED")
+    async def market_daily_bars(
+        self, request: MarketDailyGroupRequest, deadline: datetime
+    ) -> ProviderBatchResult[DailyBar]:
+        quotes = await self.realtime_quotes(request.symbols, deadline)
+        items: list[DailyBar] = []
+        failures = list(quotes.failures)
+        for quote in quotes.items:
+            quote_date = quote.quote_time.astimezone(CHINA_TIMEZONE).date()
+            if quote_date != request.trading_date:
+                failures.append(
+                    ProviderItemFailure(
+                        quote.symbol,
+                        "PROVIDER_ITEM_STALE",
+                        "行情日期与目标交易日不一致",
+                        self.code,
+                    )
+                )
+                continue
+            items.append(
+                DailyBar(
+                    symbol=quote.symbol,
+                    trading_date=request.trading_date,
+                    open=quote.open,
+                    high=quote.high,
+                    low=quote.low,
+                    close=quote.price,
+                    volume=quote.volume,
+                    amount=quote.amount,
+                    source=self.code,
+                    capability=ProviderCapability.DAILY_BAR_UNADJUSTED,
+                    collected_at=quote.received_at,
+                )
+            )
+        return ProviderBatchResult(
+            tuple(items), tuple(failures), quotes.batch_error_code
+        )
 
     async def corporate_actions(self, request, deadline):
         del request, deadline

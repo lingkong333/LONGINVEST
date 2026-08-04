@@ -69,7 +69,7 @@ def _bar(symbol: str) -> DailyBar:
     ("mode", "group_size", "expected_sizes"),
     [
         (DailyCollectionMode.SNAPSHOT, 150, [150]),
-        (DailyCollectionMode.PAGED, 100, [150, 150]),
+        (DailyCollectionMode.PAGED, 100, [100, 50]),
         (DailyCollectionMode.BATCHED_SYMBOLS, 100, [100, 50]),
         (DailyCollectionMode.SINGLE_SYMBOL, 1, [1] * 150),
     ],

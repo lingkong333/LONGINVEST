@@ -29,6 +29,9 @@ def test_monitoring_status_values_are_stable() -> None:
         "PENDING",
         "CLAIMED",
         "DISPATCHED",
+        "RUNNING",
+        "SUCCEEDED",
+        "PARTIAL",
         "MISSED",
         "FAILED",
     }

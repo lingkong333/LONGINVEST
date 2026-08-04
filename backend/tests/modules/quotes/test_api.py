@@ -105,6 +105,7 @@ def test_router_exposes_realtime_and_legacy_read_routes() -> None:
         ("GET", "/api/v1/quote-cycles/{cycle_id}/items"),
         ("POST", "/api/v1/quote-cycles/manual"),
         ("POST", "/api/v1/quotes/check-now"),
+        ("POST", "/api/v1/quotes/market-snapshot"),
         ("POST", "/api/v1/quotes/diagnose"),
     }
 

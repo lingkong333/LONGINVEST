@@ -23,6 +23,11 @@ from long_invest.modules.strategies.models import (
     StrategyValidationRun,
     StrategyVersion,
 )
+from long_invest.modules.strategies.template import (
+    DEFAULT_STRATEGY_SOURCE,
+    default_strategy_metadata,
+    default_strategy_parameter_schema,
+)
 from long_invest.platform.audit.contracts import AuditWrite
 from long_invest.platform.errors import AppError
 
@@ -281,9 +286,9 @@ class StrategyService:
         draft = StrategyDraft(
             id=uuid4(),
             strategy_id=strategy.id,
-            source_code="",
-            strategy_metadata={},
-            parameter_schema={},
+            source_code=DEFAULT_STRATEGY_SOURCE,
+            strategy_metadata=default_strategy_metadata(),
+            parameter_schema=default_strategy_parameter_schema(),
             draft_version=1,
         )
         await self._repository.create_strategy(strategy, draft)

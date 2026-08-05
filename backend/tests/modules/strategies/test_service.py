@@ -17,6 +17,11 @@ from long_invest.modules.strategies.service import (
     StrategyService,
     strategy_allowed_actions,
 )
+from long_invest.modules.strategies.template import (
+    DEFAULT_STRATEGY_SOURCE,
+    default_strategy_metadata,
+    default_strategy_parameter_schema,
+)
 from long_invest.platform.errors import AppError
 
 
@@ -262,8 +267,12 @@ def succeeded_validation(
     params=None,
 ):
     validation_id = uuid4()
-    metadata = {} if metadata is None else metadata
-    parameter_schema = {} if parameter_schema is None else parameter_schema
+    metadata = default_strategy_metadata() if metadata is None else metadata
+    parameter_schema = (
+        default_strategy_parameter_schema()
+        if parameter_schema is None
+        else parameter_schema
+    )
     params = params or {}
     source_facts = {
         "source_code_hash": source_code_hash,
@@ -368,14 +377,22 @@ def json_hash(value):
 
 
 @async_test
-async def test_create_initializes_empty_server_draft_and_records_event():
+async def test_create_initializes_documented_server_draft_and_records_event():
     subject, repository, audit, events = service()
 
     result = await subject.create("均线策略", context())
 
-    assert result.draft.source_code == ""
-    assert result.draft.strategy_metadata == {}
-    assert result.draft.parameter_schema == {}
+    assert "def calculate_targets(history, params, context):" in (
+        result.draft.source_code
+    )
+    assert '"matched": False' in result.draft.source_code
+    assert "策略不能访问数据库、文件或网络" in result.draft.source_code
+    assert result.draft.strategy_metadata["data_requirements"] == {
+        "adjustment": "qfq",
+        "min_bars": 60,
+        "max_bars": 5000,
+    }
+    assert result.draft.parameter_schema["required"] == ["price_band_ratio"]
     assert result.draft.draft_version == 1
     assert repository.strategies[result.strategy.id].status == "DRAFT"
     assert audit.items[-1].action_code == "strategy.created"
@@ -526,8 +543,8 @@ async def test_save_rejects_stale_expected_version():
     assert raised.value.details == {
         "server_draft_version": 2,
         "server_source_code": "v1",
-        "server_metadata": {},
-        "server_parameter_schema": {},
+        "server_metadata": default_strategy_metadata(),
+        "server_parameter_schema": default_strategy_parameter_schema(),
     }
 
 
@@ -894,7 +911,7 @@ async def test_publish_failure_is_audited_and_emitted():
     subject, repository, audit, events = service()
     created = await subject.create("策略", context())
     validation_id, validation = succeeded_validation(
-        created.strategy.id, 1, subject.hash_source("")
+        created.strategy.id, 1, subject.hash_source(DEFAULT_STRATEGY_SOURCE)
     )
     repository.validation_runs[validation_id] = validation
     repository.strategies[created.strategy.id].status = "VALIDATED"
@@ -920,7 +937,7 @@ async def test_failure_confirmation_converges_already_published_run_to_success()
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
     validation_id, validation = succeeded_validation(
-        created.strategy.id, 1, subject.hash_source("")
+        created.strategy.id, 1, subject.hash_source(DEFAULT_STRATEGY_SOURCE)
     )
     repository.validation_runs[validation_id] = validation
     repository.strategies[created.strategy.id].status = "VALIDATED"
@@ -951,7 +968,7 @@ async def test_publish_rejects_stale_validation_evidence():
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
     validation_id, validation = succeeded_validation(
-        created.strategy.id, 1, subject.hash_source("")
+        created.strategy.id, 1, subject.hash_source(DEFAULT_STRATEGY_SOURCE)
     )
     repository.validation_runs[validation_id] = validation
     await subject.save_draft(
@@ -974,7 +991,7 @@ async def test_publish_rejects_stale_validation_evidence():
 async def test_publish_rejects_validation_from_another_strategy_or_draft():
     subject, repository, *_ = service()
     created = await subject.create("策略", context())
-    current_hash = subject.hash_source("")
+    current_hash = subject.hash_source(DEFAULT_STRATEGY_SOURCE)
     validation_id, validation = succeeded_validation(uuid4(), 99, current_hash)
     repository.validation_runs[validation_id] = validation
     repository.strategies[created.strategy.id].status = "VALIDATED"

@@ -3,8 +3,15 @@ from __future__ import annotations
 import hashlib
 import json
 from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
 
 from long_invest.modules.notifications.contracts import DeliveryChannel
+from long_invest.modules.notifications.models import (
+    NotificationRecipient,
+    SignalNotificationBinding,
+)
 from long_invest.modules.notifications.service import ChannelDeliveryTarget
 from long_invest.modules.settings.service import transactional_settings_service
 
@@ -20,11 +27,36 @@ _CHANNEL_SECRET = {
 
 class DynamicNotificationTargetResolver:
     def __init__(self, session: Any) -> None:
+        self._session = session
         self._settings = transactional_settings_service(session)
 
     async def resolve_targets(
         self, notification: Any
     ) -> tuple[ChannelDeliveryTarget, ...]:
+        binding = None
+        subscription_id = getattr(notification, "subscription_id", None)
+        if getattr(self, "_session", None) is not None and subscription_id is not None:
+            binding = await self._session.get(
+                SignalNotificationBinding, subscription_id
+            )
+        if binding is not None and binding.recipient_ids:
+            recipient_ids = [UUID(value) for value in binding.recipient_ids]
+            recipients = list(
+                (
+                    await self._session.scalars(
+                        select(NotificationRecipient).where(
+                            NotificationRecipient.id.in_(recipient_ids),
+                            NotificationRecipient.enabled.is_(True),
+                        )
+                    )
+                ).all()
+            )
+            by_id = {item.id: item for item in recipients}
+            return tuple(
+                _recipient_target(by_id[item_id])
+                for item_id in recipient_ids
+                if item_id in by_id
+            )
         global_policy = await self._settings.get_setting("notification.policy.global")
         signal_policy = await self._settings.get_setting("notification.policy.signals")
         if (
@@ -73,3 +105,29 @@ def target_fingerprint(
     return hashlib.sha256(
         json.dumps(fingerprint_data, sort_keys=True).encode()
     ).hexdigest()[:32]
+
+
+def _recipient_target(recipient: NotificationRecipient) -> ChannelDeliveryTarget:
+    channel = (
+        DeliveryChannel.EMAIL
+        if recipient.recipient_type == "EMAIL"
+        else DeliveryChannel.WECOM
+    )
+    fingerprint_data = {
+        "id": str(recipient.id),
+        "version": recipient.version,
+        "destination": recipient.destination,
+        "config": recipient.config,
+        "secret": recipient.secret_fingerprint,
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_data, sort_keys=True).encode()
+    ).hexdigest()[:32]
+    return ChannelDeliveryTarget(
+        channel=channel,
+        config_version=recipient.version,
+        target_fingerprint=fingerprint,
+        recipient_id=recipient.id,
+        recipient_name=recipient.name,
+        recipient_type=recipient.recipient_type,
+    )

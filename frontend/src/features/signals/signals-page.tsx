@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Bell,
   CheckCircle2,
@@ -15,6 +15,11 @@ import {
 import { useEffect, useState } from "react"
 
 import { useAuth } from "@/features/auth"
+import { notificationGateway } from "@/features/notifications/gateway"
+import type {
+  NotificationGateway,
+  SignalNotificationBinding,
+} from "@/features/notifications/types"
 import { signalsGateway } from "@/features/signals/gateway"
 import type {
   EvaluationReason,
@@ -32,6 +37,14 @@ import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert"
 import { Badge } from "@/shared/ui/badge"
 import { Button } from "@/shared/ui/button"
 import { Card, CardContent } from "@/shared/ui/card"
+import { Checkbox } from "@/shared/ui/checkbox"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogTitle,
+} from "@/shared/ui/dialog"
 import {
   Empty,
   EmptyDescription,
@@ -114,7 +127,7 @@ const channelLabels: Record<string, string> = {
   EMAIL: "电子邮件",
 }
 
-type SectionKey = "states" | "events" | "evaluations"
+type SectionKey = "states" | "events" | "evaluations" | "notifications"
 
 function translated(labels: Record<string, string>, value: string | null | undefined) {
   if (!value) {
@@ -586,8 +599,10 @@ function EvaluationsSection({
 
 export function SignalsPage({
   gateway = signalsGateway,
+  notifications = notificationGateway,
 }: {
   gateway?: SignalsGateway
+  notifications?: NotificationGateway
 }) {
   const { invalidate } = useAuth()
   const [section, setSection] = useState<SectionKey>("states")
@@ -623,6 +638,7 @@ export function SignalsPage({
     { key: "states" as const, label: "当前状态", icon: Crosshair, count: statesQuery.data?.total },
     { key: "events" as const, label: "信号事件", icon: Bell, count: eventsQuery.data?.total },
     { key: "evaluations" as const, label: "判断记录", icon: Clock3, count: evaluationsQuery.data?.total },
+    { key: "notifications" as const, label: "通知设置", icon: Bell, count: statesQuery.data?.total },
   ]
 
   return (
@@ -652,7 +668,7 @@ export function SignalsPage({
       </header>
 
       <Tabs value={section} onValueChange={(value) => setSection(value as SectionKey)}>
-        <TabsList className="grid h-auto w-full grid-cols-1 sm:grid-cols-3" aria-label="信号中心分区">
+        <TabsList className="grid h-auto w-full grid-cols-1 sm:grid-cols-4" aria-label="信号中心分区">
           {sections.map(({ key, label, icon: Icon, count }) => (
             <TabsTrigger className="justify-between px-4 py-3" value={key} key={key}>
               <span className="flex items-center gap-2"><Icon aria-hidden="true" />{label}</span>
@@ -666,12 +682,162 @@ export function SignalsPage({
         <StatesSection setPage={setStatePage} query={statesQuery} />
       ) : section === "events" ? (
         <EventsSection setPage={setEventPage} query={eventsQuery} />
-      ) : (
+      ) : section === "evaluations" ? (
         <EvaluationsSection
           setPage={setEvaluationPage}
           query={evaluationsQuery}
         />
+      ) : (
+        <SignalNotificationSettings
+          states={statesQuery.data?.items ?? []}
+          gateway={notifications}
+        />
       )}
     </main>
+  )
+}
+
+function SignalNotificationSettings({
+  states,
+  gateway,
+}: {
+  states: SignalState[]
+  gateway: NotificationGateway
+}) {
+  const queryClient = useQueryClient()
+  const [selectedState, setSelectedState] = useState<SignalState | null>(null)
+  const [selectionDraft, setSelectionDraft] = useState<string[] | null>(null)
+  const recipients = useQuery({
+    queryKey: ["notifications", "recipients", "enabled"],
+    queryFn: () => gateway.loadRecipients(true),
+  })
+  const binding = useQuery({
+    queryKey: ["notifications", "binding", selectedState?.subscription_id],
+    queryFn: () => gateway.loadSignalBinding(selectedState!.subscription_id),
+    enabled: Boolean(selectedState),
+  })
+  const selection = selectionDraft ?? binding.data?.recipientIds ?? []
+  const save = useMutation({
+    mutationFn: (current: SignalNotificationBinding) =>
+      gateway.updateSignalBinding({ ...current, recipientIds: selection }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ["notifications", "binding"],
+      })
+      setSelectedState(null)
+    },
+  })
+
+  if (recipients.isPending) return <SectionLoading label="通知设置" />
+  if (recipients.isError || !recipients.data) {
+    return (
+      <SectionFailure
+        title="通知设置"
+        error={recipients.error}
+        retry={() => void recipients.refetch()}
+      />
+    )
+  }
+  return (
+    <section className="space-y-4">
+      <Alert>
+        <Bell />
+        <AlertTitle>信号通知对象</AlertTitle>
+        <AlertDescription>
+          选择保存后只影响之后产生的新信号。通知对象在通知中心统一维护。
+        </AlertDescription>
+      </Alert>
+      {recipients.data.length === 0 ? (
+        <EmptyState
+          title="还没有可用通知对象"
+          description="请先到通知中心添加并启用邮箱或企业微信对象。"
+        />
+      ) : states.length === 0 ? (
+        <EmptyState
+          title="还没有信号订阅"
+          description="监控股票产生状态后，可在这里配置通知对象。"
+        />
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {states.map((state) => (
+            <Card key={state.subscription_id}>
+              <CardContent className="flex items-center justify-between gap-4">
+                <div>
+                  <p className="font-medium">监控订阅</p>
+                  <code className="text-xs text-muted-foreground">
+                    {shortId(state.subscription_id)}
+                  </code>
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSelectionDraft(null)
+                    setSelectedState(state)
+                  }}
+                >
+                  <Bell />配置通知对象
+                </Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+      <Dialog
+        open={Boolean(selectedState)}
+        onOpenChange={(open) => {
+          if (!open) setSelectedState(null)
+        }}
+      >
+        <DialogContent>
+          <DialogTitle>选择通知对象</DialogTitle>
+          <DialogDescription>
+            同一信号可以同时通知多个邮箱、机器人或企业成员。
+          </DialogDescription>
+          {binding.isPending ? (
+            <SectionLoading label="当前通知设置" />
+          ) : (
+            <div className="space-y-2">
+              {recipients.data.map((recipient) => (
+                <label
+                  key={recipient.id}
+                  className="flex cursor-pointer items-center gap-3 rounded-md border p-3"
+                >
+                  <Checkbox
+                    checked={selection.includes(recipient.id)}
+                    onCheckedChange={(checked) =>
+                      setSelectionDraft((currentDraft) => {
+                        const current = currentDraft ?? binding.data?.recipientIds ?? []
+                        return (
+                        checked
+                          ? [...current, recipient.id]
+                          : current.filter((id) => id !== recipient.id)
+                        )
+                      })
+                    }
+                  />
+                  <span className="flex-1">
+                    <strong className="block text-sm">{recipient.name}</strong>
+                    <span className="text-xs text-muted-foreground">
+                      {recipient.destination}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedState(null)}>
+              取消
+            </Button>
+            <Button
+              disabled={!binding.data || selection.length === 0 || save.isPending}
+              onClick={() => binding.data && save.mutate(binding.data)}
+            >
+              <Bell />保存通知对象
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </section>
   )
 }

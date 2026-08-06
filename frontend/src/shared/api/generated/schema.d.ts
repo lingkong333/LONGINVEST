@@ -1360,6 +1360,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notifications/recipients": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Recipients */
+        get: operations["list_recipients_api_v1_notifications_recipients_get"];
+        put?: never;
+        /** Create Recipient */
+        post: operations["create_recipient_api_v1_notifications_recipients_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/recipients/{recipient_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Recipient */
+        patch: operations["update_recipient_api_v1_notifications_recipients__recipient_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/notifications/recipients/{recipient_id}/enable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Enable Recipient */
+        post: operations["enable_recipient_api_v1_notifications_recipients__recipient_id__enable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/recipients/{recipient_id}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Disable Recipient */
+        post: operations["disable_recipient_api_v1_notifications_recipients__recipient_id__disable_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/recipients/{recipient_id}/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Test Recipient */
+        post: operations["test_recipient_api_v1_notifications_recipients__recipient_id__test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notifications/signal-bindings/{subscription_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Signal Binding */
+        get: operations["get_signal_binding_api_v1_notifications_signal_bindings__subscription_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /** Update Signal Binding */
+        patch: operations["update_signal_binding_api_v1_notifications_signal_bindings__subscription_id__patch"];
+        trace?: never;
+    };
     "/api/v1/notifications/events": {
         parameters: {
             query?: never;
@@ -6910,6 +7014,79 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
+        /** RecipientCreateRequest */
+        RecipientCreateRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Name */
+            name: string;
+            recipient_type: components["schemas"]["RecipientType"];
+            /**
+             * Destination
+             * @default
+             */
+            destination: string;
+            /**
+             * Config
+             * @default {}
+             */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Secret */
+            secret?: string | null;
+        };
+        /** RecipientStateRequest */
+        RecipientStateRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** RecipientTestRequest */
+        RecipientTestRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Message */
+            message: string;
+        };
+        /**
+         * RecipientType
+         * @enum {string}
+         */
+        RecipientType: "EMAIL" | "WECOM_ROBOT" | "WECOM_USER";
+        /** RecipientUpdateRequest */
+        RecipientUpdateRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Name */
+            name: string;
+            recipient_type: components["schemas"]["RecipientType"];
+            /**
+             * Destination
+             * @default
+             */
+            destination: string;
+            /**
+             * Config
+             * @default {}
+             */
+            config: {
+                [key: string]: unknown;
+            };
+            /** Secret */
+            secret?: string | null;
+            /** Expected Version */
+            expected_version: number;
+        };
         /** RemoveItemBody */
         RemoveItemBody: {
             /** Reason */
@@ -7801,6 +7978,17 @@ export interface components {
             confirm: boolean;
             /** Reason */
             reason: string;
+            /** Expected Version */
+            expected_version: number;
+        };
+        /** SignalBindingRequest */
+        SignalBindingRequest: {
+            /** Reason */
+            reason: string;
+            /** Confirm */
+            confirm: boolean;
+            /** Recipient Ids */
+            recipient_ids: string[];
             /** Expected Version */
             expected_version: number;
         };
@@ -12411,6 +12599,288 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_recipients_api_v1_notifications_recipients_get: {
+        parameters: {
+            query?: {
+                enabled_only?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_recipient_api_v1_notifications_recipients_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipientCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_recipient_api_v1_notifications_recipients__recipient_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipientUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    enable_recipient_api_v1_notifications_recipients__recipient_id__enable_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipientStateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    disable_recipient_api_v1_notifications_recipients__recipient_id__disable_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipientStateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    test_recipient_api_v1_notifications_recipients__recipient_id__test_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                recipient_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipientTestRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_signal_binding_api_v1_notifications_signal_bindings__subscription_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_signal_binding_api_v1_notifications_signal_bindings__subscription_id__patch: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                subscription_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignalBindingRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SuccessEnvelope"];
                 };
             };
             /** @description Validation Error */

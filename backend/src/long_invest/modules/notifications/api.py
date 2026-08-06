@@ -29,6 +29,12 @@ from long_invest.modules.notifications.permissions import (
     notification_policy_allowed_actions,
     notification_template_allowed_actions,
 )
+from long_invest.modules.notifications.recipients import (
+    NotificationRecipientApplication,
+    RecipientInput,
+    RecipientType,
+    get_notification_recipient_application,
+)
 from long_invest.modules.notifications.template_catalog import GIT_TEMPLATE_REGISTRY
 from long_invest.modules.notifications.templates import StrictTemplateRenderer
 from long_invest.modules.settings.application import (
@@ -45,6 +51,10 @@ Application = Annotated[
 ]
 SettingsApplicationDependency = Annotated[
     SettingsApplication, Depends(get_settings_application)
+]
+RecipientApplication = Annotated[
+    NotificationRecipientApplication,
+    Depends(get_notification_recipient_application),
 ]
 ReadIdentity = Annotated[AuthenticatedRequest, Depends(require_authenticated_request)]
 WriteIdentity = Annotated[AuthenticatedRequest, Depends(require_verified_write_request)]
@@ -94,6 +104,31 @@ class ChannelTestRequest(MutationRequest):
 class SettingMutationRequest(MutationRequest):
     value: dict[str, Any]
     expected_version: int = Field(ge=1)
+
+
+class RecipientCreateRequest(MutationRequest):
+    name: str = Field(min_length=1, max_length=100)
+    recipient_type: RecipientType
+    destination: str = Field(default="", max_length=200)
+    config: dict[str, Any] = {}
+    secret: str | None = Field(default=None, max_length=2000)
+
+
+class RecipientUpdateRequest(RecipientCreateRequest):
+    expected_version: int = Field(ge=1)
+
+
+class RecipientStateRequest(MutationRequest):
+    expected_version: int = Field(ge=1)
+
+
+class RecipientTestRequest(MutationRequest):
+    message: str = Field(min_length=1, max_length=1000)
+
+
+class SignalBindingRequest(MutationRequest):
+    recipient_ids: tuple[UUID, ...] = Field(min_length=1, max_length=20)
+    expected_version: int = Field(ge=0)
 
 
 class TemplateVersionData(BaseModel):
@@ -166,6 +201,148 @@ _CHANNEL_SECRET_KEYS = {
     DeliveryChannel.WECOM: "notification.wecom.webhook",
     DeliveryChannel.EMAIL: "notification.email.password",
 }
+
+
+@router.get("/api/v1/notifications/recipients", response_model=SuccessEnvelope)
+async def list_recipients(
+    application: RecipientApplication,
+    _identity: ReadIdentity,
+    enabled_only: bool = False,
+):
+    rows = await application.list_recipients(enabled_only=enabled_only)
+    return success_response(data={"items": [_recipient(row) for row in rows]})
+
+
+@router.post("/api/v1/notifications/recipients", response_model=SuccessEnvelope)
+async def create_recipient(
+    body: RecipientCreateRequest,
+    application: RecipientApplication,
+    _identity: WriteIdentity,
+    _idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    row = await application.create(_recipient_input(body))
+    return success_response(data=_recipient(row), code="NOTIFICATION_RECIPIENT_CREATED")
+
+
+@router.patch(
+    "/api/v1/notifications/recipients/{recipient_id}", response_model=SuccessEnvelope
+)
+async def update_recipient(
+    recipient_id: UUID,
+    body: RecipientUpdateRequest,
+    application: RecipientApplication,
+    _identity: WriteIdentity,
+    _idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    row = await application.update(
+        recipient_id, _recipient_input(body), body.expected_version
+    )
+    return success_response(data=_recipient(row), code="NOTIFICATION_RECIPIENT_UPDATED")
+
+
+@router.post(
+    "/api/v1/notifications/recipients/{recipient_id}/enable",
+    response_model=SuccessEnvelope,
+)
+async def enable_recipient(
+    recipient_id: UUID,
+    body: RecipientStateRequest,
+    application: RecipientApplication,
+    _identity: WriteIdentity,
+    _idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    row = await application.set_enabled(recipient_id, True, body.expected_version)
+    return success_response(
+        data=_recipient(row), code="NOTIFICATION_RECIPIENT_STATE_CHANGED"
+    )
+
+
+@router.post(
+    "/api/v1/notifications/recipients/{recipient_id}/disable",
+    response_model=SuccessEnvelope,
+)
+async def disable_recipient(
+    recipient_id: UUID,
+    body: RecipientStateRequest,
+    application: RecipientApplication,
+    _identity: WriteIdentity,
+    _idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    row = await application.set_enabled(recipient_id, False, body.expected_version)
+    return success_response(
+        data=_recipient(row), code="NOTIFICATION_RECIPIENT_STATE_CHANGED"
+    )
+
+
+@router.post(
+    "/api/v1/notifications/recipients/{recipient_id}/test",
+    response_model=SuccessEnvelope,
+)
+async def test_recipient(
+    recipient_id: UUID,
+    body: RecipientTestRequest,
+    application: RecipientApplication,
+    _identity: WriteIdentity,
+    _idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    result = await application.test(recipient_id, message=body.message)
+    return success_response(
+        data=result.as_safe_dict(), code="NOTIFICATION_RECIPIENT_TESTED"
+    )
+
+
+@router.get(
+    "/api/v1/notifications/signal-bindings/{subscription_id}",
+    response_model=SuccessEnvelope,
+)
+async def get_signal_binding(
+    subscription_id: UUID,
+    application: RecipientApplication,
+    _identity: ReadIdentity,
+):
+    row = await application.get_binding(subscription_id)
+    return success_response(
+        data={
+            "subscription_id": subscription_id,
+            "recipient_ids": [] if row is None else row.recipient_ids,
+            "version": 0 if row is None else row.version,
+            "updated_at": None if row is None else row.updated_at,
+        }
+    )
+
+
+@router.patch(
+    "/api/v1/notifications/signal-bindings/{subscription_id}",
+    response_model=SuccessEnvelope,
+)
+async def update_signal_binding(
+    subscription_id: UUID,
+    body: SignalBindingRequest,
+    application: RecipientApplication,
+    identity: WriteIdentity,
+    _idempotency_key: IdempotencyKey,
+):
+    _confirm(body.confirm)
+    row = await application.update_binding(
+        subscription_id,
+        body.recipient_ids,
+        body.expected_version,
+        str(identity.user.id),
+    )
+    return success_response(
+        data={
+            "subscription_id": row.subscription_id,
+            "recipient_ids": row.recipient_ids,
+            "version": row.version,
+            "updated_at": row.updated_at,
+        },
+        code="SIGNAL_NOTIFICATION_BINDING_UPDATED",
+    )
 
 
 @router.get("/api/v1/notification-events", response_model=SuccessEnvelope)
@@ -678,6 +855,32 @@ def _page(value, serializer):
     }
 
 
+def _recipient_input(body: RecipientCreateRequest) -> RecipientInput:
+    return RecipientInput(
+        name=body.name,
+        recipient_type=body.recipient_type,
+        destination=body.destination,
+        config=body.config,
+        secret=body.secret,
+    )
+
+
+def _recipient(item) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "recipient_type": item.recipient_type,
+        "destination": item.destination,
+        "config": item.config,
+        "secret_configured": item.secret_ciphertext is not None,
+        "secret_fingerprint": item.secret_fingerprint,
+        "enabled": item.enabled,
+        "version": item.version,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
 def _circuit(channel: DeliveryChannel, snapshot) -> dict[str, Any]:
     return {
         "channel": channel,
@@ -714,6 +917,9 @@ def _delivery(item):
         "event_id": item.event_id,
         "generation": item.generation,
         "channel": item.channel,
+        "recipient_id": item.recipient_id,
+        "recipient_name": item.recipient_name,
+        "recipient_type": item.recipient_type,
         "config_version": item.config_version,
         "target_fingerprint": item.target_fingerprint,
         "status": status,

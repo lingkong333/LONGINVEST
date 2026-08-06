@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     UniqueConstraint,
     func,
@@ -26,6 +27,68 @@ from long_invest.modules.notifications.contracts import (
 from long_invest.modules.notifications.delivery import CircuitState
 from long_invest.modules.notifications.security import validate_notification_payload
 from long_invest.platform.database.base import Base
+
+
+class NotificationRecipient(Base):
+    __tablename__ = "notification_recipient"
+    __table_args__ = (
+        UniqueConstraint("recipient_type", "name"),
+        CheckConstraint(
+            "recipient_type IN ('EMAIL','WECOM_ROBOT','WECOM_USER')",
+            name="recipient_type_valid",
+        ),
+        CheckConstraint("version > 0", name="version_positive"),
+        Index("ix_notification_recipient_enabled", "enabled", "recipient_type"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True, default=uuid4
+    )
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    recipient_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    destination: Mapped[str] = mapped_column(String(200), nullable=False)
+    config: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    secret_ciphertext: Mapped[bytes | None] = mapped_column(LargeBinary)
+    secret_fingerprint: Mapped[str | None] = mapped_column(String(32))
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+
+
+class SignalNotificationBinding(Base):
+    __tablename__ = "signal_notification_binding"
+    __table_args__ = (CheckConstraint("version > 0", name="version_positive"),)
+
+    subscription_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), primary_key=True
+    )
+    recipient_ids: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    version: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default="1"
+    )
+    updated_by_user_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class NotificationEvent(Base):
@@ -201,7 +264,7 @@ class NotificationChannelCircuit(Base):
 class NotificationDelivery(Base):
     __tablename__ = "notification_delivery"
     __table_args__ = (
-        UniqueConstraint("event_id", "channel", "generation"),
+        UniqueConstraint("event_id", "recipient_id", "channel", "generation"),
         UniqueConstraint("lease_token"),
         CheckConstraint("generation > 0", name="generation_positive"),
         CheckConstraint("attempt_count >= 0", name="attempt_count_nonnegative"),
@@ -250,6 +313,12 @@ class NotificationDelivery(Base):
         server_default="1",
     )
     channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    recipient_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True),
+        ForeignKey("notification_recipient.id", ondelete="RESTRICT"),
+    )
+    recipient_name: Mapped[str | None] = mapped_column(String(100))
+    recipient_type: Mapped[str | None] = mapped_column(String(20))
     config_version: Mapped[int] = mapped_column(Integer, nullable=False)
     target_fingerprint: Mapped[str] = mapped_column(String(100), nullable=False)
     status: Mapped[str] = mapped_column(

@@ -1,10 +1,12 @@
 import { z } from "zod"
 
 import type {
+  DeliveryChannel,
   NotificationAction,
   NotificationChannel,
   NotificationGateway,
   NotificationPolicy,
+  NotificationRecipient,
   PolicyScope,
 } from "@/features/notifications/types"
 import {
@@ -25,6 +27,7 @@ const actionSchema = z.enum([
   "ACTIVATE",
 ])
 const channelSchema = z.enum(["WECOM", "EMAIL"])
+const recipientTypeSchema = z.enum(["EMAIL", "WECOM_ROBOT", "WECOM_USER"])
 const actionsSchema = z.array(actionSchema).optional().default([])
 
 const pageFields = {
@@ -44,8 +47,8 @@ const eventPageSchema = z.object({
     status: z.string(),
     eligibility_status: z.string(),
     suppression_reason: z.string().nullable(),
-    effective_channels: z.array(channelSchema),
-    template_version: z.string(),
+    effective_channels: z.array(z.string()).catch([]),
+    template_version: z.string().nullable().optional().default("v1"),
     created_at: z.string(),
     allowed_actions: actionsSchema,
   })),
@@ -58,6 +61,9 @@ const deliveryPageSchema = z.object({
     event_id: z.string(),
     generation: z.number().int().positive(),
     channel: channelSchema,
+    recipient_id: z.string().nullable().optional().default(null),
+    recipient_name: z.string().nullable().optional().default(null),
+    recipient_type: recipientTypeSchema.nullable().optional().default(null),
     target_fingerprint: z.string(),
     status: z.string(),
     attempt_count: z.number().int().nonnegative(),
@@ -133,6 +139,29 @@ const previewSchema = z.object({
   subject: z.string().nullable().optional(),
   text: z.string(),
   html: z.string().nullable().optional(),
+})
+
+const recipientsSchema = z.object({
+  items: z.array(z.object({
+    id: z.string(),
+    name: z.string(),
+    recipient_type: recipientTypeSchema,
+    destination: z.string(),
+    config: z.record(z.string(), z.unknown()),
+    secret_configured: z.boolean(),
+    secret_fingerprint: z.string().nullable(),
+    enabled: z.boolean(),
+    version: z.number().int().positive(),
+    created_at: z.string(),
+    updated_at: z.string(),
+  })),
+})
+
+const bindingSchema = z.object({
+  subscription_id: z.string(),
+  recipient_ids: z.array(z.string()),
+  version: z.number().int().nonnegative(),
+  updated_at: z.string().nullable(),
 })
 
 function parse<T>(schema: z.ZodType<T>, value: unknown, code: string): T {
@@ -213,6 +242,119 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
   const api = createApiClient<paths>({ baseUrl })
 
   return {
+    async loadRecipients(enabledOnly = false) {
+      const value = parse(
+        recipientsSchema,
+        await api.request<unknown>(api.client.GET(
+          "/api/v1/notifications/recipients",
+          { params: { query: { enabled_only: enabledOnly } } },
+        )),
+        "INVALID_NOTIFICATION_RECIPIENTS",
+      )
+      return value.items.map((item): NotificationRecipient => ({
+        id: item.id,
+        name: item.name,
+        recipientType: item.recipient_type,
+        destination: item.destination,
+        config: item.config,
+        secretConfigured: item.secret_configured,
+        secretFingerprint: item.secret_fingerprint,
+        enabled: item.enabled,
+        version: item.version,
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+      }))
+    },
+    async createRecipient(input) {
+      await api.request(api.client.POST("/api/v1/notifications/recipients", {
+        params: { header: { "Idempotency-Key": createClientIdempotencyKey() } },
+        body: {
+          name: input.name,
+          recipient_type: input.recipientType,
+          destination: input.destination,
+          config: input.config,
+          secret: input.secret,
+          reason: "新增通知对象",
+          confirm: true,
+        },
+      }))
+    },
+    async updateRecipient(id, input) {
+      await api.request(api.client.PATCH(
+        "/api/v1/notifications/recipients/{recipient_id}",
+        {
+          params: { path: { recipient_id: id }, header: { "Idempotency-Key": createClientIdempotencyKey() } },
+          body: {
+            name: input.name,
+            recipient_type: input.recipientType,
+            destination: input.destination,
+            config: input.config,
+            secret: input.secret,
+            expected_version: input.expectedVersion,
+            reason: "更新通知对象",
+            confirm: true,
+          },
+        },
+      ))
+    },
+    async setRecipientEnabled(id, enabled, expectedVersion) {
+      const params = {
+        params: { path: { recipient_id: id }, header: { "Idempotency-Key": createClientIdempotencyKey() } },
+        body: {
+          expected_version: expectedVersion,
+          reason: enabled ? "启用通知对象" : "停用通知对象",
+          confirm: true as const,
+        },
+      }
+      await api.request(enabled
+        ? api.client.POST(
+            "/api/v1/notifications/recipients/{recipient_id}/enable",
+            params,
+          )
+        : api.client.POST(
+            "/api/v1/notifications/recipients/{recipient_id}/disable",
+            params,
+          ))
+    },
+    async testRecipient(id, message) {
+      await api.request(api.client.POST(
+        "/api/v1/notifications/recipients/{recipient_id}/test",
+        {
+          params: { path: { recipient_id: id }, header: { "Idempotency-Key": createClientIdempotencyKey() } },
+          body: { message, reason: "测试通知对象", confirm: true },
+        },
+      ))
+    },
+    async loadSignalBinding(subscriptionId) {
+      const value = parse(
+        bindingSchema,
+        await api.request<unknown>(api.client.GET(
+          "/api/v1/notifications/signal-bindings/{subscription_id}",
+          { params: { path: { subscription_id: subscriptionId } } },
+        )),
+        "INVALID_SIGNAL_NOTIFICATION_BINDING",
+      )
+      return {
+        subscriptionId: value.subscription_id,
+        recipientIds: value.recipient_ids,
+        version: value.version,
+        updatedAt: value.updated_at,
+      }
+    },
+    async updateSignalBinding(input) {
+      await api.request(api.client.PATCH(
+        "/api/v1/notifications/signal-bindings/{subscription_id}",
+        {
+          params: { path: { subscription_id: input.subscriptionId }, header: { "Idempotency-Key": createClientIdempotencyKey() } },
+          body: {
+            recipient_ids: input.recipientIds,
+            expected_version: input.version,
+            reason: "更新信号通知对象",
+            confirm: true,
+          },
+        },
+      ))
+    },
     async loadEvents() {
       const value = parse(
         eventPageSchema,
@@ -232,8 +374,10 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
           status: item.status,
           eligibilityStatus: item.eligibility_status,
           suppressionReason: item.suppression_reason,
-          effectiveChannels: item.effective_channels,
-          templateVersion: item.template_version,
+          effectiveChannels: item.effective_channels.filter(
+            (channel): channel is DeliveryChannel => channel === "WECOM" || channel === "EMAIL",
+          ),
+          templateVersion: item.template_version ?? "v1",
           createdAt: item.created_at,
           allowedActions: item.allowed_actions,
         })),
@@ -257,6 +401,9 @@ export function createNotificationGateway(baseUrl = ""): NotificationGateway {
           eventId: item.event_id,
           generation: item.generation,
           channel: item.channel,
+          recipientId: item.recipient_id,
+          recipientName: item.recipient_name,
+          recipientType: item.recipient_type,
           targetFingerprint: item.target_fingerprint,
           status: item.status,
           attemptCount: item.attempt_count,

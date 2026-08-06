@@ -232,3 +232,89 @@ class WeComRobotChannel:
 
 class _ResponseTooLarge(Exception):
     pass
+
+
+class WeComUserChannel:
+    """Send an application message to one configured enterprise member."""
+
+    channel = DeliveryChannel.WECOM
+
+    def __init__(
+        self,
+        *,
+        corp_id: str,
+        agent_id: str,
+        app_secret: str,
+        user_id: str,
+        client: httpx.AsyncClient,
+        renderer: StrictTemplateRenderer | None = None,
+    ) -> None:
+        if not all(value.strip() for value in (corp_id, agent_id, app_secret, user_id)):
+            raise ValueError("enterprise WeCom application configuration is incomplete")
+        self._corp_id = corp_id
+        self._agent_id = int(agent_id)
+        self._app_secret = app_secret
+        self._user_id = user_id
+        self._client = client
+        self._renderer = renderer or StrictTemplateRenderer()
+
+    def render(
+        self, template: TemplateDefinition, variables: dict[str, Any]
+    ) -> RenderedTemplate:
+        return self._renderer.render(template, variables)
+
+    async def send(self, request: ChannelSendRequest) -> ChannelResult:
+        try:
+            token_response = await self._client.get(
+                "https://qyapi.weixin.qq.com/cgi-bin/gettoken",
+                params={"corpid": self._corp_id, "corpsecret": self._app_secret},
+            )
+            token_value = token_response.json()
+            token = (
+                token_value.get("access_token")
+                if isinstance(token_value, dict)
+                else None
+            )
+            if token_response.status_code != 200 or not token:
+                return ChannelResult.permanent_failure(
+                    code="WECOM_USER_AUTH_FAILED",
+                    summary="enterprise WeCom application authentication failed",
+                )
+            response = await self._client.post(
+                "https://qyapi.weixin.qq.com/cgi-bin/message/send",
+                params={"access_token": token},
+                json={
+                    "touser": self._user_id,
+                    "msgtype": "text",
+                    "agentid": self._agent_id,
+                    "text": {"content": request.text},
+                    "safe": 0,
+                },
+            )
+            value = response.json()
+        except (httpx.HTTPError, ValueError, TypeError):
+            return ChannelResult.temporary_failure(
+                code="WECOM_USER_REQUEST_FAILED",
+                summary="enterprise WeCom application request failed",
+            )
+        code = value.get("errcode") if isinstance(value, dict) else None
+        if response.status_code == 200 and code == 0:
+            return ChannelResult.success(
+                summary="enterprise WeCom accepted the user notification"
+            )
+        if (
+            response.status_code == 429
+            or response.status_code >= 500
+            or code in _TRANSIENT_BUSINESS_CODES
+        ):
+            return ChannelResult.temporary_failure(
+                code="WECOM_USER_RETRYABLE",
+                summary="enterprise WeCom is temporarily unavailable",
+            )
+        return ChannelResult.permanent_failure(
+            code="WECOM_USER_REJECTED",
+            summary="enterprise WeCom rejected the user notification",
+        )
+
+    async def test(self, request: ChannelSendRequest) -> ChannelResult:
+        return await self.send(request)

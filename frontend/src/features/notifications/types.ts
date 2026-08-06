@@ -11,6 +11,28 @@ export type NotificationAction =
 export type DeliveryChannel = "WECOM" | "EMAIL"
 export type PolicyScope = "global" | "signals" | "system-alerts"
 export type CircuitState = "CLOSED" | "OPEN" | "HALF_OPEN" | "DISABLED"
+export type RecipientType = "EMAIL" | "WECOM_ROBOT" | "WECOM_USER"
+
+export interface NotificationRecipient {
+  id: string
+  name: string
+  recipientType: RecipientType
+  destination: string
+  config: Record<string, unknown>
+  secretConfigured: boolean
+  secretFingerprint: string | null
+  enabled: boolean
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface SignalNotificationBinding {
+  subscriptionId: string
+  recipientIds: string[]
+  version: number
+  updatedAt: string | null
+}
 
 export interface PageResult<T> {
   items: T[]
@@ -40,6 +62,9 @@ export interface NotificationDelivery {
   eventId: string
   generation: number
   channel: DeliveryChannel
+  recipientId: string | null
+  recipientName: string | null
+  recipientType: RecipientType | null
   targetFingerprint: string
   status: string
   attemptCount: number
@@ -113,6 +138,13 @@ export interface TemplatePreview {
 }
 
 export interface NotificationGateway {
+  loadRecipients(enabledOnly?: boolean): Promise<NotificationRecipient[]>
+  createRecipient(input: RecipientMutationInput): Promise<void>
+  updateRecipient(id: string, input: RecipientMutationInput & { expectedVersion: number }): Promise<void>
+  setRecipientEnabled(id: string, enabled: boolean, expectedVersion: number): Promise<void>
+  testRecipient(id: string, message: string): Promise<void>
+  loadSignalBinding(subscriptionId: string): Promise<SignalNotificationBinding>
+  updateSignalBinding(input: SignalNotificationBinding): Promise<void>
   loadEvents(): Promise<PageResult<NotificationEvent>>
   loadDeliveries(): Promise<PageResult<NotificationDelivery>>
   loadAttempts(deliveryId: string): Promise<PageResult<NotificationAttempt>>
@@ -139,4 +171,12 @@ export interface NotificationGateway {
     variables: Record<string, unknown>
   }): Promise<TemplatePreview>
   activateTemplate(template: NotificationTemplate, reason: string): Promise<void>
+}
+
+export interface RecipientMutationInput {
+  name: string
+  recipientType: RecipientType
+  destination: string
+  config: Record<string, unknown>
+  secret: string | null
 }

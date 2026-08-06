@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 
@@ -20,12 +20,13 @@ from long_invest.modules.notifications.contracts import (
 )
 from long_invest.modules.notifications.eligibility import EligibilityDecision
 from long_invest.modules.notifications.email import SmtpEmailChannel
+from long_invest.modules.notifications.models import NotificationRecipient
 from long_invest.modules.notifications.repository import NotificationRepository
 from long_invest.modules.notifications.security import SecretReferenceValue
 from long_invest.modules.notifications.service import DeliveryLease, NotificationService
 from long_invest.modules.notifications.targets import target_fingerprint
 from long_invest.modules.notifications.template_catalog import GIT_TEMPLATE_REGISTRY
-from long_invest.modules.notifications.wecom import WeComRobotChannel
+from long_invest.modules.notifications.wecom import WeComRobotChannel, WeComUserChannel
 from long_invest.modules.notifications.worker import (
     ClaimedNotificationDelivery,
     NotificationWorker,
@@ -101,8 +102,10 @@ class NotificationDeliveryRuntime:
                 )
                 return True
 
-        config, secret_status, secret = await self._load_channel(channel)
-        reviewer = self._reviewer(config, secret_status)
+        config, secret_status, secret, recipient = await self._load_channel(
+            channel, claimed.delivery.recipient_id
+        )
+        reviewer = self._reviewer(config, secret_status, recipient)
         eligibility = await reviewer(event, claimed.delivery)
         if not eligibility.eligible:
             async with self._database.transaction() as session:
@@ -122,7 +125,9 @@ class NotificationDeliveryRuntime:
             return EligibilityDecision(True, None, None)
 
         try:
-            async with self._build_channel(channel, config, secret) as sender:
+            async with self._build_channel(
+                channel, config, secret, recipient
+            ) as sender:
                 execution = await NotificationWorker(
                     channel=sender,
                     eligibility_reviewer=eligible,
@@ -183,7 +188,12 @@ class NotificationDeliveryRuntime:
     async def test_channel(
         self, channel: DeliveryChannel, *, message: str
     ) -> ChannelResult:
-        config, secret_status, secret = await self._load_channel(channel)
+        loaded = await self._load_channel(channel)
+        if len(loaded) == 3:
+            config, secret_status, secret = loaded
+            recipient = None
+        else:
+            config, secret_status, secret, recipient = loaded
         if not config["value"]["enabled"] or not secret_status["configured"]:
             return ChannelResult.permanent_failure(
                 code="NOTIFICATION_CHANNEL_DISABLED",
@@ -191,7 +201,7 @@ class NotificationDeliveryRuntime:
             )
         event_id = str(uuid4())
         definition = GIT_TEMPLATE_REGISTRY.resolve("notification.test", "v1")
-        async with self._build_channel(channel, config, secret) as sender:
+        async with self._build_channel(channel, config, secret, recipient) as sender:
             rendered = sender.render(
                 definition,
                 {"message": message, "event_id": event_id},
@@ -200,6 +210,45 @@ class NotificationDeliveryRuntime:
                 ChannelSendRequest(
                     event_id=event_id,
                     deterministic_message_id=f"notification-test:{event_id}",
+                    subject=rendered.subject,
+                    text=rendered.text,
+                    html=rendered.html,
+                )
+            )
+
+    async def test_recipient(
+        self, recipient_id: UUID, *, message: str
+    ) -> ChannelResult:
+        async with self._database.session() as session:
+            recipient = await session.get(NotificationRecipient, recipient_id)
+        if recipient is None or not recipient.enabled:
+            return ChannelResult.permanent_failure(
+                code="NOTIFICATION_RECIPIENT_DISABLED",
+                summary="notification recipient is missing or disabled",
+            )
+        channel = (
+            DeliveryChannel.EMAIL
+            if recipient.recipient_type == "EMAIL"
+            else DeliveryChannel.WECOM
+        )
+        config, secret_status, secret, recipient = await self._load_channel(
+            channel, recipient_id
+        )
+        if not secret_status["configured"]:
+            return ChannelResult.permanent_failure(
+                code="NOTIFICATION_CHANNEL_DISABLED",
+                summary="notification channel is incomplete",
+            )
+        event_id = str(uuid4())
+        definition = GIT_TEMPLATE_REGISTRY.resolve("notification.test", "v1")
+        async with self._build_channel(channel, config, secret, recipient) as sender:
+            rendered = sender.render(
+                definition, {"message": message, "event_id": event_id}
+            )
+            return await sender.test(
+                ChannelSendRequest(
+                    event_id=event_id,
+                    deterministic_message_id=f"notification-recipient-test:{event_id}",
                     subject=rendered.subject,
                     text=rendered.text,
                     html=rendered.html,
@@ -263,7 +312,9 @@ class NotificationDeliveryRuntime:
                 now=datetime.now(UTC),
             )
 
-    async def _load_channel(self, channel: DeliveryChannel):
+    async def _load_channel(
+        self, channel: DeliveryChannel, recipient_id: UUID | None = None
+    ):
         async with self._database.session() as session:
             service = transactional_settings_service(session, cipher=self._cipher)
             config = await service.get_setting(_CONFIG_KEYS[channel])
@@ -272,23 +323,51 @@ class NotificationDeliveryRuntime:
             secret = None
             if secret_status["configured"] and self._cipher is not None:
                 secret = await service.resolve_secret(_SECRET_KEYS[channel])
-            return config, secret_status, secret
+            recipient = None
+            if recipient_id is not None:
+                recipient = await session.get(NotificationRecipient, recipient_id)
+                if recipient is not None and recipient.recipient_type != "EMAIL":
+                    configured = recipient.secret_ciphertext is not None
+                    secret_status = {
+                        "configured": configured,
+                        "fingerprint": recipient.secret_fingerprint,
+                        "version": recipient.version,
+                    }
+                    secret = None
+                    if configured and self._cipher is not None:
+                        key = f"notification-recipient:{recipient.id}"
+                        secret = self._cipher.decrypt(key, recipient.secret_ciphertext)
+            return config, secret_status, secret, recipient
 
-    def _reviewer(self, config: dict[str, Any], secret: dict[str, Any]):
+    def _reviewer(
+        self,
+        config: dict[str, Any],
+        secret: dict[str, Any],
+        recipient: NotificationRecipient | None = None,
+    ):
         async def review(event, delivery) -> EligibilityDecision:
             if (
                 NotificationEventStatus(event.status)
                 is NotificationEventStatus.CANCELED
             ):
                 return EligibilityDecision(False, "EVENT_CANCELED", "CANCELED")
-            current_fingerprint = target_fingerprint(
-                DeliveryChannel(delivery.channel), config, secret
+            current_fingerprint = (
+                _recipient_fingerprint(recipient)
+                if recipient is not None
+                else target_fingerprint(
+                    DeliveryChannel(delivery.channel), config, secret
+                )
             )
             available = (
-                config["value"]["enabled"]
+                (
+                    recipient.enabled
+                    if recipient is not None
+                    else config["value"]["enabled"]
+                )
                 and secret["configured"]
                 and self._cipher is not None
-                and delivery.config_version == config["version"]
+                and delivery.config_version
+                == (recipient.version if recipient is not None else config["version"])
                 and delivery.target_fingerprint == current_fingerprint
             )
             if not available:
@@ -304,7 +383,7 @@ class NotificationDeliveryRuntime:
 
         return review
 
-    def _build_channel(self, channel, config, secret):
+    def _build_channel(self, channel, config, secret, recipient=None):
         if not secret:
             raise RuntimeError("notification channel secret is not configured")
         value = config["value"]
@@ -314,15 +393,24 @@ class NotificationDeliveryRuntime:
                 timeout=httpx.Timeout(value["timeout_seconds"]),
                 follow_redirects=False,
             )
-            sender = WeComRobotChannel(
-                config=WeComChannelConfig(
-                    config_version=config["version"],
-                    target_fingerprint="runtime",
-                    webhook_secret_ref=secret_ref,
-                ),
-                webhook_url=secret,
-                client=client,
-            )
+            if recipient is not None and recipient.recipient_type == "WECOM_USER":
+                sender = WeComUserChannel(
+                    corp_id=recipient.config["corp_id"],
+                    agent_id=recipient.config["agent_id"],
+                    app_secret=secret,
+                    user_id=recipient.destination,
+                    client=client,
+                )
+            else:
+                sender = WeComRobotChannel(
+                    config=WeComChannelConfig(
+                        config_version=config["version"],
+                        target_fingerprint="runtime",
+                        webhook_secret_ref=secret_ref,
+                    ),
+                    webhook_url=secret,
+                    client=client,
+                )
             return _AsyncChannelContext(sender, client=client)
         allowed_hosts = tuple(
             item.strip()
@@ -335,7 +423,9 @@ class NotificationDeliveryRuntime:
                 target_fingerprint="runtime",
                 password_secret_ref=secret_ref,
                 sender=value["sender"],
-                recipients=tuple(value["recipients"]),
+                recipients=(recipient.destination,)
+                if recipient is not None
+                else tuple(value["recipients"]),
             ),
             smtp_host=value["smtp_host"],
             smtp_port=value["smtp_port"],
@@ -363,3 +453,17 @@ class _AsyncChannelContext:
 
 def _lease(claimed):
     return DeliveryLease(claimed.delivery.id, claimed.lease_token)
+
+
+def _recipient_fingerprint(recipient: NotificationRecipient) -> str:
+    import hashlib
+    import json
+
+    value = {
+        "id": str(recipient.id),
+        "version": recipient.version,
+        "destination": recipient.destination,
+        "config": recipient.config,
+        "secret": recipient.secret_fingerprint,
+    }
+    return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()[:32]

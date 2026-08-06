@@ -47,6 +47,9 @@ class ChannelDeliveryTarget:
     channel: DeliveryChannel
     config_version: int
     target_fingerprint: str
+    recipient_id: UUID | None = None
+    recipient_name: str | None = None
+    recipient_type: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +131,9 @@ class NotificationService:
             status=status,
             eligibility_status=command.eligibility_status,
             suppression_reason=command.suppression_reason,
-            effective_channels=[target.channel for target in command.targets],
+            effective_channels=list(
+                dict.fromkeys(target.channel for target in command.targets)
+            ),
             template_version=definition.version,
             idempotency_key=command.idempotency_key,
             content_hash=content_hash,
@@ -147,12 +152,16 @@ class NotificationService:
             if not is_eligible:
                 continue
             state = delivery_states[target.channel]
+            target_key = target.recipient_id or target.channel.value
             deliveries.append(
                 NotificationDelivery(
                     id=uuid4(),
                     event_id=event_id,
                     generation=1,
                     channel=target.channel,
+                    recipient_id=target.recipient_id,
+                    recipient_name=target.recipient_name,
+                    recipient_type=target.recipient_type,
                     config_version=target.config_version,
                     target_fingerprint=target.target_fingerprint,
                     status=state.status,
@@ -160,9 +169,7 @@ class NotificationService:
                     unknown_compensation_count=0,
                     next_retry_at=state.next_retry_at,
                     circuit_deferred_until=state.circuit_deferred_until,
-                    deterministic_message_id=(
-                        f"notification:{event_id}:{target.channel.value}:1"
-                    ),
+                    deterministic_message_id=f"notification:{event_id}:{target_key}:1",
                 )
             )
         try:

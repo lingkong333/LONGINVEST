@@ -44,7 +44,10 @@ def test_notification_records_keep_business_channel_and_attempt_facts_separate()
         foreign_key.target_fullname
         for foreign_key in models.NotificationDeliveryAttempt.__table__.foreign_keys
     }
-    assert delivery_fks == {"notification_event.id"}
+    assert delivery_fks == {
+        "notification_event.id",
+        "notification_recipient.id",
+    }
     assert attempt_fks == {"notification_delivery.id"}
 
 
@@ -64,7 +67,7 @@ def test_notification_models_define_independent_idempotency_boundaries() -> None
         if isinstance(constraint, UniqueConstraint)
     }
 
-    assert ("event_id", "channel", "generation") in delivery_uniques
+    assert ("event_id", "recipient_id", "channel", "generation") in delivery_uniques
     assert ("delivery_id", "attempt_no") in attempt_uniques
 
 

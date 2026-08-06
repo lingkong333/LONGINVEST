@@ -39,6 +39,18 @@ function gateway(
   overrides: Partial<NotificationGateway> = {},
 ): NotificationGateway {
   return {
+    loadRecipients: vi.fn().mockResolvedValue([]),
+    createRecipient: vi.fn().mockResolvedValue(undefined),
+    updateRecipient: vi.fn().mockResolvedValue(undefined),
+    setRecipientEnabled: vi.fn().mockResolvedValue(undefined),
+    testRecipient: vi.fn().mockResolvedValue(undefined),
+    loadSignalBinding: vi.fn().mockResolvedValue({
+      subscriptionId: "subscription-1",
+      recipientIds: [],
+      version: 0,
+      updatedAt: null,
+    }),
+    updateSignalBinding: vi.fn().mockResolvedValue(undefined),
     loadEvents: vi.fn().mockResolvedValue({
       items: [{
         id: "event-1",
@@ -65,6 +77,9 @@ function gateway(
         eventId: "event-1",
         generation: 1,
         channel: "WECOM",
+        recipientId: null,
+        recipientName: null,
+        recipientType: null,
         targetFingerprint: "sha256:target",
         status: "SENT",
         attemptCount: 1,
@@ -162,8 +177,20 @@ function renderPage(notificationApi: NotificationGateway) {
 }
 
 describe("通知中心", () => {
+  it("默认管理通知对象并可选择邮箱或企业微信", async () => {
+    renderPage(gateway())
+
+    expect(await screen.findByText("还没有通知对象")).toBeInTheDocument()
+    await userEvent.click(screen.getAllByRole("button", { name: "添加通知对象" })[0])
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+    expect(screen.getByLabelText("名称")).toBeInTheDocument()
+    expect(screen.getByLabelText("邮箱地址")).toBeInTheDocument()
+  })
+
   it("展示冻结渠道和渠道级投递结果", async () => {
     renderPage(gateway())
+    await userEvent.click(screen.getByRole("tab", { name: "通知事件" }))
 
     expect(await screen.findByText("signal.high")).toBeInTheDocument()
     expect(screen.getByText("企业微信、邮件")).toBeInTheDocument()
@@ -179,6 +206,7 @@ describe("通知中心", () => {
         total: 0,
       }),
     }))
+    await userEvent.click(screen.getByRole("tab", { name: "通知事件" }))
 
     expect(await screen.findByText("暂无通知事件")).toBeInTheDocument()
   })

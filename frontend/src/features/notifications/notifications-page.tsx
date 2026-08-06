@@ -11,11 +11,14 @@ import {
   ListChecks,
   Mail,
   MessageSquareText,
+  Plus,
   Pencil,
   RefreshCw,
   RotateCcw,
   Save,
   Send,
+  UserRound,
+  UsersRound,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 
@@ -28,6 +31,9 @@ import type {
   NotificationGateway,
   NotificationChannel,
   NotificationPolicy,
+  NotificationRecipient,
+  RecipientMutationInput,
+  RecipientType,
   NotificationTemplate,
   PolicyScope,
 } from "@/features/notifications/types"
@@ -78,9 +84,10 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/shared/ui/tabs"
 import { Textarea } from "@/shared/ui/textarea"
 
-type View = "events" | "deliveries" | "channels" | "policies" | "templates"
+type View = "recipients" | "events" | "deliveries" | "channels" | "policies" | "templates"
 
 const views = [
+  { id: "recipients", label: "通知对象", icon: UsersRound },
   { id: "events", label: "通知事件", icon: BellRing },
   { id: "deliveries", label: "渠道投递", icon: Send },
   { id: "channels", label: "通知渠道", icon: Cable },
@@ -145,14 +152,14 @@ export function NotificationsPage({
   gateway?: NotificationGateway
 }) {
   const { invalidate } = useAuth()
-  const [view, setView] = useState<View>("events")
+  const [view, setView] = useState<View>("recipients")
 
   return (
     <Tabs value={view} onValueChange={(value) => setView(value as View)} className="contents">
     <main className="mx-auto flex w-full max-w-[1500px] flex-col gap-6 px-4 py-6 lg:px-8">
       <header className="grid gap-5 border-b pb-5 xl:grid-cols-[1fr_auto] xl:items-end">
         <h1 className="text-3xl font-semibold">通知中心</h1>
-        <TabsList className="max-w-full overflow-x-auto" aria-label="通知中心视图">
+        <TabsList className="grid h-auto w-full grid-cols-2 xl:w-auto xl:grid-cols-6" aria-label="通知中心视图">
           {views.map(({ id, label, icon: Icon }) => (
             <TabsTrigger
               key={id}
@@ -165,6 +172,7 @@ export function NotificationsPage({
         </TabsList>
       </header>
 
+      <TabsContent value="recipients"><RecipientsView gateway={gateway} onUnauthorized={invalidate} /></TabsContent>
       <TabsContent value="events"><EventsView gateway={gateway} onUnauthorized={invalidate} /></TabsContent>
       <TabsContent value="deliveries"><DeliveriesView gateway={gateway} onUnauthorized={invalidate} /></TabsContent>
       <TabsContent value="channels"><ChannelsView gateway={gateway} onUnauthorized={invalidate} /></TabsContent>
@@ -172,6 +180,156 @@ export function NotificationsPage({
       <TabsContent value="templates"><TemplatesView gateway={gateway} onUnauthorized={invalidate} /></TabsContent>
     </main>
     </Tabs>
+  )
+}
+
+const recipientLabels: Record<RecipientType, string> = {
+  EMAIL: "邮箱收件人",
+  WECOM_ROBOT: "企业微信机器人",
+  WECOM_USER: "企业微信企业用户",
+}
+
+const emptyRecipient: RecipientMutationInput = {
+  name: "",
+  recipientType: "EMAIL",
+  destination: "",
+  config: {},
+  secret: null,
+}
+
+function RecipientsView({
+  gateway,
+  onUnauthorized,
+}: {
+  gateway: NotificationGateway
+  onUnauthorized: () => void
+}) {
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState<NotificationRecipient | null>(null)
+  const [form, setForm] = useState<RecipientMutationInput>(emptyRecipient)
+  const [open, setOpen] = useState(false)
+  const query = useQuery({
+    queryKey: ["notifications", "recipients"],
+    queryFn: () => gateway.loadRecipients(),
+  })
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["notifications", "recipients"] })
+  const save = useMutation({
+    mutationFn: () => editing
+      ? gateway.updateRecipient(editing.id, { ...form, expectedVersion: editing.version })
+      : gateway.createRecipient(form),
+    onSuccess: () => {
+      setOpen(false)
+      void refresh()
+    },
+  })
+  const state = useMutation({
+    mutationFn: (item: NotificationRecipient) => gateway.setRecipientEnabled(
+      item.id,
+      !item.enabled,
+      item.version,
+    ),
+    onSuccess: () => void refresh(),
+  })
+  const test = useMutation({
+    mutationFn: (item: NotificationRecipient) => gateway.testRecipient(
+      item.id,
+      "LongInvest 通知对象连接测试",
+    ),
+  })
+
+  useEffect(() => {
+    const error = query.error ?? save.error ?? state.error ?? test.error
+    if (error instanceof ApiError && error.status === 401) onUnauthorized()
+  }, [onUnauthorized, query.error, save.error, state.error, test.error])
+
+  const begin = (item?: NotificationRecipient) => {
+    setEditing(item ?? null)
+    setForm(item ? {
+      name: item.name,
+      recipientType: item.recipientType,
+      destination: item.recipientType === "WECOM_ROBOT" ? "" : item.destination,
+      config: item.config,
+      secret: null,
+    } : emptyRecipient)
+    setOpen(true)
+  }
+
+  if (query.isPending) return <PageState state="loading" title="正在读取通知对象" description="正在加载接收人和机器人。" />
+  if (query.isError || !query.data) {
+    return <PageState state="error" title="通知对象暂时无法读取" description="请稍后重试。" error={errorDetails(query.error, "INVALID_NOTIFICATION_RECIPIENTS")} action={{ label: "重新加载", onClick: () => void query.refetch() }} />
+  }
+
+  return (
+    <section className="space-y-4" aria-label="通知对象">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-semibold">接收人和机器人</h2>
+          <p className="text-sm text-muted-foreground">在这里维护发送目标，再到信号中心选择需要通知的对象。</p>
+        </div>
+        <Button onClick={() => begin()}><Plus />添加通知对象</Button>
+      </div>
+      {query.data.length === 0 ? (
+        <PageState state="empty" title="还没有通知对象" description="先添加邮箱收件人、企业微信机器人或企业微信企业用户。" action={{ label: "添加通知对象", onClick: () => begin() }} />
+      ) : (
+        <div className="grid gap-3 lg:grid-cols-2">
+          {query.data.map((item) => (
+            <Card key={item.id}>
+              <CardHeader className="flex-row items-start justify-between gap-4">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    {item.recipientType === "EMAIL" ? <Mail /> : <UserRound />}
+                    {item.name}
+                  </CardTitle>
+                  <CardDescription>{recipientLabels[item.recipientType]} · {item.destination}</CardDescription>
+                </div>
+                <Badge variant={item.enabled ? "default" : "secondary"}>{item.enabled ? "已启用" : "已停用"}</Badge>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => begin(item)}><Pencil />编辑</Button>
+                <Button variant="outline" size="sm" disabled={!item.enabled || test.isPending} onClick={() => test.mutate(item)}><Send />发送测试</Button>
+                <Button variant="outline" size="sm" disabled={state.isPending} onClick={() => state.mutate(item)}>{item.enabled ? <CircleX /> : <CheckCircle2 />}{item.enabled ? "停用" : "启用"}</Button>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+      {(save.isError || state.isError || test.isError) ? <Alert variant="destructive"><AlertTriangle /><AlertDescription>{errorDetails(save.error ?? state.error ?? test.error, "NOTIFICATION_RECIPIENT_OPERATION_FAILED").code}</AlertDescription></Alert> : null}
+      {test.isSuccess ? <Alert><CheckCircle2 /><AlertDescription>测试消息已提交。</AlertDescription></Alert> : null}
+      <RecipientDialog open={open} setOpen={setOpen} editing={editing} form={form} setForm={setForm} saving={save.isPending} save={() => save.mutate()} />
+    </section>
+  )
+}
+
+function RecipientDialog({ open, setOpen, editing, form, setForm, saving, save }: {
+  open: boolean
+  setOpen(value: boolean): void
+  editing: NotificationRecipient | null
+  form: RecipientMutationInput
+  setForm(value: RecipientMutationInput): void
+  saving: boolean
+  save(): void
+}) {
+  const config = form.config as { corp_id?: string; agent_id?: string }
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent>
+        <DialogTitle>{editing ? "编辑通知对象" : "添加通知对象"}</DialogTitle>
+        <DialogDescription>敏感信息保存后不会再次显示。编辑时留空表示保持原值。</DialogDescription>
+        <FieldSet>
+          <Field><FieldLabel>类型</FieldLabel><Select value={form.recipientType} disabled={Boolean(editing)} onValueChange={(value) => setForm({ ...emptyRecipient, name: form.name, recipientType: value as RecipientType })}><SelectTrigger aria-label="类型"><SelectValue /></SelectTrigger><SelectContent><SelectGroup>{Object.entries(recipientLabels).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectGroup></SelectContent></Select></Field>
+          <Field><FieldLabel htmlFor="recipient-name">名称</FieldLabel><Input id="recipient-name" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：高坤、投资提醒群" /></Field>
+          {form.recipientType === "EMAIL" ? <Field><FieldLabel htmlFor="recipient-email">邮箱地址</FieldLabel><Input id="recipient-email" type="email" value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} placeholder="name@example.com" /></Field> : null}
+          {form.recipientType === "WECOM_ROBOT" ? <Field><FieldLabel htmlFor="recipient-webhook">机器人 Webhook</FieldLabel><Input id="recipient-webhook" type="password" value={form.secret ?? ""} onChange={(event) => setForm({ ...form, secret: event.target.value || null })} placeholder={editing ? "留空保持原值" : "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=..."} /></Field> : null}
+          {form.recipientType === "WECOM_USER" ? <>
+            <Field><FieldLabel htmlFor="recipient-corp-id">企业 ID</FieldLabel><Input id="recipient-corp-id" value={config.corp_id ?? ""} onChange={(event) => setForm({ ...form, config: { ...config, corp_id: event.target.value } })} /></Field>
+            <Field><FieldLabel htmlFor="recipient-agent-id">应用 AgentId</FieldLabel><Input id="recipient-agent-id" value={config.agent_id ?? ""} onChange={(event) => setForm({ ...form, config: { ...config, agent_id: event.target.value } })} /></Field>
+            <Field><FieldLabel htmlFor="recipient-user-id">成员账号</FieldLabel><Input id="recipient-user-id" value={form.destination} onChange={(event) => setForm({ ...form, destination: event.target.value })} /></Field>
+            <Field><FieldLabel htmlFor="recipient-secret">应用 Secret</FieldLabel><Input id="recipient-secret" type="password" value={form.secret ?? ""} onChange={(event) => setForm({ ...form, secret: event.target.value || null })} placeholder={editing ? "留空保持原值" : "请输入应用 Secret"} /></Field>
+          </> : null}
+        </FieldSet>
+        <DialogFooter><Button variant="outline" onClick={() => setOpen(false)}>取消</Button><Button disabled={saving || !form.name.trim()} onClick={save}><Save />保存</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 
@@ -297,7 +455,10 @@ function DeliveriesView({
                 <TableRow key={item.id} data-state={item.id === selectedId ? "selected" : undefined}>
                   <TableCell>
                     <Button type="button" variant="ghost" className="h-auto justify-start px-0 text-left" onClick={() => setSelectedId(item.id)}>
-                      <strong className="block">{channelLabels[item.channel]}</strong>
+                      <span>
+                        <strong className="block">{item.recipientName ?? channelLabels[item.channel]}</strong>
+                        {item.recipientName ? <small className="text-muted-foreground">{channelLabels[item.channel]}</small> : null}
+                      </span>
                     </Button>
                   </TableCell>
                   <TableCell><StatusBadge status={item.status} />{item.errorCode ? <span className="mt-1 block text-xs text-destructive">{item.errorCode}</span> : null}</TableCell>

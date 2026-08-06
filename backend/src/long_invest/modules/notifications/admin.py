@@ -325,7 +325,8 @@ class NotificationAdminService:
             max(
                 item.generation
                 for item in deliveries
-                if DeliveryChannel(item.channel) is DeliveryChannel(delivery.channel)
+                if item.recipient_id == delivery.recipient_id
+                and DeliveryChannel(item.channel) is DeliveryChannel(delivery.channel)
             )
             + 1
         )
@@ -334,6 +335,9 @@ class NotificationAdminService:
             event_id=delivery.event_id,
             generation=generation,
             channel=delivery.channel,
+            recipient_id=delivery.recipient_id,
+            recipient_name=delivery.recipient_name,
+            recipient_type=delivery.recipient_type,
             config_version=delivery.config_version,
             target_fingerprint=delivery.target_fingerprint,
             status=NotificationDeliveryStatus.PENDING,
@@ -341,7 +345,8 @@ class NotificationAdminService:
             unknown_compensation_count=0,
             deterministic_message_id=(
                 f"notification:{delivery.event_id}:"
-                f"{DeliveryChannel(delivery.channel).value}:{generation}"
+                f"{delivery.recipient_id or DeliveryChannel(delivery.channel).value}:"
+                f"{generation}"
             ),
         )
         self._repository.add_delivery(retried)
@@ -430,8 +435,7 @@ class NotificationAdminService:
             except NotificationAdminError as exc:
                 code = (
                     "NOTIFICATION_DELIVERY_NOT_RETRYABLE"
-                    if exc.code
-                    == "NOTIFICATION_DUPLICATE_RISK_CONFIRMATION_REQUIRED"
+                    if exc.code == "NOTIFICATION_DUPLICATE_RISK_CONFIRMATION_REQUIRED"
                     else exc.code
                 )
                 failures.append(DeliveryRetryFailure(delivery_id, code))

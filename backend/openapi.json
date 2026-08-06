@@ -13641,6 +13641,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ActionData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -13649,9 +13652,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ActionData"
           }
         },
         "type": "object",
@@ -13659,9 +13659,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ActionResponse"
       },
@@ -13815,6 +13815,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/AuditEventPageResponse"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -13823,9 +13826,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/AuditEventPageResponse"
           }
         },
         "type": "object",
@@ -13833,9 +13833,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "AuditEventPageEnvelope"
       },
@@ -14122,6 +14122,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BackfillPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -14130,9 +14133,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BackfillPageData"
           }
         },
         "type": "object",
@@ -14140,9 +14140,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BackfillPageResponse"
       },
@@ -14192,6 +14192,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BackfillView"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -14200,9 +14203,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BackfillView"
           }
         },
         "type": "object",
@@ -14210,9 +14210,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BackfillResponse"
       },
@@ -14786,6 +14786,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BacktestControlData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -14794,9 +14797,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BacktestControlData"
           }
         },
         "type": "object",
@@ -14804,9 +14804,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BacktestControlResponse"
       },
@@ -14878,6 +14878,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BacktestItemPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -14886,9 +14889,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BacktestItemPageData"
           }
         },
         "type": "object",
@@ -14896,9 +14896,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BacktestItemPageResponse"
       },
@@ -15395,6 +15395,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BacktestSummaryView"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -15403,9 +15406,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BacktestSummaryView"
           }
         },
         "type": "object",
@@ -15413,9 +15413,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BacktestSummaryResponse"
       },
@@ -15673,6 +15673,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BacktestTaskPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -15681,9 +15684,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BacktestTaskPageData"
           }
         },
         "type": "object",
@@ -15691,9 +15691,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BacktestTaskPageResponse"
       },
@@ -15916,6 +15916,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/BatchCapabilityResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -15924,9 +15927,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/BatchCapabilityResult"
           }
         },
         "type": "object",
@@ -15934,9 +15934,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "BatchCapabilityResponse"
       },
@@ -16127,6 +16127,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/CalculationRunPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -16135,9 +16138,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/CalculationRunPageData"
           }
         },
         "type": "object",
@@ -16145,9 +16145,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "CalculationRunPageResponse"
       },
@@ -16246,6 +16246,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/CapabilityResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -16254,9 +16257,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/CapabilityResult"
           }
         },
         "type": "object",
@@ -16264,9 +16264,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "CapabilityResponse"
       },
@@ -16425,6 +16425,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ChannelActionData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -16433,9 +16436,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ChannelActionData"
           }
         },
         "type": "object",
@@ -16443,9 +16443,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ChannelActionResponse"
       },
@@ -16537,6 +16537,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/CircuitResetData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -16545,9 +16548,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/CircuitResetData"
           }
         },
         "type": "object",
@@ -16555,9 +16555,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "CircuitResetResponse"
       },
@@ -16576,6 +16576,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ClientErrorReceipt"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -16584,9 +16587,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ClientErrorReceipt"
           }
         },
         "type": "object",
@@ -16594,9 +16594,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ClientErrorEnvelope"
       },
@@ -16763,6 +16763,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ComponentListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -16771,9 +16774,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ComponentListData"
           }
         },
         "type": "object",
@@ -16781,9 +16781,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ComponentListEnvelope"
       },
@@ -17446,6 +17446,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DailyBarPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -17454,9 +17457,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DailyBarPageData"
           }
         },
         "type": "object",
@@ -17464,9 +17464,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DailyBarPageResponse"
       },
@@ -17600,6 +17600,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DailyBatchPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -17608,9 +17611,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DailyBatchPageData"
           }
         },
         "type": "object",
@@ -17618,9 +17618,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DailyBatchPageResponse"
       },
@@ -17908,6 +17908,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DailyJobData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -17916,9 +17919,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DailyJobData"
           }
         },
         "type": "object",
@@ -17926,9 +17926,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DailyJobResponse"
       },
@@ -17967,6 +17967,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DailyMissingPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -17975,9 +17978,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DailyMissingPageData"
           }
         },
         "type": "object",
@@ -17985,9 +17985,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DailyMissingPageResponse"
       },
@@ -18092,6 +18092,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DailyRevisionPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -18100,9 +18103,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DailyRevisionPageData"
           }
         },
         "type": "object",
@@ -18110,9 +18110,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DailyRevisionPageResponse"
       },
@@ -18676,6 +18676,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DashboardSummaryResponse"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -18684,9 +18687,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DashboardSummaryResponse"
           }
         },
         "type": "object",
@@ -18694,9 +18694,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DashboardSummaryEnvelope"
       },
@@ -18737,6 +18737,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DashboardTimelineResponse"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -18745,9 +18748,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DashboardTimelineResponse"
           }
         },
         "type": "object",
@@ -18755,9 +18755,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DashboardTimelineEnvelope"
       },
@@ -18826,6 +18826,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/DetailData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -18834,9 +18837,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/DetailData"
           }
         },
         "type": "object",
@@ -18844,9 +18844,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "DetailResponse"
       },
@@ -19147,6 +19147,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/JobControlData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19155,9 +19158,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/JobControlData"
           }
         },
         "type": "object",
@@ -19165,9 +19165,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "JobControlResponse"
       },
@@ -19247,6 +19247,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/JobItemPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19255,9 +19258,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/JobItemPageData"
           }
         },
         "type": "object",
@@ -19265,9 +19265,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "JobItemPageResponse"
       },
@@ -19322,6 +19322,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/JobPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19330,9 +19333,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/JobPageData"
           }
         },
         "type": "object",
@@ -19340,9 +19340,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "JobPageResponse"
       },
@@ -19399,6 +19399,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19407,9 +19410,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ListData"
           }
         },
         "type": "object",
@@ -19417,9 +19417,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ListResponse"
       },
@@ -19656,6 +19656,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/MarketSnapshotData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19664,9 +19667,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/MarketSnapshotData"
           }
         },
         "type": "object",
@@ -19674,9 +19674,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "MarketSnapshotResponse"
       },
@@ -19893,6 +19893,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/NotificationPolicyMutationData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19901,9 +19904,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/NotificationPolicyMutationData"
           }
         },
         "type": "object",
@@ -19911,9 +19911,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "NotificationPolicyMutationResponse"
       },
@@ -19972,6 +19972,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/NotificationPolicyData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -19980,9 +19983,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/NotificationPolicyData"
           }
         },
         "type": "object",
@@ -19990,9 +19990,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "NotificationPolicyResponse"
       },
@@ -20039,6 +20039,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/OccurrenceListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20047,9 +20050,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/OccurrenceListData"
           }
         },
         "type": "object",
@@ -20057,9 +20057,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "OccurrenceListEnvelope"
       },
@@ -20222,6 +20222,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/PositionBatchItems"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20230,9 +20233,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/PositionBatchItems"
           }
         },
         "type": "object",
@@ -20240,9 +20240,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "PositionBatchResponse"
       },
@@ -20308,6 +20308,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/PositionResultRecord"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20316,9 +20319,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/PositionResultRecord"
           }
         },
         "type": "object",
@@ -20326,9 +20326,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "PositionChangeResponse"
       },
@@ -20469,6 +20469,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/PositionHistoryItems"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20477,9 +20480,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/PositionHistoryItems"
           }
         },
         "type": "object",
@@ -20487,9 +20487,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "PositionHistoryResponse"
       },
@@ -20528,6 +20528,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/PositionItems"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20536,9 +20539,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/PositionItems"
           }
         },
         "type": "object",
@@ -20546,9 +20546,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "PositionListResponse"
       },
@@ -20628,6 +20628,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/PositionRecord"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20636,9 +20639,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/PositionRecord"
           }
         },
         "type": "object",
@@ -20646,9 +20646,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "PositionResponse"
       },
@@ -20861,6 +20861,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QfqDataPage"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -20869,9 +20872,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QfqDataPage"
           }
         },
         "type": "object",
@@ -20879,9 +20879,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QfqDataResponse"
       },
@@ -21092,6 +21092,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QfqJobData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -21100,9 +21103,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QfqJobData"
           }
         },
         "type": "object",
@@ -21110,9 +21110,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QfqJobResponse"
       },
@@ -21299,6 +21299,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QualityIssueListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -21307,9 +21310,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QualityIssueListData"
           }
         },
         "type": "object",
@@ -21317,9 +21317,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QualityIssueListResponse"
       },
@@ -21338,6 +21338,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QualityIssueItem"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -21346,9 +21349,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QualityIssueItem"
           }
         },
         "type": "object",
@@ -21356,9 +21356,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QualityIssueResponse"
       },
@@ -21431,6 +21431,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QueueListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -21439,9 +21442,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QueueListData"
           }
         },
         "type": "object",
@@ -21449,9 +21449,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QueueListEnvelope"
       },
@@ -21667,6 +21667,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QuoteCyclePageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -21675,9 +21678,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QuoteCyclePageData"
           }
         },
         "type": "object",
@@ -21685,9 +21685,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QuoteCyclePageResponse"
       },
@@ -22097,6 +22097,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/QuoteItemsData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -22105,9 +22108,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/QuoteItemsData"
           }
         },
         "type": "object",
@@ -22115,9 +22115,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "QuoteItemsResponse"
       },
@@ -22213,6 +22213,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/RealtimeCheckData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -22221,9 +22224,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/RealtimeCheckData"
           }
         },
         "type": "object",
@@ -22231,9 +22231,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "RealtimeCheckResponse"
       },
@@ -22737,6 +22737,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ResultData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -22745,9 +22748,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ResultData"
           }
         },
         "type": "object",
@@ -22755,9 +22755,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ResultResponse"
       },
@@ -22922,6 +22922,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ReviewPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -22930,9 +22933,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ReviewPageData"
           }
         },
         "type": "object",
@@ -22940,9 +22940,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ReviewPageResponse"
       },
@@ -23192,6 +23192,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ScheduleDetailData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23200,9 +23203,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ScheduleDetailData"
           }
         },
         "type": "object",
@@ -23210,9 +23210,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ScheduleDetailResponse"
       },
@@ -23247,6 +23247,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ScheduleListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23255,9 +23258,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ScheduleListData"
           }
         },
         "type": "object",
@@ -23265,9 +23265,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ScheduleListResponse"
       },
@@ -23307,6 +23307,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ScheduleMutationData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23315,9 +23318,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ScheduleMutationData"
           }
         },
         "type": "object",
@@ -23325,9 +23325,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ScheduleMutationResponse"
       },
@@ -23539,6 +23539,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/ScheduleRevisionListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23547,9 +23550,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/ScheduleRevisionListData"
           }
         },
         "type": "object",
@@ -23557,9 +23557,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "ScheduleRevisionListResponse"
       },
@@ -23754,6 +23754,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SchedulerStatusData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23762,9 +23765,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SchedulerStatusData"
           }
         },
         "type": "object",
@@ -23772,9 +23772,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SchedulerStatusEnvelope"
       },
@@ -23814,6 +23814,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SecretCommandResponse"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23822,9 +23825,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SecretCommandResponse"
           }
         },
         "type": "object",
@@ -23832,9 +23832,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SecretCommandEnvelope"
       },
@@ -23946,6 +23946,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SecretStatusListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -23954,9 +23957,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SecretStatusListData"
           }
         },
         "type": "object",
@@ -23964,9 +23964,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SecretStatusListEnvelope"
       },
@@ -24142,6 +24142,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SettingCommandResponse"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -24150,9 +24153,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SettingCommandResponse"
           }
         },
         "type": "object",
@@ -24160,9 +24160,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SettingCommandEnvelope"
       },
@@ -24288,6 +24288,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SettingResponse"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -24296,9 +24299,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SettingResponse"
           }
         },
         "type": "object",
@@ -24306,9 +24306,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SettingEnvelope"
       },
@@ -24343,6 +24343,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SettingHistoryData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -24351,9 +24354,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SettingHistoryData"
           }
         },
         "type": "object",
@@ -24361,9 +24361,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SettingHistoryEnvelope"
       },
@@ -24446,6 +24446,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SettingListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -24454,9 +24457,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SettingListData"
           }
         },
         "type": "object",
@@ -24464,9 +24464,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SettingListEnvelope"
       },
@@ -24980,6 +24980,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalEvaluationPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -24988,9 +24991,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalEvaluationPageData"
           }
         },
         "type": "object",
@@ -24998,9 +24998,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalEvaluationPageResponse"
       },
@@ -25019,6 +25019,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalEvaluationView"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25027,9 +25030,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalEvaluationView"
           }
         },
         "type": "object",
@@ -25037,9 +25037,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalEvaluationResponse"
       },
@@ -25326,6 +25326,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalEventPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25334,9 +25337,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalEventPageData"
           }
         },
         "type": "object",
@@ -25344,9 +25344,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalEventPageResponse"
       },
@@ -25365,6 +25365,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalEventView"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25373,9 +25376,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalEventView"
           }
         },
         "type": "object",
@@ -25383,9 +25383,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalEventResponse"
       },
@@ -25585,6 +25585,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalReevaluationResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25593,9 +25596,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalReevaluationResult"
           }
         },
         "type": "object",
@@ -25603,9 +25603,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalReevaluationResponse"
       },
@@ -25660,6 +25660,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalStateMutationResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25668,9 +25671,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalStateMutationResult"
           }
         },
         "type": "object",
@@ -25678,9 +25678,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalStateMutationResponse"
       },
@@ -25754,6 +25754,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalStatePageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25762,9 +25765,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalStatePageData"
           }
         },
         "type": "object",
@@ -25772,9 +25772,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalStatePageResponse"
       },
@@ -25793,6 +25793,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SignalStateView"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -25801,9 +25804,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SignalStateView"
           }
         },
         "type": "object",
@@ -25811,9 +25811,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SignalStateResponse"
       },
@@ -26193,6 +26193,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/StrategyStockTestData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -26201,9 +26204,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/StrategyStockTestData"
           }
         },
         "type": "object",
@@ -26211,9 +26211,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "StrategyStockTestResponse"
       },
@@ -26337,6 +26337,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/StrategyVersionOperationData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -26345,9 +26348,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/StrategyVersionOperationData"
           }
         },
         "type": "object",
@@ -26355,9 +26355,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "StrategyVersionOperationResponse"
       },
@@ -26473,6 +26473,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "title": "Data"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -26488,6 +26491,7 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
           "server_time"
         ],
@@ -26579,6 +26583,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SystemClockStatusData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -26587,9 +26594,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SystemClockStatusData"
           }
         },
         "type": "object",
@@ -26597,9 +26601,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SystemClockStatusEnvelope"
       },
@@ -26682,6 +26686,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/SystemHealthData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -26690,9 +26697,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/SystemHealthData"
           }
         },
         "type": "object",
@@ -26700,9 +26704,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "SystemHealthEnvelope"
       },
@@ -27015,6 +27019,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/TargetHistoryData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -27023,9 +27030,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/TargetHistoryData"
           }
         },
         "type": "object",
@@ -27033,9 +27037,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "TargetHistoryResponse"
       },
@@ -27054,6 +27058,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/TargetMutationResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -27062,9 +27069,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/TargetMutationResult"
           }
         },
         "type": "object",
@@ -27072,9 +27076,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "TargetMutationResponse"
       },
@@ -27142,6 +27146,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/TargetPageData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -27150,9 +27157,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/TargetPageData"
           }
         },
         "type": "object",
@@ -27160,9 +27164,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "TargetPageResponse"
       },
@@ -27294,6 +27298,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/TargetRecord"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -27302,9 +27309,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/TargetRecord"
           }
         },
         "type": "object",
@@ -27312,9 +27316,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "TargetResponse"
       },
@@ -27760,6 +27764,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/TemplateActivationData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -27768,9 +27775,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/TemplateActivationData"
           }
         },
         "type": "object",
@@ -27778,9 +27782,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "TemplateActivationResponse"
       },
@@ -27823,6 +27827,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/TemplateListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -27831,9 +27838,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/TemplateListData"
           }
         },
         "type": "object",
@@ -27841,9 +27845,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "TemplateListResponse"
       },
@@ -28323,6 +28327,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/WatchlistBatchData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -28331,9 +28338,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/WatchlistBatchData"
           }
         },
         "type": "object",
@@ -28341,9 +28345,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "WatchlistBatchResponse"
       },
@@ -28474,6 +28478,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/WatchlistItemMutationResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -28482,9 +28489,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/WatchlistItemMutationResult"
           }
         },
         "type": "object",
@@ -28492,9 +28496,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "WatchlistItemResponse"
       },
@@ -28572,6 +28576,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/WatchlistListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -28580,9 +28587,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/WatchlistListData"
           }
         },
         "type": "object",
@@ -28590,9 +28594,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "WatchlistListResponse"
       },
@@ -28611,6 +28615,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/WatchlistItemRemovalResult"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -28619,9 +28626,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/WatchlistItemRemovalResult"
           }
         },
         "type": "object",
@@ -28629,9 +28633,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "WatchlistRemovalResponse"
       },
@@ -28650,6 +28654,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/WatchlistView"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -28658,9 +28665,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/WatchlistView"
           }
         },
         "type": "object",
@@ -28668,9 +28672,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "WatchlistResponse"
       },
@@ -28775,6 +28779,9 @@
             "type": "string",
             "title": "Message"
           },
+          "data": {
+            "$ref": "#/components/schemas/WorkerListData"
+          },
           "request_id": {
             "type": "string",
             "title": "Request Id"
@@ -28783,9 +28790,6 @@
             "type": "string",
             "format": "date-time",
             "title": "Server Time"
-          },
-          "data": {
-            "$ref": "#/components/schemas/WorkerListData"
           }
         },
         "type": "object",
@@ -28793,9 +28797,9 @@
           "success",
           "code",
           "message",
+          "data",
           "request_id",
-          "server_time",
-          "data"
+          "server_time"
         ],
         "title": "WorkerListEnvelope"
       },

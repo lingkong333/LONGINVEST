@@ -3653,6 +3653,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ActionData"];
             /** Request Id */
             request_id: string;
             /**
@@ -3660,7 +3661,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ActionData"];
         };
         /** AlertData */
         AlertData: {
@@ -3717,6 +3717,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["AuditEventPageResponse"];
             /** Request Id */
             request_id: string;
             /**
@@ -3724,7 +3725,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["AuditEventPageResponse"];
         };
         /** AuditEventPageResponse */
         AuditEventPageResponse: {
@@ -3827,6 +3827,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BackfillPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -3834,7 +3835,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BackfillPageData"];
         };
         /** BackfillProgress */
         BackfillProgress: {
@@ -3856,6 +3856,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BackfillView"];
             /** Request Id */
             request_id: string;
             /**
@@ -3863,7 +3864,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BackfillView"];
         };
         /** BackfillResult */
         BackfillResult: {
@@ -4077,6 +4077,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BacktestControlData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4084,7 +4085,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BacktestControlData"];
         };
         /** BacktestDateRange */
         BacktestDateRange: {
@@ -4126,6 +4126,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BacktestItemPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4133,7 +4134,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BacktestItemPageData"];
         };
         /**
          * BacktestItemStatus
@@ -4312,6 +4312,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BacktestSummaryView"];
             /** Request Id */
             request_id: string;
             /**
@@ -4319,7 +4320,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BacktestSummaryView"];
         };
         /** BacktestSummaryView */
         BacktestSummaryView: {
@@ -4408,6 +4408,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BacktestTaskPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4415,7 +4416,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BacktestTaskPageData"];
         };
         /**
          * BacktestTaskStatus
@@ -4511,6 +4511,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["BatchCapabilityResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -4518,7 +4519,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["BatchCapabilityResult"];
         };
         /** BatchCapabilityResult */
         BatchCapabilityResult: {
@@ -4594,6 +4594,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["CalculationRunPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4601,7 +4602,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["CalculationRunPageData"];
         };
         /** CalendarDayInput */
         CalendarDayInput: {
@@ -4652,6 +4652,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["CapabilityResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -4659,7 +4660,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["CapabilityResult"];
         };
         /** CapabilityResult */
         CapabilityResult: {
@@ -4723,6 +4723,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ChannelActionData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4730,7 +4731,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ChannelActionData"];
         };
         /** ChannelTestRequest */
         ChannelTestRequest: {
@@ -4766,6 +4766,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["CircuitResetData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4773,7 +4774,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["CircuitResetData"];
         };
         /** ClientErrorEnvelope */
         ClientErrorEnvelope: {
@@ -4786,6 +4786,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ClientErrorReceipt"];
             /** Request Id */
             request_id: string;
             /**
@@ -4793,7 +4794,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ClientErrorReceipt"];
         };
         /** ClientErrorInput */
         ClientErrorInput: {
@@ -4850,6 +4850,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ComponentListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -4857,7 +4858,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ComponentListData"];
         };
         /** ComponentStatus */
         ComponentStatus: {
@@ -5106,6 +5106,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DailyBarPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5113,7 +5114,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DailyBarPageData"];
         };
         /** DailyBarRecord */
         DailyBarRecord: {
@@ -5175,6 +5175,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DailyBatchPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5182,7 +5183,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DailyBatchPageData"];
         };
         /** DailyBatchRecord */
         DailyBatchRecord: {
@@ -5291,6 +5291,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DailyJobData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5298,7 +5299,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DailyJobData"];
         };
         /** DailyMissingPageData */
         DailyMissingPageData: {
@@ -5317,6 +5317,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DailyMissingPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5324,7 +5325,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DailyMissingPageData"];
         };
         /** DailyMissingRecord */
         DailyMissingRecord: {
@@ -5371,6 +5371,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DailyRevisionPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5378,7 +5379,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DailyRevisionPageData"];
         };
         /** DailyRevisionRecord */
         DailyRevisionRecord: {
@@ -5596,6 +5596,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DashboardSummaryResponse"];
             /** Request Id */
             request_id: string;
             /**
@@ -5603,7 +5604,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DashboardSummaryResponse"];
         };
         /** DashboardSummaryResponse */
         DashboardSummaryResponse: {
@@ -5626,6 +5626,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DashboardTimelineResponse"];
             /** Request Id */
             request_id: string;
             /**
@@ -5633,7 +5634,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DashboardTimelineResponse"];
         };
         /** DashboardTimelineResponse */
         DashboardTimelineResponse: {
@@ -5667,6 +5667,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["DetailData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5674,7 +5675,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["DetailData"];
         };
         /** DiagnoseQuoteRequest */
         DiagnoseQuoteRequest: {
@@ -5783,6 +5783,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["JobControlData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5790,7 +5791,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["JobControlData"];
         };
         /** JobData */
         JobData: {
@@ -5820,6 +5820,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["JobItemPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5827,7 +5828,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["JobItemPageData"];
         };
         /**
          * JobItemStatus
@@ -5853,6 +5853,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["JobPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5860,7 +5861,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["JobPageData"];
         };
         /**
          * JobStatus
@@ -5883,6 +5883,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5890,7 +5891,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ListData"];
         };
         /** LoginRequest */
         LoginRequest: {
@@ -5990,6 +5990,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["MarketSnapshotData"];
             /** Request Id */
             request_id: string;
             /**
@@ -5997,7 +5998,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["MarketSnapshotData"];
         };
         /** MonitoringData */
         MonitoringData: {
@@ -6076,6 +6076,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["NotificationPolicyMutationData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6083,7 +6084,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["NotificationPolicyMutationData"];
         };
         /** NotificationPolicyRequest */
         NotificationPolicyRequest: {
@@ -6111,6 +6111,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["NotificationPolicyData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6118,7 +6119,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["NotificationPolicyData"];
         };
         /** OccurrenceListData */
         OccurrenceListData: {
@@ -6139,6 +6139,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["OccurrenceListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6146,7 +6147,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["OccurrenceListData"];
         };
         /** OverrideRequest */
         OverrideRequest: {
@@ -6208,6 +6208,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["PositionBatchItems"];
             /** Request Id */
             request_id: string;
             /**
@@ -6215,7 +6216,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionBatchItems"];
         };
         /** PositionChangeRequest */
         PositionChangeRequest: {
@@ -6242,6 +6242,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["PositionResultRecord"];
             /** Request Id */
             request_id: string;
             /**
@@ -6249,7 +6250,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionResultRecord"];
         };
         /** PositionData */
         PositionData: {
@@ -6305,6 +6305,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["PositionHistoryItems"];
             /** Request Id */
             request_id: string;
             /**
@@ -6312,7 +6313,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionHistoryItems"];
         };
         /** PositionItems */
         PositionItems: {
@@ -6331,6 +6331,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["PositionItems"];
             /** Request Id */
             request_id: string;
             /**
@@ -6338,7 +6339,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionItems"];
         };
         /** PositionRecord */
         PositionRecord: {
@@ -6370,6 +6370,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["PositionRecord"];
             /** Request Id */
             request_id: string;
             /**
@@ -6377,7 +6378,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["PositionRecord"];
         };
         /** PositionResultRecord */
         PositionResultRecord: {
@@ -6463,6 +6463,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QfqDataPage"];
             /** Request Id */
             request_id: string;
             /**
@@ -6470,7 +6471,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QfqDataPage"];
         };
         /**
          * QfqDatasetLifecycle
@@ -6577,6 +6577,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QfqJobData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6584,7 +6585,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QfqJobData"];
         };
         /** QualityIssueItem */
         QualityIssueItem: {
@@ -6650,6 +6650,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QualityIssueListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6657,7 +6658,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QualityIssueListData"];
         };
         /** QualityIssueResponse */
         QualityIssueResponse: {
@@ -6670,6 +6670,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QualityIssueItem"];
             /** Request Id */
             request_id: string;
             /**
@@ -6677,7 +6678,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QualityIssueItem"];
         };
         /**
          * QualityIssueStatus
@@ -6712,6 +6712,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QueueListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6719,7 +6720,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QueueListData"];
         };
         /** QueueStatus */
         QueueStatus: {
@@ -6783,6 +6783,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QuoteCyclePageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6790,7 +6791,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QuoteCyclePageData"];
         };
         /** QuoteCycleRecord */
         QuoteCycleRecord: {
@@ -6907,6 +6907,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["QuoteItemsData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6914,7 +6915,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["QuoteItemsData"];
         };
         /** RealtimeCheckData */
         RealtimeCheckData: {
@@ -6963,6 +6963,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["RealtimeCheckData"];
             /** Request Id */
             request_id: string;
             /**
@@ -6970,7 +6971,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["RealtimeCheckData"];
         };
         /** RealtimeFailureRecord */
         RealtimeFailureRecord: {
@@ -7174,6 +7174,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ResultData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7181,7 +7182,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ResultData"];
         };
         /** RetryBackfillItemsBody */
         RetryBackfillItemsBody: {
@@ -7243,6 +7243,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ReviewPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7250,7 +7251,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ReviewPageData"];
         };
         /** ReviewTargetRequest */
         ReviewTargetRequest: {
@@ -7346,6 +7346,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ScheduleDetailData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7353,7 +7354,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ScheduleDetailData"];
         };
         /** ScheduleListData */
         ScheduleListData: {
@@ -7371,6 +7371,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ScheduleListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7378,7 +7379,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ScheduleListData"];
         };
         /** ScheduleMutationData */
         ScheduleMutationData: {
@@ -7398,6 +7398,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ScheduleMutationData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7405,7 +7406,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ScheduleMutationData"];
         };
         /** ScheduleOccurrence */
         ScheduleOccurrence: {
@@ -7496,6 +7496,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["ScheduleRevisionListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7503,7 +7504,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["ScheduleRevisionListData"];
         };
         /** ScheduleRevisionRecord */
         ScheduleRevisionRecord: {
@@ -7587,6 +7587,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SchedulerStatusData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7594,7 +7595,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SchedulerStatusData"];
         };
         /** ScreeningControlBody */
         ScreeningControlBody: {
@@ -7614,6 +7614,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SecretCommandResponse"];
             /** Request Id */
             request_id: string;
             /**
@@ -7621,7 +7622,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SecretCommandResponse"];
         };
         /** SecretCommandResponse */
         SecretCommandResponse: {
@@ -7659,6 +7659,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SecretStatusListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7666,7 +7667,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SecretStatusListData"];
         };
         /** SecretStatusResponse */
         SecretStatusResponse: {
@@ -7727,6 +7727,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SettingCommandResponse"];
             /** Request Id */
             request_id: string;
             /**
@@ -7734,7 +7735,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SettingCommandResponse"];
         };
         /** SettingCommandResponse */
         SettingCommandResponse: {
@@ -7791,6 +7791,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SettingResponse"];
             /** Request Id */
             request_id: string;
             /**
@@ -7798,7 +7799,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SettingResponse"];
         };
         /** SettingHistoryData */
         SettingHistoryData: {
@@ -7816,6 +7816,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SettingHistoryData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7823,7 +7824,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SettingHistoryData"];
         };
         /** SettingHistoryResponse */
         SettingHistoryResponse: {
@@ -7863,6 +7863,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SettingListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -7870,7 +7871,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SettingListData"];
         };
         /** SettingMutationRequest */
         SettingMutationRequest: {
@@ -8018,6 +8018,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalEvaluationPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8025,7 +8026,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalEvaluationPageData"];
         };
         /** SignalEvaluationResponse */
         SignalEvaluationResponse: {
@@ -8038,6 +8038,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalEvaluationView"];
             /** Request Id */
             request_id: string;
             /**
@@ -8045,7 +8046,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalEvaluationView"];
         };
         /** SignalEvaluationView */
         SignalEvaluationView: {
@@ -8124,6 +8124,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalEventPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8131,7 +8132,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalEventPageData"];
         };
         /** SignalEventResponse */
         SignalEventResponse: {
@@ -8144,6 +8144,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalEventView"];
             /** Request Id */
             request_id: string;
             /**
@@ -8151,7 +8152,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalEventView"];
         };
         /** SignalEventView */
         SignalEventView: {
@@ -8234,6 +8234,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalReevaluationResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -8241,7 +8242,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalReevaluationResult"];
         };
         /** SignalReevaluationResult */
         SignalReevaluationResult: {
@@ -8276,6 +8276,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalStateMutationResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -8283,7 +8284,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalStateMutationResult"];
         };
         /** SignalStateMutationResult */
         SignalStateMutationResult: {
@@ -8323,6 +8323,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalStatePageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8330,7 +8331,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalStatePageData"];
         };
         /** SignalStateResponse */
         SignalStateResponse: {
@@ -8343,6 +8343,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SignalStateView"];
             /** Request Id */
             request_id: string;
             /**
@@ -8350,7 +8351,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SignalStateView"];
         };
         /** SignalStateView */
         SignalStateView: {
@@ -8471,6 +8471,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["StrategyStockTestData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8478,7 +8479,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["StrategyStockTestData"];
         };
         /**
          * StrategySubscriptionScope
@@ -8547,6 +8547,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["StrategyVersionOperationData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8554,7 +8555,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["StrategyVersionOperationData"];
         };
         /**
          * SubscriptionAction
@@ -8607,6 +8607,8 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            /** Data */
+            data: unknown;
             /** Request Id */
             request_id: string;
             /**
@@ -8650,6 +8652,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SystemClockStatusData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8657,7 +8660,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SystemClockStatusData"];
         };
         /** SystemData */
         SystemData: {
@@ -8690,6 +8692,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["SystemHealthData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8697,7 +8700,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["SystemHealthData"];
         };
         /** TargetBindingView */
         TargetBindingView: {
@@ -8808,6 +8810,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["TargetHistoryData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8815,7 +8818,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TargetHistoryData"];
         };
         /** TargetMutationResponse */
         TargetMutationResponse: {
@@ -8828,6 +8830,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["TargetMutationResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -8835,7 +8838,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TargetMutationResult"];
         };
         /** TargetMutationResult */
         TargetMutationResult: {
@@ -8866,6 +8868,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["TargetPageData"];
             /** Request Id */
             request_id: string;
             /**
@@ -8873,7 +8876,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TargetPageData"];
         };
         /** TargetRecord */
         TargetRecord: {
@@ -8930,6 +8932,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["TargetRecord"];
             /** Request Id */
             request_id: string;
             /**
@@ -8937,7 +8940,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TargetRecord"];
         };
         /** TargetReviewDetail */
         TargetReviewDetail: {
@@ -9104,6 +9106,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["TemplateActivationData"];
             /** Request Id */
             request_id: string;
             /**
@@ -9111,7 +9114,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TemplateActivationData"];
         };
         /** TemplateListData */
         TemplateListData: {
@@ -9131,6 +9133,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["TemplateListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -9138,7 +9141,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["TemplateListData"];
         };
         /** TemplatePreviewRequest */
         TemplatePreviewRequest: {
@@ -9337,6 +9339,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["WatchlistBatchData"];
             /** Request Id */
             request_id: string;
             /**
@@ -9344,7 +9347,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["WatchlistBatchData"];
         };
         /**
          * WatchlistBatchStatus
@@ -9395,6 +9397,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["WatchlistItemMutationResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -9402,7 +9405,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["WatchlistItemMutationResult"];
         };
         /** WatchlistItemView */
         WatchlistItemView: {
@@ -9442,6 +9444,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["WatchlistListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -9449,7 +9452,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["WatchlistListData"];
         };
         /** WatchlistRemovalResponse */
         WatchlistRemovalResponse: {
@@ -9462,6 +9464,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["WatchlistItemRemovalResult"];
             /** Request Id */
             request_id: string;
             /**
@@ -9469,7 +9472,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["WatchlistItemRemovalResult"];
         };
         /** WatchlistResponse */
         WatchlistResponse: {
@@ -9482,6 +9484,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["WatchlistView"];
             /** Request Id */
             request_id: string;
             /**
@@ -9489,7 +9492,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["WatchlistView"];
         };
         /** WatchlistView */
         WatchlistView: {
@@ -9537,6 +9539,7 @@ export interface components {
             code: string;
             /** Message */
             message: string;
+            data: components["schemas"]["WorkerListData"];
             /** Request Id */
             request_id: string;
             /**
@@ -9544,7 +9547,6 @@ export interface components {
              * Format: date-time
              */
             server_time: string;
-            data: components["schemas"]["WorkerListData"];
         };
         /** WorkerStatus */
         WorkerStatus: {

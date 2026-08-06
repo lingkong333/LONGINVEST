@@ -4,11 +4,29 @@ from httpx import ASGITransport, AsyncClient
 
 from long_invest.bootstrap.app import create_app
 from long_invest.platform.errors import AppError
+from long_invest.platform.http.responses import success_response
+from long_invest.platform.http.schemas import SuccessEnvelope
 
 
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.mark.anyio
+async def test_success_envelope_keeps_response_data() -> None:
+    app = create_app()
+
+    @app.get("/_test/success", response_model=SuccessEnvelope)
+    async def success() -> dict:
+        return success_response(data={"items": []})
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.get("/_test/success")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"items": []}
 
 
 @pytest.mark.anyio
